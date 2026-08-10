@@ -22,6 +22,22 @@ const RecipeIngredientShape = z.object({
   isOptional: z.boolean().default(false),
 });
 
+const TranslationShape = z.object({
+  lang: z.string().describe("Language code, e.g. 'en'"),
+  title: z.string().optional(),
+  description: z.string().optional(),
+});
+
+const StepIngredientRefShape = z.object({
+  ingredientSortOrder: z.number().int().min(0).describe("Matches the sortOrder of an entry in this recipe's ingredients list"),
+  amountMode: z.enum(["fraction", "absolute"]).default("fraction").describe("'fraction' = a portion of the ingredient's total recipe quantity; 'absolute' = an exact quantity+unit used in this step"),
+  portion: z.number().positive().max(1).default(1).describe("Used when amountMode='fraction': fraction (0.05-1) of the ingredient's total recipe quantity used in this step"),
+  quantity: z.number().positive().optional().describe("Used when amountMode='absolute': the exact amount used in this step"),
+  unitId: z.string().uuid().optional().describe("Used when amountMode='absolute': unit for quantity"),
+  unitSymbol: z.string().optional(),
+  notes: z.string().optional(),
+});
+
 const RecipeStepShape = z.object({
   stepNumber: z.number().int().positive(),
   title: z.string().optional(),
@@ -29,7 +45,37 @@ const RecipeStepShape = z.object({
   durationMin: z.number().int().positive().optional(),
   toolIds: z.array(z.string().uuid()).optional(),
   notes: z.string().optional(),
+  imageUrl: z.string().nullable().optional(),
+  translations: z.array(TranslationShape).optional(),
+  stepIngredients: z.array(StepIngredientRefShape).default([]),
 });
+
+const RecipeSourceShape = z.object({
+  type: z.enum(["url", "book", "video", "other"]).default("url"),
+  label: z.string().optional(),
+  url: z.string().optional(),
+});
+
+// Shared by create_recipe and update_recipe.
+const recipeInputShape = {
+  title: z.string().min(1).max(200),
+  description: z.string().optional(),
+  difficulty: z.enum(["easy", "medium", "hard", "expert"]).default("medium"),
+  servings: z.number().int().positive().default(4),
+  prepTimeMin: z.number().int().positive().optional(),
+  cookTimeMin: z.number().int().positive().optional(),
+  restTimeMin: z.number().int().positive().optional(),
+  tags: z.array(z.string()).default([]),
+  coverImageUrl: z.string().nullable().optional(),
+  sourceUrl: z.string().nullable().optional(),
+  sources: z.array(RecipeSourceShape).default([]).describe("One or more references — a link, a book citation, a video, etc"),
+  isComponent: z.boolean().default(false).describe("Mark true if this recipe is only meant to be used as a sub-recipe component of other recipes"),
+  languageCode: z.string().optional().describe("Language the base title/description/steps are authored in, e.g. 'en'"),
+  ingredients: z.array(RecipeIngredientShape).default([]),
+  steps: z.array(RecipeStepShape).default([]),
+  toolIds: z.array(z.string().uuid()).default([]),
+  translations: z.array(TranslationShape).optional(),
+};
 
 export function registerTools(server: McpServer) {
   server.tool(
@@ -95,27 +141,43 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "create_recipe",
-    "Create a new recipe in the SmartChef library, including its ingredient list, method steps and required tools. Ingredients may reference either an existing ingredient by id or another recipe (as a nested sub-recipe).",
-    {
-      title: z.string().min(1).max(200),
-      description: z.string().optional(),
-      difficulty: z.enum(["easy", "medium", "hard", "expert"]).default("medium"),
-      servings: z.number().int().positive().default(4),
-      prepTimeMin: z.number().int().positive().optional(),
-      cookTimeMin: z.number().int().positive().optional(),
-      restTimeMin: z.number().int().positive().optional(),
-      tags: z.array(z.string()).default([]),
-      coverImageUrl: z.string().nullable().optional(),
-      sourceUrl: z.string().nullable().optional(),
-      isComponent: z.boolean().default(false).describe("Mark true if this recipe is only meant to be used as a sub-recipe component of other recipes"),
-      ingredients: z.array(RecipeIngredientShape).default([]),
-      steps: z.array(RecipeStepShape).default([]),
-      toolIds: z.array(z.string().uuid()).default([]),
-    },
+    "Create a new recipe in the SmartChef library, including its ingredient list, method steps, required tools and source references. Ingredients may reference either an existing ingredient by id or another recipe (as a nested sub-recipe).",
+    recipeInputShape,
     async (input) => {
       try {
         const data = await backend.post("/recipes", input);
         return textResult(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  server.tool(
+    "update_recipe",
+    "Replace an existing recipe's full content (title, ingredients, steps, tools, sources, translations) by id. This is a full replace, not a partial patch — omitted fields reset to their defaults, so pass the complete recipe (typically fetched first via get_recipe).",
+    {
+      id: z.string().uuid(),
+      ...recipeInputShape,
+    },
+    async ({ id, ...input }) => {
+      try {
+        const data = await backend.put(`/recipes/${id}`, input);
+        return textResult(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  server.tool(
+    "delete_recipe",
+    "Soft-delete a recipe by id (marks it deleted; it stops appearing in list_recipes).",
+    { id: z.string().uuid() },
+    async ({ id }) => {
+      try {
+        await backend.del(`/recipes/${id}`);
+        return textResult({ deleted: true, id });
       } catch (err) {
         return errorResult(err);
       }
@@ -178,6 +240,20 @@ export function registerTools(server: McpServer) {
     async ({ lang }) => {
       try {
         const data = await backend.get(`/tools${lang ? `?lang=${lang}` : ""}`);
+        return textResult(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  server.tool(
+    "list_techniques",
+    "List cooking techniques (e.g. Sauté, Blanch, Julienne) that recipe steps can reference.",
+    { lang: z.string().optional() },
+    async ({ lang }) => {
+      try {
+        const data = await backend.get(`/techniques${lang ? `?lang=${lang}` : ""}`);
         return textResult(data);
       } catch (err) {
         return errorResult(err);

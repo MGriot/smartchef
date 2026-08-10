@@ -28,6 +28,14 @@ const RecipeIngredientSchema = z.object({
   message: "Deve essere presente ingredientId o subRecipeId",
 });
 
+const RecipeSourceSchema = z.object({
+  type: z.enum(["url", "book", "video", "other"]).default("url"),
+  label: z.string().optional(),
+  url: z.string().optional(),
+}).refine(d => d.label || d.url, {
+  message: "Deve essere presente label o url",
+});
+
 const TranslationSchema = z.object({
   lang: z.string(),
   title: z.string().optional(),
@@ -36,7 +44,11 @@ const TranslationSchema = z.object({
 
 const StepIngredientRefSchema = z.object({
   ingredientSortOrder: z.number().int().min(0),
+  amountMode: z.enum(["fraction", "absolute"]).default("fraction"),
   portion: z.number().positive().max(1).default(1),
+  quantity: z.number().positive().optional(),
+  unitId: z.string().uuid().optional(),
+  unitSymbol: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -47,6 +59,7 @@ const RecipeStepSchema = z.object({
   durationMin: z.number().int().positive().optional(),
   toolIds: z.array(z.string().uuid()).optional(),
   notes: z.string().optional(),
+  imageUrl: z.string().nullable().optional(),
   translations: z.array(TranslationSchema).optional(),
   stepIngredients: z.array(StepIngredientRefSchema).default([]),
 });
@@ -62,7 +75,9 @@ const CreateRecipeSchema = z.object({
   tags: z.array(z.string()).default([]),
   coverImageUrl: z.string().nullable().optional(),
   sourceUrl: z.string().nullable().optional(),
+  sources: z.array(RecipeSourceSchema).default([]),
   isComponent: z.boolean().default(false),
+  languageCode: z.string().optional().describe("Language the base title/description/steps were authored in, e.g. 'en'"),
   ingredients: z.array(RecipeIngredientSchema).default([]),
   steps: z.array(RecipeStepSchema).default([]),
   toolIds: z.array(z.string().uuid()).default([]),
@@ -168,6 +183,11 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
 
   const recipe = await queryOne(
     `SELECT r.*, ${translatedCols},
+            COALESCE(
+              (SELECT json_agg(json_build_object('lang', rt2.language_code, 'title', rt2.title, 'description', rt2.description))
+               FROM recipe_translations rt2 WHERE rt2.recipe_id = r.id),
+              '[]'::json
+            ) AS translations,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'id', ri.id, 'sortOrder', ri.sort_order,
               'ingredientId', ri.ingredient_id,
@@ -188,7 +208,13 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'durationMin', rs.duration_min,
               'toolIds', rs.tool_ids,
               'notes', rs.notes,
-              'stepIngredients', rs.step_ingredients
+              'imageUrl', rs.image_url,
+              'stepIngredients', rs.step_ingredients,
+              'translations', COALESCE(
+                (SELECT json_agg(json_build_object('lang', rst2.language_code, 'title', rst2.title, 'description', rst2.description))
+                 FROM recipe_step_translations rst2 WHERE rst2.step_id = rs.id),
+                '[]'::json
+              )
             )) FILTER (WHERE rs.id IS NOT NULL), '[]'::json) AS steps,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'id', t.id, 'name', t.name, 'icon', t.icon,
@@ -231,10 +257,10 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
     await withTransaction(async (client) => {
       await client.query(
         `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,
-           cook_time_min,rest_time_min,tags,cover_image_url,source_url,is_component,crdt_clock)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'{}')`,
+           cook_time_min,rest_time_min,tags,cover_image_url,source_url,sources,is_component,language_code,crdt_clock)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'{}')`,
         [recipeId,d.title,d.description,d.difficulty,d.servings,d.prepTimeMin,
-         d.cookTimeMin,d.restTimeMin,d.tags,d.coverImageUrl,d.sourceUrl,d.isComponent]
+         d.cookTimeMin,d.restTimeMin,d.tags,d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null]
       );
 
       // Inserisci ingredienti
@@ -255,11 +281,11 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
         const stepId = uuidv4();
         await client.query(
           `INSERT INTO recipe_steps
-             (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,step_ingredients)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+             (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [stepId,recipeId,step.stepNumber,step.title??null,
            step.description,step.durationMin??null,step.toolIds??[],step.notes??null,
-           JSON.stringify(step.stepIngredients)]
+           step.imageUrl??null,JSON.stringify(step.stepIngredients)]
         );
         await insertStepTranslations(client, stepId, step.translations);
       }
@@ -329,11 +355,11 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
         `UPDATE recipes SET
            title=$2, description=$3, difficulty=$4, servings=$5,
            prep_time_min=$6, cook_time_min=$7, rest_time_min=$8,
-           tags=$9, cover_image_url=$10, source_url=$11, is_component=$12,
+           tags=$9, cover_image_url=$10, source_url=$11, sources=$12, is_component=$13,
            updated_at=now()
          WHERE id=$1`,
         [id, d.title, d.description, d.difficulty, d.servings, d.prepTimeMin,
-         d.cookTimeMin, d.restTimeMin, d.tags, d.coverImageUrl, d.sourceUrl, d.isComponent]
+         d.cookTimeMin, d.restTimeMin, d.tags, d.coverImageUrl, d.sourceUrl, JSON.stringify(d.sources), d.isComponent]
       );
 
       // Rimpiazza ingredienti (drop + reinsert)
@@ -356,11 +382,11 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
         const stepId = uuidv4();
         await client.query(
           `INSERT INTO recipe_steps
-             (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,step_ingredients)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+             (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [stepId, id, step.stepNumber, step.title??null,
            step.description, step.durationMin??null, step.toolIds??[], step.notes??null,
-           JSON.stringify(step.stepIngredients)]
+           step.imageUrl??null, JSON.stringify(step.stepIngredients)]
         );
         await insertStepTranslations(client, stepId, step.translations);
       }

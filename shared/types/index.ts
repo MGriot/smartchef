@@ -104,6 +104,14 @@ export interface RecipeStep {
   imageUrl?: string;
 }
 
+export type RecipeSourceType = "url" | "book" | "video" | "other";
+
+export interface RecipeSource {
+  type: RecipeSourceType;
+  label?: string;
+  url?: string;
+}
+
 export interface Recipe {
   id: UUID;
   title: string;
@@ -116,6 +124,7 @@ export interface Recipe {
   tags: string[];
   coverImageUrl?: string;
   sourceUrl?: string;
+  sources: RecipeSource[];
   isComponent: boolean;
   ingredients: RecipeIngredient[];
   steps: RecipeStep[];

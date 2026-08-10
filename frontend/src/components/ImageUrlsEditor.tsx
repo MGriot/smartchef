@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 
 interface ImageUrlsEditorProps {
   urls: string[];
@@ -7,20 +7,39 @@ interface ImageUrlsEditorProps {
 
 /**
  * Add/remove one or more reference photo URLs, with live thumbnail previews.
- * No file upload backend exists yet, so this takes URLs (same pattern as
- * a recipe's cover image) rather than raw file uploads.
+ * Photos can either be linked (pasted URL) or uploaded — an upload is sent
+ * to POST /api/uploads (resized/recompressed server-side to WebP) and the
+ * returned same-origin URL is appended just like a pasted one.
  */
 export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps) {
   const [draft, setDraft] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const addUrl = () => {
-    const trimmed = draft.trim();
+  const addUrl = (url?: string) => {
+    const trimmed = (url ?? draft).trim();
     if (!trimmed || urls.includes(trimmed)) return;
     onChange([...urls, trimmed]);
     setDraft('');
   };
 
   const removeUrl = (url: string) => onChange(urls.filter(u => u !== url));
+
+  const handleFile = async (file: File) => {
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/uploads', { method: 'POST', body: formData });
+      const json = await res.json();
+      if (!res.ok || !json.data?.url) throw new Error(json.error ? JSON.stringify(json.error) : 'Upload failed');
+      addUrl(json.data.url);
+    } catch (err) {
+      console.error('Image upload failed:', err);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div>
@@ -35,11 +54,27 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
         />
         <button
           type="button"
-          onClick={addUrl}
+          onClick={() => addUrl()}
           disabled={!draft.trim()}
           className="w-10 h-10 rounded-xl bg-zinc-900 text-white flex items-center justify-center disabled:opacity-30 shrink-0"
         >
           <span className="material-symbols-outlined text-lg">add</span>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="shrink-0 flex items-center gap-1.5 px-4 rounded-xl bg-zinc-100 text-zinc-600 text-sm font-bold hover:bg-zinc-200 transition-colors disabled:opacity-50"
+        >
+          <span className="material-symbols-outlined text-sm">{uploading ? 'sync' : 'upload'}</span>
+          {uploading ? 'Uploading…' : 'Upload'}
         </button>
       </div>
       {urls.length > 0 && (

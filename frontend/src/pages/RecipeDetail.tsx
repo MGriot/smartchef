@@ -5,7 +5,10 @@ import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
-import StepEditor from '../components/StepEditor';
+import StepEditor, { StepIngredientAmount } from '../components/StepEditor';
+import RecipeSourcesEditor, { RecipeSourceEntry, SOURCE_TYPE_META } from '../components/RecipeSourcesEditor';
+import ImageUrlInput from '../components/ImageUrlInput';
+import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
 import RenderStepText from '../components/RenderStepText';
 import AppLayout from '../components/AppLayout';
 
@@ -29,7 +32,11 @@ interface Ingredient {
 
 interface StepIngredientRef {
   ingredientSortOrder: number;
+  amountMode?: 'fraction' | 'absolute';
   portion: number;
+  quantity?: number | null;
+  unitId?: string | null;
+  unitSymbol?: string | null;
   notes?: string;
 }
 
@@ -43,7 +50,9 @@ interface Step {
   durationMin: number | null;
   toolIds: string[];
   notes: string | null;
+  imageUrl: string | null;
   stepIngredients: StepIngredientRef[];
+  translations: TranslationEntry[];
 }
 
 interface Tool {
@@ -68,7 +77,10 @@ interface Recipe {
   tags: string[];
   cover_image_url: string;
   source_url: string | null;
+  sources: RecipeSourceEntry[];
   is_component: boolean;
+  language_code?: string | null;
+  translations: TranslationEntry[];
   ingredients: Ingredient[];
   steps: Step[];
   tools: Tool[];
@@ -251,6 +263,14 @@ const RecipeDetail: React.FC = () => {
     return step.stepIngredients.map(ref => {
       const ing = recipe.ingredients.find(i => i.sortOrder === ref.ingredientSortOrder);
       if (!ing) return null;
+      if (ref.amountMode === 'absolute') {
+        return {
+          name: ing.ingredientName || ing.subRecipeTitle || 'Ingredient',
+          quantity: ref.quantity != null ? scale(ref.quantity) : '',
+          unitSymbol: ref.unitSymbol || '',
+          portionPct: 100,
+        };
+      }
       const portionQty = ing.quantity !== null ? ing.quantity * ref.portion : null;
       return {
         name: ing.ingredientName || ing.subRecipeTitle || 'Ingredient',
@@ -286,7 +306,9 @@ const RecipeDetail: React.FC = () => {
         tags: draft.tags || [],
         coverImageUrl: draft.cover_image_url || null,
         sourceUrl: draft.source_url || null,
+        sources: draft.sources || [],
         isComponent: draft.is_component || false,
+        translations: draft.translations || [],
         ingredients: (draft.ingredients || []).map((ing, i) => ({
           sortOrder: i,
           ingredientId: ing.ingredientId || undefined,
@@ -304,7 +326,9 @@ const RecipeDetail: React.FC = () => {
           durationMin: s.durationMin || undefined,
           toolIds: s.toolIds || [],
           notes: s.notes || undefined,
+          imageUrl: s.imageUrl || null,
           stepIngredients: s.stepIngredients || [],
+          translations: s.translations || [],
         })),
         toolIds: (draft.tools || []).map(t => t.id),
       };
@@ -409,6 +433,9 @@ const RecipeDetail: React.FC = () => {
                     <h3 className={`font-headline font-bold text-xl mb-3 ${done ? 'text-primary line-through' : 'text-white'}`}>
                       {step.translatedTitle || step.title || `Step ${step.stepNumber}`}
                     </h3>
+                    {step.imageUrl && (
+                      <img src={step.imageUrl} alt="" className="w-full max-h-64 object-cover rounded-2xl mb-4" />
+                    )}
                     <p className="text-zinc-300 leading-relaxed text-[15px] mb-4">
                       <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredients} tools={stepTextTools} techniques={stepTextTechniques} />
                     </p>
@@ -505,7 +532,7 @@ const RecipeDetail: React.FC = () => {
     const addStep = () =>
       setDraft(prev => ({
         ...prev,
-        steps: [...(prev.steps || []), { id: '', stepNumber: (prev.steps?.length || 0) + 1, title: '', description: '', durationMin: null, toolIds: [], notes: '', stepIngredients: [] }],
+        steps: [...(prev.steps || []), { id: '', stepNumber: (prev.steps?.length || 0) + 1, title: '', description: '', durationMin: null, toolIds: [], notes: '', imageUrl: null, stepIngredients: [], translations: [] }],
       }));
     const removeStep = (idx: number) =>
       setDraft(prev => ({
@@ -524,7 +551,7 @@ const RecipeDetail: React.FC = () => {
             ...s,
             stepIngredients: has
               ? existing.filter(si => si.ingredientSortOrder !== ingredientSortOrder)
-              : [...existing, { ingredientSortOrder, portion: 1 }],
+              : [...existing, { ingredientSortOrder, amountMode: 'fraction' as const, portion: 1 }],
           };
         }),
       }));
@@ -540,32 +567,70 @@ const RecipeDetail: React.FC = () => {
         } : s),
       }));
 
-    // Adds (or updates the portion of) a step ingredient — unlike
+    // Switches a step-ingredient between "% of total" and "exact amount" mode.
+    const setStepIngredientMode = (stepIdx: number, ingredientSortOrder: number, amountMode: 'fraction' | 'absolute') =>
+      setDraft(prev => ({
+        ...prev,
+        steps: (prev.steps || []).map((s, i) => i === stepIdx ? {
+          ...s,
+          stepIngredients: (s.stepIngredients || []).map(si =>
+            si.ingredientSortOrder === ingredientSortOrder ? { ...si, amountMode } : si
+          ),
+        } : s),
+      }));
+
+    const updateStepIngredientAmount = (stepIdx: number, ingredientSortOrder: number, field: 'quantity' | 'unitId' | 'unitSymbol', value: unknown) =>
+      setDraft(prev => ({
+        ...prev,
+        steps: (prev.steps || []).map((s, i) => i === stepIdx ? {
+          ...s,
+          stepIngredients: (s.stepIngredients || []).map(si =>
+            si.ingredientSortOrder === ingredientSortOrder ? { ...si, [field]: value } : si
+          ),
+        } : s),
+      }));
+
+    // Adds (or updates the amount of) a step ingredient — unlike
     // toggleStepIngredient this never removes, used when inserting an
     // inline {{ing:N}} reference from the step text toolbar.
-    const setStepIngredient = (stepIdx: number, ingredientSortOrder: number, portion: number) =>
+    const setStepIngredient = (stepIdx: number, ingredientSortOrder: number, amount: StepIngredientAmount) =>
       setDraft(prev => ({
         ...prev,
         steps: (prev.steps || []).map((s, i) => {
           if (i !== stepIdx) return s;
           const existing = s.stepIngredients || [];
           const has = existing.some(si => si.ingredientSortOrder === ingredientSortOrder);
+          const patch = {
+            amountMode: amount.amountMode,
+            portion: amount.portion ?? 1,
+            quantity: amount.quantity ?? null,
+            unitId: amount.unitId ?? null,
+            unitSymbol: amount.unitSymbol ?? null,
+          };
           return {
             ...s,
             stepIngredients: has
-              ? existing.map(si => si.ingredientSortOrder === ingredientSortOrder ? { ...si, portion } : si)
-              : [...existing, { ingredientSortOrder, portion }],
+              ? existing.map(si => si.ingredientSortOrder === ingredientSortOrder ? { ...si, ...patch } : si)
+              : [...existing, { ingredientSortOrder, ...patch }],
           };
         }),
       }));
 
+    // Adds a tool reference to a step and, if it isn't already in the
+    // dedicated Tools section, flags it there too — inline step references
+    // and the recipe's tool list stay in sync.
     const addToolToStep = (stepIdx: number, toolId: string) =>
-      setDraft(prev => ({
-        ...prev,
-        steps: (prev.steps || []).map((s, i) => i === stepIdx && !(s.toolIds || []).includes(toolId)
-          ? { ...s, toolIds: [...(s.toolIds || []), toolId] }
-          : s),
-      }));
+      setDraft(prev => {
+        const alreadySelected = (prev.tools || []).some(t => t.id === toolId);
+        const tool = allTools.find(t => t.id === toolId);
+        return {
+          ...prev,
+          tools: !alreadySelected && tool ? [...(prev.tools || []), tool] : prev.tools,
+          steps: (prev.steps || []).map((s, i) => i === stepIdx && !(s.toolIds || []).includes(toolId)
+            ? { ...s, toolIds: [...(s.toolIds || []), toolId] }
+            : s),
+        };
+      });
 
     const updateIngredient = (idx: number, field: string, value: unknown) =>
       setDraft(prev => ({
@@ -593,7 +658,19 @@ const RecipeDetail: React.FC = () => {
       setDraft(prev => {
         const tools = prev.tools || [];
         const exists = tools.find(t => t.id === tool.id);
-        if (exists) return { ...prev, tools: tools.filter(t => t.id !== tool.id) };
+        if (exists) {
+          return {
+            ...prev,
+            tools: tools.filter(t => t.id !== tool.id),
+            // Deselecting a tool removes it from any step that referenced
+            // it, so it can't be silently dropped from recipe_tools on save
+            // while a step still shows it as used.
+            steps: (prev.steps || []).map(s => ({
+              ...s,
+              toolIds: (s.toolIds || []).filter(id => id !== tool.id),
+            })),
+          };
+        }
         return { ...prev, tools: [...tools, tool] };
       });
 
@@ -630,7 +707,12 @@ const RecipeDetail: React.FC = () => {
           {/* Title & description */}
           <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
             <label className="block mb-6">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Recipe Title</span>
+              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">
+                Recipe Title
+                {recipe.language_code && (
+                  <span className="ml-2 normal-case font-medium text-zinc-400">— written in {recipe.language_code}</span>
+                )}
+              </span>
               <input
                 type="text" value={draft.title || ''}
                 onChange={e => updateDraft('title', e.target.value)}
@@ -648,14 +730,22 @@ const RecipeDetail: React.FC = () => {
               />
             </label>
             <label className="block">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Cover Image URL</span>
-              <input
-                type="url" value={draft.cover_image_url || ''}
-                onChange={e => updateDraft('cover_image_url', e.target.value)}
-                className="w-full border-none bg-zinc-50 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20"
-                placeholder="https://…"
+              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Cover Image</span>
+              <ImageUrlInput
+                value={draft.cover_image_url || ''}
+                onChange={url => updateDraft('cover_image_url', url)}
               />
             </label>
+          </div>
+
+          {/* Translations */}
+          <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+            <h3 className="font-headline font-bold text-xl mb-2">Translations</h3>
+            <p className="text-xs text-zinc-400 mb-6">Optional. Add a title/description for other languages — switching the app's content language will show these instead of the text above.</p>
+            <TranslationsEditor
+              translations={draft.translations || []}
+              onChange={translations => updateDraft('translations', translations)}
+            />
           </div>
 
           {/* Metadata grid */}
@@ -703,6 +793,15 @@ const RecipeDetail: React.FC = () => {
                 />
               </label>
             </div>
+          </div>
+
+          {/* Sources & References */}
+          <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+            <h3 className="font-headline font-bold text-xl mb-6">Sources & References</h3>
+            <RecipeSourcesEditor
+              sources={draft.sources || []}
+              onChange={sources => updateDraft('sources', sources)}
+            />
           </div>
 
           {/* Kitchen Tools Selector */}
@@ -832,11 +931,30 @@ const RecipeDetail: React.FC = () => {
                     description={step.description}
                     onChangeDescription={text => updateStep(idx, 'description', text)}
                     ingredients={draft.ingredients || []}
-                    tools={draft.tools || []}
+                    tools={allTools}
+                    units={allUnits}
                     techniques={allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }))}
-                    onInsertIngredient={(sortOrder, portion) => setStepIngredient(idx, sortOrder, portion)}
+                    onInsertIngredient={(sortOrder, amount) => setStepIngredient(idx, sortOrder, amount)}
                     onInsertTool={(toolId) => addToolToStep(idx, toolId)}
                   />
+                  <div className="mt-3">
+                    <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">Step Photo (optional)</label>
+                    <ImageUrlInput
+                      value={step.imageUrl || ''}
+                      onChange={url => updateStep(idx, 'imageUrl', url || null)}
+                      className="flex-1 border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div className="mt-3">
+                    <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">Step Translations (optional)</label>
+                    <TranslationsEditor
+                      translations={step.translations || []}
+                      onChange={translations => updateStep(idx, 'translations', translations)}
+                      titleLabel="Step title"
+                      descriptionLabel="Step description"
+                      compact
+                    />
+                  </div>
                   <textarea
                     value={step.notes || ''}
                     onChange={e => updateStep(idx, 'notes', e.target.value)}
@@ -900,13 +1018,49 @@ const RecipeDetail: React.FC = () => {
                               </button>
                               {isUsed && (
                                 <>
-                                  <input
-                                    type="range" min="0.05" max="1" step="0.05"
-                                    value={ref!.portion}
-                                    onChange={e => updateStepIngredientPortion(idx, ing.sortOrder, parseFloat(e.target.value))}
-                                    className="w-24 accent-primary"
-                                  />
-                                  <span className="text-[10px] font-bold text-zinc-500 w-10 text-right">{Math.round(ref!.portion * 100)}%</span>
+                                  <div className="flex bg-white rounded-lg p-0.5 border border-zinc-100 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => setStepIngredientMode(idx, ing.sortOrder, 'fraction')}
+                                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${(ref!.amountMode || 'fraction') === 'fraction' ? 'bg-primary text-white' : 'text-zinc-400'}`}
+                                    >%</button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setStepIngredientMode(idx, ing.sortOrder, 'absolute')}
+                                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${ref!.amountMode === 'absolute' ? 'bg-primary text-white' : 'text-zinc-400'}`}
+                                    >amt</button>
+                                  </div>
+                                  {(ref!.amountMode || 'fraction') === 'fraction' ? (
+                                    <>
+                                      <input
+                                        type="range" min="0.05" max="1" step="0.05"
+                                        value={ref!.portion}
+                                        onChange={e => updateStepIngredientPortion(idx, ing.sortOrder, parseFloat(e.target.value))}
+                                        className="w-24 accent-primary"
+                                      />
+                                      <span className="text-[10px] font-bold text-zinc-500 w-10 text-right">{Math.round(ref!.portion * 100)}%</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <input
+                                        type="number" step="any" value={ref!.quantity ?? ''}
+                                        onChange={e => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', e.target.value ? parseFloat(e.target.value) : null)}
+                                        className="w-14 border-none bg-white rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
+                                      />
+                                      <select
+                                        value={ref!.unitId || ''}
+                                        onChange={e => {
+                                          const sym = allUnits.find(u => u.id === e.target.value)?.symbol || '';
+                                          updateStepIngredientAmount(idx, ing.sortOrder, 'unitId', e.target.value || null);
+                                          updateStepIngredientAmount(idx, ing.sortOrder, 'unitSymbol', sym);
+                                        }}
+                                        className="w-16 border-none bg-white rounded px-1 py-1 text-[10px] focus:ring-2 focus:ring-primary/20"
+                                      >
+                                        <option value="">Unit…</option>
+                                        {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol}</option>)}
+                                      </select>
+                                    </>
+                                  )}
                                 </>
                               )}
                             </div>
@@ -1061,6 +1215,29 @@ const RecipeDetail: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* References card */}
+            {recipe.sources && recipe.sources.length > 0 && (
+              <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+                <h3 className="font-headline font-bold text-lg mb-5">References</h3>
+                <div className="space-y-2">
+                  {recipe.sources.map((s, idx) => {
+                    const meta = SOURCE_TYPE_META[s.type] || SOURCE_TYPE_META.other;
+                    const content = (
+                      <div className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-50 transition-colors">
+                        <span className="material-symbols-outlined text-primary text-lg shrink-0">{meta.icon}</span>
+                        <span className="text-sm font-semibold text-zinc-700 truncate">{s.label || s.url}</span>
+                      </div>
+                    );
+                    return s.url ? (
+                      <a key={idx} href={s.url} target="_blank" rel="noopener noreferrer">{content}</a>
+                    ) : (
+                      <div key={idx}>{content}</div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
 
@@ -1096,6 +1273,9 @@ const RecipeDetail: React.FC = () => {
                       {step.translatedTitle || step.title || `Step ${step.stepNumber}`}
                     </h4>
                     <div className="bg-white p-6 rounded-2xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 group-hover:border-primary/15 transition-colors">
+                      {step.imageUrl && (
+                        <img src={step.imageUrl} alt="" className="w-full max-h-64 object-cover rounded-xl mb-4" />
+                      )}
                       <p className="text-[15px] leading-relaxed text-zinc-600 mb-4">
                         <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredients} tools={stepTextTools} techniques={stepTextTechniques} />
                       </p>
@@ -1117,16 +1297,6 @@ const RecipeDetail: React.FC = () => {
                           {step.durationMin} minutes
                         </div>
                       )}
-
-                      <label className="flex items-center gap-3 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={completedSteps.has(step.stepNumber)}
-                          onChange={() => toggleStep(step.stepNumber)}
-                          className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary/30"
-                        />
-                        <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-zinc-400">Mark as Complete</span>
-                      </label>
                     </div>
                   </div>
                 </div>

@@ -1,0 +1,24 @@
+{
+  "nav": {
+    "gallery": "Galleria",
+    "planner": "Pianificatore",
+    "shoppingList": "Lista della Spesa",
+    "import": "Importa",
+    "ingredients": "Ingredienti",
+    "tools": "Strumenti",
+    "units": "Unità",
+    "techniques": "Tecniche",
+    "library": "Libreria",
+    "search": "Cerca",
+    "createRecipe": "Crea Ricetta"
+  },
+  "common": {
+    "cancel": "Annulla",
+    "save": "Salva",
+    "delete": "Elimina",
+    "edit": "Modifica",
+    "add": "Aggiungi",
+    "loading": "Caricamento…",
+    "language": "Lingua"
+  }
+}

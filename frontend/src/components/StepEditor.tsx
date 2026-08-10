@@ -6,6 +6,7 @@ interface IngredientOption {
   sortOrder: number;
   ingredientName: string;
   quantity: number | null;
+  unitId?: string | null;
   unitSymbol?: string | null;
 }
 
@@ -19,13 +20,27 @@ interface TechniqueOption {
   name: string;
 }
 
+interface UnitOption {
+  id: string;
+  symbol: string;
+}
+
+export type StepIngredientAmount = {
+  amountMode: 'fraction' | 'absolute';
+  portion?: number;
+  quantity?: number;
+  unitId?: string;
+  unitSymbol?: string;
+};
+
 interface StepEditorProps {
   description: string;
   onChangeDescription: (text: string) => void;
   ingredients: IngredientOption[];
   tools: ToolOption[];
   techniques: TechniqueOption[];
-  onInsertIngredient?: (sortOrder: number, portion: number) => void;
+  units?: UnitOption[];
+  onInsertIngredient?: (sortOrder: number, amount: StepIngredientAmount) => void;
   onInsertTool?: (toolId: string) => void;
 }
 
@@ -36,16 +51,24 @@ type Popover = 'ingredient' | 'tool' | 'technique' | null;
  * references — {{ing:N}}, {{tool:id}}, {{tech:id|params}} — at the cursor,
  * plus a live preview showing how they'll render (bold + underlined,
  * Bimby-style) once expanded.
+ *
+ * `tools` should be the full tool library (not just the recipe's
+ * already-selected tools) so a tool can be referenced inline before it's
+ * been added to the dedicated Tools section — the caller is responsible for
+ * flagging it there once `onInsertTool` fires.
  */
 export default function StepEditor({
-  description, onChangeDescription, ingredients, tools, techniques,
+  description, onChangeDescription, ingredients, tools, techniques, units = [],
   onInsertIngredient, onInsertTool,
 }: StepEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [popover, setPopover] = useState<Popover>(null);
 
   const [pickIngredient, setPickIngredient] = useState('');
+  const [pickAmountMode, setPickAmountMode] = useState<'fraction' | 'absolute'>('fraction');
   const [pickPortion, setPickPortion] = useState(1);
+  const [pickQuantity, setPickQuantity] = useState<number | null>(null);
+  const [pickUnitId, setPickUnitId] = useState<string | null>(null);
   const [pickTool, setPickTool] = useState('');
   const [pickTechnique, setPickTechnique] = useState('');
   const [pickParams, setPickParams] = useState('');
@@ -64,13 +87,32 @@ export default function StepEditor({
     });
   };
 
+  const resetIngredientPicker = () => {
+    setPickIngredient('');
+    setPickAmountMode('fraction');
+    setPickPortion(1);
+    setPickQuantity(null);
+    setPickUnitId(null);
+  };
+
   const confirmIngredient = () => {
     if (!pickIngredient) return;
+    if (pickAmountMode === 'absolute' && !pickQuantity) return;
     insertAtCursor(`{{ing:${pickIngredient}}}`);
-    onInsertIngredient?.(parseInt(pickIngredient, 10), pickPortion);
+    const sortOrder = parseInt(pickIngredient, 10);
+    if (pickAmountMode === 'absolute') {
+      const unit = units.find(u => u.id === pickUnitId);
+      onInsertIngredient?.(sortOrder, {
+        amountMode: 'absolute',
+        quantity: pickQuantity ?? undefined,
+        unitId: pickUnitId ?? undefined,
+        unitSymbol: unit?.symbol,
+      });
+    } else {
+      onInsertIngredient?.(sortOrder, { amountMode: 'fraction', portion: pickPortion });
+    }
     setPopover(null);
-    setPickIngredient('');
-    setPickPortion(1);
+    resetIngredientPicker();
   };
 
   const confirmTool = () => {
@@ -113,23 +155,67 @@ export default function StepEditor({
       </div>
 
       {popover === 'ingredient' && (
-        <div className="flex items-end gap-2 mb-2 bg-primary/5 border border-primary/10 rounded-xl p-3">
-          <div className="flex-1">
+        <div className="flex items-end gap-2 mb-2 bg-primary/5 border border-primary/10 rounded-xl p-3 flex-wrap">
+          <div className="flex-1 min-w-[180px]">
             <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">Ingredient</label>
             <Autocomplete
               value={pickIngredient}
-              options={ingredients.map(i => ({ id: String(i.sortOrder), label: i.ingredientName || 'Unnamed' }))}
-              onSelect={(id) => setPickIngredient(id)}
-              onClear={() => setPickIngredient('')}
+              options={ingredients.map(i => ({
+                id: String(i.sortOrder),
+                label: `${i.ingredientName || 'Unnamed'}${i.quantity ? ` — ${i.quantity}${i.unitSymbol ? ' ' + i.unitSymbol : ''}` : ''}`,
+              }))}
+              onSelect={(id) => {
+                setPickIngredient(id);
+                const ing = ingredients.find(i => String(i.sortOrder) === id);
+                setPickUnitId(ing?.unitId ?? null);
+              }}
+              onClear={() => { setPickIngredient(''); setPickUnitId(null); }}
               placeholder="Search…"
               className="w-full px-3 py-2 bg-white rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
             />
           </div>
-          <div className="w-28">
-            <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">Portion {Math.round(pickPortion * 100)}%</label>
-            <input type="range" min="0.05" max="1" step="0.05" value={pickPortion} onChange={e => setPickPortion(parseFloat(e.target.value))} className="w-full accent-primary" />
+          <div>
+            <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">Amount</label>
+            <div className="flex bg-white rounded-lg p-0.5 border border-zinc-100">
+              <button type="button" onClick={() => setPickAmountMode('fraction')}
+                className={`px-2 py-1 rounded text-[10px] font-bold transition-colors ${pickAmountMode === 'fraction' ? 'bg-primary text-white' : 'text-zinc-400'}`}>
+                % of total
+              </button>
+              <button type="button" onClick={() => setPickAmountMode('absolute')}
+                className={`px-2 py-1 rounded text-[10px] font-bold transition-colors ${pickAmountMode === 'absolute' ? 'bg-primary text-white' : 'text-zinc-400'}`}>
+                Exact amount
+              </button>
+            </div>
           </div>
-          <button type="button" onClick={confirmIngredient} disabled={!pickIngredient} className="px-3 py-2 bg-primary text-white rounded-lg text-xs font-bold disabled:opacity-40">Insert</button>
+          {pickAmountMode === 'fraction' ? (
+            <div className="w-28">
+              <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">Portion {Math.round(pickPortion * 100)}%</label>
+              <input type="range" min="0.05" max="1" step="0.05" value={pickPortion} onChange={e => setPickPortion(parseFloat(e.target.value))} className="w-full accent-primary" />
+            </div>
+          ) : (
+            <>
+              <div className="w-20">
+                <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">Qty</label>
+                <input
+                  type="number" step="any" value={pickQuantity ?? ''}
+                  onChange={e => setPickQuantity(e.target.value ? parseFloat(e.target.value) : null)}
+                  className="w-full px-3 py-2 bg-white rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
+                />
+              </div>
+              <div className="w-24">
+                <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">Unit</label>
+                <select
+                  value={pickUnitId || ''}
+                  onChange={e => setPickUnitId(e.target.value || null)}
+                  className="w-full px-2 py-2 bg-white rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-xs font-bold"
+                >
+                  <option value="">Unit…</option>
+                  {units.map(u => <option key={u.id} value={u.id}>{u.symbol}</option>)}
+                </select>
+              </div>
+            </>
+          )}
+          <button type="button" onClick={confirmIngredient} disabled={!pickIngredient || (pickAmountMode === 'absolute' && !pickQuantity)} className="px-3 py-2 bg-primary text-white rounded-lg text-xs font-bold disabled:opacity-40">Insert</button>
         </div>
       )}
 

@@ -13,8 +13,10 @@ import { llmRouter }        from "./routes/llm";
 import { menuRouter }       from "./routes/menus";
 import { ingredientsRouter, unitsRouter, toolsRouter } from "./routes/ingredients";
 import { techniquesRouter } from "./routes/techniques";
+import { uploadsRouter }    from "./routes/uploads";
 import { checkOllamaHealth } from "./services/llm.parser";
 import { startSyncLoop }    from "./services/mdns.service";
+import { UPLOAD_DIR }       from "./services/uploadDir";
 import pool                 from "./db/pool";
 
 const app = express();
@@ -35,6 +37,8 @@ app.use("/api/ingredients", ingredientsRouter);
 app.use("/api/units",       unitsRouter);
 app.use("/api/tools",       toolsRouter);
 app.use("/api/techniques",  techniquesRouter);
+app.use("/api/uploads",     uploadsRouter);
+app.use("/uploads",         express.static(UPLOAD_DIR));
 
 
 // ── Health Check ───────────────────────────────────────────────────────
