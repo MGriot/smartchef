@@ -12,6 +12,7 @@ import { syncRouter }       from "./routes/sync";
 import { llmRouter }        from "./routes/llm";
 import { menuRouter }       from "./routes/menus";
 import { ingredientsRouter, unitsRouter, toolsRouter } from "./routes/ingredients";
+import { techniquesRouter } from "./routes/techniques";
 import { checkOllamaHealth } from "./services/llm.parser";
 import { startSyncLoop }    from "./services/mdns.service";
 import pool                 from "./db/pool";
@@ -33,6 +34,7 @@ app.use("/api/menus",       menuRouter);
 app.use("/api/ingredients", ingredientsRouter);
 app.use("/api/units",       unitsRouter);
 app.use("/api/tools",       toolsRouter);
+app.use("/api/techniques",  techniquesRouter);
 
 
 // ── Health Check ───────────────────────────────────────────────────────

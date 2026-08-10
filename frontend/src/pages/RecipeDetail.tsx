@@ -5,6 +5,8 @@ import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
+import StepEditor from '../components/StepEditor';
+import RenderStepText from '../components/RenderStepText';
 import AppLayout from '../components/AppLayout';
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -162,6 +164,7 @@ const RecipeDetail: React.FC = () => {
   const [allTools, setAllTools] = useState<Tool[]>([]);
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
+  const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
   const { t, i18n } = useTranslation();
   const contentLang = useStore((s) => s.contentLang);
   const setContentLang = useStore((s) => s.setContentLang);
@@ -172,6 +175,17 @@ const RecipeDetail: React.FC = () => {
     localStorage.setItem('smartchef.uiLang', code);
     setContentLang(code);
   };
+
+  /* ── Fetch techniques (needed in every mode to resolve {{tech:id}} refs in step text) ── */
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/techniques${contentLang ? `?lang=${contentLang}` : ''}`);
+        const json = await res.json();
+        setAllTechniques(json.data || []);
+      } catch (err) { console.error('Techniques fetch failed:', err); }
+    })();
+  }, [contentLang]);
 
   /* ── Fetch library data (for edit mode) ────────────────────────── */
   useEffect(() => {
@@ -221,6 +235,15 @@ const RecipeDetail: React.FC = () => {
     const v = (qty * servings) / recipe.servings;
     return v % 1 === 0 ? String(v) : v.toFixed(1);
   };
+
+  /* ── Context for resolving {{ing:N}}/{{tool:id}}/{{tech:id}} inline refs in step text ── */
+  const stepTextIngredients = (recipe?.ingredients || []).map(ing => ({
+    sortOrder: ing.sortOrder,
+    name: ing.ingredientName || ing.subRecipeTitle || 'ingredient',
+    quantity: ing.quantity !== null ? `${scale(ing.quantity)}${ing.unitSymbol ? ' ' + ing.unitSymbol : ''}` : '',
+  }));
+  const stepTextTools = (recipe?.tools || []).map(t => ({ id: t.id, name: t.translated_name || t.name }));
+  const stepTextTechniques = allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }));
 
   /* ── Resolve a step's linked ingredients + their portion of the total ── */
   const stepIngredientList = (step: Step) => {
@@ -386,7 +409,9 @@ const RecipeDetail: React.FC = () => {
                     <h3 className={`font-headline font-bold text-xl mb-3 ${done ? 'text-primary line-through' : 'text-white'}`}>
                       {step.translatedTitle || step.title || `Step ${step.stepNumber}`}
                     </h3>
-                    <p className="text-zinc-300 leading-relaxed text-[15px] mb-4">{step.translatedDescription || step.description}</p>
+                    <p className="text-zinc-300 leading-relaxed text-[15px] mb-4">
+                      <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredients} tools={stepTextTools} techniques={stepTextTechniques} />
+                    </p>
 
                     {stepIngredientList(step).length > 0 && (
                       <div className="flex flex-wrap gap-2 mb-4">
@@ -513,6 +538,33 @@ const RecipeDetail: React.FC = () => {
             si.ingredientSortOrder === ingredientSortOrder ? { ...si, portion } : si
           ),
         } : s),
+      }));
+
+    // Adds (or updates the portion of) a step ingredient — unlike
+    // toggleStepIngredient this never removes, used when inserting an
+    // inline {{ing:N}} reference from the step text toolbar.
+    const setStepIngredient = (stepIdx: number, ingredientSortOrder: number, portion: number) =>
+      setDraft(prev => ({
+        ...prev,
+        steps: (prev.steps || []).map((s, i) => {
+          if (i !== stepIdx) return s;
+          const existing = s.stepIngredients || [];
+          const has = existing.some(si => si.ingredientSortOrder === ingredientSortOrder);
+          return {
+            ...s,
+            stepIngredients: has
+              ? existing.map(si => si.ingredientSortOrder === ingredientSortOrder ? { ...si, portion } : si)
+              : [...existing, { ingredientSortOrder, portion }],
+          };
+        }),
+      }));
+
+    const addToolToStep = (stepIdx: number, toolId: string) =>
+      setDraft(prev => ({
+        ...prev,
+        steps: (prev.steps || []).map((s, i) => i === stepIdx && !(s.toolIds || []).includes(toolId)
+          ? { ...s, toolIds: [...(s.toolIds || []), toolId] }
+          : s),
       }));
 
     const updateIngredient = (idx: number, field: string, value: unknown) =>
@@ -776,11 +828,14 @@ const RecipeDetail: React.FC = () => {
                       placeholder="Step title (optional)"
                     />
                   </div>
-                  <textarea
-                    value={step.description}
-                    onChange={e => updateStep(idx, 'description', e.target.value)}
-                    className="w-full border-none bg-white rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px]"
-                    placeholder="Describe this step…"
+                  <StepEditor
+                    description={step.description}
+                    onChangeDescription={text => updateStep(idx, 'description', text)}
+                    ingredients={draft.ingredients || []}
+                    tools={draft.tools || []}
+                    techniques={allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }))}
+                    onInsertIngredient={(sortOrder, portion) => setStepIngredient(idx, sortOrder, portion)}
+                    onInsertTool={(toolId) => addToolToStep(idx, toolId)}
                   />
                   <textarea
                     value={step.notes || ''}
@@ -1041,7 +1096,9 @@ const RecipeDetail: React.FC = () => {
                       {step.translatedTitle || step.title || `Step ${step.stepNumber}`}
                     </h4>
                     <div className="bg-white p-6 rounded-2xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 group-hover:border-primary/15 transition-colors">
-                      <p className="text-[15px] leading-relaxed text-zinc-600 mb-4">{step.translatedDescription || step.description}</p>
+                      <p className="text-[15px] leading-relaxed text-zinc-600 mb-4">
+                        <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredients} tools={stepTextTools} techniques={stepTextTechniques} />
+                      </p>
 
                       {stepIngredientList(step).length > 0 && (
                         <div className="flex flex-wrap gap-2 mb-4">

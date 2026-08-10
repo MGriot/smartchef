@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 
-type LibrarySection = 'ingredients' | 'tools' | 'units';
+type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -111,6 +111,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
               <LibraryLink to="/library/ingredients" icon="restaurant" label={t('nav.ingredients')} active={librarySection === 'ingredients'} />
               <LibraryLink to="/library/tools" icon="construction" label={t('nav.tools')} active={librarySection === 'tools'} />
               <LibraryLink to="/library/units" icon="straighten" label={t('nav.units')} active={librarySection === 'units'} />
+              <LibraryLink to="/library/techniques" icon="whatshot" label={t('nav.techniques')} active={librarySection === 'techniques'} />
               {sidebarExtra}
             </nav>
           </aside>

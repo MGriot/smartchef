@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
+import StepEditor from '../components/StepEditor';
 import { useStore } from '../store/app.store';
 
 /* ── Types ─────────────────────────────────────────────────── */
@@ -79,6 +80,7 @@ const RecipeCreate: React.FC = () => {
   const [allTools, setAllTools] = useState<Tool[]>([]);
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
+  const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
 
   // Draft state
   const [draft, setDraft] = useState<Partial<Recipe>>({
@@ -101,15 +103,17 @@ const RecipeCreate: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        const [tRes, uRes, iRes] = await Promise.all([
+        const [tRes, uRes, iRes, techRes] = await Promise.all([
           fetch(`/api/tools${langQuery}`),
           fetch(`/api/units${langQuery}`),
           fetch(`/api/ingredients${langQuery}`),
+          fetch(`/api/techniques${langQuery}`),
         ]);
-        const [tJson, uJson, iJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json()]);
+        const [tJson, uJson, iJson, techJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), techRes.json()]);
         setAllTools(tJson.data || []);
         setAllUnits(uJson.data || []);
         setAllIngredients(iJson.data || []);
+        setAllTechniques(techJson.data || []);
       } catch (err) {
         console.error('RecipeCreate: Library fetch failed:', err);
       }
@@ -157,6 +161,33 @@ const RecipeCreate: React.FC = () => {
           si.ingredientSortOrder === ingredientSortOrder ? { ...si, portion } : si
         ),
       } : s),
+    }));
+
+  // Adds (or updates the portion of) a step ingredient — unlike
+  // toggleStepIngredient this never removes, used when inserting an inline
+  // {{ing:N}} reference from the step text toolbar.
+  const setStepIngredient = (stepIdx: number, ingredientSortOrder: number, portion: number) =>
+    setDraft(prev => ({
+      ...prev,
+      steps: (prev.steps || []).map((s, i) => {
+        if (i !== stepIdx) return s;
+        const existing = s.stepIngredients || [];
+        const has = existing.some(si => si.ingredientSortOrder === ingredientSortOrder);
+        return {
+          ...s,
+          stepIngredients: has
+            ? existing.map(si => si.ingredientSortOrder === ingredientSortOrder ? { ...si, portion } : si)
+            : [...existing, { ingredientSortOrder, portion }],
+        };
+      }),
+    }));
+
+  const addToolToStep = (stepIdx: number, toolId: string) =>
+    setDraft(prev => ({
+      ...prev,
+      steps: (prev.steps || []).map((s, i) => i === stepIdx && !(s.toolIds || []).includes(toolId)
+        ? { ...s, toolIds: [...(s.toolIds || []), toolId] }
+        : s),
     }));
 
   const removeStep = (idx: number) =>
@@ -481,11 +512,14 @@ const RecipeCreate: React.FC = () => {
                     placeholder="Step title (optional)"
                   />
                 </div>
-                <textarea
-                  value={step.description}
-                  onChange={e => updateStep(idx, 'description', e.target.value)}
-                  className="w-full border-none bg-white rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px]"
-                  placeholder="Describe this step…"
+                <StepEditor
+                  description={step.description}
+                  onChangeDescription={text => updateStep(idx, 'description', text)}
+                  ingredients={draft.ingredients || []}
+                  tools={draft.tools || []}
+                  techniques={allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }))}
+                  onInsertIngredient={(sortOrder, portion) => setStepIngredient(idx, sortOrder, portion)}
+                  onInsertTool={(toolId) => addToolToStep(idx, toolId)}
                 />
                 <textarea
                   value={step.notes || ''}

@@ -332,6 +332,9 @@ I conflitti concorrenti (modifiche simultanee offline) vengono rilevati tramite 
 | Meal Planner | Crea/elimina menù settimanali, assegna ricette per giorno/pasto/porzioni tramite ricerca autocomplete | ✅ Completa |
 | Lista della spesa | Genera da un menù salvato **o** da un "carrello" ad-hoc di ricette (aggiunte dalla pagina ricetta o dalla Shopping List stessa); vista aggregata per ingrediente o raggruppata per ricetta, checkbox con progresso, export Markdown | ✅ Completa |
 | Ricerca ingredienti nell'editor ricetta | Combobox con ricerca live al posto del menu a tendina (100+ ingredienti) | ✅ Completa |
+| Libreria Tecniche | Nuova sezione (come Ingredienti/Strumenti): CRUD, traduzioni, foto di riferimento | ✅ Completa |
+| Foto di riferimento | Ingredienti e strumenti supportano una o più foto (URL) con anteprima, oltre all'icona | ✅ Completa |
+| Riferimenti inline negli step | Toolbar sopra il testo dello step per inserire riferimenti a ingrediente/strumento/tecnica ("stile Bimby": grassetto+sottolineato, quantità scalata dal vivo) | ✅ Completa |
 | CRDT Vector Clock + protocollo sync P2P | Endpoint REST (`/api/sync/*`) funzionanti e testati; nessuna UI per gestione peer o risoluzione conflitti | ⚠️ Solo backend |
 | LLM Parser (Ollama) + Ingredient Matcher | Endpoint `/api/llm/parse` e `/api/llm/confirm` funzionanti; la pagina **Import** in UI è ancora una demo statica (non chiama l'endpoint reale) | ⚠️ Backend pronto, UI da collegare |
 

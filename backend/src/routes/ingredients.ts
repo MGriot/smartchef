@@ -158,6 +158,7 @@ const IngredientSchema = z.object({
   categoryId: z.string().uuid(),
   description: z.string().optional(),
   icon: z.string().optional(),
+  imageUrls: z.array(z.string().url()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
     text: z.string()
@@ -167,13 +168,13 @@ const IngredientSchema = z.object({
 ingredientsRouter.post("/", async (req: Request, res: Response) => {
   const parsed = IngredientSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  
+
   const d = parsed.data;
   const id = uuidv4();
   await query(
-    `INSERT INTO ingredients (id, name, category_id, description, icon)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, d.name, d.categoryId, d.description || null, d.icon || null]
+    `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || []]
   );
 
   if (d.translations && d.translations.length > 0) {
@@ -195,9 +196,9 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
 
   const d = parsed.data;
   await query(
-    `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, updated_at=now()
-     WHERE id=$5`,
-    [d.name, d.categoryId, d.description || null, d.icon || null, id]
+    `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5, updated_at=now()
+     WHERE id=$6`,
+    [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [], id]
   );
 
   if (d.translations) {
@@ -228,6 +229,7 @@ const ToolSchema = z.object({
   category: z.string().optional(),
   description: z.string().optional(),
   icon: z.string().optional(),
+  imageUrls: z.array(z.string().url()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
     name: z.string().optional(),
@@ -254,8 +256,8 @@ toolsRouter.post("/", async (req: Request, res: Response) => {
   const d = parsed.data;
   const id = uuidv4();
   await query(
-    "INSERT INTO tools (id, name, category, description, icon) VALUES ($1, $2, $3, $4, $5)",
-    [id, d.name, d.category || null, d.description || null, d.icon || null]
+    "INSERT INTO tools (id, name, category, description, icon, image_urls) VALUES ($1, $2, $3, $4, $5, $6)",
+    [id, d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || []]
   );
   await upsertToolTranslations(id, d.translations);
   res.json({ data: { id } });
@@ -268,8 +270,8 @@ toolsRouter.put("/:id", async (req: Request, res: Response) => {
 
   const d = parsed.data;
   await query(
-    "UPDATE tools SET name=$1, category=$2, description=$3, icon=$4 WHERE id=$5",
-    [d.name, d.category || null, d.description || null, d.icon || null, id]
+    "UPDATE tools SET name=$1, category=$2, description=$3, icon=$4, image_urls=$5 WHERE id=$6",
+    [d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || [], id]
   );
   await upsertToolTranslations(id, d.translations);
   res.json({ success: true });

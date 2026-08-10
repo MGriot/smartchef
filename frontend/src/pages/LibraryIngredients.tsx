@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
+import ImageUrlsEditor from '../components/ImageUrlsEditor';
 import { useStore } from '../store/app.store';
 
 const INGREDIENT_ICONS = [
@@ -21,7 +22,7 @@ export default function LibraryIngredients() {
   
   // Ingredient form
   const [editingIng, setEditingIng] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg' });
+  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[] });
   const [translations, setTranslations] = useState<{lang: string, text: string}[]>([]);
 
   // Category form
@@ -58,20 +59,22 @@ export default function LibraryIngredients() {
   const handleOpenModal = (ing: any = null) => {
     if (ing) {
       setEditingIng(ing);
-      setForm({ 
-        name: ing.name, 
-        categoryId: ing.category_id, 
-        description: ing.description || '', 
-        icon: ing.icon || 'egg' 
+      setForm({
+        name: ing.name,
+        categoryId: ing.category_id,
+        description: ing.description || '',
+        icon: ing.icon || 'egg',
+        imageUrls: ing.image_urls || [],
       });
       setTranslations(ing.translations || []);
     } else {
       setEditingIng(null);
-      setForm({ 
-        name: '', 
-        categoryId: categories[0]?.id || '', 
-        description: '', 
-        icon: 'egg' 
+      setForm({
+        name: '',
+        categoryId: categories[0]?.id || '',
+        description: '',
+        icon: 'egg',
+        imageUrls: [],
       });
       setTranslations([]);
     }
@@ -261,9 +264,13 @@ export default function LibraryIngredients() {
                     <tr key={ing.id} className="group hover:bg-zinc-50/50 transition-colors">
                       <td className="py-6 pl-4">
                         <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 bg-zinc-100 rounded-2xl flex items-center justify-center text-[24px] text-zinc-400">
-                            <RenderFaIcon name={ing.icon || 'FaEgg'} />
-                          </div>
+                          {ing.image_urls?.[0] ? (
+                            <img src={ing.image_urls[0]} alt="" className="w-12 h-12 rounded-2xl object-cover bg-zinc-100" />
+                          ) : (
+                            <div className="w-12 h-12 bg-zinc-100 rounded-2xl flex items-center justify-center text-[24px] text-zinc-400">
+                              <RenderFaIcon name={ing.icon || 'FaEgg'} />
+                            </div>
+                          )}
                           <div>
                             <p className="font-extrabold text-zinc-900 leading-tight">{ing.translated_name || ing.name}</p>
                             <p className="text-zinc-400 text-[11px] font-medium tracking-tighter mt-1">{ing.translated_category_name || ing.category_name || 'Uncategorized'}</p>
@@ -371,6 +378,11 @@ export default function LibraryIngredients() {
                  <div>
                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Nutrition / Notes</label>
                    <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="High protein, locally sourced..." className="w-full h-24 px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium transition-all" />
+                 </div>
+
+                 <div>
+                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Reference Photos</label>
+                    <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({...form, imageUrls: urls})} />
                  </div>
 
                  <div className="flex gap-4 pt-4 sticky bottom-0 bg-white pb-2">

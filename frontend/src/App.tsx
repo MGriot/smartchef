@@ -6,6 +6,7 @@ import RecipeImport from "./pages/RecipeImport";
 import LibraryTools from "./pages/LibraryTools";
 import LibraryIngredients from "./pages/LibraryIngredients";
 import LibraryUnits from "./pages/LibraryUnits";
+import LibraryTechniques from "./pages/LibraryTechniques";
 import Planner from "./pages/Planner";
 import ShoppingList from "./pages/ShoppingList";
 
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/library/tools" element={<LibraryTools />} />
         <Route path="/library/ingredients" element={<LibraryIngredients />} />
         <Route path="/library/units" element={<LibraryUnits />} />
+        <Route path="/library/techniques" element={<LibraryTechniques />} />
         <Route path="/planner" element={<Planner />} />
         <Route path="/shopping" element={<ShoppingList />} />
       </Routes>
