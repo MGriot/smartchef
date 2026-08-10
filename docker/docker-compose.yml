@@ -1,0 +1,94 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: smartchef_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: smartchef
+      POSTGRES_USER: smartchef
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-smartchef_secret}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ../db/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartchef"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend Node.js ────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: smartchef_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://smartchef:${DB_PASSWORD:-smartchef_secret}@db:5432/smartchef
+      OLLAMA_URL: http://ollama:11434
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── MCP Server (Model Context Protocol) ────────────────────────────────
+  mcp:
+    build:
+      context: ..
+      dockerfile: mcp/Dockerfile
+    container_name: smartchef_mcp
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      BACKEND_URL: http://backend:3000
+      PORT: 3002
+    ports:
+      - "3002:3002"
+    depends_on:
+      - backend
+
+  # ── Frontend Web ───────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: smartchef_frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+  # ── Ollama AI Engine ───────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: smartchef_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    # GPU support (uncomment if available)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  pg_data:
+  ollama_data:
+
+networks:
+  default:
+    name: smartchef_network

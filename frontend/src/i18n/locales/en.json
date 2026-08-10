@@ -1,0 +1,23 @@
+{
+  "nav": {
+    "gallery": "Gallery",
+    "planner": "Planner",
+    "shoppingList": "Shopping List",
+    "import": "Import",
+    "ingredients": "Ingredients",
+    "tools": "Tools",
+    "units": "Units",
+    "library": "Library",
+    "search": "Search",
+    "createRecipe": "Create Recipe"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "add": "Add",
+    "loading": "Loading…",
+    "language": "Language"
+  }
+}

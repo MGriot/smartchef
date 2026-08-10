@@ -1,0 +1,21 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { registerSW } from "virtual:pwa-register";
+import App from "./App";
+import "./index.css";
+import "./i18n";
+
+// Force an immediate reload as soon as a new deployed version is detected,
+// instead of leaving the tab running stale cached JS until the user happens
+// to close and reopen it.
+const updateSW = registerSW({
+  onNeedRefresh() {
+    updateSW(true);
+  },
+});
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);

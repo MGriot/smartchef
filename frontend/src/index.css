@@ -1,0 +1,85 @@
+/* ── Google Fonts ─────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+@import './theme.css';
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Material Symbols defaults ─────────────────────────────────────────────── */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  display: inline-block;
+  line-height: 1;
+  vertical-align: middle;
+  user-select: none;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html, body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background-color: #fafaf5;
+    color: #1a1c19;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 700;
+  }
+
+  :focus-visible {
+    outline: 2px solid #006c49;
+    outline-offset: 2px;
+  }
+
+  /* Suppress default focus ring in favour of ring-primary */
+  * {
+    @apply box-border;
+  }
+}
+
+@layer components {
+  /* ── Scrollbar ─────────────────────────────────────────────── */
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* ── Recipe card hover lift ─────────────────────────────────── */
+  .recipe-card {
+    @apply group relative bg-surface-container-lowest rounded-xl overflow-hidden
+           transition-all duration-300 cursor-pointer;
+  }
+  .recipe-card:hover {
+    transform: translateY(-4px);
+    @apply shadow-card;
+  }
+}
+
+@layer utilities {
+  /* ── Page-entry animation ───────────────────────────────────── */
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in-up {
+    animation: fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* ── Spin (sync icon) ───────────────────────────────────────── */
+  @keyframes spin-slow {
+    to { transform: rotate(360deg); }
+  }
+  .animate-spin-slow {
+    animation: spin-slow 3s linear infinite;
+  }
+}

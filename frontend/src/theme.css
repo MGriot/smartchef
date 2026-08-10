@@ -1,0 +1,55 @@
+:root {
+  --color-primary: 0 108 73;
+  --color-on-primary: 255 255 255;
+  --color-primary-container: 16 185 129;
+  --color-on-primary-container: 0 66 43;
+  --color-primary-fixed: 111 251 190;
+  --color-primary-fixed-dim: 78 222 163;
+  --color-on-primary-fixed: 0 33 19;
+  --color-on-primary-fixed-variant: 0 82 54;
+  --color-inverse-primary: 78 222 163;
+
+  --color-secondary: 95 95 88;
+  --color-on-secondary: 255 255 255;
+  --color-secondary-container: 228 227 218;
+  --color-on-secondary-container: 101 101 94;
+  --color-secondary-fixed: 228 227 218;
+  --color-secondary-fixed-dim: 200 199 190;
+  --color-on-secondary-fixed: 27 28 23;
+  --color-on-secondary-fixed-variant: 71 71 65;
+
+  --color-tertiary: 159 64 45;
+  --color-on-tertiary: 255 255 255;
+  --color-tertiary-container: 246 129 105;
+  --color-on-tertiary-container: 109 27 12;
+  --color-tertiary-fixed: 255 218 211;
+  --color-tertiary-fixed-dim: 255 180 165;
+  --color-on-tertiary-fixed: 62 5 0;
+  --color-on-tertiary-fixed-variant: 128 41 24;
+
+  --color-error: 186 26 26;
+  --color-on-error: 255 255 255;
+  --color-error-container: 255 218 214;
+  --color-on-error-container: 147 0 10;
+
+  --color-surface: 250 250 245;
+  --color-on-surface: 26 28 25;
+  --color-surface-variant: 227 227 222;
+  --color-on-surface-variant: 60 74 66;
+  --color-surface-bright: 250 250 245;
+  --color-surface-dim: 218 218 213;
+  --color-surface-tint: 0 108 73;
+  --color-surface-container-lowest: 255 255 255;
+  --color-surface-container-low: 244 244 239;
+  --color-surface-container: 238 238 233;
+  --color-surface-container-high: 232 232 227;
+  --color-surface-container-highest: 227 227 222;
+  --color-inverse-surface: 47 49 46;
+  --color-inverse-on-surface: 241 241 236;
+
+  --color-outline: 108 122 113;
+  --color-outline-variant: 187 202 191;
+
+  --color-background: 250 250 245;
+  --color-on-background: 26 28 25;
+}
