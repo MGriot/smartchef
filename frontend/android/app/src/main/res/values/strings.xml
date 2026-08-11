@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SmartChef</string>
+    <string name="title_activity_main">SmartChef</string>
+    <string name="package_name">com.smartchef.app</string>
+    <string name="custom_url_scheme">com.smartchef.app</string>
+</resources>

@@ -1,0 +1,17 @@
+# Thin root-level entry point so `docker compose` / `podman compose` works
+# directly from the repo root (e.g. `podman compose up --build --force-recreate`)
+# without having to `cd docker` first. The actual service definitions live
+# in docker/docker-compose.yml — this just includes it. Relative paths
+# inside that file (build contexts, volume mounts) stay relative to
+# docker/, not to this file, so nothing there needed to change.
+#
+# `name:` has to be repeated here, not just in docker/docker-compose.yml —
+# when a file is brought in via `include:`, the *including* file's own
+# project name wins (defaulting to this directory's name, "smartchef",
+# if unset here), silently overriding the included file's `name:`. Without
+# this, running from the repo root would resolve to a different project
+# than running from docker/ and spin up a second, empty stack instead of
+# reusing the existing containers/volumes.
+name: docker
+include:
+  - docker/docker-compose.yml

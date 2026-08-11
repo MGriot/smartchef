@@ -250,8 +250,10 @@ export interface LLMParseResult {
   servings?: number;
   prepTimeMin?: number;
   cookTimeMin?: number;
+  restTimeMin?: number;
   difficulty?: DifficultyLevel;
   tags: string[];
+  tools: string[];
   ingredients: Array<{
     name: string;
     quantity?: number;

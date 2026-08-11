@@ -10,6 +10,7 @@ import type { LLMParseResult, UUID } from "@shared/types/index";
 
 interface DBIngredient { id: UUID; name: string; category_id: UUID; }
 interface DBUnit       { id: UUID; symbol: string; name: string; }
+interface DBTool       { id: UUID; name: string; }
 
 // ── Fuzzy String Match ─────────────────────────────────────────────────
 
@@ -22,7 +23,7 @@ function normalize(s: string): string {
 }
 
 /** Calcola similarità Levenshtein normalizzata (0–1) */
-function similarity(a: string, b: string): number {
+export function similarity(a: string, b: string): number {
   const na = normalize(a);
   const nb = normalize(b);
   if (na === nb) return 1;
@@ -111,18 +112,18 @@ async function findBestMatch(
 /** Trova la categoria "Altro", creandola se non esiste ancora */
 async function getOrCreateFallbackCategory(): Promise<UUID> {
   const existing = await queryOne<{ id: UUID }>(
-    "SELECT id FROM ingredient_categories WHERE name='Altro' LIMIT 1"
+    "SELECT id FROM ingredient_categories WHERE name='Altro' AND deleted_at IS NULL LIMIT 1"
   );
   if (existing) return existing.id;
 
   const id = uuidv4();
   await query(
     `INSERT INTO ingredient_categories (id, name) VALUES ($1, 'Altro')
-     ON CONFLICT (name) DO NOTHING`,
+     ON CONFLICT (name) WHERE deleted_at IS NULL DO NOTHING`,
     [id]
   );
   const row = await queryOne<{ id: UUID }>(
-    "SELECT id FROM ingredient_categories WHERE name='Altro' LIMIT 1"
+    "SELECT id FROM ingredient_categories WHERE name='Altro' AND deleted_at IS NULL LIMIT 1"
   );
   return row!.id;
 }
@@ -147,6 +148,67 @@ async function createIngredient(name: string): Promise<UUID> {
   return existing?.id ?? id;
 }
 
+// ── Tool Matching ──────────────────────────────────────────────────────
+
+export interface MatchedTool {
+  toolId: UUID;
+  toolName: string;
+  isNew: boolean;
+}
+
+/** Trova lo strumento più simile nel DB (soglia 0.7) */
+async function findBestToolMatch(
+  name: string,
+  allTools: DBTool[]
+): Promise<{ tool: DBTool; score: number } | null> {
+  let best: { tool: DBTool; score: number } | null = null;
+
+  for (const tool of allTools) {
+    const score = similarity(name, tool.name);
+    if (score > 0.7 && (!best || score > best.score)) {
+      best = { tool, score };
+    }
+  }
+
+  return best;
+}
+
+/** Crea un nuovo strumento nel DB (senza categoria) */
+async function createTool(name: string): Promise<UUID> {
+  const id = uuidv4();
+  await query(
+    `INSERT INTO tools (id, name) VALUES ($1, $2)
+     ON CONFLICT (name) WHERE deleted_at IS NULL DO NOTHING`,
+    [id, name]
+  );
+
+  const existing = await queryOne<{ id: UUID }>(
+    "SELECT id FROM tools WHERE LOWER(name)=LOWER($1) AND deleted_at IS NULL LIMIT 1",
+    [name]
+  );
+  return existing?.id ?? id;
+}
+
+/** Mappa nomi strumenti estratti dall'LLM a strumenti nel DB, creando quelli mancanti */
+export async function matchTools(toolNames: string[]): Promise<MatchedTool[]> {
+  if (!toolNames.length) return [];
+
+  const allTools = await query<DBTool>("SELECT id, name FROM tools WHERE deleted_at IS NULL");
+  const matched: MatchedTool[] = [];
+
+  for (const name of toolNames) {
+    const bestMatch = await findBestToolMatch(name, allTools);
+    if (bestMatch) {
+      matched.push({ toolId: bestMatch.tool.id, toolName: bestMatch.tool.name, isNew: false });
+    } else {
+      const newId = await createTool(name);
+      matched.push({ toolId: newId, toolName: name, isNew: true });
+    }
+  }
+
+  return matched;
+}
+
 // ── Main Entry Point ───────────────────────────────────────────────────
 
 export interface RecipeMatchResult {
@@ -155,10 +217,12 @@ export interface RecipeMatchResult {
   servings: number;
   prepTimeMin?: number;
   cookTimeMin?: number;
+  restTimeMin?: number;
   difficulty: string;
   tags: string[];
   sourceUrl?: string;
   matchedIngredients: MatchedIngredient[];
+  matchedTools: MatchedTool[];
   steps: LLMParseResult["steps"];
   overallConfidence: number;
   warnings: string[];
@@ -218,6 +282,11 @@ export async function matchLLMResultToDB(
     }
   }
 
+  const matchedTools = await matchTools(llmResult.tools ?? []);
+  for (const t of matchedTools) {
+    if (t.isNew) warnings.push(`🆕 Nuovo strumento creato: "${t.toolName}"`);
+  }
+
   const avgConfidence =
     matchedIngredients.reduce((s, i) => s + i.confidence, 0) /
     (matchedIngredients.length || 1);
@@ -228,10 +297,12 @@ export async function matchLLMResultToDB(
     servings: llmResult.servings ?? 4,
     prepTimeMin: llmResult.prepTimeMin,
     cookTimeMin: llmResult.cookTimeMin,
+    restTimeMin: llmResult.restTimeMin,
     difficulty: llmResult.difficulty ?? "medium",
     tags: llmResult.tags,
     sourceUrl: llmResult.sourceUrl,
     matchedIngredients,
+    matchedTools,
     steps: llmResult.steps,
     overallConfidence: llmResult.confidence * avgConfidence,
     warnings,

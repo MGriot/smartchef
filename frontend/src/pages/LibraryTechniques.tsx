@@ -3,6 +3,7 @@ import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
 import { useStore } from '../store/app.store';
+import { apiFetch } from '../lib/api';
 
 const TECHNIQUE_ICONS = [
   'FaFire', 'FaSnowflake', 'FaHandFist', 'FaKnifeKitchen', 'FaUtensils',
@@ -20,7 +21,7 @@ export default function LibraryTechniques() {
 
   const fetchTechniques = () => {
     setLoading(true);
-    fetch(`/api/techniques${contentLang ? `?lang=${contentLang}` : ''}`)
+    apiFetch(`/api/techniques${contentLang ? `?lang=${contentLang}` : ''}`)
       .then(res => res.json())
       .then(json => {
         setTechniques(json.data || []);
@@ -64,7 +65,7 @@ export default function LibraryTechniques() {
     const method = editingTechnique ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, translations: translations.filter(t => t.lang.trim() && t.name.trim()) })
@@ -84,7 +85,7 @@ export default function LibraryTechniques() {
   const handleDelete = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this technique?')) return;
     try {
-      const res = await fetch(`/api/techniques/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/techniques/${id}`, { method: 'DELETE' });
       if (res.ok) fetchTechniques();
     } catch (err) {
       console.error('Delete failed:', err);

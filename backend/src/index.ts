@@ -6,6 +6,7 @@ import express from "express";
 import "express-async-errors";
 import cors from "cors";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import { recipeRouter }     from "./routes/recipes";
 import { shoppingRouter }   from "./routes/shopping";
 import { syncRouter }       from "./routes/sync";
@@ -13,9 +14,16 @@ import { llmRouter }        from "./routes/llm";
 import { menuRouter }       from "./routes/menus";
 import { ingredientsRouter, unitsRouter, toolsRouter } from "./routes/ingredients";
 import { techniquesRouter } from "./routes/techniques";
+import { tagsRouter }       from "./routes/tags";
+import { collectionsRouter } from "./routes/collections";
 import { uploadsRouter }    from "./routes/uploads";
+import { authRouter }       from "./routes/auth";
+import { shareRouter }      from "./routes/share";
+import { syncFolderRouter } from "./routes/sync-folder";
+import { requireAuth }      from "./middleware/requireAuth";
 import { checkOllamaHealth } from "./services/llm.parser";
 import { startSyncLoop }    from "./services/mdns.service";
+import { startFolderSyncLoop, SYNC_ENABLED } from "./services/folder-sync.service";
 import { UPLOAD_DIR }       from "./services/uploadDir";
 import pool                 from "./db/pool";
 
@@ -24,19 +32,41 @@ const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
 // ── Middleware ─────────────────────────────────────────────────────────
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN ?? "*" }));
+// CORS_ORIGIN accepts a comma-separated list — this needs to allow *every*
+// distinct origin a credentialed browser-like client calls the API from,
+// not just the server's own address. A browser hitting the Tailscale HTTPS
+// URL sends Origin: https://<tailscale-host> (same-origin via nginx, so
+// this rarely even matters there), but the Capacitor Android app's WebView
+// requests come from its own fixed app origin (https://localhost by
+// Capacitor's default androidScheme) regardless of which server it's
+// pointed at — so that origin needs to be allowed explicitly too.
+const corsOrigins = (process.env.CORS_ORIGIN ?? "*").split(",").map((o) => o.trim());
+app.use(cors({
+  origin: corsOrigins.includes("*") ? "*" : corsOrigins,
+  credentials: true,
+}));
 app.use(express.json({ limit: "5mb" }));
+app.use(cookieParser());
 
 // ── Routes ─────────────────────────────────────────────────────────────
+app.use("/api/auth", authRouter);
+// /api/sync is device-to-device (mDNS peer handshake/receive), not
+// browser traffic — it carries no session cookie, so it stays outside
+// the auth gate. Excluded before the blanket requireAuth below.
+app.use("/api/sync", syncRouter);
+app.use("/api", requireAuth);
 app.use("/api/recipes",     recipeRouter);
 app.use("/api/shopping",    shoppingRouter);
-app.use("/api/sync",        syncRouter);
 app.use("/api/llm",         llmRouter);
 app.use("/api/menus",       menuRouter);
 app.use("/api/ingredients", ingredientsRouter);
 app.use("/api/units",       unitsRouter);
 app.use("/api/tools",       toolsRouter);
 app.use("/api/techniques",  techniquesRouter);
+app.use("/api/tags",        tagsRouter);
+app.use("/api/collections", collectionsRouter);
+app.use("/api/share",       shareRouter);
+app.use("/api/sync-folder", syncFolderRouter);
 app.use("/api/uploads",     uploadsRouter);
 app.use("/uploads",         express.static(UPLOAD_DIR));
 
@@ -75,5 +105,9 @@ app.listen(PORT, () => {
   if (process.env.NODE_ENV === "production") {
     startSyncLoop(30_000);
     console.log("   🔄 Sync loop attivo (30s)");
+  }
+  if (SYNC_ENABLED) {
+    startFolderSyncLoop(90_000);
+    console.log(`   📁 Folder sync attivo (90s) — ${process.env.SYNC_FOLDER ?? "/app/sync"}`);
   }
 });

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import AppLayout from '../components/AppLayout';
 import Autocomplete from '../components/Autocomplete';
 import { useStore } from '../store/app.store';
+import { apiFetch } from '../lib/api';
 
 interface MenuSummary {
   id: string;
@@ -81,7 +82,7 @@ export default function ShoppingList() {
 
   const fetchMenus = async () => {
     try {
-      const res = await fetch('/api/menus');
+      const res = await apiFetch('/api/menus');
       const json = await res.json();
       setMenus(json.data || []);
     } catch (err) { console.error('Failed to fetch menus:', err); }
@@ -89,7 +90,7 @@ export default function ShoppingList() {
 
   const fetchPastLists = async () => {
     try {
-      const res = await fetch('/api/shopping');
+      const res = await apiFetch('/api/shopping');
       const json = await res.json();
       setPastLists(json.data || []);
     } catch (err) { console.error('Failed to fetch shopping lists:', err); }
@@ -103,7 +104,7 @@ export default function ShoppingList() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/recipes${contentLang ? `?lang=${contentLang}` : ''}`);
+        const res = await apiFetch(`/api/recipes${contentLang ? `?lang=${contentLang}` : ''}`);
         const json = await res.json();
         setAllRecipes(json.data || []);
       } catch (err) { console.error('Failed to fetch recipes:', err); }
@@ -112,7 +113,7 @@ export default function ShoppingList() {
 
   const openList = async (id: string) => {
     try {
-      const res = await fetch(`/api/shopping/${id}`);
+      const res = await apiFetch(`/api/shopping/${id}`);
       const json = await res.json();
       setActiveList(json.data);
       setViewMode('ingredient');
@@ -124,7 +125,7 @@ export default function ShoppingList() {
     setGenerating(true);
     try {
       const menuName = menus.find(m => m.id === selectedMenuId)?.name || 'Menu';
-      const res = await fetch('/api/shopping/generate', {
+      const res = await apiFetch('/api/shopping/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ menuId: selectedMenuId, listName: listName.trim() || `Shopping — ${menuName}` }),
@@ -148,7 +149,7 @@ export default function ShoppingList() {
     if (cart.length === 0) return;
     setGenerating(true);
     try {
-      const res = await fetch('/api/shopping/generate', {
+      const res = await apiFetch('/api/shopping/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -185,7 +186,7 @@ export default function ShoppingList() {
     if (!activeList) return;
     setActiveList({ ...activeList, items: activeList.items.map(it => it.id === itemId ? { ...it, isChecked: checked } : it) });
     try {
-      await fetch(`/api/shopping/${activeList.id}/items/${itemId}/check`, {
+      await apiFetch(`/api/shopping/${activeList.id}/items/${itemId}/check`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ checked }),
@@ -199,7 +200,7 @@ export default function ShoppingList() {
     if (!activeList) return;
     if (!window.confirm(`Delete "${activeList.name}"?`)) return;
     try {
-      const res = await fetch(`/api/shopping/${activeList.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/shopping/${activeList.id}`, { method: 'DELETE' });
       if (res.ok) {
         setActiveList(null);
         await fetchPastLists();

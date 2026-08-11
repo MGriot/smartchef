@@ -15,14 +15,26 @@ ingredientsRouter.get("/", async (req: Request, res: Response) => {
   if (q) params.push(`%${q}%`);
 
   const rows = await query(
-    `SELECT i.*, ic.name AS category_name, ic.icon AS category_icon,
+    `SELECT i.*, ic.name AS category_name, ic.icon AS category_icon, ic.color AS category_color,
             ${lang ? "COALESCE(ict.name, ic.name)" : "ic.name"} AS translated_category_name,
             ${lang ? "it_lang.translated_name" : "NULL"} AS translated_name,
             COALESCE(
               (SELECT json_agg(json_build_object('lang', t.language_code, 'text', t.translated_name))
                FROM ingredient_translations t WHERE t.ingredient_id = i.id),
               '[]'::json
-            ) AS translations
+            ) AS translations,
+            COALESCE(
+              (SELECT json_agg(json_build_object(
+                 'id', tg.id, 'name', tg.name,
+                 'translated_name', ${lang ? "tgt.name" : "NULL"},
+                 'color', tg.color, 'icon', tg.icon
+               ))
+               FROM ingredient_tags igt
+               JOIN tags tg ON tg.id = igt.tag_id
+               ${lang ? "LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_code = $1" : ""}
+               WHERE igt.ingredient_id = i.id),
+              '[]'::json
+            ) AS tags
      FROM ingredients i
      LEFT JOIN ingredient_categories ic ON ic.id = i.category_id
      ${lang ? `LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND it_lang.language_code = $1` : ""}
@@ -48,6 +60,7 @@ ingredientsRouter.get("/categories", async (req: Request, res: Response) => {
             ) AS translations
      FROM ingredient_categories c
      ${lang ? "LEFT JOIN ingredient_category_translations ct ON ct.category_id = c.id AND ct.language_code = $1" : ""}
+     WHERE c.deleted_at IS NULL
      ORDER BY c.sort_order, c.name`,
     lang ? [lang] : []
   );
@@ -56,16 +69,17 @@ ingredientsRouter.get("/categories", async (req: Request, res: Response) => {
 
 const CategorySchema = z.object({
   name: z.string().min(1),
-  description: z.string().optional(),
-  icon: z.string().optional(),
+  description: z.string().optional().nullable(),
+  icon: z.string().optional().nullable(),
+  color: z.string().optional().nullable(),
   translations: z.array(z.object({
     lang: z.string(),
-    name: z.string().optional(),
-    description: z.string().optional(),
+    name: z.string().optional().nullable(),
+    description: z.string().optional().nullable(),
   })).optional(),
 });
 
-async function upsertCategoryTranslations(categoryId: string, translations?: Array<{ lang: string; name?: string; description?: string }>) {
+async function upsertCategoryTranslations(categoryId: string, translations?: Array<{ lang: string; name?: string | null; description?: string | null }>) {
   if (!translations) return;
   await query("DELETE FROM ingredient_category_translations WHERE category_id=$1", [categoryId]);
   for (const t of translations) {
@@ -84,8 +98,8 @@ ingredientsRouter.post("/categories", async (req: Request, res: Response) => {
 
   const id = uuidv4();
   await query(
-    "INSERT INTO ingredient_categories (id, name, description, icon) VALUES ($1, $2, $3, $4)",
-    [id, parsed.data.name, parsed.data.description || null, parsed.data.icon || null]
+    "INSERT INTO ingredient_categories (id, name, description, icon, color) VALUES ($1, $2, $3, $4, $5)",
+    [id, parsed.data.name, parsed.data.description || null, parsed.data.icon || null, parsed.data.color || null]
   );
   await upsertCategoryTranslations(id, parsed.data.translations);
   res.json({ data: { id } });
@@ -97,8 +111,8 @@ ingredientsRouter.put("/categories/:id", async (req: Request, res: Response) => 
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   await query(
-    "UPDATE ingredient_categories SET name=$1, description=$2, icon=$3, updated_at=now() WHERE id=$4",
-    [parsed.data.name, parsed.data.description || null, parsed.data.icon || null, id]
+    "UPDATE ingredient_categories SET name=$1, description=$2, icon=$3, color=$4, updated_at=now() WHERE id=$5",
+    [parsed.data.name, parsed.data.description || null, parsed.data.icon || null, parsed.data.color || null, id]
   );
   await upsertCategoryTranslations(id, parsed.data.translations);
   res.json({ success: true });
@@ -106,12 +120,8 @@ ingredientsRouter.put("/categories/:id", async (req: Request, res: Response) => 
 
 ingredientsRouter.delete("/categories/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
-  try {
-    await query("DELETE FROM ingredient_categories WHERE id=$1", [id]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(400).json({ error: "Cannot delete category in use." });
-  }
+  await query("UPDATE ingredient_categories SET deleted_at=now(), updated_at=now() WHERE id=$1", [id]);
+  res.json({ success: true });
 });
 
 // GET /units
@@ -144,6 +154,7 @@ toolsRouter.get("/", async (req: Request, res: Response) => {
             ) AS translations
      FROM tools t
      ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND tt.language_code = $1" : ""}
+     WHERE t.deleted_at IS NULL
      ORDER BY t.category, t.name`,
     lang ? [lang] : []
   );
@@ -153,17 +164,40 @@ toolsRouter.get("/", async (req: Request, res: Response) => {
 
 // ── Ingredients Mutazioni ──────────────────────────────────────────────
 
+const NutritionFieldsSchema = {
+  caloriesKcal: z.number().nonnegative().optional(),
+  proteinG: z.number().nonnegative().optional(),
+  carbsG: z.number().nonnegative().optional(),
+  fatG: z.number().nonnegative().optional(),
+  fiberG: z.number().nonnegative().optional(),
+  sugarG: z.number().nonnegative().optional(),
+  sodiumMg: z.number().nonnegative().optional(),
+};
+
 const IngredientSchema = z.object({
   name: z.string().min(1),
   categoryId: z.string().uuid(),
-  description: z.string().optional(),
-  icon: z.string().optional(),
+  description: z.string().optional().nullable(),
+  icon: z.string().optional().nullable(),
   imageUrls: z.array(z.string().url()).optional(),
+  tagIds: z.array(z.string().uuid()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
     text: z.string()
-  })).optional()
+  })).optional(),
+  ...NutritionFieldsSchema,
 });
+
+async function upsertIngredientTags(ingredientId: string, tagIds?: string[]) {
+  if (!tagIds) return;
+  await query("DELETE FROM ingredient_tags WHERE ingredient_id=$1", [ingredientId]);
+  for (const tagId of tagIds) {
+    await query(
+      "INSERT INTO ingredient_tags (ingredient_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      [ingredientId, tagId]
+    );
+  }
+}
 
 ingredientsRouter.post("/", async (req: Request, res: Response) => {
   const parsed = IngredientSchema.safeParse(req.body);
@@ -172,9 +206,12 @@ ingredientsRouter.post("/", async (req: Request, res: Response) => {
   const d = parsed.data;
   const id = uuidv4();
   await query(
-    `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || []]
+    `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
+       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
+     d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null]
   );
 
   if (d.translations && d.translations.length > 0) {
@@ -185,6 +222,7 @@ ingredientsRouter.post("/", async (req: Request, res: Response) => {
       );
     }
   }
+  await upsertIngredientTags(id, d.tagIds);
 
   res.json({ data: { id } });
 });
@@ -196,9 +234,13 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
 
   const d = parsed.data;
   await query(
-    `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5, updated_at=now()
-     WHERE id=$6`,
-    [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [], id]
+    `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,
+       calories_kcal=$6, protein_g=$7, carbs_g=$8, fat_g=$9, fiber_g=$10, sugar_g=$11, sodium_mg=$12,
+       updated_at=now()
+     WHERE id=$13`,
+    [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
+     d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, id]
   );
 
   if (d.translations) {
@@ -212,6 +254,7 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
       }
     }
   }
+  await upsertIngredientTags(id, d.tagIds);
 
   res.json({ success: true });
 });
@@ -226,18 +269,18 @@ ingredientsRouter.delete("/:id", async (req: Request, res: Response) => {
 
 const ToolSchema = z.object({
   name: z.string().min(1),
-  category: z.string().optional(),
-  description: z.string().optional(),
-  icon: z.string().optional(),
+  category: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  icon: z.string().optional().nullable(),
   imageUrls: z.array(z.string().url()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
-    name: z.string().optional(),
-    description: z.string().optional(),
+    name: z.string().optional().nullable(),
+    description: z.string().optional().nullable(),
   })).optional(),
 });
 
-async function upsertToolTranslations(toolId: string, translations?: Array<{ lang: string; name?: string; description?: string }>) {
+async function upsertToolTranslations(toolId: string, translations?: Array<{ lang: string; name?: string | null; description?: string | null }>) {
   if (!translations) return;
   await query("DELETE FROM tool_translations WHERE tool_id=$1", [toolId]);
   for (const t of translations) {
@@ -293,11 +336,11 @@ const UnitSchema = z.object({
   toBaseFactor: z.number().optional(),
   translations: z.array(z.object({
     lang: z.string(),
-    name: z.string().optional(),
+    name: z.string().optional().nullable(),
   })).optional(),
 });
 
-async function upsertUnitTranslations(unitId: string, translations?: Array<{ lang: string; name?: string }>) {
+async function upsertUnitTranslations(unitId: string, translations?: Array<{ lang: string; name?: string | null }>) {
   if (!translations) return;
   await query("DELETE FROM unit_translations WHERE unit_id=$1", [unitId]);
   for (const t of translations) {

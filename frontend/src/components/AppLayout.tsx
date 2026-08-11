@@ -3,8 +3,9 @@ import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
+import OfflineBanner from './OfflineBanner';
 
-type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques';
+type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -36,9 +37,12 @@ function LibraryLink({ to, icon, label, active }: { to: string; icon: string; la
   );
 }
 
+const DEFAULT_AVATAR = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
+
 export default function AppLayout({ children, librarySection, sidebarExtra, headerActions }: AppLayoutProps) {
   const { t, i18n } = useTranslation();
   const setContentLang = useStore((s) => s.setContentLang);
+  const account = useStore((s) => s.account);
   const location = useLocation();
 
   const handleLanguageChange = (code: string) => {
@@ -56,10 +60,11 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
 
   return (
     <div className="min-h-screen bg-[#fafaf5] text-zinc-900 font-outfit">
+      <OfflineBanner />
       <header className="h-[65px] bg-white border-b border-zinc-100 flex items-center justify-between px-8 sticky top-0 z-50">
         <div className="flex items-center gap-12">
           <Link to="/" className="text-2xl font-black text-primary tracking-tight">SmartChef</Link>
-          <nav className="hidden md:flex items-center gap-8">
+          <nav className="hidden lg:flex items-center gap-8">
             {NAV_LINKS.map((link) => (
               <Link
                 key={link.to}
@@ -94,9 +99,13 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
               <option key={l.code} value={l.code}>{l.label}</option>
             ))}
           </select>
-          <div className="w-8 h-8 rounded-full bg-zinc-200 border-2 border-white shadow-sm overflow-hidden shrink-0">
-            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="Chef Avatar" />
-          </div>
+          <Link
+            to="/account"
+            title={account?.name ?? 'Account'}
+            className="w-8 h-8 rounded-full bg-zinc-200 border-2 border-white shadow-sm overflow-hidden shrink-0 hover:ring-2 hover:ring-primary/30 transition-all"
+          >
+            <img src={account?.avatarUrl || DEFAULT_AVATAR} alt={account?.name ?? 'Account'} className="w-full h-full object-cover" />
+          </Link>
         </div>
       </header>
 
@@ -112,6 +121,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
               <LibraryLink to="/library/tools" icon="construction" label={t('nav.tools')} active={librarySection === 'tools'} />
               <LibraryLink to="/library/units" icon="straighten" label={t('nav.units')} active={librarySection === 'units'} />
               <LibraryLink to="/library/techniques" icon="whatshot" label={t('nav.techniques')} active={librarySection === 'techniques'} />
+              <LibraryLink to="/library/tags" icon="sell" label={t('nav.tags')} active={librarySection === 'tags'} />
               {sidebarExtra}
             </nav>
           </aside>

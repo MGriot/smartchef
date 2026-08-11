@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { query, queryOne } from "../db/pool";
 import { v4 as uuidv4 } from "uuid";
+import { calculateMenuNutrition } from "../services/nutrition.service";
 
 export const menuRouter = Router();
 
@@ -39,6 +40,12 @@ menuRouter.get("/:id", async (req: Request, res: Response) => {
   );
   if (!menu) return res.status(404).json({ error: "Menù non trovato" });
   res.json({ data: menu });
+});
+
+// GET /menus/:id/nutrition
+menuRouter.get("/:id/nutrition", async (req: Request, res: Response) => {
+  const result = await calculateMenuNutrition(req.params.id);
+  res.json({ data: result });
 });
 
 // POST /menus

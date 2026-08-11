@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { apiFetch } from '../lib/api';
 
 interface ImageUrlInputProps {
   value: string;
@@ -25,7 +26,7 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch('/api/uploads', { method: 'POST', body: formData });
+      const res = await apiFetch('/api/uploads', { method: 'POST', body: formData });
       const json = await res.json();
       if (!res.ok || !json.data?.url) throw new Error(json.error ? JSON.stringify(json.error) : 'Upload failed');
       onChange(json.data.url);

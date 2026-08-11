@@ -38,11 +38,21 @@ function saveShoppingCart(items: ShoppingCartItem[]) {
   localStorage.setItem(SHOPPING_CART_KEY, JSON.stringify(items));
 }
 
+export interface Account {
+  name: string;
+  avatarUrl?: string;
+}
+
 interface AppStore {
   // Recipes
   recipes: Recipe[];
   setRecipes: (r: Recipe[]) => void;
   removeRecipe: (id: string) => void;
+
+  // Auth: the logged-in account for this instance (single shared
+  // password gate — see backend/src/routes/auth.ts)
+  account: Account | null;
+  setAccount: (a: Account | null) => void;
 
   // Sync
   sync: SyncState;
@@ -75,6 +85,9 @@ export const useStore = create<AppStore>((set) => ({
   setRecipes: (recipes) => set({ recipes }),
   removeRecipe: (id) =>
     set((s) => ({ recipes: s.recipes.filter((r) => r.id !== id) })),
+
+  account: null,
+  setAccount: (account) => set({ account }),
 
   sync: { peers: [], conflicts: [] },
   setSyncPeers: (peers) => set((s) => ({ sync: { ...s.sync, peers } })),

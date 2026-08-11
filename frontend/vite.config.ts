@@ -21,6 +21,11 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
+        // Default 2 MiB limit no longer fits the main bundle now that the
+        // Capacitor native plugins (SQLite, network, etc.) are included —
+        // they're only ever exercised on native builds, but still ship in
+        // the one shared JS bundle the web build also serves.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
     }),
   ],

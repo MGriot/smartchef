@@ -13,6 +13,144 @@ import type {
 
 const MAX_DEPTH = 20; // protezione contro ricorsione infinita
 
+// ── Cook sequence (Kitchen Mode: sub-recipes before the main recipe) ──────
+
+export interface CookSequenceStep {
+  id: UUID;
+  stepNumber: number;
+  title: string | null;
+  description: string;
+  durationMin: number | null;
+  toolIds: UUID[];
+  imageUrl: string | null;
+  notes: string | null;
+}
+
+export interface CookSequenceIngredientRef {
+  sortOrder: number;
+  ingredientName: string;
+  quantity: number | null;
+  unitSymbol: string | null;
+}
+
+export interface CookSequenceToolRef {
+  id: UUID;
+  name: string;
+  icon: string | null;
+}
+
+export interface CookSequenceSection {
+  recipeId: UUID;
+  recipeTitle: string;
+  isMain: boolean;
+  steps: CookSequenceStep[];
+  ingredients: CookSequenceIngredientRef[];
+  tools: CookSequenceToolRef[];
+}
+
+interface SubRecipeRef {
+  sub_recipe_id: UUID;
+  sub_recipe_title: string;
+}
+
+async function loadSubRecipeRefs(recipeId: UUID): Promise<SubRecipeRef[]> {
+  return query<SubRecipeRef>(
+    `SELECT ri.sub_recipe_id, sr.title AS sub_recipe_title
+     FROM recipe_ingredients ri
+     JOIN recipes sr ON sr.id = ri.sub_recipe_id
+     WHERE ri.recipe_id = $1 AND ri.sub_recipe_id IS NOT NULL
+     ORDER BY ri.sort_order`,
+    [recipeId]
+  );
+}
+
+async function loadRecipeSteps(recipeId: UUID): Promise<CookSequenceStep[]> {
+  return query<CookSequenceStep>(
+    `SELECT id, step_number AS "stepNumber", title, description,
+            duration_min AS "durationMin", tool_ids AS "toolIds", image_url AS "imageUrl", notes
+     FROM recipe_steps
+     WHERE recipe_id = $1
+     ORDER BY step_number`,
+    [recipeId]
+  );
+}
+
+async function loadSectionIngredients(recipeId: UUID): Promise<CookSequenceIngredientRef[]> {
+  return query<CookSequenceIngredientRef>(
+    `SELECT ri.sort_order AS "sortOrder", COALESCE(i.name, sr.title) AS "ingredientName",
+            ri.quantity, u.symbol AS "unitSymbol"
+     FROM recipe_ingredients ri
+     LEFT JOIN ingredients i ON i.id = ri.ingredient_id
+     LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
+     LEFT JOIN units u ON u.id = ri.unit_id
+     WHERE ri.recipe_id = $1
+     ORDER BY ri.sort_order`,
+    [recipeId]
+  );
+}
+
+async function loadSectionTools(recipeId: UUID): Promise<CookSequenceToolRef[]> {
+  return query<CookSequenceToolRef>(
+    `SELECT t.id, t.name, t.icon
+     FROM recipe_tools rt
+     JOIN tools t ON t.id = rt.tool_id
+     WHERE rt.recipe_id = $1`,
+    [recipeId]
+  );
+}
+
+/**
+ * Risolve ricorsivamente l'ordine di preparazione "Kitchen Mode": le
+ * sub-ricette annidate (Matrioska) vengono espanse depth-first PRIMA degli
+ * step della ricetta che le contiene, cosicché l'utente prepari sempre i
+ * componenti prima del piatto finale che li usa.
+ */
+async function resolveCookSequenceRecursive(
+  recipeId: UUID,
+  isMain: boolean,
+  depth: number,
+  visited: Set<UUID>
+): Promise<CookSequenceSection[]> {
+  if (depth > MAX_DEPTH || visited.has(recipeId)) return [];
+  visited.add(recipeId);
+
+  const [subRefs, recipeRow] = await Promise.all([
+    loadSubRecipeRefs(recipeId),
+    query<{ title: string }>("SELECT title FROM recipes WHERE id = $1", [recipeId]),
+  ]);
+
+  const sections: CookSequenceSection[] = [];
+  for (const ref of subRefs) {
+    const subSections = await resolveCookSequenceRecursive(
+      ref.sub_recipe_id,
+      false,
+      depth + 1,
+      new Set(visited)
+    );
+    sections.push(...subSections);
+  }
+
+  const [steps, ingredients, tools] = await Promise.all([
+    loadRecipeSteps(recipeId),
+    loadSectionIngredients(recipeId),
+    loadSectionTools(recipeId),
+  ]);
+  sections.push({
+    recipeId,
+    recipeTitle: recipeRow[0]?.title ?? "?",
+    isMain,
+    steps,
+    ingredients,
+    tools,
+  });
+
+  return sections;
+}
+
+export async function resolveCookSequence(recipeId: UUID): Promise<CookSequenceSection[]> {
+  return resolveCookSequenceRecursive(recipeId, true, 0, new Set());
+}
+
 interface RawRecipeIngredient {
   id: UUID;
   sort_order: number;

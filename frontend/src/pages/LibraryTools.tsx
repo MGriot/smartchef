@@ -3,6 +3,7 @@ import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
 import { useStore } from '../store/app.store';
+import { apiFetch } from '../lib/api';
 
 const TOOL_ICONS = [
   'FaBlender', 'FaFireBurner', 'FaKitchenSet', 'FaBowlFood', 'FaUtensils',
@@ -21,7 +22,7 @@ export default function LibraryTools() {
 
   const fetchTools = () => {
     setLoading(true);
-    fetch(`/api/tools${contentLang ? `?lang=${contentLang}` : ''}`)
+    apiFetch(`/api/tools${contentLang ? `?lang=${contentLang}` : ''}`)
       .then(res => res.json())
       .then(json => {
         setTools(json.data || []);
@@ -66,7 +67,7 @@ export default function LibraryTools() {
     const method = editingTool ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, translations: translations.filter(t => t.lang.trim() && t.name.trim()) })
@@ -86,7 +87,7 @@ export default function LibraryTools() {
   const handleDelete = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this tool?')) return;
     try {
-      const res = await fetch(`/api/tools/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/tools/${id}`, { method: 'DELETE' });
       if (res.ok) fetchTools();
     } catch (err) {
       console.error('Delete failed:', err);

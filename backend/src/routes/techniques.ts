@@ -22,6 +22,7 @@ techniquesRouter.get("/", async (req: Request, res: Response) => {
             ) AS translations
      FROM techniques t
      ${lang ? "LEFT JOIN technique_translations tt ON tt.technique_id = t.id AND tt.language_code = $1" : ""}
+     WHERE t.deleted_at IS NULL
      ORDER BY t.name`,
     lang ? [lang] : []
   );
@@ -30,17 +31,17 @@ techniquesRouter.get("/", async (req: Request, res: Response) => {
 
 const TechniqueSchema = z.object({
   name: z.string().min(1),
-  description: z.string().optional(),
-  icon: z.string().optional(),
+  description: z.string().optional().nullable(),
+  icon: z.string().optional().nullable(),
   imageUrls: z.array(z.string().url()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
-    name: z.string().optional(),
-    description: z.string().optional(),
+    name: z.string().optional().nullable(),
+    description: z.string().optional().nullable(),
   })).optional(),
 });
 
-async function upsertTechniqueTranslations(techniqueId: string, translations?: Array<{ lang: string; name?: string; description?: string }>) {
+async function upsertTechniqueTranslations(techniqueId: string, translations?: Array<{ lang: string; name?: string | null; description?: string | null }>) {
   if (!translations) return;
   await query("DELETE FROM technique_translations WHERE technique_id=$1", [techniqueId]);
   for (const t of translations) {
@@ -81,6 +82,6 @@ techniquesRouter.put("/:id", async (req: Request, res: Response) => {
 });
 
 techniquesRouter.delete("/:id", async (req: Request, res: Response) => {
-  await query("DELETE FROM techniques WHERE id=$1", [req.params.id]);
+  await query("UPDATE techniques SET deleted_at=now(), updated_at=now() WHERE id=$1", [req.params.id]);
   res.json({ success: true });
 });

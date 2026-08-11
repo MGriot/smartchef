@@ -6,7 +6,10 @@ import StepEditor, { StepIngredientAmount } from '../components/StepEditor';
 import RecipeSourcesEditor, { RecipeSourceEntry } from '../components/RecipeSourcesEditor';
 import ImageUrlInput from '../components/ImageUrlInput';
 import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
+import TagPicker from '../components/TagPicker';
 import { useStore } from '../store/app.store';
+import { SUPPORTED_LANGUAGES } from '../i18n';
+import { apiFetch } from '../lib/api';
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Ingredient {
@@ -68,6 +71,7 @@ interface Recipe {
   source_url: string | null;
   sources: RecipeSourceEntry[];
   is_component: boolean;
+  language_code: string;
   translations: TranslationEntry[];
   ingredients: Ingredient[];
   steps: Step[];
@@ -106,6 +110,7 @@ const RecipeCreate: React.FC = () => {
     cover_image_url: '',
     sources: [],
     is_component: false,
+    language_code: contentLang || 'en',
     translations: [],
     ingredients: [],
     steps: [],
@@ -117,10 +122,10 @@ const RecipeCreate: React.FC = () => {
     (async () => {
       try {
         const [tRes, uRes, iRes, techRes] = await Promise.all([
-          fetch(`/api/tools${langQuery}`),
-          fetch(`/api/units${langQuery}`),
-          fetch(`/api/ingredients${langQuery}`),
-          fetch(`/api/techniques${langQuery}`),
+          apiFetch(`/api/tools${langQuery}`),
+          apiFetch(`/api/units${langQuery}`),
+          apiFetch(`/api/ingredients${langQuery}`),
+          apiFetch(`/api/techniques${langQuery}`),
         ]);
         const [tJson, uJson, iJson, techJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), techRes.json()]);
         setAllTools(tJson.data || []);
@@ -311,7 +316,7 @@ const RecipeCreate: React.FC = () => {
         sourceUrl: draft.source_url || null,
         sources: draft.sources || [],
         isComponent: draft.is_component || false,
-        languageCode: contentLang || undefined,
+        languageCode: draft.language_code || contentLang || undefined,
         translations: draft.translations || [],
         ingredients: (draft.ingredients || []).map((ing, i) => ({
           sortOrder: i,
@@ -337,7 +342,7 @@ const RecipeCreate: React.FC = () => {
         toolIds: (draft.tools || []).map(t => t.id),
       };
 
-      const res = await fetch('/api/recipes', {
+      const res = await apiFetch('/api/recipes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -382,7 +387,19 @@ const RecipeCreate: React.FC = () => {
         {/* Title & description */}
         <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
           <label className="block mb-6">
-            <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Recipe Title</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold block">Recipe Title</span>
+              <span className="flex items-center gap-1.5 text-[11px] text-zinc-400 font-medium">
+                Written in
+                <select
+                  value={draft.language_code || 'en'}
+                  onChange={e => updateDraft('language_code', e.target.value)}
+                  className="border-none bg-zinc-50 rounded-lg px-2 py-1 text-[11px] font-bold text-zinc-600 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                >
+                  {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                </select>
+              </span>
+            </div>
             <input
               type="text" value={draft.title || ''}
               onChange={e => updateDraft('title', e.target.value)}
@@ -452,16 +469,10 @@ const RecipeCreate: React.FC = () => {
                 ))}
               </select>
             </label>
-            <label className="flex-1 min-w-[200px]">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Tags (comma separated)</span>
-              <input
-                type="text"
-                value={(draft.tags || []).join(', ')}
-                onChange={e => updateDraft('tags', e.target.value.split(',').map(t => t.trim()).filter(Boolean))}
-                className="w-full border-none bg-zinc-50 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
-                placeholder="italian, pasta, main course"
-              />
-            </label>
+            <div className="flex-1 min-w-[200px]">
+              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Tags</span>
+              <TagPicker value={draft.tags || []} onChange={tags => updateDraft('tags', tags)} />
+            </div>
           </div>
         </div>
 

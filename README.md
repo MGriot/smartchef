@@ -15,6 +15,8 @@
 - [API Routes](#-api-routes)
 - [Come funziona il Matrioska Engine](#-matrioska-engine)
 - [Come funziona il Sync CRDT](#-crdt-sync)
+- [App Mobile (Android) & Accesso Remoto via Tailscale](#-app-mobile-android--accesso-remoto-via-tailscale)
+- [Eseguire i comandi Compose da qualunque cartella](#-eseguire-i-comandi-compose-da-qualunque-cartella)
 - [Stato implementazione](#️-stato-implementazione)
 
 ---
@@ -337,6 +339,117 @@ I conflitti concorrenti (modifiche simultanee offline) vengono rilevati tramite 
 | Riferimenti inline negli step | Toolbar sopra il testo dello step per inserire riferimenti a ingrediente/strumento/tecnica ("stile Bimby": grassetto+sottolineato, quantità scalata dal vivo) | ✅ Completa |
 | CRDT Vector Clock + protocollo sync P2P | Endpoint REST (`/api/sync/*`) funzionanti e testati; nessuna UI per gestione peer o risoluzione conflitti | ⚠️ Solo backend |
 | LLM Parser (Ollama) + Ingredient Matcher | Endpoint `/api/llm/parse` e `/api/llm/confirm` funzionanti; la pagina **Import** in UI è ancora una demo statica (non chiama l'endpoint reale) | ⚠️ Backend pronto, UI da collegare |
+
+---
+
+## 📱 App Mobile (Android) & Accesso Remoto via Tailscale
+
+SmartChef è già una PWA installabile, ma per un'app nativa Android con vera
+cache offline è stato aggiunto un wrapper [Capacitor](https://capacitorjs.com)
+(`frontend/android/`), che riusa l'intero frontend React esistente. Per farla
+funzionare — sia in casa che fuori — serve un indirizzo HTTPS raggiungibile
+per il backend, ottenuto con [Tailscale](https://tailscale.com) invece di un
+reverse proxy/dominio pubblico tradizionale: niente porte da aprire sul
+router, un solo indirizzo stabile identico sia in LAN che da remoto.
+
+### 1. Installa Tailscale su entrambi i dispositivi
+
+- **Sul PC che fa da server:** `winget install Tailscale.Tailscale`, poi
+  `tailscale up` (apre un URL di login da completare nel browser).
+- **Sul telefono:** installa l'app Tailscale dal Play Store, accedi con lo
+  stesso account.
+- **Abilita i certificati HTTPS** (una tantum, per tailnet) nella console
+  admin: <https://login.tailscale.com/admin/dns> → sezione "HTTPS
+  Certificates" → Enable.
+
+### 2. Esponi l'app via HTTPS
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:8080
+```
+
+Rende l'app raggiungibile su `https://<nome-macchina>.<tuo-tailnet>.ts.net`
+con un certificato reale (Let's Encrypt, rinnovato automaticamente da
+Tailscale) — non serve configurare Caddy/nginx per i certificati. Verifica
+con `tailscale serve status` e `tailscale status` (mostra il nome esatto
+della macchina e se il telefono risulta già connesso alla stessa tailnet).
+
+### 3. Configura i cookie di sessione e CORS
+
+L'app nativa gira su un'origine fissa (`https://localhost`, lo
+`androidScheme` di default di Capacitor) diversa da quella del backend —
+diversamente da un browser normale, che invece passa dallo stesso dominio
+tramite il proxy nginx del frontend. Questo richiede una configurazione
+esplicita in `docker/.env` (copia da `docker/.env.example`):
+
+```bash
+COOKIE_SAME_SITE=none
+COOKIE_SECURE=true
+CORS_ORIGIN=https://<nome-macchina>.<tuo-tailnet>.ts.net,https://localhost
+```
+
+`CORS_ORIGIN` accetta una lista separata da virgole — deve includere **sia**
+l'indirizzo Tailscale (per l'accesso da browser) **sia** `https://localhost`
+(l'origine fissa della WebView Android, indipendente dal server a cui
+l'app si connette). Poi:
+
+```bash
+podman compose up -d --build backend
+podman restart smartchef_frontend   # nginx altrimenti tiene in cache il vecchio IP del backend
+```
+
+### 4. Build dell'app Android
+
+```bash
+cd frontend
+npm install
+npx cap sync android
+cd android
+./gradlew assembleDebug
+```
+
+L'APK di debug viene generato in
+`frontend/android/app/build/outputs/apk/debug/app-debug.apk`. Installalo sul
+telefono (via `adb install app-debug.apk` oppure trasferendo il file e
+aprendolo direttamente — richiede di consentire "installa da sorgenti
+sconosciute").
+
+### 5. Collega l'app al server
+
+Al primo avvio l'app mostra una schermata "Connect to your SmartChef
+server" — inserisci l'indirizzo Tailscale
+(`https://<nome-macchina>.<tuo-tailnet>.ts.net`). L'app verifica `/health`
+prima di salvare l'indirizzo; se la verifica fallisce, controlla che
+Tailscale sia connesso sul telefono e che i passaggi 2–3 sopra siano stati
+completati.
+
+### Modalità offline
+
+Una volta autenticato, il telefono mantiene una cache locale (SQLite) di
+tutta la libreria (ricette, ingredienti, tag, strumenti, collezioni) e una
+coda delle modifiche fatte senza connessione (creazione/modifica ricette,
+valutazioni, eliminazioni), che vengono ri-applicate automaticamente al
+backend non appena torna la connessione — vedi `frontend/src/lib/api.ts`,
+`offlineStore.ts` e `offlineSync.ts`.
+
+---
+
+## 🐳 Eseguire i comandi Compose da qualunque cartella
+
+Oltre a `docker/docker-compose.yml` (i servizi veri), esiste un file
+equivalente nella root del progetto (`./docker-compose.yml`) che lo include
+tramite la direttiva `include:`, così i comandi funzionano anche senza
+`cd docker` prima:
+
+```bash
+podman compose -f docker-compose.yml up --build --force-recreate
+```
+
+Entrambi i file puntano esplicitamente allo stesso progetto Compose
+(`name: docker` in cima a ciascuno) — necessario perché altrimenti il nome
+progetto di default viene dedotto dalla cartella da cui si lancia il
+comando, e le due cartelle risulterebbero in due stack (e due insiemi di
+volumi dati) completamente separati.
 
 ---
 

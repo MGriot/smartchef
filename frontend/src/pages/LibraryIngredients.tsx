@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
+import TagPicker from '../components/TagPicker';
 import { useStore } from '../store/app.store';
+import { apiFetch } from '../lib/api';
 
 const INGREDIENT_ICONS = [
   'FaEgg', 'FaCarrot', 'FaAppleWhole', 'FaFish', 'FaBacon',
@@ -14,20 +16,24 @@ const INGREDIENT_ICONS = [
 export default function LibraryIngredients() {
   const [ingredients, setIngredients] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [allTags, setAllTags] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
+  const [search, setSearch] = useState('');
+  const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
+
   // Modals state
   const [showModal, setShowModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   
   // Ingredient form
   const [editingIng, setEditingIng] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[] });
+  const emptyNutrition = { caloriesKcal: '', proteinG: '', carbsG: '', fatG: '', fiberG: '', sugarG: '', sodiumMg: '' };
+  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], nutrition: { ...emptyNutrition } });
   const [translations, setTranslations] = useState<{lang: string, text: string}[]>([]);
 
   // Category form
   const [editingCat, setEditingCat] = useState<any>(null);
-  const [catForm, setCatForm] = useState({ name: '', description: '', icon: 'category' });
+  const [catForm, setCatForm] = useState({ name: '', description: '', icon: 'category', color: '#71717a' });
   const [catTranslations, setCatTranslations] = useState<{ lang: string; name: string }[]>([]);
 
   const contentLang = useStore((s) => s.contentLang);
@@ -36,20 +42,43 @@ export default function LibraryIngredients() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [ingRes, catRes] = await Promise.all([
-        fetch(`/api/ingredients${langQuery}`),
-        fetch(`/api/ingredients/categories${langQuery}`)
+      const [ingRes, catRes, tagRes] = await Promise.all([
+        apiFetch(`/api/ingredients${langQuery}`),
+        apiFetch(`/api/ingredients/categories${langQuery}`),
+        apiFetch(`/api/tags${langQuery}`)
       ]);
       const ings = await ingRes.json();
       const cats = await catRes.json();
+      const tgs = await tagRes.json();
       setIngredients(ings.data || []);
       setCategories(cats.data || []);
+      setAllTags(tgs.data || []);
     } catch (err) {
       console.error('Fetch failed:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  const toggleTagFilter = (tagId: string) => {
+    setActiveTagFilters(f => f.includes(tagId) ? f.filter(x => x !== tagId) : [...f, tagId]);
+  };
+
+  const matchesFilters = (ing: any) => {
+    const q = search.trim().toLowerCase();
+    if (q) {
+      const inName = ing.name?.toLowerCase().includes(q) || ing.translated_name?.toLowerCase().includes(q);
+      if (!inName) return false;
+    }
+    if (activeTagFilters.length > 0) {
+      const ingTagIds = (ing.tags || []).map((t: any) => t.id);
+      if (!activeTagFilters.some(id => ingTagIds.includes(id))) return false;
+    }
+    return true;
+  };
+
+  const isFiltering = search.trim().length > 0 || activeTagFilters.length > 0;
+  const uncategorized = ingredients.filter(i => !i.category_id || !categories.some(c => c.id === i.category_id));
 
   useEffect(() => {
     fetchData();
@@ -65,6 +94,16 @@ export default function LibraryIngredients() {
         description: ing.description || '',
         icon: ing.icon || 'egg',
         imageUrls: ing.image_urls || [],
+        tagIds: (ing.tags || []).map((t: any) => t.id),
+        nutrition: {
+          caloriesKcal: ing.calories_kcal ?? '',
+          proteinG: ing.protein_g ?? '',
+          carbsG: ing.carbs_g ?? '',
+          fatG: ing.fat_g ?? '',
+          fiberG: ing.fiber_g ?? '',
+          sugarG: ing.sugar_g ?? '',
+          sodiumMg: ing.sodium_mg ?? '',
+        },
       });
       setTranslations(ing.translations || []);
     } else {
@@ -75,6 +114,8 @@ export default function LibraryIngredients() {
         description: '',
         icon: 'egg',
         imageUrls: [],
+        tagIds: [],
+        nutrition: { ...emptyNutrition },
       });
       setTranslations([]);
     }
@@ -92,14 +133,21 @@ export default function LibraryIngredients() {
     // Clean empty translations
     const cleanTranslations = translations.filter(t => t.lang.trim() && t.text.trim());
 
+    // Nutrition fields are entered as text inputs; blank means "not set" (omit),
+    // not zero — an ingredient with no data shouldn't silently count as 0 kcal.
+    const nutritionFields = Object.fromEntries(
+      Object.entries(form.nutrition).map(([k, v]) => [k, v === '' ? undefined : parseFloat(String(v))])
+    );
+
+    const { nutrition, ...formRest } = form;
     const url = editingIng ? `/api/ingredients/${editingIng.id}` : '/api/ingredients';
     const method = editingIng ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, translations: cleanTranslations })
+        body: JSON.stringify({ ...formRest, ...nutritionFields, translations: cleanTranslations })
       });
       const result = await res.json();
       if (res.ok) {
@@ -116,7 +164,7 @@ export default function LibraryIngredients() {
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete ingredient?')) return;
     try {
-      const res = await fetch(`/api/ingredients/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/ingredients/${id}`, { method: 'DELETE' });
       if (res.ok) fetchData();
     } catch (err) {
       console.error('Delete failed:', err);
@@ -141,11 +189,11 @@ export default function LibraryIngredients() {
   const handleOpenCatModal = (cat: any = null) => {
     if (cat) {
       setEditingCat(cat);
-      setCatForm({ name: cat.name, description: cat.description || '', icon: cat.icon || 'category' });
+      setCatForm({ name: cat.name, description: cat.description || '', icon: cat.icon || 'category', color: cat.color || '#71717a' });
       setCatTranslations(cat.translations || []);
     } else {
       setEditingCat(null);
-      setCatForm({ name: '', description: '', icon: 'category' });
+      setCatForm({ name: '', description: '', icon: 'category', color: '#71717a' });
       setCatTranslations([]);
     }
     setShowCategoryModal(true);
@@ -163,7 +211,7 @@ export default function LibraryIngredients() {
   const handleDeleteCat = async (id: string) => {
     if (!window.confirm('Delete this category? Ensure no ingredients use it.')) return;
     try {
-      const res = await fetch(`/api/ingredients/categories/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/ingredients/categories/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setShowCategoryModal(false);
         fetchData();
@@ -182,7 +230,7 @@ export default function LibraryIngredients() {
     const method = editingCat ? 'PUT' : 'POST';
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...catForm, translations: catTranslations.filter(t => t.lang.trim() && t.name.trim()) })
@@ -213,7 +261,7 @@ export default function LibraryIngredients() {
              className="w-full flex items-center justify-between gap-3 px-4 py-2 text-zinc-500 hover:bg-zinc-50 rounded-xl font-medium text-xs transition-all group"
           >
              <div className="flex items-center gap-2 truncate">
-                <RenderFaIcon name={c.icon || 'FaTag'} className="text-[16px] text-zinc-400" />
+                <RenderFaIcon name={c.icon || 'FaTag'} className="text-[16px]" color={c.color} />
                 <span className="truncate">{c.translated_name || c.name}</span>
              </div>
              <span className="material-symbols-outlined text-[14px] opacity-0 group-hover:opacity-100 transition-opacity">edit</span>
@@ -229,6 +277,100 @@ export default function LibraryIngredients() {
     </>
   );
 
+  const renderIngredientRow = (ing: any) => (
+    <tr key={ing.id} className="group hover:bg-zinc-50/50 transition-colors">
+      <td className="py-6 pl-4">
+        <div className="flex items-center gap-4">
+          <div className="relative w-12 h-12 shrink-0">
+            {ing.image_urls?.[0] ? (
+              <>
+                <img src={ing.image_urls[0]} alt="" className="w-12 h-12 rounded-2xl object-cover bg-zinc-100" />
+                <span
+                  className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-[11px] text-white ring-2 ring-white"
+                  style={{ backgroundColor: ing.category_color || '#71717a' }}
+                >
+                  <RenderFaIcon name={ing.icon || 'FaEgg'} />
+                </span>
+              </>
+            ) : (
+              <div
+                className="w-12 h-12 rounded-2xl flex items-center justify-center text-[24px] text-white"
+                style={{ backgroundColor: ing.category_color || '#71717a' }}
+              >
+                <RenderFaIcon name={ing.icon || 'FaEgg'} />
+              </div>
+            )}
+          </div>
+          <p className="font-extrabold text-zinc-900 leading-tight">{ing.translated_name || ing.name}</p>
+        </div>
+      </td>
+      <td className="py-6">
+         <div className="flex flex-wrap gap-1 max-w-[200px]">
+            {ing.translations?.map((t: any, idx: number) => (
+               <span key={idx} className="px-2 py-0.5 bg-zinc-100 text-zinc-500 text-[9px] font-black uppercase rounded border border-zinc-200">
+                  {t.lang}: {t.text}
+               </span>
+            ))}
+            {(!ing.translations || ing.translations.length === 0) && (
+               <span className="text-zinc-300 text-[10px] italic">None</span>
+            )}
+         </div>
+      </td>
+      <td className="py-6">
+         <div className="flex flex-wrap gap-1 max-w-[220px]">
+            {ing.tags?.map((t: any) => (
+               <span
+                  key={t.id}
+                  className="px-2 py-0.5 text-white text-[9px] font-black uppercase rounded-full"
+                  style={{ backgroundColor: t.color || '#3f3f46' }}
+               >
+                  {t.translated_name || t.name}
+               </span>
+            ))}
+            {(!ing.tags || ing.tags.length === 0) && (
+               <span className="text-zinc-300 text-[10px] italic">None</span>
+            )}
+         </div>
+      </td>
+      <td className="py-6 text-right pr-4">
+         <div className="flex justify-end gap-2">
+            <button onClick={() => handleOpenModal(ing)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+              <span className="material-symbols-outlined text-xl">edit</span>
+            </button>
+            <button onClick={() => handleDelete(ing.id)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-tertiary transition-all">
+              <span className="material-symbols-outlined text-xl">delete</span>
+            </button>
+         </div>
+      </td>
+    </tr>
+  );
+
+  const categorySection = (categoryId: string | null, catName: string, catIcon: string | undefined, catColor: string | undefined, items: any[]) => {
+    const matched = items.filter(matchesFilters);
+    if (isFiltering && matched.length === 0) return null;
+    return (
+      <details key={categoryId || 'uncategorized'} open className="group/section">
+        <summary className="flex items-center justify-between cursor-pointer list-none py-4 px-2 select-none">
+          <div className="flex items-center gap-3">
+            <span className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-[16px]" style={{ backgroundColor: catColor || '#71717a' }}>
+              <RenderFaIcon name={catIcon || 'FaTag'} />
+            </span>
+            <span className="font-black text-zinc-900 text-lg">{catName}</span>
+            <span className="px-2 py-0.5 bg-zinc-100 text-zinc-400 text-[10px] font-bold rounded-full">{matched.length}</span>
+          </div>
+          <span className="material-symbols-outlined text-zinc-400 transition-transform group-open/section:rotate-180">expand_more</span>
+        </summary>
+        <div className="overflow-x-auto pb-4">
+          <table className="w-full">
+            <tbody className="divide-y divide-zinc-50">
+              {matched.map(renderIngredientRow)}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    );
+  };
+
   return (
     <>
       <AppLayout librarySection="ingredients" sidebarExtra={categorySidebar}>
@@ -237,7 +379,7 @@ export default function LibraryIngredients() {
               <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">The Atelier Management</p>
               <h1 className="text-6xl font-black text-zinc-900 tracking-tight leading-none">Ingredients</h1>
             </div>
-            <button 
+            <button
               onClick={() => handleOpenModal()}
               className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
             >
@@ -246,70 +388,42 @@ export default function LibraryIngredients() {
             </button>
           </div>
 
-          <section className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-zinc-100">
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest pl-4">Ingredient</th>
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Translations</th>
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Category</th>
-                    <th className="text-right py-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest pr-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-50">
-                  {loading ? (
-                    <tr><td colSpan={4} className="py-20 text-center text-zinc-400 font-medium">Scanning pantry...</td></tr>
-                  ) : ingredients.map((ing) => (
-                    <tr key={ing.id} className="group hover:bg-zinc-50/50 transition-colors">
-                      <td className="py-6 pl-4">
-                        <div className="flex items-center gap-4">
-                          {ing.image_urls?.[0] ? (
-                            <img src={ing.image_urls[0]} alt="" className="w-12 h-12 rounded-2xl object-cover bg-zinc-100" />
-                          ) : (
-                            <div className="w-12 h-12 bg-zinc-100 rounded-2xl flex items-center justify-center text-[24px] text-zinc-400">
-                              <RenderFaIcon name={ing.icon || 'FaEgg'} />
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-extrabold text-zinc-900 leading-tight">{ing.translated_name || ing.name}</p>
-                            <p className="text-zinc-400 text-[11px] font-medium tracking-tighter mt-1">{ing.translated_category_name || ing.category_name || 'Uncategorized'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-6">
-                         <div className="flex flex-wrap gap-1 max-w-[200px]">
-                            {ing.translations?.map((t: any, idx: number) => (
-                               <span key={idx} className="px-2 py-0.5 bg-zinc-100 text-zinc-500 text-[9px] font-black uppercase rounded border border-zinc-200">
-                                  {t.lang}: {t.text}
-                               </span>
-                            ))}
-                            {(!ing.translations || ing.translations.length === 0) && (
-                               <span className="text-zinc-300 text-[10px] italic">None</span>
-                            )}
-                         </div>
-                      </td>
-                      <td className="py-6">
-                         <span className="px-3 py-1 bg-zinc-100 text-zinc-500 text-[10px] font-black uppercase rounded-md border border-zinc-200/50 flex items-center gap-1 w-max">
-                          <RenderFaIcon name={ing.category_icon || 'FaTag'} className="text-[14px]" />
-                          {ing.translated_category_name || ing.category_name || 'GENERAL'}
-                        </span>
-                      </td>
-                      <td className="py-6 text-right pr-4">
-                         <div className="flex justify-end gap-2">
-                            <button onClick={() => handleOpenModal(ing)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
-                              <span className="material-symbols-outlined text-xl">edit</span>
-                            </button>
-                            <button onClick={() => handleDelete(ing.id)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-tertiary transition-all">
-                              <span className="material-symbols-outlined text-xl">delete</span>
-                            </button>
-                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="flex flex-wrap items-center gap-4 mb-6">
+            <div className="relative flex-1 min-w-[220px] max-w-sm">
+              <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 text-[18px]">search</span>
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search ingredients…"
+                className="w-full pl-11 pr-4 py-3 bg-white rounded-full border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
+              />
             </div>
+            <div className="flex flex-wrap gap-1.5">
+              {allTags.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => toggleTagFilter(t.id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                    activeTagFilters.includes(t.id) ? 'text-white border-transparent' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'
+                  }`}
+                  style={activeTagFilters.includes(t.id) ? { backgroundColor: t.color || '#3f3f46' } : undefined}
+                >
+                  {t.translated_name || t.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <section className="bg-white rounded-[40px] px-10 py-4 shadow-sm border border-zinc-100 divide-y divide-zinc-100">
+            {loading ? (
+              <p className="py-20 text-center text-zinc-400 font-medium">Scanning pantry...</p>
+            ) : (
+              <>
+                {categories.map(c => categorySection(c.id, c.translated_name || c.name, c.icon, c.color, ingredients.filter(i => i.category_id === c.id)))}
+                {uncategorized.length > 0 && categorySection(null, 'Uncategorized', 'FaTag', '#71717a', uncategorized)}
+              </>
+            )}
           </section>
       </AppLayout>
 
@@ -381,8 +495,38 @@ export default function LibraryIngredients() {
                  </div>
 
                  <div>
+                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Nutrition (per 100g)</label>
+                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 bg-zinc-50 p-4 rounded-2xl">
+                     {[
+                       { key: 'caloriesKcal', label: 'Kcal' },
+                       { key: 'proteinG', label: 'Protein (g)' },
+                       { key: 'carbsG', label: 'Carbs (g)' },
+                       { key: 'fatG', label: 'Fat (g)' },
+                       { key: 'fiberG', label: 'Fiber (g)' },
+                       { key: 'sugarG', label: 'Sugar (g)' },
+                       { key: 'sodiumMg', label: 'Sodium (mg)' },
+                     ].map(f => (
+                       <label key={f.key}>
+                         <span className="block text-[9px] font-bold text-zinc-400 uppercase mb-1">{f.label}</span>
+                         <input
+                           type="number" step="any" min="0"
+                           value={(form.nutrition as any)[f.key]}
+                           onChange={e => setForm({ ...form, nutrition: { ...form.nutrition, [f.key]: e.target.value } })}
+                           className="w-full px-3 py-2 bg-white rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
+                         />
+                       </label>
+                     ))}
+                   </div>
+                 </div>
+
+                 <div>
                     <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Reference Photos</label>
                     <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({...form, imageUrls: urls})} />
+                 </div>
+
+                 <div>
+                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Tags</label>
+                    <TagPicker by="id" value={form.tagIds} onChange={tagIds => setForm({...form, tagIds})} />
                  </div>
 
                  <div className="flex gap-4 pt-4 sticky bottom-0 bg-white pb-2">
@@ -408,6 +552,13 @@ export default function LibraryIngredients() {
                    <input type="text" required value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} placeholder="e.g. Dairy / Formaggi" className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all" />
                  </div>
                  <div>
+                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Color</label>
+                   <div className="flex items-center gap-3">
+                     <input type="color" value={catForm.color} onChange={e => setCatForm({...catForm, color: e.target.value})} className="w-14 h-14 rounded-2xl border-none cursor-pointer bg-zinc-50" />
+                     <span className="text-sm font-mono text-zinc-500">{catForm.color}</span>
+                   </div>
+                 </div>
+                 <div>
                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Visual Icon</label>
                    <div className="grid grid-cols-8 gap-2 bg-zinc-50 p-4 rounded-2xl">
                       {INGREDIENT_ICONS.map(ic => (
@@ -416,7 +567,8 @@ export default function LibraryIngredients() {
                           type="button"
                           title={ic}
                           onClick={() => setCatForm({...catForm, icon: ic})}
-                          className={`w-full aspect-square rounded-xl flex items-center justify-center transition-all ${catForm.icon === ic ? 'bg-primary text-white shadow-md shadow-primary/30 scale-105' : 'bg-white border border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:border-zinc-300'}`}
+                          className={`w-full aspect-square rounded-xl flex items-center justify-center transition-all ${catForm.icon === ic ? 'text-white shadow-md scale-105' : 'bg-white border border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:border-zinc-300'}`}
+                          style={catForm.icon === ic ? { backgroundColor: catForm.color } : undefined}
                         >
                           <RenderFaIcon name={ic} className="text-[20px]" />
                         </button>

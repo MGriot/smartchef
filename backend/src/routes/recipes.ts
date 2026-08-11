@@ -6,8 +6,11 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import type { PoolClient } from "pg";
 import { query, queryOne, withTransaction } from "../db/pool";
-import { calculatePortions } from "../services/matrioska.engine";
+import { calculatePortions, resolveCookSequence } from "../services/matrioska.engine";
+import { calculateRecipeNutrition } from "../services/nutrition.service";
+import { computeAutoTagNames, unionTagNames } from "../services/tags.service";
 import { parseRecipeWithLLM } from "../services/llm.parser";
+import { matchLLMResultToDB } from "../services/ingredient.matcher";
 import { v4 as uuidv4 } from "uuid";
 
 export const recipeRouter = Router();
@@ -38,8 +41,8 @@ const RecipeSourceSchema = z.object({
 
 const TranslationSchema = z.object({
   lang: z.string(),
-  title: z.string().optional(),
-  description: z.string().optional(),
+  title: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
 });
 
 const StepIngredientRefSchema = z.object({
@@ -54,11 +57,11 @@ const StepIngredientRefSchema = z.object({
 
 const RecipeStepSchema = z.object({
   stepNumber: z.number().int().positive(),
-  title: z.string().optional(),
+  title: z.string().optional().nullable(),
   description: z.string().min(1),
-  durationMin: z.number().int().positive().optional(),
+  durationMin: z.number().int().positive().optional().nullable(),
   toolIds: z.array(z.string().uuid()).optional(),
-  notes: z.string().optional(),
+  notes: z.string().optional().nullable(),
   imageUrl: z.string().nullable().optional(),
   translations: z.array(TranslationSchema).optional(),
   stepIngredients: z.array(StepIngredientRefSchema).default([]),
@@ -66,12 +69,13 @@ const RecipeStepSchema = z.object({
 
 const CreateRecipeSchema = z.object({
   title: z.string().min(1).max(200),
-  description: z.string().optional(),
+  description: z.string().optional().nullable(),
   difficulty: z.enum(["easy","medium","hard","expert"]).default("medium"),
   servings: z.number().int().positive().default(4),
-  prepTimeMin: z.number().int().positive().optional(),
-  cookTimeMin: z.number().int().positive().optional(),
-  restTimeMin: z.number().int().positive().optional(),
+  prepTimeMin: z.number().int().positive().optional().nullable(),
+  cookTimeMin: z.number().int().positive().optional().nullable(),
+  restTimeMin: z.number().int().positive().optional().nullable(),
+  rating: z.number().int().min(0).max(5).optional().nullable(),
   tags: z.array(z.string()).default([]),
   coverImageUrl: z.string().nullable().optional(),
   sourceUrl: z.string().nullable().optional(),
@@ -109,20 +113,41 @@ async function insertStepTranslations(client: PoolClient, stepId: string, transl
 
 // ── GET /recipes ───────────────────────────────────────────────────────
 
+const SORT_OPTIONS: Record<string, string> = {
+  "recently-edited": "r.updated_at DESC",
+  "newest": "r.created_at DESC",
+  "oldest": "r.created_at ASC",
+};
+
 recipeRouter.get("/", async (req: Request, res: Response) => {
-  const { q, tag, difficulty, component, lang } = req.query;
+  const { q, tag, tags, ingredientCategories, difficulty, component, lang, sort } = req.query;
 
   const params: unknown[] = [];
   let langJoin = "";
   let translatedCols = "NULL AS translated_title, NULL AS translated_description";
+  let langParamIndex: number | null = null;
   if (lang) {
     params.push(lang);
-    langJoin = `LEFT JOIN recipe_translations rt ON rt.recipe_id = r.id AND rt.language_code = $${params.length}`;
+    langParamIndex = params.length;
+    langJoin = `LEFT JOIN recipe_translations rt ON rt.recipe_id = r.id AND rt.language_code = $${langParamIndex}`;
     translatedCols = "rt.title AS translated_title, rt.description AS translated_description";
   }
 
+  const tagsDisplaySql = `
+    COALESCE(
+      (SELECT json_agg(json_build_object(
+         'name', tag_name,
+         'translated_name', COALESCE(${langParamIndex ? `tt.name` : "NULL"}, t.name, tag_name),
+         'color', t.color
+       ))
+       FROM unnest(r.tags) AS tag_name
+       LEFT JOIN tags t ON lower(t.name) = lower(tag_name)
+       ${langParamIndex ? `LEFT JOIN tag_translations tt ON tt.tag_id = t.id AND tt.language_code = $${langParamIndex}` : ""}
+      ), '[]'::json
+    ) AS tags_display`;
+
   let sql = `
-    SELECT r.*, ${translatedCols},
+    SELECT r.*, ${translatedCols}, ${tagsDisplaySql},
            COUNT(ri.id) AS ingredient_count
     FROM recipes r
     LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
@@ -132,11 +157,37 @@ recipeRouter.get("/", async (req: Request, res: Response) => {
 
   if (q) {
     params.push(`%${q}%`);
-    sql += ` AND r.title ILIKE $${params.length}`;
+    const p = params.length;
+    sql += ` AND (
+      r.title ILIKE $${p} OR r.description ILIKE $${p} OR EXISTS (
+        SELECT 1 FROM recipe_ingredients qri
+        JOIN ingredients qi ON qi.id = qri.ingredient_id
+        LEFT JOIN ingredient_translations qit ON qit.ingredient_id = qi.id
+        WHERE qri.recipe_id = r.id AND (qi.name ILIKE $${p} OR qit.translated_name ILIKE $${p})
+      )
+    )`;
+  }
+  if (ingredientCategories) {
+    const catList = String(ingredientCategories).split(",").map(c => c.trim()).filter(Boolean);
+    if (catList.length > 0) {
+      params.push(catList);
+      sql += ` AND EXISTS (
+        SELECT 1 FROM recipe_ingredients cri
+        JOIN ingredients ci ON ci.id = cri.ingredient_id
+        WHERE cri.recipe_id = r.id AND ci.category_id = ANY($${params.length}::uuid[])
+      )`;
+    }
   }
   if (tag) {
     params.push(tag);
     sql += ` AND $${params.length} = ANY(r.tags)`;
+  }
+  if (tags) {
+    const tagList = String(tags).split(",").map(t => t.trim()).filter(Boolean);
+    if (tagList.length > 0) {
+      params.push(tagList);
+      sql += ` AND EXISTS (SELECT 1 FROM unnest(r.tags) rt_name WHERE lower(rt_name) = ANY(SELECT lower(unnest($${params.length}::text[]))))`;
+    }
   }
   if (difficulty) {
     params.push(difficulty);
@@ -147,7 +198,8 @@ recipeRouter.get("/", async (req: Request, res: Response) => {
     sql += ` AND r.is_component = $${params.length}`;
   }
 
-  sql += ` GROUP BY r.id${lang ? ", rt.title, rt.description" : ""} ORDER BY r.updated_at DESC`;
+  const orderBy = SORT_OPTIONS[String(sort)] ?? SORT_OPTIONS["recently-edited"];
+  sql += ` GROUP BY r.id${lang ? ", rt.title, rt.description" : ""} ORDER BY ${orderBy}`;
 
   const recipes = await query(sql, params);
   res.json({ data: recipes, total: recipes.length });
@@ -183,6 +235,17 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
 
   const recipe = await queryOne(
     `SELECT r.*, ${translatedCols},
+            COALESCE(
+              (SELECT json_agg(json_build_object(
+                 'name', tag_name,
+                 'translated_name', COALESCE(${lang ? "tt_tag.name" : "NULL"}, t.name, tag_name),
+                 'color', t.color
+               ))
+               FROM unnest(r.tags) AS tag_name
+               LEFT JOIN tags t ON lower(t.name) = lower(tag_name)
+               ${lang ? "LEFT JOIN tag_translations tt_tag ON tt_tag.tag_id = t.id AND tt_tag.language_code = $2" : ""}
+              ), '[]'::json
+            ) AS tags_display,
             COALESCE(
               (SELECT json_agg(json_build_object('lang', rt2.language_code, 'title', rt2.title, 'description', rt2.description))
                FROM recipe_translations rt2 WHERE rt2.recipe_id = r.id),
@@ -257,10 +320,10 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
     await withTransaction(async (client) => {
       await client.query(
         `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,
-           cook_time_min,rest_time_min,tags,cover_image_url,source_url,sources,is_component,language_code,crdt_clock)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'{}')`,
+           cook_time_min,rest_time_min,rating,tags,cover_image_url,source_url,sources,is_component,language_code,crdt_clock)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'{}')`,
         [recipeId,d.title,d.description,d.difficulty,d.servings,d.prepTimeMin,
-         d.cookTimeMin,d.restTimeMin,d.tags,d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null]
+         d.cookTimeMin,d.restTimeMin,d.rating??null,d.tags,d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null]
       );
 
       // Inserisci ingredienti
@@ -298,6 +361,12 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
         );
       }
 
+      // Unisce i tag manuali con quelli derivati automaticamente dagli
+      // ingredienti (deve avvenire dopo l'inserimento di recipe_ingredients)
+      const autoTags = await computeAutoTagNames(client, recipeId);
+      const finalTags = unionTagNames(d.tags, autoTags);
+      await client.query("UPDATE recipes SET tags=$1 WHERE id=$2", [finalTags, recipeId]);
+
       await upsertRecipeTranslations(client, recipeId, d.translations);
     });
   } catch (err) {
@@ -306,6 +375,21 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
   }
 
   res.status(201).json({ data: { id: recipeId } });
+});
+
+// ── GET /recipes/:id/collections ──────────────────────────────────────
+// Which collections already contain this recipe (drives the "Add to
+// Collection" membership checklist on the recipe page).
+
+recipeRouter.get("/:id/collections", async (req: Request, res: Response) => {
+  const rows = await query(
+    `SELECT c.id, c.name FROM collections c
+     JOIN collection_recipes cr ON cr.collection_id = c.id
+     WHERE cr.recipe_id = $1
+     ORDER BY c.name`,
+    [req.params.id]
+  );
+  res.json({ data: rows });
 });
 
 // ── GET /recipes/:id/portions?servings=N ─────────────────────────────
@@ -317,6 +401,27 @@ recipeRouter.get("/:id/portions", async (req: Request, res: Response) => {
   }
 
   const result = await calculatePortions(req.params.id, servings);
+  res.json({ data: result });
+});
+
+// ── GET /recipes/:id/cook-sequence ────────────────────────────────────
+// Kitchen Mode step order: sub-recipes (Matrioska) fully prepared before
+// the main recipe that uses them.
+
+recipeRouter.get("/:id/cook-sequence", async (req: Request, res: Response) => {
+  const sections = await resolveCookSequence(req.params.id);
+  res.json({ data: { sections } });
+});
+
+// ── GET /recipes/:id/nutrition?servings=N ────────────────────────────
+
+recipeRouter.get("/:id/nutrition", async (req: Request, res: Response) => {
+  const servings = parseInt(String(req.query.servings ?? "4"), 10);
+  if (isNaN(servings) || servings < 1 || servings > 1000) {
+    return res.status(400).json({ error: "servings deve essere tra 1 e 1000" });
+  }
+
+  const result = await calculateRecipeNutrition(req.params.id, servings);
   res.json({ data: result });
 });
 
@@ -333,8 +438,14 @@ recipeRouter.post("/parse", async (req: Request, res: Response) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const result = await parseRecipeWithLLM(parsed.data);
-  res.json({ data: result });
+  try {
+    const llmResult = await parseRecipeWithLLM(parsed.data);
+    const matched = await matchLLMResultToDB(llmResult);
+    res.json({ data: matched });
+  } catch (err) {
+    console.error("Recipe parse failed:", err);
+    res.status(502).json({ error: err instanceof Error ? err.message : "Impossibile analizzare la ricetta" });
+  }
 });
 
 // ── PUT /recipes/:id ──────────────────────────────────────────────────
@@ -354,12 +465,13 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
       await client.query(
         `UPDATE recipes SET
            title=$2, description=$3, difficulty=$4, servings=$5,
-           prep_time_min=$6, cook_time_min=$7, rest_time_min=$8,
-           tags=$9, cover_image_url=$10, source_url=$11, sources=$12, is_component=$13,
-           updated_at=now()
+           prep_time_min=$6, cook_time_min=$7, rest_time_min=$8, rating=$9,
+           tags=$10, cover_image_url=$11, source_url=$12, sources=$13, is_component=$14,
+           language_code=$15, updated_at=now()
          WHERE id=$1`,
         [id, d.title, d.description, d.difficulty, d.servings, d.prepTimeMin,
-         d.cookTimeMin, d.restTimeMin, d.tags, d.coverImageUrl, d.sourceUrl, JSON.stringify(d.sources), d.isComponent]
+         d.cookTimeMin, d.restTimeMin, d.rating ?? null, d.tags, d.coverImageUrl, d.sourceUrl, JSON.stringify(d.sources), d.isComponent,
+         d.languageCode ?? null]
       );
 
       // Rimpiazza ingredienti (drop + reinsert)
@@ -400,6 +512,12 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
         );
       }
 
+      // Unisce i tag manuali con quelli derivati automaticamente dagli
+      // ingredienti (deve avvenire dopo il reinserimento di recipe_ingredients)
+      const autoTags = await computeAutoTagNames(client, id);
+      const finalTags = unionTagNames(d.tags, autoTags);
+      await client.query("UPDATE recipes SET tags=$1 WHERE id=$2", [finalTags, id]);
+
       await upsertRecipeTranslations(client, id, d.translations);
     });
   } catch (err) {
@@ -408,6 +526,19 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
   }
 
   res.json({ data: { id } });
+});
+
+// ── PATCH /recipes/:id/rating ──────────────────────────────────────────
+// Fast one-tap rating from the recipe view page — doesn't require opening
+// the full editor. null = "not tried" (N/A).
+
+recipeRouter.patch("/:id/rating", async (req: Request, res: Response) => {
+  const schema = z.object({ rating: z.number().int().min(0).max(5).nullable() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  await query("UPDATE recipes SET rating=$1, updated_at=now() WHERE id=$2", [parsed.data.rating, req.params.id]);
+  res.json({ success: true });
 });
 
 // ── DELETE /recipes/:id ────────────────────────────────────────────────

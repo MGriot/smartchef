@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import AppLayout from '../components/AppLayout';
 import Autocomplete from '../components/Autocomplete';
 import { useStore } from '../store/app.store';
+import { apiFetch } from '../lib/api';
 
 interface MenuSummary {
   id: string;
@@ -28,6 +29,16 @@ interface RecipeOption {
   id: string;
   title: string;
   translated_title?: string | null;
+}
+
+interface NutritionTotals {
+  caloriesKcal: number; proteinG: number; carbsG: number; fatG: number;
+  fiberG: number; sugarG: number; sodiumMg: number;
+}
+interface MenuNutrition {
+  byDay: Record<number, NutritionTotals>;
+  weekly: NutritionTotals;
+  unresolved: string[];
 }
 
 const DAYS = [
@@ -63,6 +74,7 @@ export default function Planner() {
   const [loadingMenus, setLoadingMenus] = useState(true);
   const [selectedMenuId, setSelectedMenuId] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuDetail | null>(null);
+  const [menuNutrition, setMenuNutrition] = useState<MenuNutrition | null>(null);
 
   const [allRecipes, setAllRecipes] = useState<RecipeOption[]>([]);
 
@@ -80,7 +92,7 @@ export default function Planner() {
   const fetchMenus = async () => {
     setLoadingMenus(true);
     try {
-      const res = await fetch('/api/menus');
+      const res = await apiFetch('/api/menus');
       const json = await res.json();
       const list: MenuSummary[] = json.data || [];
       setMenus(list);
@@ -94,7 +106,7 @@ export default function Planner() {
 
   const fetchMenuDetail = async (id: string) => {
     try {
-      const res = await fetch(`/api/menus/${id}`);
+      const res = await apiFetch(`/api/menus/${id}`);
       const json = await res.json();
       setMenu(json.data || null);
     } catch (err) {
@@ -110,9 +122,23 @@ export default function Planner() {
   }, [selectedMenuId]);
 
   useEffect(() => {
+    if (!selectedMenuId) { setMenuNutrition(null); return; }
     (async () => {
       try {
-        const res = await fetch(`/api/recipes${contentLang ? `?lang=${contentLang}` : ''}`);
+        const res = await apiFetch(`/api/menus/${selectedMenuId}/nutrition`);
+        const json = await res.json();
+        setMenuNutrition(json.data || null);
+      } catch (err) {
+        console.error('Failed to fetch menu nutrition:', err);
+        setMenuNutrition(null);
+      }
+    })();
+  }, [selectedMenuId, menu?.items?.length]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/recipes${contentLang ? `?lang=${contentLang}` : ''}`);
         const json = await res.json();
         setAllRecipes(json.data || []);
       } catch (err) {
@@ -126,7 +152,7 @@ export default function Planner() {
     if (!newMenuName.trim()) return;
     setCreating(true);
     try {
-      const res = await fetch('/api/menus', {
+      const res = await apiFetch('/api/menus', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newMenuName.trim(), weekStart: newMenuWeekStart }),
@@ -159,7 +185,7 @@ export default function Planner() {
     if (!menu || addingForDay === null || !addRecipeId) return;
     setSavingItem(true);
     try {
-      const res = await fetch(`/api/menus/${menu.id}/items`, {
+      const res = await apiFetch(`/api/menus/${menu.id}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -187,7 +213,7 @@ export default function Planner() {
   const handleRemoveItem = async (itemId: string) => {
     if (!menu) return;
     try {
-      const res = await fetch(`/api/menus/${menu.id}/items/${itemId}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/menus/${menu.id}/items/${itemId}`, { method: 'DELETE' });
       if (res.ok) {
         await fetchMenuDetail(menu.id);
         await fetchMenus();
@@ -201,7 +227,7 @@ export default function Planner() {
     if (!menu) return;
     if (!window.confirm(`Delete menu "${menu.name}"? This cannot be undone.`)) return;
     try {
-      const res = await fetch(`/api/menus/${menu.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/menus/${menu.id}`, { method: 'DELETE' });
       if (res.ok) {
         setSelectedMenuId(null);
         await fetchMenus();
@@ -311,6 +337,39 @@ export default function Planner() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Weekly nutrition summary */}
+        {menu && menuNutrition && menuNutrition.weekly.caloriesKcal > 0 && (
+          <div className="mt-8 bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+            <h3 className="font-headline font-bold text-lg mb-4">Weekly Nutrition</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-4">
+              {[
+                { key: 'caloriesKcal', label: 'Calories', unit: 'kcal' },
+                { key: 'proteinG', label: 'Protein', unit: 'g' },
+                { key: 'carbsG', label: 'Carbs', unit: 'g' },
+                { key: 'fatG', label: 'Fat', unit: 'g' },
+                { key: 'fiberG', label: 'Fiber', unit: 'g' },
+                { key: 'sugarG', label: 'Sugar', unit: 'g' },
+                { key: 'sodiumMg', label: 'Sodium', unit: 'mg' },
+              ].map(f => (
+                <div key={f.key} className="text-center py-3 rounded-2xl bg-zinc-50">
+                  <p className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold mb-1">{f.label}</p>
+                  <p className="text-sm font-bold text-zinc-800 tabular-nums">
+                    {Math.round((menuNutrition.weekly as any)[f.key])} {f.unit}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-zinc-400">
+              Daily average: ≈{Math.round(menuNutrition.weekly.caloriesKcal / 7)} kcal/day
+            </p>
+            {menuNutrition.unresolved.length > 0 && (
+              <p className="text-[10px] text-amber-600 mt-2 italic">
+                Nutrition unavailable for: {menuNutrition.unresolved.join(', ')}
+              </p>
+            )}
           </div>
         )}
       </div>

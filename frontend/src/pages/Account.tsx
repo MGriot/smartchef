@@ -1,0 +1,233 @@
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import AppLayout from '../components/AppLayout';
+import ImageUrlInput from '../components/ImageUrlInput';
+import { useStore } from '../store/app.store';
+import { apiFetch } from '../lib/api';
+
+interface SyncPeer {
+  deviceId: string;
+  deviceName: string;
+  lastSeenAt: string;
+}
+
+interface SyncStatus {
+  enabled: boolean;
+  deviceId: string;
+  deviceName: string;
+  lastSyncAt?: string | null;
+  peers?: SyncPeer[];
+}
+
+function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  return `${Math.round(hours / 24)} day(s) ago`;
+}
+
+function SyncCard() {
+  const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchStatus = async () => {
+    try {
+      const res = await apiFetch('/api/sync-folder/status');
+      const json = await res.json();
+      if (res.ok) setStatus(json.data);
+    } catch {
+      // best-effort — leave status as-is
+    }
+  };
+
+  useEffect(() => { fetchStatus(); }, []);
+
+  const handleSyncNow = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/sync-folder/sync-now', { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Sync failed');
+      await fetchStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  if (!status) return null;
+
+  return (
+    <div className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mt-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-lg font-black text-zinc-900">Multi-Device Sync</h2>
+          <p className="text-sm text-zinc-400 font-medium mt-1">
+            {status.enabled
+              ? 'Backs up and merges your library through a shared folder.'
+              : 'Disabled — enable via SYNC_ENABLED in this instance\'s .env, then restart.'}
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${status.enabled ? 'bg-primary/10 text-primary' : 'bg-zinc-100 text-zinc-400'}`}>
+          {status.enabled ? 'Enabled' : 'Disabled'}
+        </span>
+      </div>
+
+      {status.enabled && (
+        <div className="space-y-5">
+          <div className="flex gap-8">
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">This Device</p>
+              <p className="text-sm font-bold text-zinc-900">{status.deviceName}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Last Sync</p>
+              <p className="text-sm font-bold text-zinc-900">{status.lastSyncAt ? formatRelativeTime(status.lastSyncAt) : 'Never'}</p>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Known Devices</p>
+            {!status.peers || status.peers.length === 0 ? (
+              <p className="text-sm text-zinc-400">No other devices seen yet.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {status.peers.map((p) => (
+                  <div key={p.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 rounded-xl">
+                    <span className="text-sm font-bold text-zinc-700">{p.deviceName}</span>
+                    <span className="text-xs text-zinc-400">{formatRelativeTime(p.lastSeenAt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+          <button
+            type="button"
+            onClick={handleSyncNow}
+            disabled={syncing}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
+            {syncing ? 'Syncing…' : 'Sync Now'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Account() {
+  const navigate = useNavigate();
+  const account = useStore((s) => s.account);
+  const setAccount = useStore((s) => s.setAccount);
+
+  const [name, setName] = useState(account?.name ?? '');
+  const [avatarUrl, setAvatarUrl] = useState(account?.avatarUrl ?? '');
+  const [password, setPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const body: Record<string, unknown> = { name, avatarUrl: avatarUrl || null };
+      if (password) body.password = password;
+      const res = await apiFetch('/api/auth/account', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Failed to save');
+      setAccount({ name, avatarUrl: avatarUrl || undefined });
+      setPassword('');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+    setAccount(null);
+    window.location.href = '/';
+  };
+
+  return (
+    <AppLayout>
+      <div className="p-12 max-w-2xl mx-auto">
+        <div className="mb-10">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-600 text-sm font-bold mb-6 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+            Back
+          </button>
+          <h1 className="text-4xl font-black text-zinc-900 tracking-tighter">Account</h1>
+        </div>
+
+        <form onSubmit={handleSave} className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 space-y-6">
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
+            <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
+          </div>
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">New Password (leave blank to keep current)</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+            />
+          </div>
+          {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+          <div className="flex gap-4 pt-2">
+            <button
+              type="submit"
+              disabled={saving || !name}
+              className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
+              {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
+            >
+              Log Out
+            </button>
+          </div>
+        </form>
+
+        <SyncCard />
+      </div>
+    </AppLayout>
+  );
+}

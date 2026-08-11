@@ -1,4 +1,12 @@
-version: "3.9"
+# Pinned explicitly so `podman compose` resolves to the same project (and
+# therefore the same data volumes) whether invoked from this folder or via
+# the thin root-level docker-compose.yml — otherwise the default project
+# name is derived from the *invoking* directory name, and running from a
+# different location would spin up a second, empty stack instead of
+# reusing the existing one. "docker" matches the project name already in
+# use by the live volumes (docker_pg_data etc.) from this folder being the
+# original place the stack was started from.
+name: docker
 
 services:
   # ── PostgreSQL ─────────────────────────────────────────────────────────
@@ -32,10 +40,32 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://smartchef:${DB_PASSWORD:-smartchef_secret}@db:5432/smartchef
       OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: gemma3:4b
       PORT: 3000
       UPLOAD_DIR: /app/uploads
+      SESSION_SECRET: ${SESSION_SECRET:-smartchef-dev-secret-change-me}
+      # Session cookie behavior. Defaults preserve today's plain-HTTP,
+      # same-origin (browser via nginx) setup exactly. Only needed once a
+      # native app or another cross-origin client talks to the API
+      # directly (e.g. over Tailscale) — see docker/.env.example.
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      # Folder-based multi-device sync (Tenth slice) — disabled by default,
+      # zero behavior change for single-device use. SYNC_FOLDER_HOST_PATH
+      # should point at a real folder on the host, e.g. one kept in sync by
+      # OneDrive/Google Drive's own desktop client — SmartChef only reads/
+      # writes files there, the OS-level client handles getting them to
+      # another device. DEVICE_NAME is this instance's friendly label in
+      # the peer list; DEVICE_ID is auto-generated and persisted on first
+      # boot if left unset.
+      SYNC_ENABLED: ${SYNC_ENABLED:-false}
+      SYNC_FOLDER: /app/sync
+      DEVICE_NAME: ${DEVICE_NAME:-SmartChef Device}
     volumes:
       - uploads_data:/app/uploads
+      - device_data:/app/device
+      - ${SYNC_FOLDER_HOST_PATH:-../sync-data}:/app/sync
     ports:
       - "3000:3000"
     depends_on:
@@ -92,6 +122,7 @@ volumes:
   pg_data:
   ollama_data:
   uploads_data:
+  device_data:
 
 networks:
   default:

@@ -3,7 +3,16 @@
 // Analizza testo/URL di ricette e mappa i campi nel DB
 // ════════════════════════════════════════════════════════════════════════
 
+import { Agent, setGlobalDispatcher } from "undici";
 import type { LLMParseRequest, LLMParseResult } from "@shared/types/index";
+
+// undici's default headersTimeout/bodyTimeout (300s) fires independently of
+// any AbortSignal passed to fetch() — on CPU-only local inference a single
+// Ollama call can legitimately run longer than that (non-streaming, so no
+// response bytes arrive until generation finishes). Disable undici's own
+// timeouts globally and rely solely on the explicit AbortSignal below,
+// which is the real ceiling we want enforced.
+setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3";
@@ -19,8 +28,10 @@ Il JSON deve avere questa struttura:
   "servings": "number | null",
   "prepTimeMin": "number | null",
   "cookTimeMin": "number | null",
+  "restTimeMin": "number | null",
   "difficulty": "easy | medium | hard | expert | null",
   "tags": ["string"],
+  "tools": ["string"],
   "ingredients": [
     {
       "name": "string",
@@ -43,6 +54,8 @@ Il JSON deve avere questa struttura:
 }
 
 Regole:
+- restTimeMin è il tempo di attesa/riposo (lievitazione, marinatura, raffreddamento) separato dal tempo di preparazione attiva
+- tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari (es. "forno", "planetaria", "frullatore"), nomi brevi e generici
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
@@ -121,7 +134,7 @@ async function fetchUrlContent(url: string): Promise<string> {
              .replace(/<[^>]+>/g, " ")
              .replace(/\s+/g, " ")
              .trim()
-             .slice(0, 10000); // Aumentato un po' il limite
+             .slice(0, 6000); // ridotto da 10000: meno prefill su CPU-only inference, il contenuto della ricetta è quasi sempre entro questa soglia
 }
 
 /**
@@ -140,10 +153,15 @@ async function callOllama(content: string): Promise<string> {
       ],
       options: {
         temperature: 0.1, // bassa temperatura per output strutturato
-        num_predict: 4096,
+        // Misurato ~4.4 tok/s su questa CPU (nessuna GPU) con il contenuto
+        // ridotto a 6000 caratteri. 900 token ha troncato una ricetta con
+        // molti ingredienti; alzato a 1500 (~340s di generazione, entro il
+        // timeout sotto) — repairTruncatedJson() sopra fa comunque da rete
+        // di sicurezza se anche questo non bastasse.
+        num_predict: 1500,
       },
     }),
-    signal: AbortSignal.timeout(120_000), // 2 min per LLM
+    signal: AbortSignal.timeout(600_000), // 10 min: margine ampio sopra il caso peggiore osservato
   });
 
   if (!response.ok) {
@@ -156,14 +174,77 @@ async function callOllama(content: string): Promise<string> {
 }
 
 /**
+ * L'output del modello può venire troncato se raggiunge il limite di
+ * num_predict a metà di un array/oggetto (frequente su CPU-only inference
+ * dove teniamo il budget di token basso per limitare la latenza). Ripara
+ * il JSON troncato: individua l'ultimo punto "sicuro" per tagliare (subito
+ * dopo una virgola o parentesi di apertura, fuori da una stringa) e chiude
+ * le parentesi rimaste aperte nell'ordine corretto, scartando l'elemento
+ * parziale finale piuttosto che perdere l'intera risposta.
+ */
+function repairTruncatedJson(raw: string): string {
+  const stack: string[] = [];
+  let inString = false;
+  let escape = false;
+  let lastSafeIndex = -1;
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{" || ch === "[") { stack.push(ch); lastSafeIndex = i; }
+    else if (ch === "}" && stack[stack.length - 1] === "{") stack.pop();
+    else if (ch === "]" && stack[stack.length - 1] === "[") stack.pop();
+    else if (ch === "," && !inString) lastSafeIndex = i;
+  }
+
+  if (lastSafeIndex === -1) return raw;
+
+  // Ricalcola lo stack di parentesi aperte fino al punto di taglio, poi chiudile in ordine inverso.
+  let truncated = raw.slice(0, lastSafeIndex + 1);
+  if (truncated.trimEnd().endsWith(",")) truncated = truncated.trimEnd().slice(0, -1);
+
+  const reStack: string[] = [];
+  inString = false;
+  escape = false;
+  for (const ch of truncated) {
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{" || ch === "[") reStack.push(ch);
+    else if (ch === "}" && reStack[reStack.length - 1] === "{") reStack.pop();
+    else if (ch === "]" && reStack[reStack.length - 1] === "[") reStack.pop();
+  }
+  if (inString) truncated += '"';
+  for (let i = reStack.length - 1; i >= 0; i--) {
+    truncated += reStack[i] === "{" ? "}" : "]";
+  }
+  return truncated;
+}
+
+/**
  * Parsa la risposta JSON dell'LLM con fallback
  */
 function parseJsonResponse(raw: string): LLMParseResult {
   // Cerca il JSON nella risposta (l'LLM potrebbe aggiungere testo)
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  const jsonMatch = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
   if (!jsonMatch) throw new Error("Nessun JSON valido nella risposta LLM");
 
-  const parsed = JSON.parse(jsonMatch[0]);
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    parsed = JSON.parse(repairTruncatedJson(jsonMatch[0]));
+  }
 
   // Validazione base e normalizzazione
   return {
@@ -172,10 +253,12 @@ function parseJsonResponse(raw: string): LLMParseResult {
     servings: typeof parsed.servings === "number" ? parsed.servings : undefined,
     prepTimeMin: typeof parsed.prepTimeMin === "number" ? parsed.prepTimeMin : undefined,
     cookTimeMin: typeof parsed.cookTimeMin === "number" ? parsed.cookTimeMin : undefined,
+    restTimeMin: typeof parsed.restTimeMin === "number" ? parsed.restTimeMin : undefined,
     difficulty: ["easy", "medium", "hard", "expert"].includes(parsed.difficulty)
       ? parsed.difficulty
       : "medium",
     tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+    tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t: unknown) => typeof t === "string") : [],
     ingredients: Array.isArray(parsed.ingredients)
       ? parsed.ingredients.map((ing: any, i: number) => ({
           name: ing.name ?? `Ingrediente ${i + 1}`,

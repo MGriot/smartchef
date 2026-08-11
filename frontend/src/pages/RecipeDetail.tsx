@@ -9,8 +9,11 @@ import StepEditor, { StepIngredientAmount } from '../components/StepEditor';
 import RecipeSourcesEditor, { RecipeSourceEntry, SOURCE_TYPE_META } from '../components/RecipeSourcesEditor';
 import ImageUrlInput from '../components/ImageUrlInput';
 import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
+import TagPicker from '../components/TagPicker';
 import RenderStepText from '../components/RenderStepText';
 import AppLayout from '../components/AppLayout';
+import StarRating from '../components/StarRating';
+import { apiFetch } from '../lib/api';
 
 /* ═══════════════════════════════════════════════════════════════════════
    TYPES
@@ -74,7 +77,11 @@ interface Recipe {
   prep_time_min: number;
   cook_time_min: number;
   rest_time_min: number;
+  rating: number | null;
+  created_at: string;
+  updated_at: string;
   tags: string[];
+  tags_display?: { name: string; translated_name: string; color: string | null }[];
   cover_image_url: string;
   source_url: string | null;
   sources: RecipeSourceEntry[];
@@ -87,6 +94,49 @@ interface Recipe {
 }
 
 type PageMode = 'view' | 'edit' | 'cook';
+
+/* ── Kitchen Mode: sub-recipes prepared before the main recipe ─────────── */
+interface CookSequenceStep {
+  id: string;
+  stepNumber: number;
+  title: string | null;
+  description: string;
+  durationMin: number | null;
+  toolIds: string[];
+  imageUrl: string | null;
+  notes: string | null;
+}
+interface CookSequenceIngredientRef {
+  sortOrder: number;
+  ingredientName: string;
+  quantity: number | null;
+  unitSymbol: string | null;
+}
+interface CookSequenceToolRef {
+  id: string;
+  name: string;
+  icon: string | null;
+}
+interface CookSequenceSection {
+  recipeId: string;
+  recipeTitle: string;
+  isMain: boolean;
+  steps: CookSequenceStep[];
+  ingredients: CookSequenceIngredientRef[];
+  tools: CookSequenceToolRef[];
+}
+
+/* ── Nutrition ───────────────────────────────────────────────────────── */
+interface NutritionTotals {
+  caloriesKcal: number; proteinG: number; carbsG: number; fatG: number;
+  fiberG: number; sugarG: number; sodiumMg: number;
+}
+interface RecipeNutritionResult {
+  requestedServings: number;
+  totals: NutritionTotals;
+  perServing: NutritionTotals;
+  unresolved: string[];
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    HELPERS
@@ -103,6 +153,11 @@ const formatTime = (min: number | null | undefined): string => {
   return m ? `${h}h ${m}m` : `${h}h`;
 };
 
+const formatDate = (iso: string | null | undefined): string => {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
 /* ── Sub-recipe ingredient fetcher ─────────────────────────────────── */
 const SubIngredientList: React.FC<{
   subRecipeId: string; servings: number; baseServings: number;
@@ -114,7 +169,7 @@ const SubIngredientList: React.FC<{
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/recipes/${subRecipeId}`);
+        const res = await apiFetch(`/api/recipes/${subRecipeId}`);
         const json = await res.json();
         setIngredients(json.data?.ingredients || []);
       } catch { /* ignore */ }
@@ -168,8 +223,14 @@ const RecipeDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [servings, setServings] = useState(4);
-  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  const [completedSteps, setCompletedSteps] = useState<Set<string>>(new Set());
   const [addedToCart, setAddedToCart] = useState(false);
+  const [showCollectionPicker, setShowCollectionPicker] = useState(false);
+  const [allCollections, setAllCollections] = useState<{ id: string; name: string }[]>([]);
+  const [memberCollectionIds, setMemberCollectionIds] = useState<Set<string>>(new Set());
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [cookSequence, setCookSequence] = useState<CookSequenceSection[] | null>(null);
+  const [nutrition, setNutrition] = useState<RecipeNutritionResult | null>(null);
 
   // Edit-mode draft state
   const [draft, setDraft] = useState<Partial<Recipe>>({});
@@ -188,11 +249,48 @@ const RecipeDetail: React.FC = () => {
     setContentLang(code);
   };
 
+  const openCollectionPicker = async () => {
+    setShowCollectionPicker(true);
+    setLoadingCollections(true);
+    try {
+      const [allRes, memberRes] = await Promise.all([
+        apiFetch('/api/collections'),
+        apiFetch(`/api/recipes/${id}/collections`),
+      ]);
+      const allJson = await allRes.json();
+      const memberJson = await memberRes.json();
+      setAllCollections((allJson.data || []).map((c: any) => ({ id: c.id, name: c.name })));
+      setMemberCollectionIds(new Set((memberJson.data || []).map((c: any) => c.id)));
+    } catch (err) {
+      console.error('Failed to load collections:', err);
+    } finally {
+      setLoadingCollections(false);
+    }
+  };
+
+  const toggleCollectionMembership = async (collectionId: string) => {
+    const isMember = memberCollectionIds.has(collectionId);
+    setMemberCollectionIds(prev => {
+      const next = new Set(prev);
+      isMember ? next.delete(collectionId) : next.add(collectionId);
+      return next;
+    });
+    if (isMember) {
+      await apiFetch(`/api/collections/${collectionId}/recipes/${id}`, { method: 'DELETE' });
+    } else {
+      await apiFetch(`/api/collections/${collectionId}/recipes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipeId: id }),
+      });
+    }
+  };
+
   /* ── Fetch techniques (needed in every mode to resolve {{tech:id}} refs in step text) ── */
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/techniques${contentLang ? `?lang=${contentLang}` : ''}`);
+        const res = await apiFetch(`/api/techniques${contentLang ? `?lang=${contentLang}` : ''}`);
         const json = await res.json();
         setAllTechniques(json.data || []);
       } catch (err) { console.error('Techniques fetch failed:', err); }
@@ -205,9 +303,9 @@ const RecipeDetail: React.FC = () => {
       (async () => {
         try {
           const [tRes, uRes, iRes] = await Promise.all([
-            fetch(`/api/tools${contentLang ? `?lang=${contentLang}` : ''}`),
-            fetch(`/api/units${contentLang ? `?lang=${contentLang}` : ''}`),
-            fetch(`/api/ingredients${contentLang ? `?lang=${contentLang}` : ''}`),
+            apiFetch(`/api/tools${contentLang ? `?lang=${contentLang}` : ''}`),
+            apiFetch(`/api/units${contentLang ? `?lang=${contentLang}` : ''}`),
+            apiFetch(`/api/ingredients${contentLang ? `?lang=${contentLang}` : ''}`),
           ]);
           const [tJson, uJson, iJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json()]);
           setAllTools(tJson.data || []);
@@ -224,7 +322,7 @@ const RecipeDetail: React.FC = () => {
     if (!id) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/recipes/${id}${contentLang ? `?lang=${contentLang}` : ''}`);
+      const res = await apiFetch(`/api/recipes/${id}${contentLang ? `?lang=${contentLang}` : ''}`);
       const json = await res.json();
       if (json.data) {
         setRecipe(json.data);
@@ -240,12 +338,59 @@ const RecipeDetail: React.FC = () => {
 
   useEffect(() => { fetchRecipe(); }, [fetchRecipe]);
 
+  /* ── Kitchen Mode: fetch the sub-recipes-first step sequence, but only
+     when this recipe actually has a sub-recipe ingredient — keeps the
+     common case (no Matrioska nesting) to a single request. ── */
+  useEffect(() => {
+    if (mode !== 'cook' || !id || !recipe) { setCookSequence(null); return; }
+    const hasSubRecipe = (recipe.ingredients || []).some(ing => !!ing.subRecipeId);
+    if (!hasSubRecipe) { setCookSequence(null); return; }
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/recipes/${id}/cook-sequence`);
+        const json = await res.json();
+        setCookSequence(json.data?.sections || null);
+      } catch (err) {
+        console.error('Cook sequence fetch failed:', err);
+        setCookSequence(null);
+      }
+    })();
+  }, [mode, id, recipe]);
+
+  /* ── Nutrition: fetched once at the recipe's base servings, then scaled
+     client-side against the servings slider (same pattern as scale()) so
+     moving the slider doesn't trigger a refetch. ── */
+  useEffect(() => {
+    if (!id || !recipe) { setNutrition(null); return; }
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/recipes/${id}/nutrition?servings=${recipe.servings}`);
+        const json = await res.json();
+        setNutrition(json.data || null);
+      } catch (err) {
+        console.error('Nutrition fetch failed:', err);
+        setNutrition(null);
+      }
+    })();
+  }, [id, recipe?.id, recipe?.servings]);
+
   /* ── Scale quantity ─────────────────────────────────────────────── */
   const scale = (qty: number | null): string => {
     if (qty === null) return '';
     if (!recipe) return String(qty);
     const v = (qty * servings) / recipe.servings;
     return v % 1 === 0 ? String(v) : v.toFixed(1);
+  };
+
+  /* ── Scale nutrition totals (fetched once at base servings) against the current servings slider ── */
+  const nutritionAtServings = (): NutritionTotals | null => {
+    if (!nutrition || !recipe) return null;
+    const ratio = servings / recipe.servings;
+    const t = nutrition.totals;
+    return {
+      caloriesKcal: t.caloriesKcal * ratio, proteinG: t.proteinG * ratio, carbsG: t.carbsG * ratio,
+      fatG: t.fatG * ratio, fiberG: t.fiberG * ratio, sugarG: t.sugarG * ratio, sodiumMg: t.sodiumMg * ratio,
+    };
   };
 
   /* ── Context for resolving {{ing:N}}/{{tool:id}}/{{tech:id}} inline refs in step text ── */
@@ -282,10 +427,10 @@ const RecipeDetail: React.FC = () => {
   };
 
   /* ── Toggle step complete (cooking mode) ────────────────────────── */
-  const toggleStep = (n: number) => {
+  const toggleStep = (key: string) => {
     setCompletedSteps(prev => {
       const next = new Set(prev);
-      next.has(n) ? next.delete(n) : next.add(n);
+      next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
   };
@@ -303,11 +448,13 @@ const RecipeDetail: React.FC = () => {
         prepTimeMin: draft.prep_time_min || undefined,
         cookTimeMin: draft.cook_time_min || undefined,
         restTimeMin: draft.rest_time_min || undefined,
+        rating: draft.rating === undefined ? recipe?.rating ?? null : draft.rating,
         tags: draft.tags || [],
         coverImageUrl: draft.cover_image_url || null,
         sourceUrl: draft.source_url || null,
         sources: draft.sources || [],
         isComponent: draft.is_component || false,
+        languageCode: draft.language_code || recipe?.language_code || undefined,
         translations: draft.translations || [],
         ingredients: (draft.ingredients || []).map((ing, i) => ({
           sortOrder: i,
@@ -333,7 +480,7 @@ const RecipeDetail: React.FC = () => {
         toolIds: (draft.tools || []).map(t => t.id),
       };
 
-      await fetch(`/api/recipes/${id}`, {
+      await apiFetch(`/api/recipes/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -347,13 +494,28 @@ const RecipeDetail: React.FC = () => {
     }
   };
 
+  /* ── Rate recipe ────────────────────────────────────────────────── */
+  const handleRate = async (rating: number | null) => {
+    if (!id || !recipe) return;
+    setRecipe({ ...recipe, rating });
+    try {
+      await apiFetch(`/api/recipes/${id}/rating`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rating }),
+      });
+    } catch (err) {
+      console.error('Rating failed:', err);
+    }
+  };
+
   /* ── Delete recipe ──────────────────────────────────────────────── */
   const handleDelete = async () => {
     if (!id) return;
     if (!window.confirm(`Delete "${recipe?.translated_title || recipe?.title}"? This cannot be undone.`)) return;
     setSaving(true);
     try {
-      await fetch(`/api/recipes/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/recipes/${id}`, { method: 'DELETE' });
       navigate('/');
     } catch (err) {
       console.error('Delete failed:', err);
@@ -389,6 +551,137 @@ const RecipeDetail: React.FC = () => {
   /* ═════════════════════════════════════════════════════════════════
      COOKING MODE
      ═════════════════════════════════════════════════════════════════ */
+  if (mode === 'cook' && cookSequence && cookSequence.length > 1) {
+    // Recipe has sub-recipe ingredients (Matrioska): flatten into one
+    // continuous step list, sub-recipes first, main recipe last, with a
+    // section header whenever the source recipe changes.
+    type FlatCookStep = { key: string; section: CookSequenceSection; step: CookSequenceStep; isFirstOfSection: boolean };
+    const flatSteps: FlatCookStep[] = [];
+    for (const section of cookSequence) {
+      const sorted = [...section.steps].sort((a, b) => a.stepNumber - b.stepNumber);
+      sorted.forEach((step, i) => flatSteps.push({ key: `${section.recipeId}:${step.stepNumber}`, section, step, isFirstOfSection: i === 0 }));
+    }
+    const progress = flatSteps.length > 0 ? (completedSteps.size / flatSteps.length) * 100 : 0;
+
+    return (
+      <div className="min-h-screen bg-zinc-900 text-white font-body">
+        <header className="sticky top-0 z-50 bg-zinc-900/95 backdrop-blur-md border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+          <button onClick={() => setMode('view')} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors">
+            <span className="material-symbols-outlined">arrow_back</span>
+            <span className="text-sm font-bold">Exit Kitchen</span>
+          </button>
+          <h2 className="text-lg font-headline font-bold text-white truncate max-w-md">{recipe.translated_title || recipe.title}</h2>
+          <div className="text-sm text-zinc-400 font-medium">{completedSteps.size}/{flatSteps.length} steps</div>
+        </header>
+
+        <div className="h-1 bg-zinc-800">
+          <div className="h-full bg-primary transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
+        </div>
+
+        <main className="max-w-3xl mx-auto px-6 py-10 space-y-8">
+          {flatSteps.map(({ key, section, step, isFirstOfSection }) => {
+            const done = completedSteps.has(key);
+            const sectionIngredients = section.ingredients.map(ing => ({
+              sortOrder: ing.sortOrder,
+              name: ing.ingredientName,
+              quantity: ing.quantity != null ? `${ing.quantity}${ing.unitSymbol ? ' ' + ing.unitSymbol : ''}` : '',
+            }));
+            const sectionTools = section.tools.map(t => ({ id: t.id, name: t.name }));
+            return (
+              <React.Fragment key={key}>
+                {isFirstOfSection && (
+                  <div className="flex items-center gap-3 pt-2 first:pt-0">
+                    <span className={`px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider ${section.isMain ? 'bg-primary text-white' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}`}>
+                      {section.isMain ? 'Main Recipe' : 'Sub-recipe'}
+                    </span>
+                    <h3 className="text-lg font-headline font-bold text-white truncate">{section.recipeTitle}</h3>
+                  </div>
+                )}
+                <div
+                  className={`p-8 rounded-3xl border transition-all duration-300 ${
+                    done ? 'bg-primary/10 border-primary/30 opacity-60' : 'bg-zinc-800/50 border-zinc-700/50 hover:border-zinc-600'
+                  }`}
+                >
+                  <div className="flex items-start gap-6">
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-headline font-extrabold text-xl shrink-0 ${
+                      done ? 'bg-primary text-white' : 'bg-zinc-700 text-zinc-300'
+                    }`}>
+                      {done ? <span className="material-symbols-outlined">check</span> : step.stepNumber.toString().padStart(2, '0')}
+                    </div>
+                    <div className="flex-1">
+                      <h3 className={`font-headline font-bold text-xl mb-3 ${done ? 'text-primary line-through' : 'text-white'}`}>
+                        {step.title || `Step ${step.stepNumber}`}
+                      </h3>
+                      {step.imageUrl && (
+                        <img src={step.imageUrl} alt="" className="w-full max-h-64 object-cover rounded-2xl mb-4" />
+                      )}
+                      <p className="text-zinc-300 leading-relaxed text-[15px] mb-4">
+                        <RenderStepText text={step.description} ingredients={sectionIngredients} tools={sectionTools} techniques={stepTextTechniques} />
+                      </p>
+
+                      {step.toolIds.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {step.toolIds.map(tid => {
+                            const tool = section.tools.find(t => t.id === tid);
+                            if (!tool) return null;
+                            return (
+                              <div key={tid} className="flex items-center gap-1.5 px-2 py-1 bg-zinc-700/50 rounded-lg border border-zinc-600/30">
+                                <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-primary text-sm" />
+                                <span className="text-[10px] uppercase font-bold text-zinc-400">{tool.name}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {step.durationMin && (
+                        <div className="flex items-center gap-2 text-sm text-zinc-400 mb-4">
+                          <span className="material-symbols-outlined text-sm">timer</span>
+                          {step.durationMin} minutes
+                        </div>
+                      )}
+
+                      {step.notes && (
+                        <div className="bg-primary/10 border border-primary/20 rounded-2xl p-4 mb-6">
+                          <div className="flex items-center gap-2 text-primary mb-1">
+                            <span className="material-symbols-outlined text-sm text-[18px]">lightbulb</span>
+                            <span className="text-[10px] uppercase font-bold tracking-wider">Chef's Note</span>
+                          </div>
+                          <p className="text-sm text-zinc-300 italic">{step.notes}</p>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => toggleStep(key)}
+                        className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-sm transition-all ${
+                          done ? 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600' : 'bg-primary text-white hover:bg-primary/80'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-sm">{done ? 'undo' : 'check_circle'}</span>
+                        {done ? 'UNDO' : 'MARK AS COMPLETE'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </React.Fragment>
+            );
+          })}
+
+          {progress === 100 && (
+            <div className="text-center py-12 animate-fade-in-up">
+              <span className="text-6xl mb-4 block">🎉</span>
+              <h2 className="font-headline font-extrabold text-3xl text-primary mb-2">Buon Appetito!</h2>
+              <p className="text-zinc-400">All steps completed. Your dish is ready to serve.</p>
+              <button onClick={() => setMode('view')} className="mt-6 px-8 py-3 bg-primary text-white rounded-full font-bold hover:bg-primary/80 transition-colors">
+                Back to Recipe
+              </button>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   if (mode === 'cook') {
     const sortedSteps = [...(recipe.steps || [])].sort((a, b) => a.stepNumber - b.stepNumber);
     const progress = recipe.steps.length > 0 ? (completedSteps.size / recipe.steps.length) * 100 : 0;
@@ -413,7 +706,8 @@ const RecipeDetail: React.FC = () => {
         {/* Steps */}
         <main className="max-w-3xl mx-auto px-6 py-10 space-y-8">
           {sortedSteps.map((step) => {
-            const done = completedSteps.has(step.stepNumber);
+            const stepKey = `${recipe.id}:${step.stepNumber}`;
+            const done = completedSteps.has(stepKey);
             return (
               <div
                 key={step.stepNumber}
@@ -486,7 +780,7 @@ const RecipeDetail: React.FC = () => {
                     )}
 
                     <button
-                      onClick={() => toggleStep(step.stepNumber)}
+                      onClick={() => toggleStep(stepKey)}
                       className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-sm transition-all ${
                         done
                           ? 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
@@ -707,12 +1001,19 @@ const RecipeDetail: React.FC = () => {
           {/* Title & description */}
           <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
             <label className="block mb-6">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">
-                Recipe Title
-                {recipe.language_code && (
-                  <span className="ml-2 normal-case font-medium text-zinc-400">— written in {recipe.language_code}</span>
-                )}
-              </span>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold block">Recipe Title</span>
+                <span className="flex items-center gap-1.5 text-[11px] text-zinc-400 font-medium">
+                  Written in
+                  <select
+                    value={draft.language_code || recipe.language_code || 'en'}
+                    onChange={e => updateDraft('language_code', e.target.value)}
+                    className="border-none bg-zinc-50 rounded-lg px-2 py-1 text-[11px] font-bold text-zinc-600 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                  >
+                    {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                  </select>
+                </span>
+              </div>
               <input
                 type="text" value={draft.title || ''}
                 onChange={e => updateDraft('title', e.target.value)}
@@ -782,16 +1083,14 @@ const RecipeDetail: React.FC = () => {
                   ))}
                 </select>
               </label>
-              <label className="flex-1 min-w-[200px]">
-                <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Tags (comma separated)</span>
-                <input
-                  type="text"
-                  value={(draft.tags || []).join(', ')}
-                  onChange={e => updateDraft('tags', e.target.value.split(',').map(t => t.trim()).filter(Boolean))}
-                  className="w-full border-none bg-zinc-50 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
-                  placeholder="italian, pasta, main course"
-                />
+              <label>
+                <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Your Rating</span>
+                <StarRating value={draft.rating} onChange={rating => updateDraft('rating', rating)} />
               </label>
+              <div className="flex-1 min-w-[200px]">
+                <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">Tags</span>
+                <TagPicker value={draft.tags || []} onChange={tags => updateDraft('tags', tags)} />
+              </div>
             </div>
           </div>
 
@@ -1095,29 +1394,146 @@ const RecipeDetail: React.FC = () => {
     </button>
   );
 
+  const deleteButton = (
+    <button
+      onClick={handleDelete}
+      disabled={saving}
+      className="flex items-center gap-1.5 text-zinc-500 hover:text-red-500 transition-colors disabled:opacity-50"
+      aria-label="Delete recipe"
+      title="Delete Recipe"
+    >
+      <span className="material-symbols-outlined text-[20px]">delete</span>
+    </button>
+  );
+
+  const shoppingListHeaderButton = (
+    <button
+      onClick={() => {
+        addToShoppingCart({ recipeId: id!, title: recipe.translated_title || recipe.title, servings });
+        setAddedToCart(true);
+        setTimeout(() => setAddedToCart(false), 2000);
+      }}
+      className={`flex items-center gap-1.5 transition-colors ${addedToCart ? 'text-primary' : 'text-zinc-500 hover:text-primary'}`}
+      aria-label="Add to Shopping List"
+      title="Add to Shopping List"
+    >
+      <span className="material-symbols-outlined text-[20px]">{addedToCart ? 'check' : 'shopping_cart'}</span>
+    </button>
+  );
+
+  const handleExportRecipe = async () => {
+    try {
+      const res = await apiFetch(`/api/share/recipes/${id}/export`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : 'Export failed');
+      const slug = (recipe.translated_title || recipe.title || 'recipe').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${slug}.smartchef.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Recipe export failed:', err);
+    }
+  };
+
+  const exportHeaderButton = (
+    <button
+      onClick={handleExportRecipe}
+      className="flex items-center gap-1.5 text-zinc-500 hover:text-primary transition-colors"
+      aria-label="Export Recipe"
+      title="Export Recipe"
+    >
+      <span className="material-symbols-outlined text-[20px]">ios_share</span>
+    </button>
+  );
+
+  const collectionHeaderButton = (
+    <div className="relative">
+      <button
+        onClick={() => showCollectionPicker ? setShowCollectionPicker(false) : openCollectionPicker()}
+        className={`flex items-center gap-1.5 transition-colors ${memberCollectionIds.size > 0 ? 'text-primary' : 'text-zinc-500 hover:text-primary'}`}
+        aria-label="Add to Collection"
+        title="Add to Collection"
+      >
+        <span className="material-symbols-outlined text-[20px]">collections_bookmark</span>
+      </button>
+      {showCollectionPicker && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowCollectionPicker(false)} />
+          <div className="absolute right-0 top-8 z-50 w-64 bg-white rounded-2xl shadow-xl border border-zinc-100 p-3">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-2 pb-2">Add to Collection</p>
+            {loadingCollections ? (
+              <p className="text-xs text-zinc-400 px-2 py-2">Loading…</p>
+            ) : allCollections.length === 0 ? (
+              <p className="text-xs text-zinc-400 px-2 py-2">No collections yet — create one from the Gallery.</p>
+            ) : (
+              <div className="max-h-56 overflow-y-auto space-y-0.5">
+                {allCollections.map(c => (
+                  <label key={c.id} className="flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-zinc-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={memberCollectionIds.has(c.id)}
+                      onChange={() => toggleCollectionMembership(c.id)}
+                      className="accent-primary w-4 h-4"
+                    />
+                    <span className="text-sm font-medium text-zinc-700">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  const headerActions = (
+    <>
+      {shoppingListHeaderButton}
+      {collectionHeaderButton}
+      {exportHeaderButton}
+      {deleteButton}
+      {editButton}
+    </>
+  );
+
   return (
-    <AppLayout headerActions={editButton}>
+    <AppLayout headerActions={headerActions}>
       {/* ── Hero Image ─────────────────────────────────────────── */}
       <div className="max-w-6xl mx-auto px-6 pt-8">
         <div className="relative h-[360px] md:h-[440px] rounded-3xl overflow-hidden">
           <img className="w-full h-full object-cover" src={recipe.cover_image_url || 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?q=80&w=2000'} alt={recipe.translated_title || recipe.title} />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
           <div className="absolute bottom-8 left-8 right-8">
-            {recipe.tags?.[0] && (
-              <span className="inline-block px-3 py-1 bg-primary text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full mb-3">
-                {recipe.tags[0]}
+            {(recipe.tags_display?.[0] || recipe.tags?.[0]) && (
+              <span
+                className={`inline-block px-3 py-1 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full mb-3 ${recipe.tags_display?.[0]?.color ? '' : 'bg-primary'}`}
+                style={recipe.tags_display?.[0]?.color ? { backgroundColor: recipe.tags_display[0].color } : undefined}
+              >
+                {recipe.tags_display?.[0]?.translated_name || recipe.tags[0]}
               </span>
             )}
             <h1 className="text-4xl md:text-6xl font-headline font-extrabold text-white leading-none">{recipe.translated_title || recipe.title}</h1>
+            {recipe.language_code && contentLang && recipe.language_code !== contentLang && !recipe.translated_title && (
+              <p className="mt-3 text-white/70 text-xs font-medium">
+                Shown in {SUPPORTED_LANGUAGES.find(l => l.code === recipe.language_code)?.label || recipe.language_code} (original — no {SUPPORTED_LANGUAGES.find(l => l.code === contentLang)?.label || contentLang} translation yet)
+              </p>
+            )}
           </div>
         </div>
       </div>
 
       {/* ── Stats Bar ──────────────────────────────────────────── */}
       <div className="max-w-6xl mx-auto px-6 mt-8">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {[
             { label: 'Prep Time', val: formatTime(recipe.prep_time_min), icon: 'schedule' },
+            { label: 'Waiting Time', val: formatTime(recipe.rest_time_min), icon: 'hourglass_empty' },
             { label: 'Cook Time', val: formatTime(recipe.cook_time_min), icon: 'oven_gen' },
             { label: 'Total Time', val: formatTime(totalTime), icon: 'local_fire_department' },
             { label: 'Complexity', val: difficultyLabel[recipe.difficulty] || recipe.difficulty, icon: 'restaurant', highlight: true },
@@ -1128,6 +1544,15 @@ const RecipeDetail: React.FC = () => {
               <p className={`text-lg font-bold font-headline ${stat.highlight ? 'text-primary' : 'text-zinc-800'}`}>{stat.val}</p>
             </div>
           ))}
+        </div>
+        <div className="mt-4 py-4 px-6 rounded-2xl bg-white border border-zinc-100 flex items-center justify-between flex-wrap gap-3">
+          <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 font-bold">Your Rating</p>
+          <StarRating value={recipe.rating} onChange={handleRate} />
+        </div>
+        <div className="mt-3 px-6 flex items-center gap-4 text-[11px] text-zinc-400 font-medium">
+          <span>Created {formatDate(recipe.created_at)}</span>
+          <span>&middot;</span>
+          <span>Last edited {formatDate(recipe.updated_at)}</span>
         </div>
       </div>
 
@@ -1238,6 +1663,44 @@ const RecipeDetail: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Nutrition card */}
+            {nutrition && (nutrition.totals.caloriesKcal > 0 || nutrition.totals.proteinG > 0 || nutrition.totals.carbsG > 0 || nutrition.totals.fatG > 0) && (() => {
+              const at = nutritionAtServings()!;
+              const fields: { key: keyof NutritionTotals; label: string; unit: string }[] = [
+                { key: 'caloriesKcal', label: 'Calories', unit: 'kcal' },
+                { key: 'proteinG', label: 'Protein', unit: 'g' },
+                { key: 'carbsG', label: 'Carbs', unit: 'g' },
+                { key: 'fatG', label: 'Fat', unit: 'g' },
+                { key: 'fiberG', label: 'Fiber', unit: 'g' },
+                { key: 'sugarG', label: 'Sugar', unit: 'g' },
+                { key: 'sodiumMg', label: 'Sodium', unit: 'mg' },
+              ];
+              return (
+                <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+                  <h3 className="font-headline font-bold text-lg mb-1">Nutrition</h3>
+                  <p className="text-[11px] text-zinc-400 mb-4">Total for {servings} servings</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {fields.map(f => (
+                      <div key={f.key} className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-50">
+                        <span className="text-xs font-semibold text-zinc-500">{f.label}</span>
+                        <span className="text-sm font-bold text-zinc-800 tabular-nums">
+                          {Math.round(at[f.key])} {f.unit}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-zinc-400 mt-3">
+                    ≈ {Math.round(at.caloriesKcal / servings)} kcal per serving
+                  </p>
+                  {nutrition.unresolved.length > 0 && (
+                    <p className="text-[10px] text-amber-600 mt-3 italic">
+                      Nutrition unavailable for: {nutrition.unresolved.join(', ')}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
 

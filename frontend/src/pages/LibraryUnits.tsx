@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import AppLayout from '../components/AppLayout';
 import { useStore } from '../store/app.store';
+import { apiFetch } from '../lib/api';
 
 export default function LibraryUnits() {
   const [units, setUnits] = useState<any[]>([]);
@@ -14,7 +15,7 @@ export default function LibraryUnits() {
 
   const fetchUnits = () => {
     setLoading(true);
-    fetch(`/api/units${contentLang ? `?lang=${contentLang}` : ''}`)
+    apiFetch(`/api/units${contentLang ? `?lang=${contentLang}` : ''}`)
       .then(res => res.json())
       .then(json => {
         setUnits(json.data || []);
@@ -71,7 +72,7 @@ export default function LibraryUnits() {
     };
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -92,7 +93,7 @@ export default function LibraryUnits() {
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this unit?')) return;
     try {
-      const res = await fetch(`/api/units/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/units/${id}`, { method: 'DELETE' });
       if (res.ok) fetchUnits();
     } catch (err) {
       console.error('Delete failed:', err);
