@@ -30,6 +30,16 @@
     scroll-behavior: smooth;
   }
 
+  /* Keeps scrollable content clear of the gesture-nav bar / notch cutouts on
+     native Android; padding-top is handled by the sticky header itself
+     instead of here, since a sticky element ignores an ancestor's padding
+     once it's stuck. No-op on regular browsers (env() defaults to 0). */
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Manrope', system-ui, sans-serif;
     font-weight: 700;

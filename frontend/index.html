@@ -2,7 +2,11 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover lets the native Android/iOS app draw edge-to-edge
+         and use env(safe-area-inset-*) in CSS to pad around the status
+         bar/notch/gesture nav instead of the OS just reserving a fixed
+         (often wrong-looking) strip — no effect on regular browsers. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>SmartChef</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

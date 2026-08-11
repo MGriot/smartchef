@@ -89,6 +89,7 @@ interface BundleRecipe {
   cookTimeMin: number | null;
   restTimeMin: number | null;
   rating: number | null;
+  timesCooked: number;
   tags: string[];
   coverImageUrl: string | null;
   sourceUrl: string | null;
@@ -187,6 +188,7 @@ async function loadBundleRecipe(id: string): Promise<BundleRecipe> {
     cookTimeMin: r.cook_time_min,
     restTimeMin: r.rest_time_min,
     rating: r.rating,
+    timesCooked: r.times_cooked,
     tags: r.tags ?? [],
     coverImageUrl: r.cover_image_url,
     sourceUrl: r.source_url,
@@ -374,6 +376,7 @@ const BundleRecipeSchema = z.object({
   cookTimeMin: z.number().optional().nullable(),
   restTimeMin: z.number().optional().nullable(),
   rating: z.number().int().min(0).max(5).optional().nullable(),
+  timesCooked: z.number().int().min(0).default(0),
   tags: z.array(z.string()).default([]),
   coverImageUrl: z.string().optional().nullable(),
   sourceUrl: z.string().optional().nullable(),
@@ -510,11 +513,11 @@ async function createRecipeFromBundle(
 ): Promise<string> {
   const newRecipeId = uuidv4();
   await client.query(
-    `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,cook_time_min,rest_time_min,rating,
+    `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,cook_time_min,rest_time_min,rating,times_cooked,
        tags,cover_image_url,source_url,sources,is_component,language_code,crdt_clock)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'{}')`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'{}')`,
     [newRecipeId, r.title, r.description ?? null, r.difficulty, r.servings, r.prepTimeMin ?? null,
-     r.cookTimeMin ?? null, r.restTimeMin ?? null, r.rating ?? null, r.tags ?? [], r.coverImageUrl ?? null, r.sourceUrl ?? null,
+     r.cookTimeMin ?? null, r.restTimeMin ?? null, r.rating ?? null, r.timesCooked ?? 0, r.tags ?? [], r.coverImageUrl ?? null, r.sourceUrl ?? null,
      JSON.stringify(r.sources ?? []), r.isComponent, r.languageCode ?? null]
   );
 

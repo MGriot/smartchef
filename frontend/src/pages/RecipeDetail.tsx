@@ -78,6 +78,7 @@ interface Recipe {
   cook_time_min: number;
   rest_time_min: number;
   rating: number | null;
+  times_cooked: number;
   created_at: string;
   updated_at: string;
   tags: string[];
@@ -506,6 +507,21 @@ const RecipeDetail: React.FC = () => {
       });
     } catch (err) {
       console.error('Rating failed:', err);
+    }
+  };
+
+  /* ── Log a cook ─────────────────────────────────────────────────── */
+  const handleLogCooked = async () => {
+    if (!id || !recipe) return;
+    const previous = recipe.times_cooked;
+    setRecipe({ ...recipe, times_cooked: previous + 1 });
+    try {
+      const res = await apiFetch(`/api/recipes/${id}/cooked`, { method: 'POST' });
+      const json = await res.json();
+      setRecipe(r => r ? { ...r, times_cooked: json.data.timesCooked } : r);
+    } catch (err) {
+      console.error('Logging cooked failed:', err);
+      setRecipe(r => r ? { ...r, times_cooked: previous } : r);
     }
   };
 
@@ -1548,6 +1564,21 @@ const RecipeDetail: React.FC = () => {
         <div className="mt-4 py-4 px-6 rounded-2xl bg-white border border-zinc-100 flex items-center justify-between flex-wrap gap-3">
           <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 font-bold">Your Rating</p>
           <StarRating value={recipe.rating} onChange={handleRate} />
+        </div>
+        <div className="mt-3 py-4 px-6 rounded-2xl bg-white border border-zinc-100 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary/60" style={{ fontVariationSettings: "'FILL' 1" }}>skillet</span>
+            <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 font-bold">
+              Cooked {recipe.times_cooked} {recipe.times_cooked === 1 ? 'time' : 'times'}
+            </p>
+          </div>
+          <button
+            onClick={handleLogCooked}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary/8 text-primary text-xs font-bold hover:bg-primary/15 transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">add</span>
+            I cooked this
+          </button>
         </div>
         <div className="mt-3 px-6 flex items-center gap-4 text-[11px] text-zinc-400 font-medium">
           <span>Created {formatDate(recipe.created_at)}</span>

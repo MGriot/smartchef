@@ -61,7 +61,10 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
   return (
     <div className="min-h-screen bg-[#fafaf5] text-zinc-900 font-outfit">
       <OfflineBanner />
-      <header className="h-[65px] bg-white border-b border-zinc-100 flex items-center justify-between px-8 sticky top-0 z-50">
+      <header
+        className="min-h-[65px] bg-white border-b border-zinc-100 flex items-center justify-between px-8 sticky top-0 z-50"
+        style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'max(2rem, env(safe-area-inset-left))', paddingRight: 'max(2rem, env(safe-area-inset-right))' }}
+      >
         <div className="flex items-center gap-12">
           <Link to="/" className="text-2xl font-black text-primary tracking-tight">SmartChef</Link>
           <nav className="hidden lg:flex items-center gap-8">

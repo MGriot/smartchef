@@ -76,7 +76,7 @@ interface SnapshotRecipeStep {
 }
 interface SnapshotRecipe {
   id: string; title: string; description: string | null; difficulty: string; servings: number;
-  prepTimeMin: number | null; cookTimeMin: number | null; restTimeMin: number | null; rating: number | null; tags: string[];
+  prepTimeMin: number | null; cookTimeMin: number | null; restTimeMin: number | null; rating: number | null; timesCooked: number; tags: string[];
   coverImageUrl: string | null; sourceUrl: string | null; sources: unknown[]; isComponent: boolean;
   languageCode: string | null; updatedAt: string; deletedAt: string | null;
   ingredients: SnapshotRecipeIngredient[]; steps: SnapshotRecipeStep[]; toolIds: string[];
@@ -243,6 +243,7 @@ async function loadRecipes(): Promise<SnapshotRecipe[]> {
     out.push({
       id: r.id, title: r.title, description: r.description, difficulty: r.difficulty, servings: r.servings,
       prepTimeMin: r.prep_time_min, cookTimeMin: r.cook_time_min, restTimeMin: r.rest_time_min, rating: r.rating,
+      timesCooked: r.times_cooked,
       tags: r.tags ?? [], coverImageUrl: r.cover_image_url, sourceUrl: r.source_url,
       sources: r.sources ?? [], isComponent: r.is_component, languageCode: r.language_code,
       updatedAt: r.updated_at, deletedAt: r.sync_status === "deleted" ? r.updated_at : null,
@@ -415,14 +416,14 @@ async function upsertTag(client: PoolClient, t: SnapshotTag): Promise<boolean> {
 async function upsertRecipeBaseRow(client: PoolClient, r: SnapshotRecipe): Promise<boolean> {
   if (!remoteWins(r.updatedAt, await localUpdatedAt(client, "recipes", r.id))) return false;
   await client.query(
-    `INSERT INTO recipes (id, title, description, difficulty, servings, prep_time_min, cook_time_min, rest_time_min, rating,
+    `INSERT INTO recipes (id, title, description, difficulty, servings, prep_time_min, cook_time_min, rest_time_min, rating, times_cooked,
        tags, cover_image_url, source_url, sources, is_component, language_code, sync_status, crdt_clock, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'{}',$17)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'{}',$18)
      ON CONFLICT (id) DO UPDATE SET
-       title=$2, description=$3, difficulty=$4, servings=$5, prep_time_min=$6, cook_time_min=$7, rest_time_min=$8, rating=$9,
-       tags=$10, cover_image_url=$11, source_url=$12, sources=$13, is_component=$14, language_code=$15,
-       sync_status=$16, updated_at=$17`,
-    [r.id, r.title, r.description, r.difficulty, r.servings, r.prepTimeMin, r.cookTimeMin, r.restTimeMin, r.rating,
+       title=$2, description=$3, difficulty=$4, servings=$5, prep_time_min=$6, cook_time_min=$7, rest_time_min=$8, rating=$9, times_cooked=$10,
+       tags=$11, cover_image_url=$12, source_url=$13, sources=$14, is_component=$15, language_code=$16,
+       sync_status=$17, updated_at=$18`,
+    [r.id, r.title, r.description, r.difficulty, r.servings, r.prepTimeMin, r.cookTimeMin, r.restTimeMin, r.rating, r.timesCooked,
      r.tags, r.coverImageUrl, r.sourceUrl, JSON.stringify(r.sources), r.isComponent, r.languageCode,
      r.deletedAt ? "deleted" : "synced", r.updatedAt]
   );

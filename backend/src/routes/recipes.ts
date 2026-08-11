@@ -117,6 +117,7 @@ const SORT_OPTIONS: Record<string, string> = {
   "recently-edited": "r.updated_at DESC",
   "newest": "r.created_at DESC",
   "oldest": "r.created_at ASC",
+  "alphabetical": "r.title ASC",
 };
 
 recipeRouter.get("/", async (req: Request, res: Response) => {
@@ -198,7 +199,9 @@ recipeRouter.get("/", async (req: Request, res: Response) => {
     sql += ` AND r.is_component = $${params.length}`;
   }
 
-  const orderBy = SORT_OPTIONS[String(sort)] ?? SORT_OPTIONS["recently-edited"];
+  const orderBy = sort === "alphabetical" && langParamIndex
+    ? "COALESCE(rt.title, r.title) ASC"
+    : SORT_OPTIONS[String(sort)] ?? SORT_OPTIONS["recently-edited"];
   sql += ` GROUP BY r.id${lang ? ", rt.title, rt.description" : ""} ORDER BY ${orderBy}`;
 
   const recipes = await query(sql, params);
@@ -539,6 +542,20 @@ recipeRouter.patch("/:id/rating", async (req: Request, res: Response) => {
 
   await query("UPDATE recipes SET rating=$1, updated_at=now() WHERE id=$2", [parsed.data.rating, req.params.id]);
   res.json({ success: true });
+});
+
+// ── POST /recipes/:id/cooked ───────────────────────────────────────────
+// Logs one more time the user has cooked this recipe. Doesn't touch
+// updated_at — cooking it isn't editing it, and shouldn't bump it to the
+// top of a "recently edited" sort.
+
+recipeRouter.post("/:id/cooked", async (req: Request, res: Response) => {
+  const rows = await query<{ times_cooked: number }>(
+    "UPDATE recipes SET times_cooked = times_cooked + 1 WHERE id=$1 RETURNING times_cooked",
+    [req.params.id]
+  );
+  if (rows.length === 0) return res.status(404).json({ error: "Recipe not found" });
+  res.json({ data: { timesCooked: rows[0].times_cooked } });
 });
 
 // ── DELETE /recipes/:id ────────────────────────────────────────────────

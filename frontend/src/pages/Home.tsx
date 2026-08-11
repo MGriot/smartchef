@@ -23,6 +23,7 @@ interface Recipe {
   tags_display?: TagDisplay[];
   is_component: boolean;
   rating: number | null;
+  times_cooked: number;
 }
 
 interface CatalogTag {
@@ -101,7 +102,7 @@ const Home: React.FC = () => {
   const toggleCategoryFilter = (id: string) => {
     setActiveCategoryFilters(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id]);
   };
-  const [sortBy, setSortBy] = useState<'recently-edited' | 'newest' | 'oldest'>('recently-edited');
+  const [sortBy, setSortBy] = useState<'recently-edited' | 'newest' | 'oldest' | 'alphabetical'>('recently-edited');
   const clearAllFilters = () => {
     setActiveTagFilters([]);
     setActiveCategoryFilters([]);
@@ -374,6 +375,7 @@ const Home: React.FC = () => {
                           { value: 'recently-edited', label: 'Recently Edited' },
                           { value: 'newest', label: 'Newest Created' },
                           { value: 'oldest', label: 'Oldest Created' },
+                          { value: 'alphabetical', label: 'A-Z' },
                         ] as const).map(opt => (
                           <button
                             key={opt.value}
@@ -563,12 +565,24 @@ const Home: React.FC = () => {
                           </span>
                           {difficultyLabel[recipe.difficulty] || recipe.difficulty}
                         </div>
-                        {recipe.rating !== null && recipe.rating !== undefined && (
-                          <div className="flex items-center gap-1 ml-auto">
-                            <span className="material-symbols-outlined text-amber-400 text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                              star
-                            </span>
-                            {recipe.rating}
+                        {(recipe.times_cooked > 0 || (recipe.rating !== null && recipe.rating !== undefined)) && (
+                          <div className="flex items-center gap-3 ml-auto">
+                            {recipe.times_cooked > 0 && (
+                              <div className="flex items-center gap-1" title={`Cooked ${recipe.times_cooked} times`}>
+                                <span className="material-symbols-outlined text-primary/60 text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                                  skillet
+                                </span>
+                                {recipe.times_cooked}
+                              </div>
+                            )}
+                            {recipe.rating !== null && recipe.rating !== undefined && (
+                              <div className="flex items-center gap-1">
+                                <span className="material-symbols-outlined text-amber-400 text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                                  star
+                                </span>
+                                {recipe.rating}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
