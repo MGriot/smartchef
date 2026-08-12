@@ -1,303 +1,298 @@
 # 🍳 SmartChef Ecosystem
 
-> **Offline-first, self-hosted recipe management** — nested recipes, dynamic portions, local AI parsing, CRDT P2P sync.
+> **Offline-first, self-hosted recipe management** — nested recipes, dynamic portions, local AI import, multi-device sync, and a native Android app.
 
 ---
 
-## 📋 Indice
+## 📋 Table of Contents
 
-- [Come avviare l'app](#-come-avviare-lapp)
-  - [Opzione 1 — Docker (consigliata)](#-opzione-1--docker-consigliata)
-  - [Opzione 2 — Locale senza Docker](#-opzione-2--locale-senza-docker)
-- [Verificare che funzioni](#-verificare-che-funzioni)
-- [Problemi comuni](#️-problemi-comuni)
-- [Struttura del progetto](#️-struttura-del-progetto)
+- [How to start the app](#-how-to-start-the-app)
+  - [Option 1 — Docker (recommended)](#-option-1--docker-recommended)
+  - [Option 2 — Local, without Docker](#-option-2--local-without-docker)
+- [Checking it works](#-checking-it-works)
+- [Common problems](#️-common-problems)
+- [Project structure](#️-project-structure)
+- [MCP Server](#-mcp-server)
 - [API Routes](#-api-routes)
-- [Come funziona il Matrioska Engine](#-matrioska-engine)
-- [Come funziona il Sync CRDT](#-crdt-sync)
-- [App Mobile (Android) & Accesso Remoto via Tailscale](#-app-mobile-android--accesso-remoto-via-tailscale)
-- [Eseguire i comandi Compose da qualunque cartella](#-eseguire-i-comandi-compose-da-qualunque-cartella)
-- [Stato implementazione](#️-stato-implementazione)
+- [Matrioska Engine](#-matrioska-engine)
+- [Multi-device sync](#-multi-device-sync)
+- [Mobile App (Android) & Remote Access via Tailscale](#-mobile-app-android--remote-access-via-tailscale)
+- [Running Compose commands from any folder](#-running-compose-commands-from-any-folder)
+- [Implementation status](#️-implementation-status)
 
 ---
 
-## 🚀 Come avviare l'app
+## 🚀 How to start the app
 
-### 🐳 Opzione 1 — Docker (consigliata)
+### 🐳 Option 1 — Docker (recommended)
 
-**Prerequisiti:**
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installato e avviato
+**Prerequisites:**
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running (or Podman — see below)
 
 ```bash
-# 1. Entra nella cartella del progetto
+# 1. Enter the project folder
 cd smartchef
 
-# 2. Copia il file di configurazione
-cp .env.example .env
+# 2. Copy the config file
+cp docker/.env.example docker/.env
 
-# 3. Avvia tutti i servizi (DB + Backend + Frontend + Ollama)
+# 3. Start every service (DB + Backend + Frontend + Ollama)
 cd docker
 docker compose up -d
 
-# 4. Controlla che tutto sia partito correttamente
+# 4. Check everything came up correctly
 docker compose ps
 ```
 
-Dopo ~30 secondi apri nel browser:
+After ~30 seconds, open in your browser:
 
-| Servizio       | URL                          |
-|----------------|------------------------------|
-| **App (UI)**   | http://localhost:8080        |
-| **Backend API**| http://localhost:3000/health |
-| **MCP Server** | http://localhost:3002/mcp    |
-| **Ollama AI**  | http://localhost:11434       |
+| Service         | URL                          |
+|-----------------|-------------------------------|
+| **App (UI)**    | http://localhost:8080        |
+| **Backend API** | http://localhost:3000/health |
+| **MCP Server**  | http://localhost:3002/mcp    |
+| **Ollama AI**   | http://localhost:11434       |
 
 ```bash
-# 5. Scarica il modello LLM (solo al primo avvio — circa 4GB)
-docker exec smartchef_ollama ollama pull llama3
-
-# Alternativa più leggera (~4GB, più veloce):
-docker exec smartchef_ollama ollama pull mistral
+# 5. Pull the LLM model (first run only — a few GB)
+docker exec smartchef_ollama ollama pull gemma3:4b
 ```
 
-**Per fermare tutto:**
+The model name must match `OLLAMA_MODEL` in `docker/docker-compose.yml` (defaults to `gemma3:4b`, chosen for good multilingual output on CPU-only inference — swap both if you'd rather use something else).
+
+**To stop everything:**
 ```bash
 docker compose down
 ```
 
-**Per fermare tutto e cancellare i dati:**
+**To stop everything and delete the data:**
 ```bash
 docker compose down -v
 ```
 
-**Con Podman** (invece di Docker Desktop): gli stessi comandi funzionano sostituendo `docker` con `podman` — es. `podman compose up -d`, `podman compose ps`, `podman exec smartchef_ollama ollama pull llama3`.
+**With Podman** (instead of Docker Desktop): the same commands work by swapping `docker` for `podman` — e.g. `podman compose up -d`, `podman compose ps`, `podman exec smartchef_ollama ollama pull gemma3:4b`.
 
 ---
 
-### 💻 Opzione 2 — Locale senza Docker
+### 💻 Option 2 — Local, without Docker
 
-**Prerequisiti:**
+**Prerequisites:**
 - [Node.js 20+](https://nodejs.org)
-- [PostgreSQL 16](https://www.postgresql.org/download/) oppure via Homebrew: `brew install postgresql@16`
+- [PostgreSQL 16](https://www.postgresql.org/download/) or via Homebrew: `brew install postgresql@16`
 - [Ollama](https://ollama.com/download)
 
-**1. Crea il database:**
+**1. Create the database:**
 ```bash
 createdb smartchef
-psql smartchef < db/migrations/001_initial_schema.sql
-psql smartchef < db/migrations/002_crdt_tables.sql
+for f in db/migrations/*.sql; do psql smartchef < "$f"; done
 ```
 
-**2. Avvia il Backend** (terminale 1):
+**2. Start the Backend** (terminal 1):
 ```bash
 cd backend
 npm install
 
-# Crea il file .env
-cp ../.env.example .env
-# Apri .env e imposta:
+# Create the .env file
+cp ../docker/.env.example .env
+# Open .env and set:
 #   DATABASE_URL=postgres://localhost:5432/smartchef
 #   OLLAMA_URL=http://localhost:11434
 
 npm run dev
-# → Backend disponibile su http://localhost:3000
+# → Backend available at http://localhost:3000
 ```
 
-**3. Avvia il Frontend** (terminale 2):
+**3. Start the Frontend** (terminal 2):
 ```bash
 cd frontend
 npm install
 npm run dev
-# → App disponibile su http://localhost:5173
+# → App available at http://localhost:5173
 ```
 
-**4. Avvia Ollama** (terminale 3):
+**4. Start Ollama** (terminal 3):
 ```bash
-# Avvia il server
+# Start the server
 ollama serve
 
-# In un altro terminale, scarica il modello
-ollama pull llama3
+# In another terminal, pull the model
+ollama pull gemma3:4b
 ```
 
 ---
 
-## ✅ Verificare che funzioni
+## ✅ Checking it works
 
 ```bash
 curl http://localhost:3000/health
 ```
 
-Risposta attesa:
+Expected response:
 ```json
 {
   "status": "ok",
   "db": true,
   "ollama": true,
-  "ollamaModels": ["llama3"],
+  "ollamaModels": ["gemma3:4b"],
   "version": "1.0.0"
 }
 ```
 
-Poi nel browser:
-1. Vai su **http://localhost:8080** (Docker) o **http://localhost:5173** (locale)
-2. Clicca **"Importa AI"** nella sidebar
-3. Incolla l'URL di una ricetta qualsiasi (es. da giallozafferano.it)
-4. Clicca **Analizza** e attendi il parsing LLM (~10–30 secondi)
-5. Verifica il risultato, clicca **Salva**
-6. Torna nella **Gallery** per vedere la ricetta importata
+Then in the browser:
+1. Go to **http://localhost:8080** (Docker) or **http://localhost:5173** (local)
+2. On first run, set up the instance name/password, then log in
+3. Click **Smart Import** in the sidebar
+4. Paste the URL of any recipe (e.g. from giallozafferano.it), or switch to raw text
+5. Click **Start AI Transformation** and wait for the LLM parse (CPU-only inference — can take a few minutes; a progress bar shows elapsed time)
+6. Review the matched ingredients/steps, click **Create & Review Recipe**
+7. Head back to the **Gallery** to see the imported recipe
 
 ---
 
-## ⚠️ Problemi comuni
+## ⚠️ Common problems
 
-| Problema | Soluzione |
+| Problem | Solution |
 |---|---|
-| Porta 5432 già occupata | `lsof -i :5432` e chiudi Postgres locale, oppure cambia porta nel `docker-compose.yml` |
-| Porta 8080 già occupata | Cambia `"8080:80"` in `"8081:80"` nel `docker-compose.yml` |
-| Ollama lento al primo avvio | Normale — il modello è ~4GB, aspetta il completamento del download |
-| Frontend non raggiunge l'API | In locale verifica che il proxy in `vite.config.ts` punti a `http://localhost:3000` |
-| Errore `pg_trgm` | Esegui: `psql smartchef -c "CREATE EXTENSION pg_trgm;"` |
-| Ollama risponde ma non parsa | Verifica che il modello sia scaricato: `ollama list` |
-| `docker compose` non trovato | Aggiorna Docker Desktop all'ultima versione |
+| Port 5432 already in use | `lsof -i :5432` and stop the local Postgres, or change the port in `docker/docker-compose.yml` |
+| Port 8080 already in use | Change `"8080:80"` to `"8081:80"` in `docker/docker-compose.yml` |
+| Ollama slow on first run | Normal — the model is a few GB, wait for the download to finish |
+| Frontend can't reach the API | Locally, check that the proxy in `vite.config.ts` points at `http://localhost:3000` |
+| `pg_trgm` error | Run: `psql smartchef -c "CREATE EXTENSION pg_trgm;"` |
+| Ollama responds but parsing fails | Check the model is actually pulled: `ollama list` |
+| `docker compose` not found | Update Docker Desktop to the latest version |
+| 502 after rebuilding only the backend | nginx caches the old backend container IP — restart the frontend too: `podman restart smartchef_frontend` |
 
 ---
 
-## 🏗️ Struttura del progetto
+## 🏗️ Project structure
 
 ```
 smartchef/
-├── .env.example                        # Variabili d'ambiente (copia in .env)
 ├── docker/
-│   └── docker-compose.yml              # PostgreSQL + Backend + Frontend + Ollama
+│   ├── docker-compose.yml              # PostgreSQL + Backend + Frontend + MCP + Ollama
+│   └── .env.example                    # Environment variables (copy to docker/.env)
+├── docker-compose.yml                  # Thin root-level entrypoint, includes docker/docker-compose.yml
 ├── db/
-│   └── migrations/
-│       ├── 001_initial_schema.sql      # Schema completo + seed unità/categorie
-│       └── 002_crdt_tables.sql         # Tabelle CRDT ops log + device registry
+│   └── migrations/                     # Sequential SQL migrations — full schema history
 ├── shared/
-│   └── types/index.ts                  # Tipi TypeScript condivisi
+│   └── types/index.ts                  # Shared TypeScript types (backend ⇄ frontend ⇄ MCP)
 ├── backend/
 │   ├── src/
-│   │   ├── db/pool.ts                  # Connessione PostgreSQL
+│   │   ├── db/pool.ts                  # PostgreSQL connection pool
+│   │   ├── middleware/requireAuth.ts   # Session-cookie auth guard (mounted on all of /api except /api/auth)
 │   │   ├── routes/
-│   │   │   ├── recipes.ts              # CRUD ricette + API porzioni
-│   │   │   ├── menus.ts                # Menù settimanale
-│   │   │   ├── shopping.ts             # Lista spesa + export Markdown
-│   │   │   ├── llm.ts                  # Import LLM (parse + confirm)
-│   │   │   ├── sync.ts                 # Handshake P2P + resolve conflitti
-│   │   │   └── ingredients.ts          # Ingredienti + unità di misura
+│   │   │   ├── recipes.ts              # Recipe CRUD, portion scaling, LLM parse, cook-sequence, nutrition
+│   │   │   ├── ingredients.ts          # Ingredients, categories, tools, units
+│   │   │   ├── techniques.ts           # Cooking techniques library
+│   │   │   ├── tags.ts                 # Managed tag catalog + auto-tagging rules
+│   │   │   ├── collections.ts          # Freeform recipe collections
+│   │   │   ├── menus.ts                # Weekly meal planner
+│   │   │   ├── shopping.ts             # Shopping list generation + Markdown export
+│   │   │   ├── auth.ts                 # Single-instance login/setup (session JWT cookie)
+│   │   │   ├── share.ts                # Export/import a recipe or collection as a portable file
+│   │   │   ├── sync-folder.ts          # Multi-device sync via a shared folder + native offline snapshot pull
+│   │   │   ├── backup.ts               # Manual whole-library backup export/import
+│   │   │   ├── sync.ts                 # Legacy CRDT/vector-clock P2P endpoints — see "Multi-device sync" below
+│   │   │   └── uploads.ts              # Image uploads (multer + sharp)
 │   │   ├── services/
-│   │   │   ├── matrioska.engine.ts     # ⭐ Calcolo ricorsivo porzioni
-│   │   │   ├── shopping.service.ts     # Aggregazione lista da menù
-│   │   │   ├── llm.parser.ts           # Client Ollama
-│   │   │   ├── ingredient.matcher.ts   # Fuzzy match LLM→DB (Levenshtein)
-│   │   │   ├── mdns.service.ts         # Loop sync P2P + registro peer
-│   │   │   └── crdt/
-│   │   │       └── vector-clock.ts     # Vector clock + conflict detection
-│   │   └── index.ts                    # Entry point Express
-│   ├── tsconfig.json
-│   ├── package.json
+│   │   │   ├── matrioska.engine.ts     # ⭐ Recursive portion scaling across nested sub-recipes
+│   │   │   ├── llm.parser.ts           # Ollama client — recipe extraction + ingredient-name translation
+│   │   │   ├── ingredient.matcher.ts   # Fuzzy match LLM output → DB (Levenshtein), auto-creates missing ones
+│   │   │   ├── tags.service.ts         # Ingredient-driven auto-tagging
+│   │   │   ├── nutrition.service.ts    # Per-serving nutrition calculation
+│   │   │   ├── folder-sync.service.ts  # Whole-library snapshot export/merge (multi-device sync + backups)
+│   │   │   ├── device-identity.service.ts
+│   │   │   └── crdt/vector-clock.ts    # Legacy — not wired into any write path, kept for the old sync.ts routes
+│   │   └── index.ts                    # Express entry point
 │   └── Dockerfile
 ├── mcp/
 │   ├── src/
-│   │   ├── backendClient.ts            # Client HTTP verso il backend REST
-│   │   ├── tools.ts                    # Definizione dei tool MCP
+│   │   ├── backendClient.ts            # HTTP client against the backend REST API
+│   │   ├── tools.ts                    # MCP tool definitions
 │   │   └── index.ts                    # Entry point (Express + Streamable HTTP transport)
-│   ├── tsconfig.json
-│   ├── package.json
 │   └── Dockerfile
 └── frontend/
     ├── src/
     │   ├── pages/
-    │   │   ├── Home.tsx                 # Griglia ricette + ricerca/filtri
-    │   │   ├── RecipeCreate.tsx         # Creazione ricetta + link ingredienti
-    │   │   ├── RecipeDetail.tsx         # Dettaglio + calcolatore Matrioska
-    │   │   ├── RecipeImport.tsx         # Wizard import AI
-    │   │   ├── LibraryIngredients.tsx   # Gestione ingredienti + categorie + traduzioni
-    │   │   ├── LibraryTools.tsx         # Gestione strumenti
-    │   │   ├── LibraryUnits.tsx         # Gestione unità di misura
-    │   │   ├── Planner.tsx              # Pianificatore settimanale
-    │   │   └── ShoppingList.tsx         # Lista spesa
-    │   ├── components/
-    │   │   └── AppLayout.tsx           # Header + sidebar navigazione (condiviso)
-    │   ├── services/api.ts             # Tutte le chiamate API
-    │   └── store/app.store.ts          # Stato globale Zustand
-    ├── nginx.conf                      # Routing SPA + proxy API
-    ├── Dockerfile
-    ├── vite.config.ts
-    └── package.json
+    │   │   ├── Home.tsx                 # Gallery: search/filters, sort, adjustable grid density, Collections tab
+    │   │   ├── RecipeCreate.tsx         # New recipe editor
+    │   │   ├── RecipeDetail.tsx         # View/edit + Matrioska portion calculator + kitchen mode
+    │   │   ├── RecipeImport.tsx         # AI import wizard (URL / raw text / portable-file import)
+    │   │   ├── LibraryIngredients.tsx   # Ingredients + categories + translations
+    │   │   ├── LibraryTools.tsx / LibraryUnits.tsx / LibraryTechniques.tsx / LibraryTags.tsx
+    │   │   ├── Planner.tsx              # Weekly meal planner
+    │   │   ├── ShoppingList.tsx         # Shopping list
+    │   │   ├── CollectionDetail.tsx     # Recipe collection view
+    │   │   ├── Login.tsx / Account.tsx  # Auth + account settings, Backup & Restore, Multi-Device Sync
+    │   │   └── ServerConnect.tsx        # Native-app-only: connect to a remote SmartChef server
+    │   ├── lib/api.ts                   # apiFetch — same-origin on web, absolute+cookie'd on native, offline fallback/outbox
+    │   ├── lib/offlineStore.ts          # Native SQLite cache + write outbox
+    │   ├── components/AppLayout.tsx     # Shared header + sidebar navigation
+    │   └── store/app.store.ts           # Global state (Zustand)
+    ├── android/                         # Capacitor Android project (native wrapper, see below)
+    ├── nginx.conf                       # SPA routing + API proxy
+    └── vite.config.ts
 ```
-
-> ⚠️ Nota: l'API di sync P2P/CRDT (`/api/sync/*`) e il relativo motore (vector clock, conflict detection) sono implementati lato backend, ma **non esiste ancora una UI frontend** per pannello di sync o risoluzione conflitti. È un'area backend-only al momento.
 
 ---
 
 ## 🔌 MCP Server
 
-Un servizio separato (proprio `package.json`, Dockerfile e container — non gira dentro il processo del backend) espone la libreria ricette via [Model Context Protocol](https://modelcontextprotocol.io), così un assistente AI può leggere e creare ricette direttamente.
+A separate service (its own `package.json`, Dockerfile, and container — it doesn't run inside the backend process) exposes the recipe library via [Model Context Protocol](https://modelcontextprotocol.io), so an AI assistant can read and create recipes directly.
 
-- Endpoint: `POST http://localhost:3002/mcp` (Streamable HTTP transport, stateless — ogni richiesta apre una sessione MCP a sé)
-- Non tocca il database direttamente: chiama le stesse route REST del backend (`BACKEND_URL`, di default `http://backend:3000` dentro Docker)
+- Endpoint: `POST http://localhost:3002/mcp` (Streamable HTTP transport, stateless — each request opens its own MCP session)
+- Doesn't touch the database directly: it calls the backend's own REST routes (`BACKEND_URL`, defaulting to `http://backend:3000` inside Docker)
 
-Tool esposti:
+Exposed tools:
 
-| Tool | Descrizione |
+| Tool | Description |
 |------|-------------|
-| `list_recipes` | Cerca/filtra ricette (query, tag, difficoltà, componenti) |
-| `get_recipe` | Dettaglio completo di una ricetta (ingredienti, step, strumenti) |
-| `scale_recipe_portions` | Motore Matrioska: ricalcola le quantità per N porzioni risolvendo le sub-ricette annidate |
-| `create_recipe` | Crea una nuova ricetta con ingredienti, step e strumenti |
-| `list_ingredients` / `list_ingredient_categories` | Sfoglia la dispensa |
-| `list_units` | Unità di misura e fattori di conversione |
-| `list_tools` | Strumenti da cucina |
+| `list_recipes` | Search/filter recipes (query, tag, difficulty, components) |
+| `get_recipe` | Full detail of a recipe (ingredients, steps, tools) |
+| `scale_recipe_portions` | Matrioska engine: recalculates quantities for N portions, resolving nested sub-recipes |
+| `create_recipe` | Creates a new recipe with ingredients, steps and tools |
+| `list_ingredients` / `list_ingredient_categories` | Browse the pantry |
+| `list_units` | Units of measure and conversion factors |
+| `list_tools` | Kitchen tools |
 
-Per collegarlo a un client MCP (es. Claude Desktop) che richiede un transport stdio, usa un proxy come [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) puntato su `http://localhost:3002/mcp`.
+To connect it to an MCP client (e.g. Claude Desktop) that requires a stdio transport, use a proxy like [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) pointed at `http://localhost:3002/mcp`.
 
 ---
 
 ## 📡 API Routes
 
-| Method | Path | Descrizione |
-|--------|------|-------------|
-| GET    | `/health` | Stato di DB e Ollama |
-| GET    | `/api/recipes` | Lista ricette (con `?q=&difficulty=&tag=`) |
-| POST   | `/api/recipes` | Crea ricetta |
-| GET    | `/api/recipes/:id` | Dettaglio ricetta con ingredienti e step |
-| DELETE | `/api/recipes/:id` | Elimina (soft delete) |
-| GET    | `/api/recipes/:id/portions?servings=N` | **Matrioska**: ingredienti per N porzioni |
-| POST   | `/api/llm/parse` | Analizza URL o testo con Ollama |
-| POST   | `/api/llm/confirm` | Salva ricetta dopo conferma |
-| GET    | `/api/llm/health` | Stato Ollama + modelli disponibili |
-| GET    | `/api/menus` | Lista menù |
-| POST   | `/api/menus` | Crea menù |
-| POST   | `/api/menus/:id/items` | Aggiunge ricetta al menù |
-| DELETE | `/api/menus/:id/items/:itemId` | Rimuove ricetta dal menù |
-| POST   | `/api/shopping/generate` | Genera lista spesa da menù |
-| GET    | `/api/shopping/:id/export` | Esporta lista in Markdown |
-| PATCH  | `/api/shopping/:id/items/:itemId/check` | Spunta/despunta voce |
-| POST   | `/api/sync/handshake` | Handshake P2P (invia clock, riceve ops) |
-| POST   | `/api/sync/receive` | Riceve operazioni da un peer |
-| GET    | `/api/sync/peers` | Lista dispositivi conosciuti |
-| POST   | `/api/sync/trigger/:deviceId` | Forza sync manuale con un peer |
-| GET    | `/api/sync/conflicts` | Lista conflitti da risolvere |
-| POST   | `/api/sync/resolve` | Risolve un conflitto |
-| GET    | `/api/ingredients` | Lista ingredienti (con `?q=`) |
-| GET    | `/api/ingredients/categories` | Categorie ingredienti |
-| GET    | `/api/units` | Unità di misura |
+All routes below live under `/api` and (aside from `/api/auth/*`) require an authenticated session cookie. This is a resource-level overview, not an exhaustive endpoint list — see `backend/src/routes/*.ts` for the full set.
+
+| Base path | Covers |
+|-----------|--------|
+| `/api/auth` | First-run setup, login, logout, account settings |
+| `/api/recipes` | CRUD, `?q=&tag=&tags=&ingredientCategories=&difficulty=&sort=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/parse` (AI import) |
+| `/api/ingredients` | Ingredients, `/categories`, nested `/api/units`, `/api/tools` |
+| `/api/techniques` | Cooking techniques library |
+| `/api/tags` | Managed tag catalog |
+| `/api/collections` | Freeform recipe collections |
+| `/api/menus` | Weekly meal planner |
+| `/api/shopping` | Shopping list generation, item check-off, Markdown export |
+| `/api/share` | Export/import a recipe, bulk recipes, or a collection as a portable `.smartchef.json` file |
+| `/api/sync-folder` | Multi-device sync status/trigger + native app's offline-cache snapshot pull |
+| `/api/backup` | Manual whole-library backup export/import |
+| `/api/sync` | Legacy CRDT/vector-clock P2P endpoints — see [Multi-device sync](#-multi-device-sync) |
+| `/api/uploads` | Image uploads |
+| `/health` | DB + Ollama status (no auth required) |
 
 ---
 
 ## 🧩 Matrioska Engine
 
-Le ricette possono essere nidificate infinitamente. L'engine risolve ricorsivamente tutte le sub-ricette e aggrega gli ingredienti scalati per le porzioni richieste:
+Recipes can be nested infinitely. The engine recursively resolves every sub-recipe and aggregates ingredients scaled to the requested number of portions:
 
 ```
-Cena di Gala (×10 persone)
-├── 500g   Pasta all'uovo          ← ingrediente semplice  (×10/4 = ×2.5)
-├── 3 porz Salsa Madre             ← sub-ricetta nidificata
-│   ├── 1500g  Pomodori            ← risolto: 500g × 3
-│   └── 150ml  Olio EVO            ← risolto: 50ml × 3
-└── q.b.   Sale                    ← quantità vaga → warning
+Gala Dinner (×10 people)
+├── 500g   Egg pasta              ← plain ingredient  (×10/4 = ×2.5)
+├── 3 srv  Mother Sauce           ← nested sub-recipe
+│   ├── 1500g  Tomatoes           ← resolved: 500g × 3
+│   └── 150ml  Olive oil          ← resolved: 50ml × 3
+└── to taste  Salt                ← vague quantity → warning
 ```
 
 ```bash
@@ -306,99 +301,54 @@ GET /api/recipes/:id/portions?servings=10
 
 ---
 
-## 🔄 CRDT Sync
+## 🔄 Multi-device sync
 
-Protocollo di sincronizzazione bidirezionale senza server centrale:
+Two independent mechanisms exist — worth being precise about which one actually does what:
 
-```
-Device A ──► POST /sync/handshake { clock: {A:5, B:3} } ──► Device B
-Device A ◄── { ops: [...mancanti], clock: {A:5, B:7} }  ◄── Device B
-Device A ──► POST /sync/receive   { ops: [...mancanti] } ──► Device B
-```
+**Folder-based sync (the one that works).** Each device writes a full-library snapshot (`smartchef-<deviceId>.json`) into a shared folder — a plain local folder, or one kept in sync by a desktop client like OneDrive/Google Drive. On every cycle, a device reads every *other* device's file and merges each row in by id, last-write-wins on `updated_at`. No central server, no pairing handshake. Enable it with `SYNC_ENABLED=true` + `SYNC_FOLDER_HOST_PATH` in `docker/.env`; status, peer list, and a manual "Sync Now" (with a per-entity change summary) are on the **Account** page. The same snapshot format also powers the **Backup & Restore** feature (manual export/import, independent of sync being enabled) and the native app's offline read cache.
 
-I conflitti concorrenti (modifiche simultanee offline) vengono rilevati tramite Vector Clock e presentati nella UI **Conflict Resolver** con diff side-by-side rosso/verde.
+**CRDT vector-clock P2P (`/api/sync/*`, legacy).** An earlier, more ambitious design — direct device-to-device sync with field-level conflict detection via vector clocks (`services/crdt/vector-clock.ts`, `mdns.service.ts`). The endpoints exist and respond, but no mutating route in the app ever logs a local edit into the operation log, so there's nothing real for peers to exchange — it predates and was superseded by folder-based sync. Kept in the codebase but not used by the UI; retrofitting true per-operation CRDT logging into every write path would be a large separate undertaking.
+
+**Native app offline editing.** Separate again from both of the above: the Android app keeps a local SQLite cache of the whole library and a write outbox for edits made without connectivity, replayed against the real API on reconnect — see `frontend/src/lib/api.ts`, `offlineStore.ts`, `offlineSync.ts`.
 
 ---
 
-## 🗺️ Stato Implementazione
+## 📱 Mobile App (Android) & Remote Access via Tailscale
 
-| Area | Descrizione | Stato |
-|------|-------------|-------|
-| Docker + Schema DB + Matrioska Engine | Scaling ricorsivo porzioni, sub-ricette annidate | ✅ Completa |
-| Frontend — Gallery, ricerca, filtri | Ricerca e filtri per tag ora interrogano `?q=`/`?tag=` sul backend | ✅ Completa |
-| Frontend — Creazione/modifica/eliminazione ricette | Editor completo (ingredienti, step, strumenti, portion-linking step↔ingrediente); eliminazione ora disponibile dalla UI (era mancante) | ✅ Completa |
-| Frontend — Libreria (Ingredienti/Strumenti/Unità) | CRUD completo + editor traduzioni per ingredienti/categorie/unità | ✅ Completa |
-| i18n contenuti | Tabelle traduzione per ricette/step/categorie/unità/strumenti; UI switcher EN attivo | ✅ Completa (solo EN per ora) |
-| PWA | Manifest, service worker, icone, installabile | ✅ Completa |
-| Server MCP | Espone libreria ricette via Model Context Protocol (porta 3002) | ✅ Completa |
-| Meal Planner | Crea/elimina menù settimanali, assegna ricette per giorno/pasto/porzioni tramite ricerca autocomplete | ✅ Completa |
-| Lista della spesa | Genera da un menù salvato **o** da un "carrello" ad-hoc di ricette (aggiunte dalla pagina ricetta o dalla Shopping List stessa); vista aggregata per ingrediente o raggruppata per ricetta, checkbox con progresso, export Markdown | ✅ Completa |
-| Ricerca ingredienti nell'editor ricetta | Combobox con ricerca live al posto del menu a tendina (100+ ingredienti) | ✅ Completa |
-| Libreria Tecniche | Nuova sezione (come Ingredienti/Strumenti): CRUD, traduzioni, foto di riferimento | ✅ Completa |
-| Foto di riferimento | Ingredienti e strumenti supportano una o più foto (URL) con anteprima, oltre all'icona | ✅ Completa |
-| Riferimenti inline negli step | Toolbar sopra il testo dello step per inserire riferimenti a ingrediente/strumento/tecnica ("stile Bimby": grassetto+sottolineato, quantità scalata dal vivo) | ✅ Completa |
-| CRDT Vector Clock + protocollo sync P2P | Endpoint REST (`/api/sync/*`) funzionanti e testati; nessuna UI per gestione peer o risoluzione conflitti | ⚠️ Solo backend |
-| LLM Parser (Ollama) + Ingredient Matcher | Endpoint `/api/llm/parse` e `/api/llm/confirm` funzionanti; la pagina **Import** in UI è ancora una demo statica (non chiama l'endpoint reale) | ⚠️ Backend pronto, UI da collegare |
+SmartChef is already an installable PWA, but for a native Android app with a real offline cache, a [Capacitor](https://capacitorjs.com) wrapper (`frontend/android/`) was added, reusing the entire existing React frontend. For it to work — both at home and away — the backend needs a reachable HTTPS address, provided by [Tailscale](https://tailscale.com) instead of a traditional reverse proxy/public domain: no router ports to open, one stable address that's identical on LAN and remote.
 
----
+### 1. Install Tailscale on both devices
 
-## 📱 App Mobile (Android) & Accesso Remoto via Tailscale
+- **On the PC acting as server:** `winget install Tailscale.Tailscale`, then `tailscale up` (opens a login URL to complete in the browser).
+- **On the phone:** install the Tailscale app from the Play Store, sign in with the same account.
+- **Enable HTTPS certificates** (one-time, per tailnet) in the admin console: <https://login.tailscale.com/admin/dns> → "HTTPS Certificates" section → Enable.
 
-SmartChef è già una PWA installabile, ma per un'app nativa Android con vera
-cache offline è stato aggiunto un wrapper [Capacitor](https://capacitorjs.com)
-(`frontend/android/`), che riusa l'intero frontend React esistente. Per farla
-funzionare — sia in casa che fuori — serve un indirizzo HTTPS raggiungibile
-per il backend, ottenuto con [Tailscale](https://tailscale.com) invece di un
-reverse proxy/dominio pubblico tradizionale: niente porte da aprire sul
-router, un solo indirizzo stabile identico sia in LAN che da remoto.
-
-### 1. Installa Tailscale su entrambi i dispositivi
-
-- **Sul PC che fa da server:** `winget install Tailscale.Tailscale`, poi
-  `tailscale up` (apre un URL di login da completare nel browser).
-- **Sul telefono:** installa l'app Tailscale dal Play Store, accedi con lo
-  stesso account.
-- **Abilita i certificati HTTPS** (una tantum, per tailnet) nella console
-  admin: <https://login.tailscale.com/admin/dns> → sezione "HTTPS
-  Certificates" → Enable.
-
-### 2. Esponi l'app via HTTPS
+### 2. Expose the app over HTTPS
 
 ```bash
 tailscale serve --bg --https=443 http://127.0.0.1:8080
 ```
 
-Rende l'app raggiungibile su `https://<nome-macchina>.<tuo-tailnet>.ts.net`
-con un certificato reale (Let's Encrypt, rinnovato automaticamente da
-Tailscale) — non serve configurare Caddy/nginx per i certificati. Verifica
-con `tailscale serve status` e `tailscale status` (mostra il nome esatto
-della macchina e se il telefono risulta già connesso alla stessa tailnet).
+Makes the app reachable at `https://<machine-name>.<your-tailnet>.ts.net` with a real certificate (Let's Encrypt, auto-renewed by Tailscale) — no need to configure Caddy/nginx for certs. Verify with `tailscale serve status` and `tailscale status` (shows the exact machine name and whether the phone is already connected to the same tailnet).
 
-### 3. Configura i cookie di sessione e CORS
+### 3. Configure session cookies and CORS
 
-L'app nativa gira su un'origine fissa (`https://localhost`, lo
-`androidScheme` di default di Capacitor) diversa da quella del backend —
-diversamente da un browser normale, che invece passa dallo stesso dominio
-tramite il proxy nginx del frontend. Questo richiede una configurazione
-esplicita in `docker/.env` (copia da `docker/.env.example`):
+The native app runs on a fixed origin (`https://localhost`, Capacitor's default `androidScheme`) different from the backend's — unlike a regular browser, which goes through the same domain via the frontend's nginx proxy. This needs explicit config in `docker/.env` (copy from `docker/.env.example`):
 
 ```bash
 COOKIE_SAME_SITE=none
 COOKIE_SECURE=true
-CORS_ORIGIN=https://<nome-macchina>.<tuo-tailnet>.ts.net,https://localhost
+CORS_ORIGIN=https://<machine-name>.<your-tailnet>.ts.net,https://localhost
 ```
 
-`CORS_ORIGIN` accetta una lista separata da virgole — deve includere **sia**
-l'indirizzo Tailscale (per l'accesso da browser) **sia** `https://localhost`
-(l'origine fissa della WebView Android, indipendente dal server a cui
-l'app si connette). Poi:
+`CORS_ORIGIN` accepts a comma-separated list — it must include **both** the Tailscale address (for browser access) **and** `https://localhost` (the Android WebView's fixed origin, independent of which server the app is configured to talk to). Then:
 
 ```bash
 podman compose up -d --build backend
-podman restart smartchef_frontend   # nginx altrimenti tiene in cache il vecchio IP del backend
+podman restart smartchef_frontend   # otherwise nginx keeps caching the backend's old IP
 ```
 
-### 4. Build dell'app Android
+### 4. Build the Android app
 
 ```bash
 cd frontend
@@ -408,51 +358,51 @@ cd android
 ./gradlew assembleDebug
 ```
 
-L'APK di debug viene generato in
-`frontend/android/app/build/outputs/apk/debug/app-debug.apk`. Installalo sul
-telefono (via `adb install app-debug.apk` oppure trasferendo il file e
-aprendolo direttamente — richiede di consentire "installa da sorgenti
-sconosciute").
+The debug APK is generated at `frontend/android/app/build/outputs/apk/debug/app-debug.apk`. Install it on the phone (via `adb install app-debug.apk`, or transfer the file and open it directly — requires allowing "install from unknown sources").
 
-### 5. Collega l'app al server
+### 5. Connect the app to the server
 
-Al primo avvio l'app mostra una schermata "Connect to your SmartChef
-server" — inserisci l'indirizzo Tailscale
-(`https://<nome-macchina>.<tuo-tailnet>.ts.net`). L'app verifica `/health`
-prima di salvare l'indirizzo; se la verifica fallisce, controlla che
-Tailscale sia connesso sul telefono e che i passaggi 2–3 sopra siano stati
-completati.
+On first launch the app shows a "Connect to your SmartChef server" screen — enter the Tailscale address (`https://<machine-name>.<your-tailnet>.ts.net`). The app checks `/health` before saving the address; if that check fails, confirm Tailscale is connected on the phone and steps 2–3 above are complete.
 
-### Modalità offline
+### Offline mode
 
-Una volta autenticato, il telefono mantiene una cache locale (SQLite) di
-tutta la libreria (ricette, ingredienti, tag, strumenti, collezioni) e una
-coda delle modifiche fatte senza connessione (creazione/modifica ricette,
-valutazioni, eliminazioni), che vengono ri-applicate automaticamente al
-backend non appena torna la connessione — vedi `frontend/src/lib/api.ts`,
-`offlineStore.ts` e `offlineSync.ts`.
+Once logged in, the phone keeps a local cache (SQLite) of the whole library (recipes, ingredients, tags, tools, collections) and a queue of changes made without connectivity (creating/editing recipes and ingredients, ratings, deletions, logging a cook), automatically replayed against the backend as soon as the connection returns.
 
 ---
 
-## 🐳 Eseguire i comandi Compose da qualunque cartella
+## 🐳 Running Compose commands from any folder
 
-Oltre a `docker/docker-compose.yml` (i servizi veri), esiste un file
-equivalente nella root del progetto (`./docker-compose.yml`) che lo include
-tramite la direttiva `include:`, così i comandi funzionano anche senza
-`cd docker` prima:
+Besides `docker/docker-compose.yml` (the real services), an equivalent file sits at the project root (`./docker-compose.yml`) that includes it via the `include:` directive, so commands work without `cd docker` first:
 
 ```bash
 podman compose -f docker-compose.yml up --build --force-recreate
 ```
 
-Entrambi i file puntano esplicitamente allo stesso progetto Compose
-(`name: docker` in cima a ciascuno) — necessario perché altrimenti il nome
-progetto di default viene dedotto dalla cartella da cui si lancia il
-comando, e le due cartelle risulterebbero in due stack (e due insiemi di
-volumi dati) completamente separati.
+Both files explicitly point at the same Compose project (`name: docker` at the top of each) — necessary because otherwise the default project name is derived from whichever folder the command is run from, and the two folders would resolve to two completely separate stacks (and two separate sets of data volumes).
 
 ---
 
-## 📄 Licenza
+## 🗺️ Implementation status
+
+| Area | Description | Status |
+|------|-------------|--------|
+| Docker + DB schema + Matrioska Engine | Recursive portion scaling, nested sub-recipes | ✅ Complete |
+| Gallery — search, filters, sort, density | Search across title/description/ingredients, tag + ingredient-category filters, sort (recent/newest/oldest/A-Z), adjustable 2/3/4-column grid | ✅ Complete |
+| Recipe editor | Ingredients, steps, tools, inline step↔ingredient references ("Bimby-style", live-scaled quantities), translations, ratings, cook counter, delete | ✅ Complete |
+| Library (Ingredients/Tools/Units/Techniques/Tags) | Full CRUD + translation editors; managed tag catalog with ingredient-driven auto-tagging | ✅ Complete |
+| Nutrition | Per-serving calculation from ingredient nutrition data, resolved through nested sub-recipes | ✅ Complete |
+| Collections & Meal Planner & Shopping List | Freeform recipe collections; weekly planner; shopping list from a saved menu or an ad-hoc cart, aggregated or grouped view, Markdown export | ✅ Complete |
+| AI recipe import | Real Ollama-backed parsing (URL/raw text) with fuzzy ingredient/tool matching, source-language detection, progress feedback; portable-file import/export for sharing between instances | ✅ Complete |
+| Auth | Single-instance login (no per-user accounts, matches the shared-household-library model), session JWT cookie | ✅ Complete |
+| i18n | EN/IT UI + content translations (recipes, steps, categories, units, tools, tags, ingredients); ingredient names auto-translated to match a recipe's language | ✅ Complete |
+| PWA | Manifest, service worker, icons, installable | ✅ Complete |
+| MCP Server | Exposes the recipe library via Model Context Protocol (port 3002) | ✅ Complete |
+| Native Android app | Capacitor wrapper, Tailscale-based remote HTTPS access, offline read cache + write outbox, native back-gesture handling | ✅ Complete |
+| Multi-device sync & backup | Folder-based whole-library snapshot sync (peer status + manual trigger on the Account page) and manual backup export/restore, both LWW-merged by `updated_at` | ✅ Complete |
+| Legacy CRDT vector-clock P2P sync (`/api/sync/*`) | Endpoints respond, but no write path logs local edits — nothing real for peers to exchange. Superseded by folder-based sync; no field-level conflict-resolution UI exists (or is planned) for this path | ⚠️ Legacy, inert |
+
+---
+
+## 📄 License
 
 MIT

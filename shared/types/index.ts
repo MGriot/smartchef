@@ -246,6 +246,8 @@ export interface LLMParseRequest {
 
 export interface LLMParseResult {
   title: string;
+  language?: string; // ISO 639-1 code the LLM detected the source content is written in
+
   description?: string;
   servings?: number;
   prepTimeMin?: number;

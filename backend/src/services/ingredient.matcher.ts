@@ -128,7 +128,13 @@ async function getOrCreateFallbackCategory(): Promise<UUID> {
   return row!.id;
 }
 
-/** Crea un nuovo ingrediente nel DB nella categoria "Altro" */
+/** Crea un nuovo ingrediente nel DB nella categoria "Altro". Il nome-base
+ *  degli ingredienti è per convenzione in inglese (vedi il catalogo
+ *  pre-seedato, dove ingredient_translations contiene solo traduzioni 'it'
+ *  su nomi-base inglesi) — quando l'ingrediente viene creato durante
+ *  l'import di una ricetta non-inglese, il chiamante traduce prima il nome
+ *  e passa qui il nome inglese, salvando poi il nome originale come
+ *  traduzione via insertIngredientTranslation. */
 async function createIngredient(name: string): Promise<UUID> {
   const categoryId = await getOrCreateFallbackCategory();
 
@@ -146,6 +152,15 @@ async function createIngredient(name: string): Promise<UUID> {
     [name]
   );
   return existing?.id ?? id;
+}
+
+async function insertIngredientTranslation(ingredientId: UUID, languageCode: string, translatedName: string): Promise<void> {
+  await query(
+    `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (ingredient_id, language_code) DO UPDATE SET translated_name = excluded.translated_name`,
+    [ingredientId, languageCode, translatedName]
+  );
 }
 
 // ── Tool Matching ──────────────────────────────────────────────────────
@@ -213,6 +228,7 @@ export async function matchTools(toolNames: string[]): Promise<MatchedTool[]> {
 
 export interface RecipeMatchResult {
   title: string;
+  language?: string;
   description?: string;
   servings: number;
   prepTimeMin?: number;
@@ -240,14 +256,49 @@ export async function matchLLMResultToDB(
     "SELECT id, name, category_id FROM ingredients WHERE sync_status != 'deleted'"
   );
 
-  const matchedIngredients: MatchedIngredient[] = [];
   const warnings = [...llmResult.warnings];
 
+  // Prima passata: risolvi i match, ma rimanda la creazione dei nuovi
+  // ingredienti — servono tutti i nomi da creare in una volta per poterli
+  // tradurre in un'unica chiamata batch (vedi sotto), invece che una
+  // chiamata LLM per ingrediente.
+  type Plan =
+    | { type: "matched"; ing: LLMParseResult["ingredients"][number]; unitId: UUID | null; match: { ingredient: DBIngredient; score: number } }
+    | { type: "new"; ing: LLMParseResult["ingredients"][number]; unitId: UUID | null };
+
+  const plan: Plan[] = [];
   for (const ing of llmResult.ingredients) {
     const bestMatch = await findBestMatch(ing.name, allIngredients);
     const unitId = await matchUnit(ing.unit);
+    plan.push(bestMatch ? { type: "matched", ing, unitId, match: bestMatch } : { type: "new", ing, unitId });
+  }
 
-    if (bestMatch) {
+  // Il nome-base degli ingredienti è per convenzione in inglese (vedi
+  // createIngredient sopra). Se la ricetta è in un'altra lingua, traduci i
+  // nomi dei nuovi ingredienti in inglese prima di crearli, e conserva il
+  // nome originale come traduzione — altrimenti l'ingrediente resterebbe
+  // "bloccato" in quella lingua anche quando l'utente cambia lingua di
+  // visualizzazione (il fallback COALESCE(translated_name, i.name) non ha
+  // nulla da restituire nelle altre lingue). Best-effort: se la traduzione
+  // fallisce, si ricade sul comportamento precedente (nome originale).
+  let translations: Record<string, string> = {};
+  const newNames = plan.filter((p): p is Extract<Plan, { type: "new" }> => p.type === "new").map((p) => p.ing.name);
+  if (newNames.length > 0 && llmResult.language && llmResult.language !== "en") {
+    try {
+      const { translateIngredientNames } = await import("./llm.parser");
+      translations = await translateIngredientNames([...new Set(newNames)], llmResult.language, "en");
+    } catch (err) {
+      console.warn("⚠️ Ingredient name translation failed, keeping original-language names:", (err as Error).message);
+    }
+  }
+
+  const matchedIngredients: MatchedIngredient[] = [];
+
+  for (const p of plan) {
+    const { ing, unitId } = p;
+
+    if (p.type === "matched") {
+      const bestMatch = p.match;
       matchedIngredients.push({
         ingredientId: bestMatch.ingredient.id,
         ingredientName: bestMatch.ingredient.name,
@@ -266,11 +317,16 @@ export async function matchLLMResultToDB(
         );
       }
     } else {
-      // Crea nuovo ingrediente
-      const newId = await createIngredient(ing.name);
+      // Crea nuovo ingrediente — nome inglese tradotto se disponibile,
+      // altrimenti il nome originale così come estratto dall'LLM.
+      const englishName = translations[ing.name] ?? ing.name;
+      const newId = await createIngredient(englishName);
+      if (translations[ing.name] && llmResult.language) {
+        await insertIngredientTranslation(newId, llmResult.language, ing.name);
+      }
       matchedIngredients.push({
         ingredientId: newId,
-        ingredientName: ing.name,
+        ingredientName: englishName,
         confidence: 1.0,
         isNew: true,
         unitId: unitId ?? undefined,
@@ -293,6 +349,7 @@ export async function matchLLMResultToDB(
 
   return {
     title: llmResult.title,
+    language: llmResult.language,
     description: llmResult.description,
     servings: llmResult.servings ?? 4,
     prepTimeMin: llmResult.prepTimeMin,

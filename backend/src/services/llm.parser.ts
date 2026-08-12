@@ -24,6 +24,7 @@ Rispondi ESCLUSIVAMENTE con un oggetto JSON valido, senza testo aggiuntivo.
 Il JSON deve avere questa struttura:
 {
   "title": "string",
+  "language": "string (codice ISO 639-1 della lingua in cui è scritta la ricetta originale, es. it/en/fr/es/de)",
   "description": "string | null",
   "servings": "number | null",
   "prepTimeMin": "number | null",
@@ -249,6 +250,9 @@ function parseJsonResponse(raw: string): LLMParseResult {
   // Validazione base e normalizzazione
   return {
     title: parsed.title ?? "Ricetta senza titolo",
+    language: typeof parsed.language === "string" && /^[a-z]{2}$/i.test(parsed.language.trim())
+      ? parsed.language.trim().toLowerCase()
+      : undefined,
     description: parsed.description ?? undefined,
     servings: typeof parsed.servings === "number" ? parsed.servings : undefined,
     prepTimeMin: typeof parsed.prepTimeMin === "number" ? parsed.prepTimeMin : undefined,
@@ -302,6 +306,127 @@ export async function parseRecipeWithLLM(req: LLMParseRequest): Promise<LLMParse
   }
 
   return result;
+}
+
+/**
+ * Traduce un elenco di nomi ingredienti da una lingua all'altra in un'unica
+ * chiamata batch (usato per mantenere il nome-base degli ingredienti in
+ * inglese anche quando vengono creati automaticamente durante l'import di
+ * una ricetta in un'altra lingua — vedi ingredient.matcher.ts). Ritorna
+ * una mappa nome-originale -> nome-tradotto; in caso di risposta malformata
+ * o parziale, i nomi mancanti sono semplicemente assenti dalla mappa e il
+ * chiamante ricade sul comportamento esistente (nome originale invariato).
+ */
+export async function translateIngredientNames(
+  names: string[],
+  fromLang: string,
+  toLang: string
+): Promise<Record<string, string>> {
+  if (names.length === 0) return {};
+
+  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      stream: false,
+      messages: [
+        {
+          role: "system",
+          content: `Traduci nomi di ingredienti da culinaria dalla lingua "${fromLang}" alla lingua "${toLang}". ` +
+            `Rispondi ESCLUSIVAMENTE con un oggetto JSON che mappa ogni nome originale al suo nome tradotto, ` +
+            `senza testo aggiuntivo. Esempio: {"Cipolla": "Onion"}. Mantieni la capitalizzazione naturale della lingua di destinazione.`,
+        },
+        { role: "user", content: JSON.stringify(names) },
+      ],
+      options: { temperature: 0.1, num_predict: 500 },
+    }),
+    // Measured too tight at 60s for a 25-name batch on CPU-only inference —
+    // generous margin like the other Ollama calls in this file.
+    signal: AbortSignal.timeout(180_000),
+  });
+
+  if (!response.ok) throw new Error(`Ollama error ${response.status}`);
+
+  const data = await response.json() as { message?: { content?: string } };
+  const raw = data.message?.content ?? "";
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return {};
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const result: Record<string, string> = {};
+    for (const name of names) {
+      if (typeof parsed[name] === "string" && parsed[name].trim()) {
+        result[name] = parsed[name].trim();
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Translates a batch of UI strings (button labels, headings, placeholders —
+ * short, imperative, standalone) from English into another language in one
+ * call. Same shape as translateIngredientNames above but with a prompt
+ * tuned for app-chrome text rather than culinary terms, and a larger safe
+ * batch size since these strings are shorter. Local small-model translation,
+ * not human-reviewed — spot-check the result the same way the ingredient
+ * backfill was checked.
+ */
+export async function translateUiStrings(
+  strings: string[],
+  toLang: string
+): Promise<Record<string, string>> {
+  if (strings.length === 0) return {};
+
+  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      stream: false,
+      messages: [
+        {
+          role: "system",
+          content: `Translate the following user-interface strings from a recipe-management web app ` +
+            `from English into "${toLang}" (ISO 639-1 code). These are short UI labels, buttons, ` +
+            `headings and placeholders, not prose — keep translations equally short and natural for ` +
+            `a cooking app's UI, preserving punctuation like "…" or ":" where present. Some strings ` +
+            `contain placeholders wrapped in double curly braces, e.g. "{{count}}" or "{{title}}" — ` +
+            `copy these tokens through EXACTLY as-is, unchanged and untranslated, in the same relative ` +
+            `position in the sentence; never translate or alter the text inside the braces. Respond ` +
+            `EXCLUSIVELY with a JSON object mapping each original string to its translation, no extra ` +
+            `text. Example: {"Save": "Salvar", "{{count}} recipes": "{{count}} recetas"}.`,
+        },
+        { role: "user", content: JSON.stringify(strings) },
+      ],
+      options: { temperature: 0.1, num_predict: 1500 },
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+
+  if (!response.ok) throw new Error(`Ollama error ${response.status}`);
+
+  const data = await response.json() as { message?: { content?: string } };
+  const raw = data.message?.content ?? "";
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return {};
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const result: Record<string, string> = {};
+    for (const s of strings) {
+      if (typeof parsed[s] === "string" && parsed[s].trim()) {
+        result[s] = parsed[s].trim();
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
 }
 
 /**

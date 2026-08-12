@@ -19,6 +19,53 @@ interface SyncStatus {
   peers?: SyncPeer[];
 }
 
+interface SyncSummary {
+  categories: number; tools: number; techniques: number; tags: number;
+  ingredients: number; recipes: number; collections: number;
+  conflicts: string[];
+}
+
+const SYNC_SUMMARY_LABELS: Record<keyof Omit<SyncSummary, 'conflicts'>, string> = {
+  categories: 'categories', tools: 'tools', techniques: 'techniques', tags: 'tags',
+  ingredients: 'ingredients', recipes: 'recipes', collections: 'collections',
+};
+
+function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
+  const changes = (Object.keys(SYNC_SUMMARY_LABELS) as Array<keyof typeof SYNC_SUMMARY_LABELS>)
+    .map((key) => ({ key, count: summary[key], label: SYNC_SUMMARY_LABELS[key] }))
+    .filter((c) => c.count > 0);
+
+  return (
+    <div className="mt-4 p-4 bg-zinc-50 rounded-2xl space-y-2">
+      {changes.length === 0 && summary.conflicts.length === 0 ? (
+        <p className="text-xs text-zinc-400 font-medium">Nothing changed — already up to date.</p>
+      ) : (
+        <>
+          {changes.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {changes.map((c) => (
+                <span key={c.key} className="px-2.5 py-1 bg-white border border-zinc-200 rounded-lg text-[11px] font-bold text-zinc-600">
+                  {c.count} {c.label}
+                </span>
+              ))}
+            </div>
+          )}
+          {summary.conflicts.length > 0 && (
+            <div className="space-y-1 pt-1">
+              {summary.conflicts.map((msg, i) => (
+                <p key={i} className="text-[11px] text-amber-700 leading-snug flex items-start gap-1.5">
+                  <span className="material-symbols-outlined text-[13px] shrink-0 mt-px">warning</span>
+                  {msg}
+                </p>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function formatRelativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
@@ -33,6 +80,7 @@ function SyncCard() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastSummary, setLastSummary] = useState<SyncSummary | null>(null);
 
   const fetchStatus = async () => {
     try {
@@ -53,6 +101,7 @@ function SyncCard() {
       const res = await apiFetch('/api/sync-folder/sync-now', { method: 'POST' });
       const json = await res.json();
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Sync failed');
+      setLastSummary(json.data.imported);
       await fetchStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
@@ -118,8 +167,118 @@ function SyncCard() {
             <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
             {syncing ? 'Syncing…' : 'Sync Now'}
           </button>
+          {lastSummary && <SyncSummaryPanel summary={lastSummary} />}
         </div>
       )}
+    </div>
+  );
+}
+
+function BackupCard() {
+  const [exporting, setExporting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastSummary, setLastSummary] = useState<SyncSummary | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleExport = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/backup/export');
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Export failed');
+      const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `smartchef-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleRestoreFile = async (file: File) => {
+    setRestoring(true);
+    setError(null);
+    setLastSummary(null);
+    try {
+      const text = await file.text();
+      let snapshot: unknown;
+      try {
+        snapshot = JSON.parse(text);
+      } catch {
+        throw new Error('That file is not valid JSON.');
+      }
+      const res = await apiFetch('/api/backup/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(snapshot),
+        timeoutMs: 60_000,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Restore failed');
+      setLastSummary(json.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Restore failed');
+    } finally {
+      setRestoring(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mt-8">
+      <div className="mb-6">
+        <h2 className="text-lg font-black text-zinc-900">Backup &amp; Restore</h2>
+        <p className="text-sm text-zinc-400 font-medium mt-1">
+          Download your whole library as a single file — save it wherever you like, including a
+          cloud-synced folder. Restoring merges it back in (newest wins per item), it won't wipe
+          anything.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-4">
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+        >
+          <span className={`material-symbols-outlined text-lg ${exporting ? 'animate-spin' : ''}`}>
+            {exporting ? 'sync' : 'download'}
+          </span>
+          {exporting ? 'Exporting…' : 'Export Backup'}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={restoring}
+          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-700 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+        >
+          <span className={`material-symbols-outlined text-lg ${restoring ? 'animate-spin' : ''}`}>
+            {restoring ? 'sync' : 'upload_file'}
+          </span>
+          {restoring ? 'Restoring…' : 'Restore from Backup'}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleRestoreFile(f); }}
+        />
+      </div>
+
+      {error && <p className="mt-4 text-sm text-red-600 font-medium">{error}</p>}
+      {lastSummary && <SyncSummaryPanel summary={lastSummary} />}
     </div>
   );
 }
@@ -226,6 +385,7 @@ export default function Account() {
           </div>
         </form>
 
+        <BackupCard />
         <SyncCard />
       </div>
     </AppLayout>

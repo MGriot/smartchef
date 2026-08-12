@@ -122,8 +122,38 @@ async function tryServeFromCache(path: string): Promise<Response | null> {
   return null;
 }
 
-/** Drop-in replacement for `fetch(path, init)` against `/api/...` paths. */
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+// Top-level create endpoints that support offline queuing with an
+// optimistic cache entry. Shapes match the camelCase snapshot format the
+// cache already stores (see folder-sync.service.ts's Snapshot* interfaces
+// server-side) — not the snake_case shape GET /api/... returns online —
+// since that's what tryServeFromCache() above serves back while offline.
+const OFFLINE_CREATABLE_ENTITIES: Record<string, { entityType: import('./offlineStore').EntityType; toCacheRecord: (body: any) => any }> = {
+  recipes: {
+    entityType: 'recipes',
+    toCacheRecord: (b) => ({
+      id: b.id, title: b.title, description: b.description ?? null,
+      coverImageUrl: b.coverImageUrl ?? null, prepTimeMin: b.prepTimeMin ?? null,
+      cookTimeMin: b.cookTimeMin ?? null, restTimeMin: b.restTimeMin ?? null,
+      difficulty: b.difficulty ?? 'medium', rating: b.rating ?? null, timesCooked: 0,
+      tags: b.tags ?? [], isComponent: b.isComponent ?? false,
+      updatedAt: new Date().toISOString(), deletedAt: null,
+    }),
+  },
+  ingredients: {
+    entityType: 'ingredients',
+    toCacheRecord: (b) => ({
+      id: b.id, name: b.name, categoryId: b.categoryId ?? null, description: b.description ?? null,
+      icon: b.icon ?? null, imageUrls: b.imageUrls ?? [],
+      updatedAt: new Date().toISOString(), deletedAt: null,
+    }),
+  },
+};
+
+/** Drop-in replacement for `fetch(path, init)` against `/api/...` paths.
+ *  `timeoutMs` (native only) overrides the default 10s abort — pass a much
+ *  larger value for slow endpoints (e.g. LLM recipe parsing, which the
+ *  backend itself allows up to 10 minutes for). */
+export async function apiFetch(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
   if (!isNative()) {
     return fetch(path, init);
   }
@@ -132,9 +162,10 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     throw new Error('No server configured — connect to your SmartChef server first.');
   }
 
-  const method = (init?.method ?? 'GET').toUpperCase();
+  const { timeoutMs = 10_000, ...fetchInit } = init ?? {};
+  const method = (fetchInit.method ?? 'GET').toUpperCase();
   try {
-    return await fetch(`${base}${path}`, { ...init, credentials: 'include', signal: AbortSignal.timeout(10_000) });
+    return await fetch(`${base}${path}`, { ...fetchInit, credentials: 'include', signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     if (method === 'GET') {
       const cached = await tryServeFromCache(path);
@@ -144,8 +175,26 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     // Not a GET — queue it instead of losing the edit. Applied optimistically
     // by the caller (pages already update their own local state on submit);
     // this just makes sure it eventually reaches the server too.
-    const { queueOperation } = await import('./offlineStore');
-    await queueOperation(method, path, init?.body ? JSON.parse(init.body as string) : undefined);
-    return jsonResponse({ data: { queuedOffline: true } }, 202);
+    const { queueOperation, upsertCachedEntity } = await import('./offlineStore');
+    const body = fetchInit.body ? JSON.parse(fetchInit.body as string) : undefined;
+
+    // A top-level POST (creating a new recipe/ingredient, not e.g.
+    // POST /recipes/:id/cooked) needs a real id handed back immediately —
+    // callers navigate to /recipe/:id right after create — so generate one
+    // client-side, both for the queued request (the backend accepts an
+    // optional client-supplied id) and for an optimistic cache entry so the
+    // new item shows up in list views before the outbox even replays.
+    if (method === 'POST' && body && !body.id) {
+      const [pathname] = path.split('?');
+      const segments = pathname.replace(/^\/api\//, '').split('/');
+      const creatable = segments.length === 1 ? OFFLINE_CREATABLE_ENTITIES[segments[0]] : undefined;
+      if (creatable) {
+        body.id = crypto.randomUUID();
+        await upsertCachedEntity(creatable.entityType, creatable.toCacheRecord(body));
+      }
+    }
+
+    await queueOperation(method, path, body);
+    return jsonResponse({ data: { id: body?.id, queuedOffline: true } }, 202);
   }
 }

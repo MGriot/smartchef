@@ -175,6 +175,9 @@ const NutritionFieldsSchema = {
 };
 
 const IngredientSchema = z.object({
+  // Optional client-supplied id — see the identical field on
+  // CreateRecipeSchema in recipes.ts for why (native offline-create outbox).
+  id: z.string().uuid().optional(),
   name: z.string().min(1),
   categoryId: z.string().uuid(),
   description: z.string().optional().nullable(),
@@ -204,7 +207,7 @@ ingredientsRouter.post("/", async (req: Request, res: Response) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const d = parsed.data;
-  const id = uuidv4();
+  const id = d.id ?? uuidv4();
   await query(
     `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
        calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg)

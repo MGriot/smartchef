@@ -104,10 +104,10 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           </select>
           <Link
             to="/account"
-            title={account?.name ?? 'Account'}
+            title={account?.name ?? t('common.account')}
             className="w-8 h-8 rounded-full bg-zinc-200 border-2 border-white shadow-sm overflow-hidden shrink-0 hover:ring-2 hover:ring-primary/30 transition-all"
           >
-            <img src={account?.avatarUrl || DEFAULT_AVATAR} alt={account?.name ?? 'Account'} className="w-full h-full object-cover" />
+            <img src={account?.avatarUrl || DEFAULT_AVATAR} alt={account?.name ?? t('common.account')} className="w-full h-full object-cover" />
           </Link>
         </div>
       </header>
@@ -116,8 +116,8 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
         {librarySection && (
           <aside className="w-[280px] bg-white border-r border-zinc-100 flex flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
             <div className="mb-8 p-2">
-              <h2 className="text-lg font-black text-primary leading-tight">Management</h2>
-              <p className="text-[10px] font-bold text-zinc-400 tracking-[0.2em] uppercase">Kitchen Essentials</p>
+              <h2 className="text-lg font-black text-primary leading-tight">{t('library.management')}</h2>
+              <p className="text-[10px] font-bold text-zinc-400 tracking-[0.2em] uppercase">{t('library.kitchenEssentials')}</p>
             </div>
             <nav className="space-y-1">
               <LibraryLink to="/library/ingredients" icon="restaurant" label={t('nav.ingredients')} active={librarySection === 'ingredients'} />
