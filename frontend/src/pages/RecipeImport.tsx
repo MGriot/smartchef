@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
@@ -28,27 +29,9 @@ interface ParsedStep {
   durationMin?: number;
 }
 
-const RAW_TEXT_TEMPLATE = `Title:
-Description:
-Servings:
-Prep time: [e.g. 20 minutes]
-Cook time: [e.g. 45 minutes]
-Difficulty: [easy / medium / hard / expert]
-Tags: [comma-separated, e.g. vegetarian, quick, italian]
-
-Ingredients:
-- [quantity] [unit] [ingredient name] ([optional note, e.g. "finely chopped"])
-- 200 g flour
-- 2 eggs
-- 1 tsp salt
-
-Steps:
-1. [First step]
-2. [Second step]
-3. `;
-
 interface RecipeMatchResult {
   title: string;
+  language?: string;
   description?: string;
   servings: number;
   prepTimeMin?: number;
@@ -72,8 +55,10 @@ interface BundleImportResult {
 }
 
 export default function RecipeImport() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const contentLang = useStore((s) => s.contentLang);
+  const RAW_TEXT_TEMPLATE = t('import.rawTextTemplate');
   const [sourceType, setSourceType] = useState<'url' | 'text' | 'file'>('url');
   const [inputVal, setInputVal] = useState('');
   const [parsing, setParsing] = useState(false);
@@ -81,10 +66,42 @@ export default function RecipeImport() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RecipeMatchResult | null>(null);
   const [templateCopied, setTemplateCopied] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importingFile, setImportingFile] = useState(false);
   const [fileResult, setFileResult] = useState<BundleImportResult | null>(null);
+
+  // No real token-level progress signal is available without streaming the
+  // LLM response over the wire, so this is honest indeterminate feedback:
+  // an animated bar that eases toward ~90% (never claims to be "done" before
+  // it actually is) plus an elapsed-time counter and rotating status text,
+  // so a multi-minute CPU-inference wait doesn't look like a stalled spinner.
+  useEffect(() => {
+    if (!parsing) { setElapsedMs(0); return; }
+    const start = Date.now();
+    const interval = setInterval(() => setElapsedMs(Date.now() - start), 250);
+    return () => clearInterval(interval);
+  }, [parsing]);
+
+  const PARSE_STATUS_MESSAGES = [
+    t('import.status1'),
+    t('import.status2'),
+    t('import.status3'),
+    t('import.status4'),
+    t('import.status5'),
+    t('import.status6'),
+  ];
+  const elapsedSec = elapsedMs / 1000;
+  const parseProgressPct = Math.min(90, 90 * (1 - Math.exp(-elapsedSec / 45)));
+  const parseStatusText = PARSE_STATUS_MESSAGES[Math.min(
+    Math.floor(elapsedSec / 4),
+    PARSE_STATUS_MESSAGES.length - 1
+  )];
+  const formatElapsed = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  };
 
   const useTemplate = () => {
     setSourceType('text');
@@ -109,12 +126,16 @@ export default function RecipeImport() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: inputVal, inputType: sourceType }),
+        // LLM parsing on CPU-only inference can take minutes — well above
+        // apiFetch's default 10s native timeout. Backend itself allows up
+        // to 600s for the Ollama call; stay just above that.
+        timeoutMs: 650_000,
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Import failed');
+      if (!res.ok) throw new Error(json.error || t('import.importFailed'));
       setResult(json.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Import failed');
+      setError(err instanceof Error ? err.message : t('import.importFailed'));
     } finally {
       setParsing(false);
     }
@@ -135,11 +156,13 @@ export default function RecipeImport() {
         restTimeMin: result.restTimeMin || undefined,
         tags: result.tags || [],
         sourceUrl: result.sourceUrl || undefined,
-        sources: result.sourceUrl ? [{ type: 'url', label: 'Original recipe', url: result.sourceUrl }] : [],
+        sources: result.sourceUrl ? [{ type: 'url', label: t('import.originalRecipe'), url: result.sourceUrl }] : [],
         isComponent: false,
-        // Best-effort default (the parser doesn't detect source language) —
-        // the editor the user lands on right after creation makes this easy to fix.
-        languageCode: contentLang || undefined,
+        // Prefer the LLM's own language detection over the current UI
+        // language — someone browsing in English can still paste an
+        // Italian URL, and the ingredient/tag data was already localized
+        // against the detected language during matching.
+        languageCode: result.language || contentLang || undefined,
         ingredients: result.matchedIngredients.map((ing, i) => ({
           sortOrder: i,
           ingredientId: ing.ingredientId,
@@ -165,10 +188,10 @@ export default function RecipeImport() {
         body: JSON.stringify(payload),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(JSON.stringify(json.error || 'Failed to create recipe'));
+      if (!res.ok) throw new Error(JSON.stringify(json.error || t('import.failedToCreateRecipe')));
       navigate(`/recipe/${json.data.id}?mode=edit`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create recipe');
+      setError(err instanceof Error ? err.message : t('import.failedToCreateRecipe'));
     } finally {
       setCreating(false);
     }
@@ -185,18 +208,19 @@ export default function RecipeImport() {
       try {
         bundle = JSON.parse(text);
       } catch {
-        throw new Error('That file is not valid JSON.');
+        throw new Error(t('import.notValidJson'));
       }
       const res = await apiFetch('/api/share/recipes/import-bundle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bundle),
+        timeoutMs: 120_000,
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : 'Import failed');
+      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('import.importFailed'));
       setFileResult(json.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Import failed');
+      setError(err instanceof Error ? err.message : t('import.importFailed'));
     } finally {
       setImportingFile(false);
     }
@@ -206,9 +230,9 @@ export default function RecipeImport() {
     <AppLayout>
       <div className="p-12 max-w-6xl mx-auto">
           <div className="mb-12">
-            <h1 className="text-6xl font-black text-zinc-900 tracking-tighter mb-4">Smart Import</h1>
+            <h1 className="text-6xl font-black text-zinc-900 tracking-tighter mb-4">{t('import.title')}</h1>
             <p className="text-zinc-500 text-lg max-w-xl leading-relaxed">
-              Paste a link or raw recipe notes. Our Culinary AI will transform it into a perfectly formatted masterpiece.
+              {t('import.subtitle')}
             </p>
           </div>
 
@@ -217,32 +241,32 @@ export default function RecipeImport() {
             <div className="col-span-12 lg:col-span-7">
               <div className="bg-white rounded-[40px] shadow-sm border border-zinc-100 overflow-hidden">
                 <div className="p-8 border-b border-zinc-50 flex justify-between items-center">
-                   <h3 className="text-[10px] font-black text-primary tracking-[0.2em] uppercase">Source Material</h3>
+                   <h3 className="text-[10px] font-black text-primary tracking-[0.2em] uppercase">{t('import.sourceMaterial')}</h3>
                    <div className="flex bg-zinc-100 p-1 rounded-xl">
                       <button
                         onClick={() => setSourceType('url')}
                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'url' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400'}`}
-                      >URL</button>
+                      >{t('import.url')}</button>
                       <button
                          onClick={() => setSourceType('text')}
                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'text' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400'}`}
-                      >Raw Text</button>
+                      >{t('import.rawText')}</button>
                       <button
                          onClick={() => setSourceType('file')}
                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'file' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400'}`}
-                      >Import File</button>
+                      >{t('import.importFileTab')}</button>
                    </div>
                 </div>
                 <div className="p-10">
                   {sourceType === 'file' ? (
                     <>
                       <p className="text-xs text-zinc-400 font-medium mb-4">
-                        Import a <code className="bg-zinc-100 rounded px-1.5 py-0.5">.smartchef.json</code> file exported from another SmartChef instance — a single recipe, a bulk export, or a whole collection. Ingredients and tools it needs are matched against your library or created automatically.
+                        {t('import.fileHintPrefix')} <code className="bg-zinc-100 rounded px-1.5 py-0.5">.smartchef.json</code> {t('import.fileHintSuffix')}
                       </p>
                       <label className="flex flex-col items-center justify-center gap-3 w-full h-48 bg-zinc-50/50 rounded-3xl border-2 border-dashed border-zinc-200 cursor-pointer hover:border-primary/40 transition-colors">
                         <span className="material-symbols-outlined text-3xl text-zinc-300">upload_file</span>
                         <span className="text-sm font-bold text-zinc-500">
-                          {selectedFile ? selectedFile.name : 'Choose a .smartchef.json file'}
+                          {selectedFile ? selectedFile.name : t('import.chooseFile')}
                         </span>
                         <input
                           type="file"
@@ -259,7 +283,7 @@ export default function RecipeImport() {
                         <span className={`material-symbols-outlined ${importingFile ? 'animate-spin' : ''}`}>
                           {importingFile ? 'sync' : 'file_upload'}
                         </span>
-                        {importingFile ? 'Importing…' : 'Import File'}
+                        {importingFile ? t('import.importing') : t('import.importFileTab')}
                       </button>
                       {error && (
                         <div className="mt-4 px-5 py-4 bg-red-50 border border-red-100 rounded-2xl text-sm text-red-600 font-medium">
@@ -271,19 +295,19 @@ export default function RecipeImport() {
                           <div className="flex items-center gap-2 mb-4 text-primary">
                             <span className="material-symbols-outlined">check_circle</span>
                             <p className="font-black">
-                              {fileResult.recipeIds.length} recipe{fileResult.recipeIds.length === 1 ? '' : 's'} imported
+                              {t('import.recipesImported', { count: fileResult.recipeIds.length })}
                             </p>
                           </div>
                           {fileResult.matchedIngredients.length > 0 && (
                             <>
                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
-                                Ingredients ({fileResult.matchedIngredients.length})
+                                {t('import.ingredientsCount', { count: fileResult.matchedIngredients.length })}
                               </p>
                               <div className="flex flex-wrap gap-2 mb-4">
                                 {fileResult.matchedIngredients.map((ing, i) => (
                                   <span
                                     key={i}
-                                    title={ing.isNew ? 'New ingredient created' : `Matched (${Math.round(ing.confidence * 100)}%)`}
+                                    title={ing.isNew ? t('import.newIngredientCreated') : t('import.matchedPercent', { percent: Math.round(ing.confidence * 100) })}
                                     className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${ing.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'}`}
                                   >
                                     {ing.isNew && <span className="material-symbols-outlined text-[12px]">fiber_new</span>}
@@ -296,13 +320,13 @@ export default function RecipeImport() {
                           {fileResult.matchedTools.length > 0 && (
                             <>
                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
-                                Tools ({fileResult.matchedTools.length})
+                                {t('import.toolsCount', { count: fileResult.matchedTools.length })}
                               </p>
                               <div className="flex flex-wrap gap-2 mb-4">
                                 {fileResult.matchedTools.map((tool, i) => (
                                   <span
                                     key={i}
-                                    title={tool.isNew ? 'New tool created' : 'Matched to existing tool'}
+                                    title={tool.isNew ? t('import.newToolCreated') : t('import.matchedToExistingTool')}
                                     className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${tool.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'}`}
                                   >
                                     {tool.isNew && <span className="material-symbols-outlined text-[12px]">fiber_new</span>}
@@ -323,7 +347,7 @@ export default function RecipeImport() {
                             onClick={() => navigate(fileResult.recipeIds.length === 1 ? `/recipe/${fileResult.recipeIds[0]}?mode=edit` : '/')}
                             className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]"
                           >
-                            {fileResult.recipeIds.length === 1 ? 'Review Recipe' : 'Go to Gallery'}
+                            {fileResult.recipeIds.length === 1 ? t('import.reviewRecipe') : t('import.goToGallery')}
                           </button>
                         </div>
                       )}
@@ -340,7 +364,7 @@ export default function RecipeImport() {
                     <>
                       <div className="flex items-center justify-between mb-3">
                         <p className="text-xs text-zinc-400 font-medium">
-                          Not sure how to format it? Use the template — fill it in here, or copy it out to write the recipe elsewhere and paste it back later.
+                          {t('import.notSureFormat')}
                         </p>
                         <div className="flex gap-2 shrink-0 ml-4">
                           <button
@@ -349,7 +373,7 @@ export default function RecipeImport() {
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-100 text-zinc-600 text-[11px] font-bold hover:bg-zinc-200 transition-colors whitespace-nowrap"
                           >
                             <span className="material-symbols-outlined text-[14px]">{templateCopied ? 'check' : 'content_copy'}</span>
-                            {templateCopied ? 'Copied' : 'Copy Template'}
+                            {templateCopied ? t('import.copied') : t('import.copyTemplate')}
                           </button>
                           <button
                             type="button"
@@ -357,14 +381,14 @@ export default function RecipeImport() {
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 text-white text-[11px] font-bold hover:bg-zinc-800 transition-colors whitespace-nowrap"
                           >
                             <span className="material-symbols-outlined text-[14px]">description</span>
-                            Use Template
+                            {t('import.useTemplate')}
                           </button>
                         </div>
                       </div>
                       <textarea
                         value={inputVal}
                         onChange={(e) => setInputVal(e.target.value)}
-                        placeholder={"Mom's Famous Lasagna\nPrep time: 20 mins, Cook: 45 mins.\nServes 6.\n\nIngredients:\n- 1 lb ground beef..."}
+                        placeholder={t('import.rawTextPlaceholder')}
                         className="w-full h-80 bg-zinc-50/50 rounded-3xl border-none focus:ring-2 focus:ring-primary/10 text-zinc-700 font-medium leading-relaxed resize-none p-6 hide-scrollbar"
                       />
                     </>
@@ -379,7 +403,7 @@ export default function RecipeImport() {
                         <span className={`material-symbols-outlined ${parsing ? 'animate-spin' : ''}`}>
                           {parsing ? 'settings' : 'auto_fix_high'}
                         </span>
-                        {parsing ? 'Analyzing Recipe...' : 'Start AI Transformation'}
+                        {parsing ? t('import.analyzingRecipe') : t('import.startAiTransformation')}
                       </button>
                       {error && (
                         <div className="mt-4 px-5 py-4 bg-red-50 border border-red-100 rounded-2xl text-sm text-red-600 font-medium">
@@ -397,7 +421,7 @@ export default function RecipeImport() {
                {!result && !parsing && (
                  <div className="bg-white rounded-[40px] p-8 shadow-sm border border-zinc-100 text-center">
                     <span className="material-symbols-outlined text-4xl text-zinc-300 mb-3">auto_fix_high</span>
-                    <p className="text-sm text-zinc-400 font-medium">Paste a recipe URL or raw text and start the transformation to see a preview here.</p>
+                    <p className="text-sm text-zinc-400 font-medium">{t('import.pasteToPreview')}</p>
                  </div>
                )}
 
@@ -408,9 +432,16 @@ export default function RecipeImport() {
                           <span className="material-symbols-outlined text-primary text-3xl animate-pulse">model_training</span>
                           <div className="absolute inset-0 rounded-full border-2 border-primary/20 animate-ping"></div>
                        </div>
-                       <h3 className="text-2xl font-black text-zinc-900 mb-2">Culinary AI Active</h3>
-                       <p className="text-primary font-bold text-xs tracking-tight">Fetching, analyzing ingredients & mapping steps...</p>
-                       <p className="text-zinc-400 text-[11px] mt-2">This runs on a local model with no GPU acceleration — it can take several minutes.</p>
+                       <h3 className="text-2xl font-black text-zinc-900 mb-2">{t('import.culinaryAiActive')}</h3>
+                       <p className="text-primary font-bold text-xs tracking-tight">{parseStatusText}</p>
+                       <div className="w-full h-1.5 bg-zinc-100 rounded-full mt-5 overflow-hidden">
+                         <div
+                           className="h-full bg-gradient-to-r from-primary to-primary-container rounded-full transition-all duration-500 ease-out"
+                           style={{ width: `${parseProgressPct}%` }}
+                         />
+                       </div>
+                       <p className="text-zinc-400 text-[11px] mt-3 font-bold tabular-nums">{t('import.elapsed', { time: formatElapsed(elapsedMs) })}</p>
+                       <p className="text-zinc-400 text-[11px] mt-2">{t('import.localModelNote')}</p>
                     </div>
                  </div>
                )}
@@ -418,38 +449,38 @@ export default function RecipeImport() {
                {result && (
                  <div className="bg-white rounded-[40px] overflow-hidden shadow-xl shadow-zinc-200/50 border border-zinc-100">
                     <div className="p-8">
-                       <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Preview</p>
+                       <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('import.preview')}</p>
                        <h4 className="text-2xl font-black text-zinc-900 leading-tight mb-6">{result.title}</h4>
                        <div className="flex gap-8 mb-6">
                           <div>
-                             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Servings</p>
-                             <p className="text-sm font-black text-zinc-900 tracking-tight">{result.servings} People</p>
+                             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('recipeDetail.servings')}</p>
+                             <p className="text-sm font-black text-zinc-900 tracking-tight">{t('import.peopleCount', { count: result.servings })}</p>
                           </div>
                           {result.prepTimeMin && (
                             <div>
-                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Prep Time</p>
-                               <p className="text-sm font-black text-zinc-900 tracking-tight">{result.prepTimeMin} Mins</p>
+                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('recipeDetail.prepTime')}</p>
+                               <p className="text-sm font-black text-zinc-900 tracking-tight">{t('import.minsCount', { count: result.prepTimeMin })}</p>
                             </div>
                           )}
                           {result.restTimeMin && (
                             <div>
-                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Waiting Time</p>
-                               <p className="text-sm font-black text-zinc-900 tracking-tight">{result.restTimeMin} Mins</p>
+                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('recipeDetail.waitingTime')}</p>
+                               <p className="text-sm font-black text-zinc-900 tracking-tight">{t('import.minsCount', { count: result.restTimeMin })}</p>
                             </div>
                           )}
                           <div>
-                             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Confidence</p>
+                             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('import.confidence')}</p>
                              <p className="text-sm font-black text-zinc-900 tracking-tight">{Math.round(result.overallConfidence * 100)}%</p>
                           </div>
                        </div>
                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">
-                         Ingredients ({result.matchedIngredients.length}) &middot; {result.steps.length} steps
+                         {t('import.ingredientsAndSteps', { ingCount: result.matchedIngredients.length, stepCount: result.steps.length })}
                        </p>
                        <div className="flex flex-wrap gap-2 mb-6">
                           {result.matchedIngredients.map((ing, i) => (
                              <span
                                 key={i}
-                                title={ing.isNew ? 'New ingredient created' : `Matched (${Math.round(ing.confidence * 100)}%)`}
+                                title={ing.isNew ? t('import.newIngredientCreated') : t('import.matchedPercent', { percent: Math.round(ing.confidence * 100) })}
                                 className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${ing.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'}`}
                              >
                                 {ing.isNew && <span className="material-symbols-outlined text-[12px]">fiber_new</span>}
@@ -460,13 +491,13 @@ export default function RecipeImport() {
                        {result.matchedTools.length > 0 && (
                          <>
                            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">
-                             Tools ({result.matchedTools.length})
+                             {t('import.toolsCount', { count: result.matchedTools.length })}
                            </p>
                            <div className="flex flex-wrap gap-2 mb-6">
                               {result.matchedTools.map((tool, i) => (
                                  <span
                                     key={i}
-                                    title={tool.isNew ? 'New tool created' : 'Matched to existing tool'}
+                                    title={tool.isNew ? t('import.newToolCreated') : t('import.matchedToExistingTool')}
                                     className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${tool.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'}`}
                                  >
                                     {tool.isNew && <span className="material-symbols-outlined text-[12px]">fiber_new</span>}
@@ -489,7 +520,7 @@ export default function RecipeImport() {
                          className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
                        >
                          <span className="material-symbols-outlined text-lg">{creating ? 'sync' : 'check'}</span>
-                         {creating ? 'Creating…' : 'Create & Review Recipe'}
+                         {creating ? t('recipeCreate.creating') : t('import.createAndReview')}
                        </button>
                     </div>
                  </div>

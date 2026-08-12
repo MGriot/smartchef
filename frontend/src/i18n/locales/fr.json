@@ -1,0 +1,25 @@
+{
+  "nav": {
+    "gallery": "Galerie",
+    "planner": "Planificateur",
+    "shoppingList": "Liste de Courses",
+    "import": "Importer",
+    "ingredients": "Ingrédients",
+    "tools": "Ustensiles",
+    "units": "Unités",
+    "techniques": "Techniques",
+    "tags": "Étiquettes",
+    "library": "Bibliothèque",
+    "search": "Rechercher",
+    "createRecipe": "Créer une Recette"
+  },
+  "common": {
+    "cancel": "Annuler",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "add": "Ajouter",
+    "loading": "Chargement…",
+    "language": "Langue"
+  }
+}

@@ -74,6 +74,25 @@ export async function getCachedEntities<T = any>(entityType: EntityType): Promis
   return JSON.parse(row.data);
 }
 
+/** Inserts or replaces (by `id`) a single record within a cached entity
+ *  list — used to optimistically show something created while offline
+ *  (e.g. a new recipe) immediately in list views, without waiting for the
+ *  next full snapshot pull on reconnect (which still happens and replaces
+ *  this with the authoritative row). */
+export async function upsertCachedEntity(entityType: EntityType, record: { id: string } & Record<string, unknown>): Promise<void> {
+  const existing = await getCachedEntities(entityType);
+  const idx = existing.findIndex((e: any) => e.id === record.id);
+  if (idx >= 0) existing[idx] = { ...existing[idx], ...record };
+  else existing.push(record);
+
+  const db = await getDb();
+  await db.run(
+    `INSERT INTO snapshot_cache (entity_type, data, cached_at) VALUES (?, ?, ?)
+     ON CONFLICT(entity_type) DO UPDATE SET data=excluded.data, cached_at=excluded.cached_at`,
+    [entityType, JSON.stringify(existing), new Date().toISOString()]
+  );
+}
+
 export async function getCacheTimestamp(): Promise<string | null> {
   const db = await getDb();
   const result = await db.query('SELECT cached_at FROM snapshot_cache ORDER BY cached_at DESC LIMIT 1');

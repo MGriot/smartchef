@@ -17,6 +17,11 @@ export const recipeRouter = Router();
 
 // ── Validazione ────────────────────────────────────────────────────────
 
+const IngredientNoteTranslationSchema = z.object({
+  lang: z.string(),
+  notes: z.string().optional().nullable(),
+});
+
 const RecipeIngredientSchema = z.object({
   sortOrder: z.number().int().default(0),
   ingredientId: z.string().uuid().optional(),
@@ -27,6 +32,7 @@ const RecipeIngredientSchema = z.object({
   unitId: z.string().uuid().optional(),
   notes: z.string().optional(),
   isOptional: z.boolean().default(false),
+  translations: z.array(IngredientNoteTranslationSchema).optional(),
 }).refine(d => d.ingredientId || d.subRecipeId, {
   message: "Deve essere presente ingredientId o subRecipeId",
 });
@@ -43,6 +49,7 @@ const TranslationSchema = z.object({
   lang: z.string(),
   title: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
 });
 
 const StepIngredientRefSchema = z.object({
@@ -68,6 +75,11 @@ const RecipeStepSchema = z.object({
 });
 
 const CreateRecipeSchema = z.object({
+  // Optional client-supplied id — lets a native client that queued this
+  // create while offline hand back a stable id immediately (used by the
+  // offline outbox in frontend/src/lib/api.ts) instead of only finding out
+  // the real id once the queued request actually replays.
+  id: z.string().uuid().optional(),
   title: z.string().min(1).max(200),
   description: z.string().optional().nullable(),
   difficulty: z.enum(["easy","medium","hard","expert"]).default("medium"),
@@ -103,10 +115,21 @@ async function upsertRecipeTranslations(client: PoolClient, recipeId: string, tr
 async function insertStepTranslations(client: PoolClient, stepId: string, translations?: Array<z.infer<typeof TranslationSchema>>) {
   if (!translations) return;
   for (const t of translations) {
-    if (!t.lang || (!t.title && !t.description)) continue;
+    if (!t.lang || (!t.title && !t.description && !t.notes)) continue;
     await client.query(
-      `INSERT INTO recipe_step_translations (step_id, language_code, title, description) VALUES ($1, $2, $3, $4)`,
-      [stepId, t.lang, t.title || null, t.description || null]
+      `INSERT INTO recipe_step_translations (step_id, language_code, title, description, notes) VALUES ($1, $2, $3, $4, $5)`,
+      [stepId, t.lang, t.title || null, t.description || null, t.notes || null]
+    );
+  }
+}
+
+async function insertIngredientTranslations(client: PoolClient, recipeIngredientId: string, translations?: Array<z.infer<typeof IngredientNoteTranslationSchema>>) {
+  if (!translations) return;
+  for (const t of translations) {
+    if (!t.lang || !t.notes) continue;
+    await client.query(
+      `INSERT INTO recipe_ingredient_translations (recipe_ingredient_id, language_code, notes) VALUES ($1, $2, $3)`,
+      [recipeIngredientId, t.lang, t.notes]
     );
   }
 }
@@ -224,16 +247,20 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
   let translatedCols = "NULL AS translated_title, NULL AS translated_description";
   let stepTranslatedTitle = "NULL";
   let stepTranslatedDescription = "NULL";
+  let stepTranslatedNotes = "NULL";
   let toolTranslatedName = "NULL";
   let ingredientNameCol = "i.name";
+  let ingredientTranslatedNotes = "NULL";
   if (lang) {
     params.push(lang);
     langJoin = `LEFT JOIN recipe_translations rct ON rct.recipe_id = r.id AND rct.language_code = $2`;
     translatedCols = "rct.title AS translated_title, rct.description AS translated_description";
     stepTranslatedTitle = "rst.title";
     stepTranslatedDescription = "rst.description";
+    stepTranslatedNotes = "rst.notes";
     toolTranslatedName = "tt.name";
     ingredientNameCol = "COALESCE(it_lang.translated_name, i.name)";
+    ingredientTranslatedNotes = "rit_lang.notes";
   }
 
   const recipe = await queryOne(
@@ -264,20 +291,27 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'quantityText', ri.quantity_text,
               'unitSymbol', u.symbol, 'unitId', ri.unit_id,
               'isOptional', ri.is_optional,
-              'notes', ri.notes
+              'notes', ri.notes,
+              'translatedNotes', ${ingredientTranslatedNotes},
+              'translations', COALESCE(
+                (SELECT json_agg(json_build_object('lang', rit2.language_code, 'notes', rit2.notes))
+                 FROM recipe_ingredient_translations rit2 WHERE rit2.recipe_ingredient_id = ri.id),
+                '[]'::json
+              )
             )) FILTER (WHERE ri.id IS NOT NULL), '[]'::json) AS ingredients,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'id', rs.id, 'stepNumber', rs.step_number,
               'title', rs.title, 'description', rs.description,
               'translatedTitle', ${stepTranslatedTitle},
               'translatedDescription', ${stepTranslatedDescription},
+              'translatedNotes', ${stepTranslatedNotes},
               'durationMin', rs.duration_min,
               'toolIds', rs.tool_ids,
               'notes', rs.notes,
               'imageUrl', rs.image_url,
               'stepIngredients', rs.step_ingredients,
               'translations', COALESCE(
-                (SELECT json_agg(json_build_object('lang', rst2.language_code, 'title', rst2.title, 'description', rst2.description))
+                (SELECT json_agg(json_build_object('lang', rst2.language_code, 'title', rst2.title, 'description', rst2.description, 'notes', rst2.notes))
                  FROM recipe_step_translations rst2 WHERE rst2.step_id = rs.id),
                 '[]'::json
               )
@@ -290,6 +324,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
      LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
      LEFT JOIN ingredients i ON i.id = ri.ingredient_id
      ${lang ? "LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND it_lang.language_code = $2" : ""}
+     ${lang ? "LEFT JOIN recipe_ingredient_translations rit_lang ON rit_lang.recipe_ingredient_id = ri.id AND rit_lang.language_code = $2" : ""}
      LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
      LEFT JOIN units u ON u.id = ri.unit_id
      LEFT JOIN recipe_steps rs ON rs.recipe_id = r.id
@@ -317,7 +352,7 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
   }
 
   const d = parsed.data;
-  const recipeId = uuidv4();
+  const recipeId = d.id ?? uuidv4();
 
   try {
     await withTransaction(async (client) => {
@@ -331,15 +366,17 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
 
       // Inserisci ingredienti
       for (const ing of d.ingredients) {
+        const recipeIngredientId = uuidv4();
         await client.query(
           `INSERT INTO recipe_ingredients
              (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
               quantity,quantity_text,unit_id,notes,is_optional)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [uuidv4(),recipeId,ing.sortOrder,ing.ingredientId??null,
+          [recipeIngredientId,recipeId,ing.sortOrder,ing.ingredientId??null,
            ing.subtypeId??null,ing.subRecipeId??null,ing.quantity??null,
            ing.quantityText??null,ing.unitId??null,ing.notes??null,ing.isOptional]
         );
+        await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
       }
 
       // Inserisci step
@@ -477,18 +514,20 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
          d.languageCode ?? null]
       );
 
-      // Rimpiazza ingredienti (drop + reinsert)
+      // Rimpiazza ingredienti (drop + reinsert; recipe_ingredient_translations cascade with them)
       await client.query("DELETE FROM recipe_ingredients WHERE recipe_id=$1", [id]);
       for (const ing of d.ingredients) {
+        const recipeIngredientId = uuidv4();
         await client.query(
           `INSERT INTO recipe_ingredients
              (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
               quantity,quantity_text,unit_id,notes,is_optional)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [uuidv4(), id, ing.sortOrder, ing.ingredientId??null,
+          [recipeIngredientId, id, ing.sortOrder, ing.ingredientId??null,
            ing.subtypeId??null, ing.subRecipeId??null, ing.quantity??null,
            ing.quantityText??null, ing.unitId??null, ing.notes??null, ing.isOptional]
         );
+        await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
       }
 
       // Rimpiazza steps (drop + reinsert; recipe_step_translations cascade with them)

@@ -83,7 +83,7 @@ interface SnapshotRecipe {
   translations: Array<{ lang: string; title?: string | null; description?: string | null }>;
 }
 
-interface Snapshot {
+export interface Snapshot {
   formatVersion: number;
   deviceId: string;
   deviceName: string;
@@ -508,6 +508,17 @@ async function upsertCollection(client: PoolClient, c: SnapshotCollection): Prom
 export interface SyncSummary {
   categories: number; tools: number; techniques: number; tags: number;
   ingredients: number; recipes: number; collections: number;
+  // Human-readable notes on anything skipped this cycle — e.g. a row that
+  // collided (two devices independently creating an ingredient with the
+  // same name+category while offline from each other). Still no field-level
+  // conflict *resolution* UI (that needs the full CRDT retrofit noted as
+  // out of scope back when folder sync was built) — this is just visibility
+  // into what the automatic last-write-wins merge did.
+  conflicts: string[];
+}
+
+function emptySyncSummary(): SyncSummary {
+  return { categories: 0, tools: 0, techniques: 0, tags: 0, ingredients: 0, recipes: 0, collections: 0, conflicts: [] };
 }
 
 async function listPeerSnapshotFiles(): Promise<string[]> {
@@ -519,25 +530,19 @@ async function listPeerSnapshotFiles(): Promise<string[]> {
   }
 }
 
-export async function importFromPeers(): Promise<SyncSummary> {
-  const summary: SyncSummary = { categories: 0, tools: 0, techniques: 0, tags: 0, ingredients: 0, recipes: 0, collections: 0 };
-  const files = await listPeerSnapshotFiles();
+// Merges one snapshot (from a peer file, or an uploaded backup — same
+// shape either way) into the local DB, mutating `summary` in place with
+// per-entity counts and any conflict notes. Shared by importFromPeers()
+// (below) and the manual backup-restore route (backup.ts).
+export async function mergeSnapshot(snapshot: Snapshot, summary: SyncSummary, label: string): Promise<void> {
+  if (snapshot.formatVersion !== FORMAT_VERSION) {
+    const msg = `Skipped ${label} — unsupported format version ${snapshot.formatVersion}`;
+    console.warn(`⚠️ ${msg}`);
+    summary.conflicts.push(msg);
+    return;
+  }
 
-  for (const file of files) {
-    let snapshot: Snapshot;
-    try {
-      const raw = await fs.readFile(path.join(SYNC_FOLDER, file), "utf-8");
-      snapshot = JSON.parse(raw);
-    } catch (err) {
-      console.warn(`⚠️ Skipping unreadable sync file ${file}:`, (err as Error).message);
-      continue;
-    }
-    if (snapshot.formatVersion !== FORMAT_VERSION) {
-      console.warn(`⚠️ Skipping sync file ${file} — unsupported formatVersion ${snapshot.formatVersion}`);
-      continue;
-    }
-
-    try {
+  try {
     await withTransaction(async (client) => {
       for (const c of snapshot.categories) if (await upsertCategory(client, c)) summary.categories++;
       for (const i of snapshot.ingredients) if (await upsertIngredient(client, i)) summary.ingredients++;
@@ -565,15 +570,32 @@ export async function importFromPeers(): Promise<SyncSummary> {
 
       for (const c of snapshot.collections) if (await upsertCollection(client, c)) summary.collections++;
     });
+  } catch (err) {
+    // A single colliding row shouldn't block every other entity's merge —
+    // note it and move on. The colliding row will keep failing until one
+    // side renames/removes it.
+    const msg = `Skipped a conflicting item while merging ${label}: ${(err as Error).message}`;
+    console.warn(`⚠️ Folder sync: ${msg}`);
+    summary.conflicts.push(msg);
+  }
+}
+
+export async function importFromPeers(): Promise<SyncSummary> {
+  const summary = emptySyncSummary();
+  const files = await listPeerSnapshotFiles();
+
+  for (const file of files) {
+    let snapshot: Snapshot;
+    try {
+      const raw = await fs.readFile(path.join(SYNC_FOLDER, file), "utf-8");
+      snapshot = JSON.parse(raw);
     } catch (err) {
-      // A single colliding row (e.g. two devices independently creating an
-      // ingredient with the same name+category while offline from each
-      // other) shouldn't block every other peer's/entity's sync progress —
-      // log it and move on to the next file. The colliding row will keep
-      // failing until one side renames/removes it; that reconciliation UI
-      // is out of scope for this slice.
-      console.warn(`⚠️ Folder sync: failed to merge ${file}, skipping this cycle:`, (err as Error).message);
+      const msg = `Skipped unreadable sync file ${file}: ${(err as Error).message}`;
+      console.warn(`⚠️ ${msg}`);
+      summary.conflicts.push(msg);
+      continue;
     }
+    await mergeSnapshot(snapshot, summary, file);
   }
 
   return summary;

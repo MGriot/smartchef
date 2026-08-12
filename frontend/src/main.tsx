@@ -16,6 +16,20 @@ if (isNative()) {
     .catch(() => {});
 }
 
+// Since Capacitor 4, the native shell no longer auto-forwards the hardware/
+// gesture back button to WebView.goBack() — apps must handle it themselves
+// or it does nothing (or exits unpredictably). BrowserRouter already pushes
+// a real history entry per navigation, so history.back() correctly retraces
+// in-app navigation; only exits the app once there's nowhere left to go.
+if (isNative()) {
+  import("@capacitor/app").then(({ App: CapacitorApp }) => {
+    CapacitorApp.addListener("backButton", ({ canGoBack }) => {
+      if (canGoBack) window.history.back();
+      else CapacitorApp.exitApp();
+    });
+  }).catch(() => {});
+}
+
 // Force an immediate reload as soon as a new deployed version is detected,
 // instead of leaving the tab running stale cached JS until the user happens
 // to close and reopen it.
