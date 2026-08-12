@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
@@ -21,13 +21,13 @@ interface SyncStatus {
 
 interface SyncSummary {
   categories: number; tools: number; techniques: number; tags: number;
-  ingredients: number; recipes: number; collections: number;
+  ingredients: number; recipes: number;
   conflicts: string[];
 }
 
 const SYNC_SUMMARY_LABELS: Record<keyof Omit<SyncSummary, 'conflicts'>, string> = {
   categories: 'categories', tools: 'tools', techniques: 'techniques', tags: 'tags',
-  ingredients: 'ingredients', recipes: 'recipes', collections: 'collections',
+  ingredients: 'ingredients', recipes: 'recipes',
 };
 
 function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
@@ -174,6 +174,200 @@ function SyncCard() {
   );
 }
 
+interface LlmConfig {
+  provider: string;
+  hasAnthropicKey: boolean;
+  hasGeminiKey: boolean;
+  hasOpenaiKey: boolean;
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  ollama: 'Ollama',
+  anthropic: 'Anthropic',
+  gemini: 'Google Gemini',
+  openai: 'OpenAI',
+};
+
+function ProviderKeyInput({
+  label, placeholder, value, hasKey, touched, onChange,
+}: {
+  label: string; placeholder: string; value: string; hasKey: boolean; touched: boolean;
+  onChange: (value: string, touched: boolean) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{label}</label>
+      <div className="relative">
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => onChange(e.target.value, true)}
+          placeholder={hasKey && !touched ? '•••••••• (configured — leave blank to keep)' : placeholder}
+          className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4 pr-24"
+        />
+        {hasKey && !touched && (
+          <button
+            type="button"
+            onClick={() => onChange('', true)}
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-400 hover:text-red-600 transition-colors"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LlmProviderCard() {
+  const [provider, setProvider] = useState('ollama');
+  const [hasAnthropicKey, setHasAnthropicKey] = useState(false);
+  const [hasGeminiKey, setHasGeminiKey] = useState(false);
+  const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
+  const [anthropicKey, setAnthropicKey] = useState('');
+  const [geminiKey, setGeminiKey] = useState('');
+  const [openaiKey, setOpenaiKey] = useState('');
+  const [anthropicTouched, setAnthropicTouched] = useState(false);
+  const [geminiTouched, setGeminiTouched] = useState(false);
+  const [openaiTouched, setOpenaiTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/auth/llm-config')
+      .then((res) => res.json())
+      .then((json: { data?: LlmConfig }) => {
+        if (json.data) {
+          setProvider(json.data.provider);
+          setHasAnthropicKey(json.data.hasAnthropicKey);
+          setHasGeminiKey(json.data.hasGeminiKey);
+          setHasOpenaiKey(json.data.hasOpenaiKey);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const body: Record<string, unknown> = { llmProvider: provider };
+      if (anthropicTouched) body.anthropicApiKey = anthropicKey;
+      if (geminiTouched) body.geminiApiKey = geminiKey;
+      if (openaiTouched) body.openaiApiKey = openaiKey;
+      const res = await apiFetch('/api/auth/account', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Failed to save');
+      if (anthropicTouched) { setHasAnthropicKey(!!anthropicKey); setAnthropicKey(''); setAnthropicTouched(false); }
+      if (geminiTouched) { setHasGeminiKey(!!geminiKey); setGeminiKey(''); setGeminiTouched(false); }
+      if (openaiTouched) { setHasOpenaiKey(!!openaiKey); setOpenaiKey(''); setOpenaiTouched(false); }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mt-8">
+      <div className="mb-6">
+        <h2 className="text-lg font-black text-zinc-900">AI Provider</h2>
+        <p className="text-sm text-zinc-400 font-medium mt-1">
+          Choose what powers Smart Import's recipe parsing — local Ollama (free, private, slower
+          on CPU-only hardware) or a cloud provider (faster/higher quality, billed by them directly).
+        </p>
+      </div>
+
+      <div className="space-y-5">
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Provider</label>
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4 appearance-none cursor-pointer"
+          >
+            <option value="ollama">Local (Ollama) — default, private</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="gemini">Google (Gemini)</option>
+            <option value="openai">OpenAI (ChatGPT)</option>
+          </select>
+        </div>
+
+        {provider !== 'ollama' && (
+          <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-4 py-3 flex items-start gap-2">
+            <span className="material-symbols-outlined text-[16px] shrink-0">info</span>
+            Recipe text/URLs you import will be sent to {PROVIDER_LABELS[provider]}'s servers for processing.
+            Local (Ollama) keeps everything on this device.
+          </p>
+        )}
+
+        <ProviderKeyInput
+          label="Anthropic API Key"
+          placeholder="sk-ant-..."
+          value={anthropicKey}
+          hasKey={hasAnthropicKey}
+          touched={anthropicTouched}
+          onChange={(v, t) => { setAnthropicKey(v); setAnthropicTouched(t); }}
+        />
+        <ProviderKeyInput
+          label="Google Gemini API Key"
+          placeholder="AIza..."
+          value={geminiKey}
+          hasKey={hasGeminiKey}
+          touched={geminiTouched}
+          onChange={(v, t) => { setGeminiKey(v); setGeminiTouched(t); }}
+        />
+        <ProviderKeyInput
+          label="OpenAI API Key"
+          placeholder="sk-..."
+          value={openaiKey}
+          hasKey={hasOpenaiKey}
+          touched={openaiTouched}
+          onChange={(v, t) => { setOpenaiKey(v); setOpenaiTouched(t); }}
+        />
+
+        {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+        >
+          <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
+          {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ManageUsersCard() {
+  return (
+    <Link
+      to="/manage-users"
+      className="flex items-center justify-between bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mt-8 hover:border-zinc-200 transition-colors"
+    >
+      <div>
+        <h2 className="text-lg font-black text-zinc-900">Manage Users</h2>
+        <p className="text-sm text-zinc-400 font-medium mt-1">Add or review who can log into this instance.</p>
+      </div>
+      <span className="material-symbols-outlined text-zinc-300">chevron_right</span>
+    </Link>
+  );
+}
+
 function BackupCard() {
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -289,6 +483,7 @@ export default function Account() {
   const setAccount = useStore((s) => s.setAccount);
 
   const [name, setName] = useState(account?.name ?? '');
+  const [username, setUsername] = useState(account?.username ?? '');
   const [avatarUrl, setAvatarUrl] = useState(account?.avatarUrl ?? '');
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
@@ -302,6 +497,7 @@ export default function Account() {
     setSaved(false);
     try {
       const body: Record<string, unknown> = { name, avatarUrl: avatarUrl || null };
+      if (username !== account?.username) body.username = username;
       if (password) body.password = password;
       const res = await apiFetch('/api/auth/account', {
         method: 'PUT',
@@ -310,7 +506,7 @@ export default function Account() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Failed to save');
-      setAccount({ name, avatarUrl: avatarUrl || undefined });
+      if (account) setAccount({ ...account, name, username: username.toLowerCase(), avatarUrl: avatarUrl || undefined });
       setPassword('');
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -352,6 +548,16 @@ export default function Account() {
             />
           </div>
           <div>
+            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Username</label>
+            <input
+              type="text"
+              autoCapitalize="none"
+              value={username}
+              onChange={(e) => setUsername(e.target.value.toLowerCase())}
+              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+            />
+          </div>
+          <div>
             <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
             <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
           </div>
@@ -385,6 +591,8 @@ export default function Account() {
           </div>
         </form>
 
+        {account?.role === 'admin' && <ManageUsersCard />}
+        <LlmProviderCard />
         <BackupCard />
         <SyncCard />
       </div>

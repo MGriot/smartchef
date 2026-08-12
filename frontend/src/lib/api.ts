@@ -49,7 +49,7 @@ export async function clearServerUrl(): Promise<void> {
 // therefore the httpOnly session cookie check) is unreachable — there's no
 // way to validate the real session offline, so this is "was authenticated
 // last time we could ask", not a real credential.
-export interface CachedAccount { name: string; avatarUrl?: string }
+export interface CachedAccount { id: string; username: string; name: string; role: "admin" | "user"; avatarUrl?: string }
 
 export async function cacheAccountOffline(account: CachedAccount): Promise<void> {
   await Preferences.set({ key: ACCOUNT_CACHE_KEY, value: JSON.stringify(account) });
@@ -72,7 +72,7 @@ async function tryServeFromCache(path: string): Promise<Response | null> {
   if (pathname === '/api/auth/status') {
     const account = await getCachedAccountOffline();
     if (!account) return null;
-    return jsonResponse({ data: { hasAccount: true, authenticated: true, name: account.name, avatarUrl: account.avatarUrl } });
+    return jsonResponse({ data: { hasAccount: true, authenticated: true, id: account.id, username: account.username, name: account.name, role: account.role, avatarUrl: account.avatarUrl } });
   }
 
   const { getCachedEntities } = await import('./offlineStore');

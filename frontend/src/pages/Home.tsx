@@ -25,6 +25,8 @@ interface Recipe {
   is_component: boolean;
   rating: number | null;
   times_cooked: number;
+  creator_name?: string | null;
+  creator_avatar_url?: string | null;
 }
 
 interface CatalogTag {
@@ -586,9 +588,12 @@ const Home: React.FC = () => {
 
                     {/* Content */}
                     <div className="p-6">
-                      <h3 className="text-xl font-bold font-headline text-zinc-900 mb-3 group-hover:text-primary transition-colors duration-200">
+                      <h3 className="text-xl font-bold font-headline text-zinc-900 mb-1 group-hover:text-primary transition-colors duration-200">
                         {recipe.translated_title || recipe.title}
                       </h3>
+                      {recipe.creator_name && (
+                        <p className="text-xs text-zinc-400 font-medium mb-3">by {recipe.creator_name}</p>
+                      )}
                       <div className="flex items-center gap-5 text-zinc-500 text-[13px] font-medium">
                         <div className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>

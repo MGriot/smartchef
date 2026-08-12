@@ -13,6 +13,7 @@ import CollectionDetail from "./pages/CollectionDetail";
 import Planner from "./pages/Planner";
 import ShoppingList from "./pages/ShoppingList";
 import Account from "./pages/Account";
+import ManageUsers from "./pages/ManageUsers";
 import Login from "./pages/Login";
 import ServerConnect from "./pages/ServerConnect";
 import { useStore } from "./store/app.store";
@@ -44,8 +45,9 @@ export default function App() {
       .then((json) => {
         const d = json.data;
         if (d.authenticated) {
-          setAccount({ name: d.name, avatarUrl: d.avatarUrl });
-          if (isNative()) cacheAccountOffline({ name: d.name, avatarUrl: d.avatarUrl });
+          const account = { id: d.id, username: d.username, name: d.name, role: d.role, avatarUrl: d.avatarUrl };
+          setAccount(account);
+          if (isNative()) cacheAccountOffline(account);
           setAuth({ status: "authenticated" });
         } else {
           setAuth({ status: "needs-auth", hasAccount: d.hasAccount });
@@ -95,6 +97,7 @@ export default function App() {
         <Route path="/planner" element={<Planner />} />
         <Route path="/shopping" element={<ShoppingList />} />
         <Route path="/account" element={<Account />} />
+        <Route path="/manage-users" element={<ManageUsers />} />
       </Routes>
     </BrowserRouter>
   );

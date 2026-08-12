@@ -236,7 +236,10 @@
   "login": {
     "enterPasswordToContinue": "Enter your password to continue",
     "setUpInstance": "Set up this SmartChef instance",
+    "username": "Username",
+    "usernamePlaceholder": "e.g. matteo",
     "password": "Password",
+    "networkError": "Couldn't reach the server. If you're connecting from a different device or network, the server's CORS_ORIGIN setting may still be left at the default \"*\", which browsers reject for these requests — see docker/.env.example.",
     "signingIn": "Signing in…",
     "signIn": "Sign In",
     "yourName": "Your Name",

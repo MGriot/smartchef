@@ -12,18 +12,31 @@ const SESSION_SECRET = process.env.SESSION_SECRET ?? "smartchef-dev-secret-chang
 const COOKIE_NAME = "smartchef_session";
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const account = await queryOne<{ id: string }>("SELECT id FROM account LIMIT 1");
-  if (!account) return next(); // no account set up yet — nothing to protect
+  // Pure existence check — "has anyone ever set this instance up" — not an
+  // identity lookup, so LIMIT 1 with no ORDER BY is fine here (its id is
+  // never used for anything below).
+  const anyAccount = await queryOne<{ id: string }>("SELECT id FROM account LIMIT 1");
+  if (!anyAccount) return next(); // no account set up yet — nothing to protect
 
   const token = req.cookies?.[COOKIE_NAME];
   if (!token) return res.status(401).json({ error: "Not authenticated" });
 
+  let payload: { sub: string };
   try {
-    const payload = jwt.verify(token, SESSION_SECRET) as { sub: string };
-    if (payload.sub !== account.id) return res.status(401).json({ error: "Not authenticated" });
+    payload = jwt.verify(token, SESSION_SECRET) as { sub: string };
   } catch {
     return res.status(401).json({ error: "Not authenticated" });
   }
 
+  // Looked up by the JWT's own sub claim — not "whichever row sorts
+  // first" — required now that more than one account can exist.
+  const account = await queryOne<{ id: string; role: string }>(
+    "SELECT id, role FROM account WHERE id = $1",
+    [payload.sub]
+  );
+  if (!account) return res.status(401).json({ error: "Not authenticated" });
+
+  req.userId = account.id;
+  req.userRole = account.role as "admin" | "user";
   next();
 }

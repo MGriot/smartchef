@@ -5,6 +5,9 @@
 
 import { Agent, setGlobalDispatcher } from "undici";
 import type { LLMParseRequest, LLMParseResult } from "@shared/types/index";
+import { queryOne } from "../db/pool";
+import { decrypt } from "./crypto.service";
+import { callAnthropic, callGemini, callOpenAI } from "./llm.providers";
 
 // undici's default headersTimeout/bodyTimeout (300s) fires independently of
 // any AbortSignal passed to fetch() — on CPU-only local inference a single
@@ -174,6 +177,48 @@ async function callOllama(content: string): Promise<string> {
   return data.message?.content ?? "";
 }
 
+interface LLMAccountConfig {
+  llm_provider: string;
+  anthropic_api_key_encrypted: string | null;
+  gemini_api_key_encrypted: string | null;
+  openai_api_key_encrypted: string | null;
+}
+
+/**
+ * Dispatches to whichever LLM provider the account has configured
+ * (account.llm_provider — 'ollama' by default, never auto-switched to a
+ * cloud provider just because a key exists). Throws immediately if a
+ * cloud provider is selected but has no key saved, rather than silently
+ * falling back to Ollama — the error propagates through POST /recipes/parse's
+ * existing catch block unchanged.
+ */
+async function callConfiguredProvider(content: string): Promise<string> {
+  const account = await queryOne<LLMAccountConfig>(
+    `SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted FROM account LIMIT 1`
+  );
+  const provider = account?.llm_provider ?? "ollama";
+
+  if (provider === "anthropic") {
+    if (!account?.anthropic_api_key_encrypted) {
+      throw new Error("Anthropic selected but no API key configured — add one in Account settings");
+    }
+    return callAnthropic(content, decrypt(account.anthropic_api_key_encrypted), SYSTEM_PROMPT);
+  }
+  if (provider === "gemini") {
+    if (!account?.gemini_api_key_encrypted) {
+      throw new Error("Gemini selected but no API key configured — add one in Account settings");
+    }
+    return callGemini(content, decrypt(account.gemini_api_key_encrypted), SYSTEM_PROMPT);
+  }
+  if (provider === "openai") {
+    if (!account?.openai_api_key_encrypted) {
+      throw new Error("OpenAI selected but no API key configured — add one in Account settings");
+    }
+    return callOpenAI(content, decrypt(account.openai_api_key_encrypted), SYSTEM_PROMPT);
+  }
+  return callOllama(content);
+}
+
 /**
  * L'output del modello può venire troncato se raggiunge il limite di
  * num_predict a metà di un array/oggetto (frequente su CPU-only inference
@@ -298,7 +343,7 @@ export async function parseRecipeWithLLM(req: LLMParseRequest): Promise<LLMParse
     content = req.input;
   }
 
-  const rawResponse = await callOllama(content);
+  const rawResponse = await callConfiguredProvider(content);
   const result = parseJsonResponse(rawResponse);
 
   if (req.inputType === "url") {

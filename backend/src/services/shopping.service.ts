@@ -31,7 +31,8 @@ export type ShoppingListSource =
  */
 export async function generateShoppingList(
   source: ShoppingListSource,
-  listName: string
+  listName: string,
+  ownerId: UUID
 ): Promise<ShoppingList> {
   const menuId = "menuId" in source ? source.menuId : undefined;
 
@@ -115,9 +116,9 @@ export async function generateShoppingList(
   // 3. Persisti la lista nel DB
   const listId = uuidv4();
   await query(
-    `INSERT INTO shopping_lists (id, menu_id, name, crdt_clock)
-     VALUES ($1, $2, $3, '{}')`,
-    [listId, menuId ?? null, listName]
+    `INSERT INTO shopping_lists (id, menu_id, name, owner_id, crdt_clock)
+     VALUES ($1, $2, $3, $4, '{}')`,
+    [listId, menuId ?? null, listName, ownerId]
   );
 
   const items: ShoppingListItem[] = [];
@@ -175,11 +176,11 @@ export async function generateShoppingList(
 /**
  * Ricarica una lista della spesa già generata (con i suoi item) dal DB.
  */
-export async function loadShoppingList(listId: UUID): Promise<ShoppingList | null> {
+export async function loadShoppingList(listId: UUID, ownerId: UUID): Promise<ShoppingList | null> {
   const listRow = await queryOne<{
     id: UUID; menu_id: UUID | null; name: string;
     sync_status: string; created_at: string; updated_at: string;
-  }>("SELECT * FROM shopping_lists WHERE id=$1", [listId]);
+  }>("SELECT * FROM shopping_lists WHERE id=$1 AND owner_id=$2", [listId, ownerId]);
   if (!listRow) return null;
 
   // Postgres NUMERIC columns come back from the pg driver as strings (to

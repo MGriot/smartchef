@@ -60,10 +60,6 @@ interface SnapshotIngredient {
   updatedAt: string; deletedAt: string | null;
   translations: Array<{ lang: string; text: string }>; tagIds: string[];
 }
-interface SnapshotCollection {
-  id: string; name: string; description: string | null; sortOrder: number;
-  updatedAt: string; deletedAt: string | null; recipeIds: string[];
-}
 interface SnapshotRecipeIngredient {
   sortOrder: number; ingredientId?: string; subRecipeId?: string;
   quantity: number | null; quantityText: string | null; unitSymbol: string | null;
@@ -93,7 +89,6 @@ export interface Snapshot {
   techniques: SnapshotTechnique[];
   tags: SnapshotTag[];
   ingredients: SnapshotIngredient[];
-  collections: SnapshotCollection[];
   recipes: SnapshotRecipe[];
 }
 
@@ -193,21 +188,6 @@ async function loadIngredients(): Promise<SnapshotIngredient[]> {
   return out;
 }
 
-async function loadCollections(): Promise<SnapshotCollection[]> {
-  const rows = await query<any>("SELECT * FROM collections");
-  const out: SnapshotCollection[] = [];
-  for (const r of rows) {
-    const recipeRows = await query<{ recipe_id: string }>(
-      "SELECT recipe_id FROM collection_recipes WHERE collection_id=$1 ORDER BY sort_order", [r.id]
-    );
-    out.push({
-      id: r.id, name: r.name, description: r.description, sortOrder: r.sort_order,
-      updatedAt: r.updated_at, deletedAt: r.deleted_at, recipeIds: recipeRows.map((x) => x.recipe_id),
-    });
-  }
-  return out;
-}
-
 async function loadRecipes(): Promise<SnapshotRecipe[]> {
   const rows = await query<any>("SELECT * FROM recipes");
   const out: SnapshotRecipe[] = [];
@@ -269,7 +249,6 @@ export async function buildFullSnapshot(): Promise<Snapshot> {
     techniques: await loadTechniques(),
     tags: await loadTags(),
     ingredients: await loadIngredients(),
-    collections: await loadCollections(),
     recipes: await loadRecipes(),
   };
 }
@@ -484,30 +463,14 @@ async function replaceRecipeNestedData(client: PoolClient, r: SnapshotRecipe): P
   await client.query("UPDATE recipes SET tags=$1 WHERE id=$2", [finalTags, r.id]);
 }
 
-async function upsertCollection(client: PoolClient, c: SnapshotCollection): Promise<boolean> {
-  if (!remoteWins(c.updatedAt, await localUpdatedAt(client, "collections", c.id))) return false;
-  await client.query(
-    `INSERT INTO collections (id, name, description, sort_order, deleted_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (id) DO UPDATE SET name=$2, description=$3, sort_order=$4, deleted_at=$5, updated_at=$6`,
-    [c.id, c.name, c.description, c.sortOrder, c.deletedAt, c.updatedAt]
-  );
-  await client.query("DELETE FROM collection_recipes WHERE collection_id=$1", [c.id]);
-  let sortOrder = 0;
-  for (const recipeId of c.recipeIds) {
-    const exists = await client.query("SELECT 1 FROM recipes WHERE id=$1", [recipeId]);
-    if (!exists.rows[0]) continue; // recipe not (yet) present on this device — skip defensively
-    await client.query(
-      "INSERT INTO collection_recipes (collection_id, recipe_id, sort_order) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
-      [c.id, recipeId, sortOrder++]
-    );
-  }
-  return true;
-}
+// Collections are deliberately NOT part of the sync/backup snapshot —
+// they became private-per-user (see migration 026) and account UUIDs
+// aren't portable across separate SmartChef instances anyway, so
+// syncing/restoring them across devices/instances no longer makes sense.
 
 export interface SyncSummary {
   categories: number; tools: number; techniques: number; tags: number;
-  ingredients: number; recipes: number; collections: number;
+  ingredients: number; recipes: number;
   // Human-readable notes on anything skipped this cycle — e.g. a row that
   // collided (two devices independently creating an ingredient with the
   // same name+category while offline from each other). Still no field-level
@@ -518,7 +481,7 @@ export interface SyncSummary {
 }
 
 function emptySyncSummary(): SyncSummary {
-  return { categories: 0, tools: 0, techniques: 0, tags: 0, ingredients: 0, recipes: 0, collections: 0, conflicts: [] };
+  return { categories: 0, tools: 0, techniques: 0, tags: 0, ingredients: 0, recipes: 0, conflicts: [] };
 }
 
 async function listPeerSnapshotFiles(): Promise<string[]> {
@@ -567,8 +530,6 @@ export async function mergeSnapshot(snapshot: Snapshot, summary: SyncSummary, la
           await replaceRecipeNestedData(client, r);
         }
       }
-
-      for (const c of snapshot.collections) if (await upsertCollection(client, c)) summary.collections++;
     });
   } catch (err) {
     // A single colliding row shouldn't block every other entity's merge —

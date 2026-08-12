@@ -26,7 +26,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       onConnected();
     } catch (err) {
       setError(
-        err instanceof Error && err.name === 'TimeoutError'
+        err instanceof Error && (err.name === 'TimeoutError' || err instanceof TypeError)
           ? t('login.serverUnreachable')
           : err instanceof Error ? err.message : t('login.couldNotConnect')
       );

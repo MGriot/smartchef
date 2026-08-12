@@ -10,6 +10,7 @@
   - [Option 1 — Docker (recommended)](#-option-1--docker-recommended)
   - [Option 2 — Local, without Docker](#-option-2--local-without-docker)
 - [Checking it works](#-checking-it-works)
+- [Admin Access](#-admin-access)
 - [Common problems](#️-common-problems)
 - [Project structure](#️-project-structure)
 - [MCP Server](#-mcp-server)
@@ -146,6 +147,21 @@ Then in the browser:
 5. Click **Start AI Transformation** and wait for the LLM parse (CPU-only inference — can take a few minutes; a progress bar shows elapsed time)
 6. Review the matched ingredients/steps, click **Create & Review Recipe**
 7. Head back to the **Gallery** to see the imported recipe
+
+---
+
+## 🔐 Admin Access
+
+This instance's first (admin) account:
+
+| Username | Password |
+|---|---|
+| `admin` | `admin2026` |
+
+> ⚠️ **Change this password** (Account → Save Changes) before sharing this repo
+> or its history publicly — it's a weak, default-style password and this file
+> is version-controlled. Additional users can be added by an admin from
+> Account → Manage Users.
 
 ---
 
