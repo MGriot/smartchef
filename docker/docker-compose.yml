@@ -50,6 +50,9 @@ services:
       # directly (e.g. over Tailscale) — see docker/.env.example.
       COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # Leaving this at the default "*" breaks login from the native app
+      # (or any cross-origin client) with a generic "Failed to fetch" —
+      # see the CORS_ORIGIN warning in docker/.env.example.
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
       # Folder-based multi-device sync (Tenth slice) — disabled by default,
       # zero behavior change for single-device use. SYNC_FOLDER_HOST_PATH
@@ -62,6 +65,14 @@ services:
       SYNC_ENABLED: ${SYNC_ENABLED:-false}
       SYNC_FOLDER: /app/sync
       DEVICE_NAME: ${DEVICE_NAME:-SmartChef Device}
+      # Encrypts cloud LLM API keys (Anthropic/Gemini/OpenAI, opted into
+      # per-account in Account settings) before storing them in the DB —
+      # only relevant if you select a cloud provider for recipe-import
+      # parsing; local Ollama needs none of this. See docker/.env.example.
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET:-smartchef-dev-encryption-secret-change-me}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
     volumes:
       - uploads_data:/app/uploads
       - device_data:/app/device

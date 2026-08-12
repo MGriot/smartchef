@@ -27,7 +27,7 @@ backupRouter.post("/import", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "That doesn't look like a SmartChef backup file." });
   }
 
-  const summary = { categories: 0, tools: 0, techniques: 0, tags: 0, ingredients: 0, recipes: 0, collections: 0, conflicts: [] as string[] };
+  const summary = { categories: 0, tools: 0, techniques: 0, tags: 0, ingredients: 0, recipes: 0, conflicts: [] as string[] };
   await mergeSnapshot(snapshot, summary, "uploaded backup");
   res.json({ data: summary });
 });

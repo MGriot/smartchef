@@ -7,13 +7,15 @@ import { calculateMenuNutrition } from "../services/nutrition.service";
 export const menuRouter = Router();
 
 // GET /menus
-menuRouter.get("/", async (_req: Request, res: Response) => {
+menuRouter.get("/", async (req: Request, res: Response) => {
   const rows = await query(
     `SELECT m.*, COUNT(mi.id) AS item_count
      FROM menus m
      LEFT JOIN menu_items mi ON mi.menu_id = m.id
+     WHERE m.owner_id = $1
      GROUP BY m.id
-     ORDER BY m.week_start DESC`
+     ORDER BY m.week_start DESC`,
+    [req.userId]
   );
   res.json({ data: rows });
 });
@@ -34,9 +36,9 @@ menuRouter.get("/:id", async (req: Request, res: Response) => {
      FROM menus m
      LEFT JOIN menu_items mi ON mi.menu_id = m.id
      LEFT JOIN recipes r ON r.id = mi.recipe_id
-     WHERE m.id = $1
+     WHERE m.id = $1 AND m.owner_id = $2
      GROUP BY m.id`,
-    [req.params.id]
+    [req.params.id, req.userId]
   );
   if (!menu) return res.status(404).json({ error: "Menù non trovato" });
   res.json({ data: menu });
@@ -44,6 +46,9 @@ menuRouter.get("/:id", async (req: Request, res: Response) => {
 
 // GET /menus/:id/nutrition
 menuRouter.get("/:id/nutrition", async (req: Request, res: Response) => {
+  const owned = await queryOne("SELECT id FROM menus WHERE id=$1 AND owner_id=$2", [req.params.id, req.userId]);
+  if (!owned) return res.status(404).json({ error: "Menù non trovato" });
+
   const result = await calculateMenuNutrition(req.params.id);
   res.json({ data: result });
 });
@@ -60,8 +65,8 @@ menuRouter.post("/", async (req: Request, res: Response) => {
 
   const id = uuidv4();
   await query(
-    "INSERT INTO menus (id,name,week_start,notes,crdt_clock) VALUES ($1,$2,$3,$4,'{}')",
-    [id, parsed.data.name, parsed.data.weekStart, parsed.data.notes ?? null]
+    "INSERT INTO menus (id,name,week_start,notes,crdt_clock,owner_id) VALUES ($1,$2,$3,$4,'{}',$5)",
+    [id, parsed.data.name, parsed.data.weekStart, parsed.data.notes ?? null, req.userId]
   );
   res.status(201).json({ data: { id, ...parsed.data } });
 });
@@ -78,6 +83,9 @@ menuRouter.post("/:id/items", async (req: Request, res: Response) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  const owned = await queryOne("SELECT id FROM menus WHERE id=$1 AND owner_id=$2", [req.params.id, req.userId]);
+  if (!owned) return res.status(404).json({ error: "Menù non trovato" });
+
   const id = uuidv4();
   const d = parsed.data;
   await query(
@@ -90,13 +98,17 @@ menuRouter.post("/:id/items", async (req: Request, res: Response) => {
 
 // DELETE /menus/:menuId/items/:itemId
 menuRouter.delete("/:menuId/items/:itemId", async (req: Request, res: Response) => {
-  await query("DELETE FROM menu_items WHERE id=$1 AND menu_id=$2",
-    [req.params.itemId, req.params.menuId]);
+  await query(
+    `DELETE FROM menu_items
+     WHERE id=$1 AND menu_id=$2
+       AND menu_id IN (SELECT id FROM menus WHERE owner_id=$3)`,
+    [req.params.itemId, req.params.menuId, req.userId]
+  );
   res.status(204).send();
 });
 
 // DELETE /menus/:id
 menuRouter.delete("/:id", async (req: Request, res: Response) => {
-  await query("DELETE FROM menus WHERE id=$1", [req.params.id]);
+  await query("DELETE FROM menus WHERE id=$1 AND owner_id=$2", [req.params.id, req.userId]);
   res.status(204).send();
 });

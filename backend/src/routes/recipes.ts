@@ -172,9 +172,11 @@ recipeRouter.get("/", async (req: Request, res: Response) => {
 
   let sql = `
     SELECT r.*, ${translatedCols}, ${tagsDisplaySql},
-           COUNT(ri.id) AS ingredient_count
+           COUNT(ri.id) AS ingredient_count,
+           acc.name AS creator_name, acc.avatar_url AS creator_avatar_url
     FROM recipes r
     LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
+    LEFT JOIN account acc ON acc.id = r.creator_id
     ${langJoin}
     WHERE r.sync_status != 'deleted'
   `;
@@ -225,7 +227,7 @@ recipeRouter.get("/", async (req: Request, res: Response) => {
   const orderBy = sort === "alphabetical" && langParamIndex
     ? "COALESCE(rt.title, r.title) ASC"
     : SORT_OPTIONS[String(sort)] ?? SORT_OPTIONS["recently-edited"];
-  sql += ` GROUP BY r.id${lang ? ", rt.title, rt.description" : ""} ORDER BY ${orderBy}`;
+  sql += ` GROUP BY r.id, acc.name, acc.avatar_url${lang ? ", rt.title, rt.description" : ""} ORDER BY ${orderBy}`;
 
   const recipes = await query(sql, params);
   res.json({ data: recipes, total: recipes.length });
@@ -265,6 +267,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
 
   const recipe = await queryOne(
     `SELECT r.*, ${translatedCols},
+            acc.name AS creator_name, acc.avatar_url AS creator_avatar_url,
             COALESCE(
               (SELECT json_agg(json_build_object(
                  'name', tag_name,
@@ -321,6 +324,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'translated_name', ${toolTranslatedName}
             )) FILTER (WHERE t.id IS NOT NULL), '[]'::json) AS tools
      FROM recipes r
+     LEFT JOIN account acc ON acc.id = r.creator_id
      LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
      LEFT JOIN ingredients i ON i.id = ri.ingredient_id
      ${lang ? "LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND it_lang.language_code = $2" : ""}
@@ -334,7 +338,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
      ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND tt.language_code = $2" : ""}
      ${langJoin}
      WHERE r.id = $1
-     GROUP BY r.id${lang ? ", rct.title, rct.description" : ""}`,
+     GROUP BY r.id, acc.name, acc.avatar_url${lang ? ", rct.title, rct.description" : ""}`,
     params
   );
 
@@ -358,10 +362,10 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
     await withTransaction(async (client) => {
       await client.query(
         `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,
-           cook_time_min,rest_time_min,rating,tags,cover_image_url,source_url,sources,is_component,language_code,crdt_clock)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'{}')`,
+           cook_time_min,rest_time_min,rating,tags,cover_image_url,source_url,sources,is_component,language_code,creator_id,crdt_clock)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'{}')`,
         [recipeId,d.title,d.description,d.difficulty,d.servings,d.prepTimeMin,
-         d.cookTimeMin,d.restTimeMin,d.rating??null,d.tags,d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null]
+         d.cookTimeMin,d.restTimeMin,d.rating??null,d.tags,d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null,req.userId??null]
       );
 
       // Inserisci ingredienti
@@ -425,9 +429,9 @@ recipeRouter.get("/:id/collections", async (req: Request, res: Response) => {
   const rows = await query(
     `SELECT c.id, c.name FROM collections c
      JOIN collection_recipes cr ON cr.collection_id = c.id
-     WHERE cr.recipe_id = $1
+     WHERE cr.recipe_id = $1 AND c.owner_id = $2
      ORDER BY c.name`,
-    [req.params.id]
+    [req.params.id, req.userId]
   );
   res.json({ data: rows });
 });

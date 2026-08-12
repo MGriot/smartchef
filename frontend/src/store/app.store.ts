@@ -24,22 +24,33 @@ export interface ShoppingCartItem {
   servings: number;
 }
 
-const SHOPPING_CART_KEY = "smartchef.shoppingCart";
+// contentLang/shoppingCart are per-account now that multiple people can use
+// the same instance/device — the bare (unsuffixed) keys are only the
+// pre-login bootstrap default, read once before an account is known.
+function contentLangKey(accountId?: string) {
+  return accountId ? `smartchef.${accountId}.contentLang` : "smartchef.contentLang";
+}
+function shoppingCartKey(accountId?: string) {
+  return accountId ? `smartchef.${accountId}.shoppingCart` : "smartchef.shoppingCart";
+}
 
-function loadShoppingCart(): ShoppingCartItem[] {
+function loadShoppingCart(key: string): ShoppingCartItem[] {
   try {
-    return JSON.parse(localStorage.getItem(SHOPPING_CART_KEY) || "[]");
+    return JSON.parse(localStorage.getItem(key) || "[]");
   } catch {
     return [];
   }
 }
 
-function saveShoppingCart(items: ShoppingCartItem[]) {
-  localStorage.setItem(SHOPPING_CART_KEY, JSON.stringify(items));
+function saveShoppingCart(key: string, items: ShoppingCartItem[]) {
+  localStorage.setItem(key, JSON.stringify(items));
 }
 
 export interface Account {
+  id: string;
+  username: string;
   name: string;
+  role: "admin" | "user";
   avatarUrl?: string;
 }
 
@@ -49,8 +60,7 @@ interface AppStore {
   setRecipes: (r: Recipe[]) => void;
   removeRecipe: (id: string) => void;
 
-  // Auth: the logged-in account for this instance (single shared
-  // password gate — see backend/src/routes/auth.ts)
+  // Auth: the currently logged-in user on this device/browser.
   account: Account | null;
   setAccount: (a: Account | null) => void;
 
@@ -80,14 +90,26 @@ interface AppStore {
   clearShoppingCart: () => void;
 }
 
-export const useStore = create<AppStore>((set) => ({
+export const useStore = create<AppStore>((set, get) => ({
   recipes: [],
   setRecipes: (recipes) => set({ recipes }),
   removeRecipe: (id) =>
     set((s) => ({ recipes: s.recipes.filter((r) => r.id !== id) })),
 
   account: null,
-  setAccount: (account) => set({ account }),
+  setAccount: (account) => {
+    if (!account) return set({ account: null });
+    // First login on this device: inherit the pre-login default language
+    // once, then persist under this account's own key from then on. The
+    // shopping cart is deliberately NOT inherited from the bare key —
+    // it could belong to whoever was last using this browser/device.
+    const langKey = contentLangKey(account.id);
+    const contentLang = localStorage.getItem(langKey) || get().contentLang;
+    localStorage.setItem(langKey, contentLang);
+    const cartKey = shoppingCartKey(account.id);
+    const shoppingCart = loadShoppingCart(cartKey);
+    set({ account, contentLang, shoppingCart });
+  },
 
   sync: { peers: [], conflicts: [] },
   setSyncPeers: (peers) => set((s) => ({ sync: { ...s.sync, peers } })),
@@ -100,36 +122,36 @@ export const useStore = create<AppStore>((set) => ({
   // Defaults to "en" to match i18n's own default UI locale (src/i18n/index.ts)
   // — otherwise the chrome reads English on first visit while every
   // ingredient/unit/category name still shows its untranslated base value.
-  contentLang: localStorage.getItem("smartchef.contentLang") || "en",
+  contentLang: localStorage.getItem(contentLangKey()) || "en",
   setContentLang: (lang) => {
-    localStorage.setItem("smartchef.contentLang", lang);
+    localStorage.setItem(contentLangKey(get().account?.id), lang);
     set({ contentLang: lang });
   },
 
-  shoppingCart: loadShoppingCart(),
+  shoppingCart: loadShoppingCart(shoppingCartKey()),
   addToShoppingCart: (item) =>
     set((s) => {
       const exists = s.shoppingCart.some((c) => c.recipeId === item.recipeId);
       const next = exists
         ? s.shoppingCart.map((c) => (c.recipeId === item.recipeId ? item : c))
         : [...s.shoppingCart, item];
-      saveShoppingCart(next);
+      saveShoppingCart(shoppingCartKey(get().account?.id), next);
       return { shoppingCart: next };
     }),
   removeFromShoppingCart: (recipeId) =>
     set((s) => {
       const next = s.shoppingCart.filter((c) => c.recipeId !== recipeId);
-      saveShoppingCart(next);
+      saveShoppingCart(shoppingCartKey(get().account?.id), next);
       return { shoppingCart: next };
     }),
   updateShoppingCartServings: (recipeId, servings) =>
     set((s) => {
       const next = s.shoppingCart.map((c) => (c.recipeId === recipeId ? { ...c, servings } : c));
-      saveShoppingCart(next);
+      saveShoppingCart(shoppingCartKey(get().account?.id), next);
       return { shoppingCart: next };
     }),
   clearShoppingCart: () => {
-    saveShoppingCart([]);
+    saveShoppingCart(shoppingCartKey(get().account?.id), []);
     set({ shoppingCart: [] });
   },
 }));

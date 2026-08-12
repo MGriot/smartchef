@@ -2,6 +2,7 @@
 // SmartChef — Routes: Collections
 // Raccolte libere di ricette (non legate al calendario, a differenza di
 // menus/menu_items) mostrate nella sottotab "Collections" della Gallery.
+// Private per user — ogni utente vede e gestisce solo le proprie.
 // ════════════════════════════════════════════════════════════════════════
 
 import { Router, Request, Response } from "express";
@@ -12,7 +13,7 @@ import { v4 as uuidv4 } from "uuid";
 export const collectionsRouter = Router();
 
 // GET /collections
-collectionsRouter.get("/", async (_req: Request, res: Response) => {
+collectionsRouter.get("/", async (req: Request, res: Response) => {
   const rows = await query(
     `SELECT c.*, COUNT(cr.recipe_id) AS item_count,
             COALESCE(
@@ -28,9 +29,10 @@ collectionsRouter.get("/", async (_req: Request, res: Response) => {
             ) AS cover_images
      FROM collections c
      LEFT JOIN collection_recipes cr ON cr.collection_id = c.id
-     WHERE c.deleted_at IS NULL
+     WHERE c.deleted_at IS NULL AND c.owner_id = $1
      GROUP BY c.id
-     ORDER BY c.sort_order, c.name`
+     ORDER BY c.sort_order, c.name`,
+    [req.userId]
   );
   res.json({ data: rows });
 });
@@ -51,8 +53,8 @@ collectionsRouter.get("/:id", async (req: Request, res: Response) => {
          '[]'::json
        ) AS recipes
      FROM collections c
-     WHERE c.id = $1 AND c.deleted_at IS NULL`,
-    [req.params.id]
+     WHERE c.id = $1 AND c.deleted_at IS NULL AND c.owner_id = $2`,
+    [req.params.id, req.userId]
   );
   if (!collection) return res.status(404).json({ error: "Collection non trovata" });
   res.json({ data: collection });
@@ -69,8 +71,8 @@ collectionsRouter.post("/", async (req: Request, res: Response) => {
 
   const id = uuidv4();
   await query(
-    "INSERT INTO collections (id, name, description) VALUES ($1, $2, $3)",
-    [id, parsed.data.name, parsed.data.description || null]
+    "INSERT INTO collections (id, name, description, owner_id) VALUES ($1, $2, $3, $4)",
+    [id, parsed.data.name, parsed.data.description || null, req.userId]
   );
   res.status(201).json({ data: { id } });
 });
@@ -79,15 +81,20 @@ collectionsRouter.put("/:id", async (req: Request, res: Response) => {
   const parsed = CollectionSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  await query(
-    "UPDATE collections SET name=$1, description=$2, updated_at=now() WHERE id=$3",
-    [parsed.data.name, parsed.data.description || null, req.params.id]
+  const updated = await queryOne(
+    "UPDATE collections SET name=$1, description=$2, updated_at=now() WHERE id=$3 AND owner_id=$4 RETURNING id",
+    [parsed.data.name, parsed.data.description || null, req.params.id, req.userId]
   );
+  if (!updated) return res.status(404).json({ error: "Collection non trovata" });
   res.json({ success: true });
 });
 
 collectionsRouter.delete("/:id", async (req: Request, res: Response) => {
-  await query("UPDATE collections SET deleted_at=now(), updated_at=now() WHERE id=$1", [req.params.id]);
+  const deleted = await queryOne(
+    "UPDATE collections SET deleted_at=now(), updated_at=now() WHERE id=$1 AND owner_id=$2 RETURNING id",
+    [req.params.id, req.userId]
+  );
+  if (!deleted) return res.status(404).json({ error: "Collection non trovata" });
   res.status(204).send();
 });
 
@@ -96,6 +103,9 @@ collectionsRouter.post("/:id/recipes", async (req: Request, res: Response) => {
   const schema = z.object({ recipeId: z.string().uuid() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const owned = await queryOne("SELECT id FROM collections WHERE id=$1 AND owner_id=$2", [req.params.id, req.userId]);
+  if (!owned) return res.status(404).json({ error: "Collection non trovata" });
 
   const nextSort = await queryOne<{ next: number }>(
     "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM collection_recipes WHERE collection_id=$1",
@@ -112,8 +122,10 @@ collectionsRouter.post("/:id/recipes", async (req: Request, res: Response) => {
 // DELETE /collections/:id/recipes/:recipeId
 collectionsRouter.delete("/:id/recipes/:recipeId", async (req: Request, res: Response) => {
   await query(
-    "DELETE FROM collection_recipes WHERE collection_id=$1 AND recipe_id=$2",
-    [req.params.id, req.params.recipeId]
+    `DELETE FROM collection_recipes
+     WHERE collection_id=$1 AND recipe_id=$2
+       AND collection_id IN (SELECT id FROM collections WHERE owner_id=$3)`,
+    [req.params.id, req.params.recipeId, req.userId]
   );
   res.status(204).send();
 });

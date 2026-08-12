@@ -95,6 +95,8 @@ interface Recipe {
   ingredients: Ingredient[];
   steps: Step[];
   tools: Tool[];
+  creator_name?: string | null;
+  creator_avatar_url?: string | null;
 }
 
 type PageMode = 'view' | 'edit' | 'cook';
@@ -1551,6 +1553,16 @@ const RecipeDetail: React.FC = () => {
               </span>
             )}
             <h1 className="text-4xl md:text-6xl font-headline font-extrabold text-white leading-none">{recipe.translated_title || recipe.title}</h1>
+            {recipe.creator_name && (
+              <div className="flex items-center gap-2 mt-3">
+                <img
+                  src={recipe.creator_avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${recipe.creator_name}`}
+                  alt={recipe.creator_name}
+                  className="w-5 h-5 rounded-full object-cover"
+                />
+                <p className="text-white/70 text-xs font-medium">by {recipe.creator_name}</p>
+              </div>
+            )}
             {recipe.language_code && contentLang && recipe.language_code !== contentLang && !recipe.translated_title && (
               <p className="mt-3 text-white/70 text-xs font-medium">
                 {t('recipeDetail.shownInOriginal', {
