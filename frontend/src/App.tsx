@@ -11,6 +11,7 @@ import LibraryTechniques from "./pages/LibraryTechniques";
 import LibraryTags from "./pages/LibraryTags";
 import CollectionDetail from "./pages/CollectionDetail";
 import Planner from "./pages/Planner";
+import CookHistory from "./pages/CookHistory";
 import ShoppingList from "./pages/ShoppingList";
 import Account from "./pages/Account";
 import ManageUsers from "./pages/ManageUsers";
@@ -95,6 +96,7 @@ export default function App() {
         <Route path="/library/techniques" element={<LibraryTechniques />} />
         <Route path="/library/tags" element={<LibraryTags />} />
         <Route path="/planner" element={<Planner />} />
+        <Route path="/history" element={<CookHistory />} />
         <Route path="/shopping" element={<ShoppingList />} />
         <Route path="/account" element={<Account />} />
         <Route path="/manage-users" element={<ManageUsers />} />

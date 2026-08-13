@@ -287,3 +287,29 @@ authRouter.get("/users", async (req: Request, res: Response) => {
   );
   res.json({ data: users });
 });
+
+// DELETE /auth/users/:id — admin-only. Recipes they created survive
+// (creator_id -> NULL, ON DELETE SET NULL); their private shopping
+// lists/planner/collections are deleted with them (ON DELETE CASCADE) —
+// same rule already applied throughout migration 026.
+authRouter.delete("/users/:id", async (req: Request, res: Response) => {
+  const admin = await requireAdminFromCookie(req);
+  if (!admin) return res.status(403).json({ error: "Admin only" });
+
+  if (req.params.id === admin.id) {
+    return res.status(400).json({ error: "You can't delete your own account" });
+  }
+
+  const target = await queryOne<{ role: string }>("SELECT role FROM account WHERE id=$1", [req.params.id]);
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  if (target.role === "admin") {
+    const adminCount = await queryOne<{ count: string }>("SELECT COUNT(*) AS count FROM account WHERE role='admin'");
+    if (Number(adminCount?.count ?? 0) <= 1) {
+      return res.status(400).json({ error: "Can't delete the last admin" });
+    }
+  }
+
+  await query("DELETE FROM account WHERE id=$1", [req.params.id]);
+  res.status(204).send();
+});

@@ -24,11 +24,32 @@ export default function ManageUsers() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const fetchUsers = () => {
     apiFetch('/api/auth/users')
       .then((res) => res.json())
       .then((json) => setUsers(json.data ?? []))
       .catch(() => setUsers([]));
+  };
+
+  const handleDelete = async (user: User) => {
+    if (!window.confirm(`Remove ${user.name} (@${user.username})? Their private shopping list, planner, and collections will be deleted. Recipes they created stay, just without attribution.`)) return;
+    setDeletingId(user.id);
+    setDeleteError(null);
+    try {
+      const res = await apiFetch(`/api/auth/users/${user.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(typeof json.error === 'string' ? json.error : 'Failed to delete user');
+      }
+      setUsers((prev) => (prev ? prev.filter((u) => u.id !== user.id) : prev));
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete user');
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   useEffect(() => {
@@ -100,10 +121,24 @@ export default function ManageUsers() {
                   <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shrink-0 ${u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-zinc-200 text-zinc-500'}`}>
                     {u.role}
                   </span>
+                  {u.id !== account?.id && (
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(u)}
+                      disabled={deletingId === u.id}
+                      className="w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center hover:bg-red-100 transition-colors shrink-0 disabled:opacity-50"
+                      title={`Remove ${u.name}`}
+                    >
+                      <span className="material-symbols-outlined text-sm">
+                        {deletingId === u.id ? 'sync' : 'delete'}
+                      </span>
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
+          {deleteError && <p className="mt-4 text-sm text-red-600 font-medium">{deleteError}</p>}
         </div>
 
         <form onSubmit={handleCreate} className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 space-y-6">

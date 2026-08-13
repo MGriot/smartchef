@@ -48,7 +48,10 @@ export default function LibraryTags() {
       setTranslations(tag.translations || []);
     } else {
       setEditingTag(null);
-      setForm({ name: '', groupName: 'Altro', color: DEFAULT_COLOR, icon: 'FaTag', excludeTagIds: [] });
+      // Left blank (not pre-filled with 'Altro') so the "e.g. Dieta" placeholder
+      // and the existing-groups datalist are actually visible — the backend
+      // still falls back to 'Altro' if this is saved empty.
+      setForm({ name: '', groupName: '', color: DEFAULT_COLOR, icon: 'FaTag', excludeTagIds: [] });
       setTranslations([]);
     }
     setShowModal(true);

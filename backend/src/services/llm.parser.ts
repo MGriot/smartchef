@@ -142,9 +142,10 @@ async function fetchUrlContent(url: string): Promise<string> {
 }
 
 /**
- * Chiama Ollama per il parsing della ricetta
+ * Chiama Ollama con un system prompt arbitrario — usato sia per il parsing
+ * ricette (SYSTEM_PROMPT) sia per la traduzione contenuti ricetta.
  */
-async function callOllama(content: string): Promise<string> {
+async function callOllama(content: string, systemPrompt: string): Promise<string> {
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -152,8 +153,8 @@ async function callOllama(content: string): Promise<string> {
       model: OLLAMA_MODEL,
       stream: false,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: `Analizza questa ricetta:\n\n${content}` },
+        { role: "system", content: systemPrompt },
+        { role: "user", content },
       ],
       options: {
         temperature: 0.1, // bassa temperatura per output strutturato
@@ -189,10 +190,11 @@ interface LLMAccountConfig {
  * (account.llm_provider — 'ollama' by default, never auto-switched to a
  * cloud provider just because a key exists). Throws immediately if a
  * cloud provider is selected but has no key saved, rather than silently
- * falling back to Ollama — the error propagates through POST /recipes/parse's
- * existing catch block unchanged.
+ * falling back to Ollama — the error propagates through the caller's own
+ * error handling unchanged. Generic over systemPrompt/content so it's
+ * reusable for both recipe parsing and recipe-content translation.
  */
-async function callConfiguredProvider(content: string): Promise<string> {
+export async function callConfiguredProvider(content: string, systemPrompt: string): Promise<string> {
   const account = await queryOne<LLMAccountConfig>(
     `SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted FROM account LIMIT 1`
   );
@@ -202,21 +204,21 @@ async function callConfiguredProvider(content: string): Promise<string> {
     if (!account?.anthropic_api_key_encrypted) {
       throw new Error("Anthropic selected but no API key configured — add one in Account settings");
     }
-    return callAnthropic(content, decrypt(account.anthropic_api_key_encrypted), SYSTEM_PROMPT);
+    return callAnthropic(content, decrypt(account.anthropic_api_key_encrypted), systemPrompt);
   }
   if (provider === "gemini") {
     if (!account?.gemini_api_key_encrypted) {
       throw new Error("Gemini selected but no API key configured — add one in Account settings");
     }
-    return callGemini(content, decrypt(account.gemini_api_key_encrypted), SYSTEM_PROMPT);
+    return callGemini(content, decrypt(account.gemini_api_key_encrypted), systemPrompt);
   }
   if (provider === "openai") {
     if (!account?.openai_api_key_encrypted) {
       throw new Error("OpenAI selected but no API key configured — add one in Account settings");
     }
-    return callOpenAI(content, decrypt(account.openai_api_key_encrypted), SYSTEM_PROMPT);
+    return callOpenAI(content, decrypt(account.openai_api_key_encrypted), systemPrompt);
   }
-  return callOllama(content);
+  return callOllama(content, systemPrompt);
 }
 
 /**
@@ -343,7 +345,7 @@ export async function parseRecipeWithLLM(req: LLMParseRequest): Promise<LLMParse
     content = req.input;
   }
 
-  const rawResponse = await callConfiguredProvider(content);
+  const rawResponse = await callConfiguredProvider(`Analizza questa ricetta:\n\n${content}`, SYSTEM_PROMPT);
   const result = parseJsonResponse(rawResponse);
 
   if (req.inputType === "url") {
@@ -472,6 +474,85 @@ export async function translateUiStrings(
   } catch {
     return {};
   }
+}
+
+export interface RecipeTranslationStep {
+  id: string;
+  title: string | null;
+  description: string;
+  notes: string | null;
+}
+export interface RecipeTranslationIngredientNote {
+  id: string;
+  notes: string;
+}
+export interface RecipeTranslationInput {
+  title: string;
+  description: string | null;
+  steps: RecipeTranslationStep[];
+  ingredientNotes: RecipeTranslationIngredientNote[];
+}
+export type RecipeTranslationOutput = RecipeTranslationInput;
+
+const LANGUAGE_NAMES: Record<string, string> = { en: "English", it: "Italian", fr: "French", es: "Spanish" };
+
+/**
+ * Translates a recipe's title/description/step content/ingredient notes
+ * into a target language in one call, using whichever LLM provider the
+ * account has configured (see callConfiguredProvider). The `id` fields are
+ * opaque identifiers the model must copy through unchanged — they're how
+ * the caller maps translated steps/ingredient notes back to the right DB
+ * rows — never translated content themselves.
+ */
+export async function translateRecipeContent(
+  input: RecipeTranslationInput,
+  targetLang: string
+): Promise<RecipeTranslationOutput> {
+  const targetLangName = LANGUAGE_NAMES[targetLang] ?? targetLang;
+  const systemPrompt =
+    `You translate recipe content from a recipe-management app into ${targetLangName} (ISO code "${targetLang}"). ` +
+    `You will receive a JSON object with a title, an optional description, a list of steps (each with an id, ` +
+    `optional title, description, and optional notes — "notes" is a chef's tip for that step), and a list of ` +
+    `ingredient notes (each with an id and short free-text note, e.g. "finely chopped"). ` +
+    `Translate every text field naturally and idiomatically into ${targetLangName}, preserving culinary meaning ` +
+    `and quantities/units exactly as written. The "id" fields are opaque identifiers — copy them through EXACTLY ` +
+    `unchanged, never translate or alter them. If a field is null in the input, keep it null in the output. ` +
+    `Respond EXCLUSIVELY with a JSON object matching the exact same shape as the input ` +
+    `({title, description, steps: [{id, title, description, notes}], ingredientNotes: [{id, notes}]}), no extra text.`;
+
+  const raw = await callConfiguredProvider(JSON.stringify(input), systemPrompt);
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Translation response contained no JSON");
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    parsed = JSON.parse(repairTruncatedJson(jsonMatch[0]));
+  }
+
+  const stepById = new Map(input.steps.map((s) => [s.id, s]));
+  const noteById = new Map(input.ingredientNotes.map((n) => [n.id, n]));
+
+  return {
+    title: typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim() : input.title,
+    description: typeof parsed.description === "string" ? parsed.description : null,
+    steps: Array.isArray(parsed.steps)
+      ? parsed.steps
+          .filter((s: any) => s && typeof s.id === "string" && stepById.has(s.id))
+          .map((s: any) => ({
+            id: s.id,
+            title: typeof s.title === "string" ? s.title : null,
+            description: typeof s.description === "string" && s.description.trim() ? s.description : stepById.get(s.id)!.description,
+            notes: typeof s.notes === "string" ? s.notes : null,
+          }))
+      : [],
+    ingredientNotes: Array.isArray(parsed.ingredientNotes)
+      ? parsed.ingredientNotes
+          .filter((n: any) => n && typeof n.id === "string" && typeof n.notes === "string" && n.notes.trim() && noteById.has(n.id))
+          .map((n: any) => ({ id: n.id, notes: n.notes }))
+      : [],
+  };
 }
 
 /**

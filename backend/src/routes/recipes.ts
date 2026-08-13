@@ -9,7 +9,7 @@ import { query, queryOne, withTransaction } from "../db/pool";
 import { calculatePortions, resolveCookSequence } from "../services/matrioska.engine";
 import { calculateRecipeNutrition } from "../services/nutrition.service";
 import { computeAutoTagNames, unionTagNames } from "../services/tags.service";
-import { parseRecipeWithLLM } from "../services/llm.parser";
+import { parseRecipeWithLLM, translateRecipeContent } from "../services/llm.parser";
 import { matchLLMResultToDB } from "../services/ingredient.matcher";
 import { v4 as uuidv4 } from "uuid";
 
@@ -88,7 +88,14 @@ const CreateRecipeSchema = z.object({
   cookTimeMin: z.number().int().positive().optional().nullable(),
   restTimeMin: z.number().int().positive().optional().nullable(),
   rating: z.number().int().min(0).max(5).optional().nullable(),
+  yieldAmount: z.number().positive().optional().nullable(),
+  yieldUnitId: z.string().uuid().optional().nullable(),
   tags: z.array(z.string()).default([]),
+  regions: z.array(z.string()).default([]),
+  // Keyed by lowercased region label — coords for free-text regions
+  // (e.g. "sardinia") resolved via /api/geocode; country entries don't
+  // need this, their centroid comes from the static countries.ts list.
+  regionCoords: z.record(z.object({ lat: z.number(), lng: z.number() })).default({}),
   coverImageUrl: z.string().nullable().optional(),
   sourceUrl: z.string().nullable().optional(),
   sources: z.array(RecipeSourceSchema).default([]),
@@ -144,7 +151,7 @@ const SORT_OPTIONS: Record<string, string> = {
 };
 
 recipeRouter.get("/", async (req: Request, res: Response) => {
-  const { q, tag, tags, ingredientCategories, difficulty, component, lang, sort } = req.query;
+  const { q, tag, tags, ingredientCategories, regions, difficulty, component, lang, sort } = req.query;
 
   const params: unknown[] = [];
   let langJoin = "";
@@ -213,6 +220,13 @@ recipeRouter.get("/", async (req: Request, res: Response) => {
     if (tagList.length > 0) {
       params.push(tagList);
       sql += ` AND EXISTS (SELECT 1 FROM unnest(r.tags) rt_name WHERE lower(rt_name) = ANY(SELECT lower(unnest($${params.length}::text[]))))`;
+    }
+  }
+  if (regions) {
+    const regionList = String(regions).split(",").map(r => r.trim()).filter(Boolean);
+    if (regionList.length > 0) {
+      params.push(regionList);
+      sql += ` AND r.regions && $${params.length}::text[]`;
     }
   }
   if (difficulty) {
@@ -362,10 +376,10 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
     await withTransaction(async (client) => {
       await client.query(
         `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,
-           cook_time_min,rest_time_min,rating,tags,cover_image_url,source_url,sources,is_component,language_code,creator_id,crdt_clock)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'{}')`,
+           cook_time_min,rest_time_min,rating,yield_amount,yield_unit_id,tags,regions,region_coords,cover_image_url,source_url,sources,is_component,language_code,creator_id,crdt_clock)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'{}')`,
         [recipeId,d.title,d.description,d.difficulty,d.servings,d.prepTimeMin,
-         d.cookTimeMin,d.restTimeMin,d.rating??null,d.tags,d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null,req.userId??null]
+         d.cookTimeMin,d.restTimeMin,d.rating??null,d.yieldAmount??null,d.yieldUnitId??null,d.tags,d.regions,JSON.stringify(d.regionCoords),d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null,req.userId??null]
       );
 
       // Inserisci ingredienti
@@ -434,6 +448,73 @@ recipeRouter.get("/:id/collections", async (req: Request, res: Response) => {
     [req.params.id, req.userId]
   );
   res.json({ data: rows });
+});
+
+// ── POST /recipes/:id/translate/:lang ───────────────────────────────────
+// AI-translates title/description/step content/ingredient notes into the
+// given language using whichever LLM provider the account has configured.
+// Always overwrites any existing translation for that language (no manual-
+// edit preservation) — recipes are shared/attribution-only, so any logged-in
+// user can trigger this on any recipe, same as editing one.
+const SUPPORTED_TRANSLATION_LANGS = ["en", "it", "fr", "es"];
+
+recipeRouter.post("/:id/translate/:lang", async (req: Request, res: Response) => {
+  const { id, lang } = req.params;
+  if (!SUPPORTED_TRANSLATION_LANGS.includes(lang)) {
+    return res.status(400).json({ error: `Unsupported language: ${lang}` });
+  }
+
+  const recipe = await queryOne<{ title: string; description: string | null }>(
+    "SELECT title, description FROM recipes WHERE id=$1 AND sync_status != 'deleted'",
+    [id]
+  );
+  if (!recipe) return res.status(404).json({ error: "Ricetta non trovata" });
+
+  const steps = await query<{ id: string; title: string | null; description: string; notes: string | null }>(
+    "SELECT id, title, description, notes FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number",
+    [id]
+  );
+  const ingredientNotes = await query<{ id: string; notes: string }>(
+    "SELECT id, notes FROM recipe_ingredients WHERE recipe_id=$1 AND notes IS NOT NULL AND notes != ''",
+    [id]
+  );
+
+  try {
+    const translated = await translateRecipeContent(
+      { title: recipe.title, description: recipe.description, steps, ingredientNotes },
+      lang
+    );
+
+    await withTransaction(async (client) => {
+      await client.query(
+        `INSERT INTO recipe_translations (recipe_id, language_code, title, description)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (recipe_id, language_code) DO UPDATE SET title=$3, description=$4, updated_at=now()`,
+        [id, lang, translated.title, translated.description]
+      );
+      for (const step of translated.steps) {
+        await client.query(
+          `INSERT INTO recipe_step_translations (step_id, language_code, title, description, notes)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (step_id, language_code) DO UPDATE SET title=$3, description=$4, notes=$5, updated_at=now()`,
+          [step.id, lang, step.title, step.description, step.notes]
+        );
+      }
+      for (const note of translated.ingredientNotes) {
+        await client.query(
+          `INSERT INTO recipe_ingredient_translations (recipe_ingredient_id, language_code, notes)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (recipe_ingredient_id, language_code) DO UPDATE SET notes=$3, updated_at=now()`,
+          [note.id, lang, note.notes]
+        );
+      }
+    });
+
+    res.json({ data: { lang, ...translated } });
+  } catch (err) {
+    console.error("Recipe translation failed:", err);
+    res.status(502).json({ error: err instanceof Error ? err.message : "Traduzione fallita" });
+  }
 });
 
 // ── GET /recipes/:id/portions?servings=N ─────────────────────────────
@@ -510,11 +591,11 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
         `UPDATE recipes SET
            title=$2, description=$3, difficulty=$4, servings=$5,
            prep_time_min=$6, cook_time_min=$7, rest_time_min=$8, rating=$9,
-           tags=$10, cover_image_url=$11, source_url=$12, sources=$13, is_component=$14,
-           language_code=$15, updated_at=now()
+           yield_amount=$10, yield_unit_id=$11, tags=$12, regions=$13, region_coords=$14, cover_image_url=$15, source_url=$16, sources=$17, is_component=$18,
+           language_code=$19, updated_at=now()
          WHERE id=$1`,
         [id, d.title, d.description, d.difficulty, d.servings, d.prepTimeMin,
-         d.cookTimeMin, d.restTimeMin, d.rating ?? null, d.tags, d.coverImageUrl, d.sourceUrl, JSON.stringify(d.sources), d.isComponent,
+         d.cookTimeMin, d.restTimeMin, d.rating ?? null, d.yieldAmount ?? null, d.yieldUnitId ?? null, d.tags, d.regions, JSON.stringify(d.regionCoords), d.coverImageUrl, d.sourceUrl, JSON.stringify(d.sources), d.isComponent,
          d.languageCode ?? null]
       );
 
@@ -598,6 +679,7 @@ recipeRouter.post("/:id/cooked", async (req: Request, res: Response) => {
     [req.params.id]
   );
   if (rows.length === 0) return res.status(404).json({ error: "Recipe not found" });
+  await query("INSERT INTO cook_log (recipe_id, cooked_by) VALUES ($1, $2)", [req.params.id, req.userId ?? null]);
   res.json({ data: { timesCooked: rows[0].times_cooked } });
 });
 

@@ -8,6 +8,9 @@ import RecipeSourcesEditor, { RecipeSourceEntry } from '../components/RecipeSour
 import ImageUrlInput from '../components/ImageUrlInput';
 import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
 import TagPicker from '../components/TagPicker';
+import RegionPicker from '../components/RegionPicker';
+import RegionsMap from '../components/RegionsMap';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import { apiFetch } from '../lib/api';
@@ -68,6 +71,10 @@ interface Recipe {
   cook_time_min: number | null;
   rest_time_min: number | null;
   tags: string[];
+  regions: string[];
+  region_coords: Record<string, { lat: number; lng: number }>;
+  yield_amount: number | null;
+  yield_unit_id: string | null;
   cover_image_url: string | null;
   source_url: string | null;
   sources: RecipeSourceEntry[];
@@ -88,7 +95,8 @@ const RecipeCreate: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
-  
+  const isOnline = useOnlineStatus();
+
   // Library data
   const contentLang = useStore((s) => s.contentLang);
   const langQuery = contentLang ? `?lang=${contentLang}` : '';
@@ -96,6 +104,10 @@ const RecipeCreate: React.FC = () => {
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
   const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
+  const [allRecipes, setAllRecipes] = useState<{ id: string; title: string; translated_title?: string | null }[]>([]);
+  // Per-row "Ingredient" vs "Recipe" toggle for the ingredient picker — not
+  // persisted, purely a UI switch between the two Autocomplete data sources.
+  const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
 
   // Draft state
   const [draft, setDraft] = useState<Partial<Recipe>>({
@@ -107,6 +119,10 @@ const RecipeCreate: React.FC = () => {
     cook_time_min: null,
     rest_time_min: null,
     tags: [],
+    regions: [],
+    region_coords: {},
+    yield_amount: null,
+    yield_unit_id: null,
     cover_image_url: '',
     sources: [],
     is_component: false,
@@ -121,17 +137,19 @@ const RecipeCreate: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        const [tRes, uRes, iRes, techRes] = await Promise.all([
+        const [tRes, uRes, iRes, techRes, rRes] = await Promise.all([
           apiFetch(`/api/tools${langQuery}`),
           apiFetch(`/api/units${langQuery}`),
           apiFetch(`/api/ingredients${langQuery}`),
           apiFetch(`/api/techniques${langQuery}`),
+          apiFetch(`/api/recipes${langQuery}`),
         ]);
-        const [tJson, uJson, iJson, techJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), techRes.json()]);
+        const [tJson, uJson, iJson, techJson, rJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), techRes.json(), rRes.json()]);
         setAllTools(tJson.data || []);
         setAllUnits(uJson.data || []);
         setAllIngredients(iJson.data || []);
         setAllTechniques(techJson.data || []);
+        setAllRecipes(rJson.data || []);
       } catch (err) {
         console.error('RecipeCreate: Library fetch failed:', err);
       }
@@ -264,6 +282,20 @@ const RecipeCreate: React.FC = () => {
       ingredients: [...(prev.ingredients || []), { id: '', sortOrder: (prev.ingredients?.length || 0), ingredientId: null, ingredientName: '', quantity: 1, unitId: null, isOptional: false, notes: '' }],
     }));
 
+  const getEntryType = (idx: number, ing: Ingredient): 'ingredient' | 'recipe' =>
+    ingredientEntryTypes[idx] ?? (ing.subRecipeId ? 'recipe' : 'ingredient');
+
+  const setEntryType = (idx: number, type: 'ingredient' | 'recipe') => {
+    setIngredientEntryTypes(prev => ({ ...prev, [idx]: type }));
+    if (type === 'recipe') {
+      updateIngredient(idx, 'ingredientId', null);
+      updateIngredient(idx, 'ingredientName', '');
+    } else {
+      updateIngredient(idx, 'subRecipeId', null);
+      updateIngredient(idx, 'subRecipeTitle', null);
+    }
+  };
+
   const removeIngredient = (idx: number) =>
     setDraft(prev => ({
       ...prev,
@@ -312,6 +344,10 @@ const RecipeCreate: React.FC = () => {
         cookTimeMin: draft.cook_time_min || undefined,
         restTimeMin: draft.rest_time_min || undefined,
         tags: draft.tags || [],
+        regions: draft.regions || [],
+        regionCoords: draft.region_coords || {},
+        yieldAmount: draft.yield_amount || undefined,
+        yieldUnitId: draft.yield_unit_id || undefined,
         coverImageUrl: draft.cover_image_url || null,
         sourceUrl: draft.source_url || null,
         sources: draft.sources || [],
@@ -454,6 +490,28 @@ const RecipeCreate: React.FC = () => {
           ))}
         </div>
 
+        {/* Yield (optional — enables weight/volume amounts when this recipe is used as a sub-recipe ingredient) */}
+        <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+          <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.yield')}</h3>
+          <p className="text-xs text-zinc-400 mb-4">{t('recipeDetail.yieldHint')}</p>
+          <div className="flex gap-3 max-w-sm">
+            <input
+              type="number" step="any" value={draft.yield_amount ?? ''}
+              onChange={e => updateDraft('yield_amount', e.target.value ? parseFloat(e.target.value) : null)}
+              placeholder={t('recipeDetail.yieldAmountPlaceholder')}
+              className="flex-1 border-none bg-zinc-50 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
+            />
+            <select
+              value={draft.yield_unit_id || ''}
+              onChange={e => updateDraft('yield_unit_id', e.target.value || null)}
+              className="border-none bg-zinc-50 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="">{t('recipeDetail.unitEllipsis')}</option>
+              {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
+            </select>
+          </div>
+        </div>
+
         {/* Difficulty + Tags */}
         <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
           <div className="flex flex-wrap gap-6">
@@ -474,6 +532,23 @@ const RecipeCreate: React.FC = () => {
               <TagPicker value={draft.tags || []} onChange={tags => updateDraft('tags', tags)} />
             </div>
           </div>
+        </div>
+
+        {/* Regions */}
+        <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+          <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.regions')}</h3>
+          <p className="text-xs text-zinc-400 mb-4">{t('recipeDetail.regionsHint')}</p>
+          <RegionPicker
+            value={draft.regions || []}
+            onChange={regions => updateDraft('regions', regions)}
+            coords={draft.region_coords || {}}
+            onCoordsChange={coords => updateDraft('region_coords', coords)}
+          />
+          {isOnline && (draft.regions || []).length > 0 && (
+            <div className="mt-4">
+              <RegionsMap regions={draft.regions || []} coords={draft.region_coords || {}} />
+            </div>
+          )}
         </div>
 
         {/* Sources & References */}
@@ -528,21 +603,57 @@ const RecipeCreate: React.FC = () => {
                 </button>
                 <div className="grid grid-cols-12 gap-4">
                   <div className="col-span-6">
-                    <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.ingredient')}</label>
-                    <Autocomplete
-                      value={ing.ingredientId || ''}
-                      options={allIngredients.map(i => ({ id: i.id, label: i.translated_name || i.name }))}
-                      onSelect={(id, label) => {
-                        updateIngredient(idx, 'ingredientId', id);
-                        updateIngredient(idx, 'ingredientName', label);
-                      }}
-                      onClear={() => {
-                        updateIngredient(idx, 'ingredientId', null);
-                        updateIngredient(idx, 'ingredientName', '');
-                      }}
-                      placeholder={t('recipeDetail.typeToSearch')}
-                      className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[10px] uppercase font-bold text-zinc-400">{t('recipeDetail.ingredient')}</label>
+                      <div className="flex bg-zinc-100 rounded-full p-0.5">
+                        {(['ingredient', 'recipe'] as const).map((type) => (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => setEntryType(idx, type)}
+                            className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                              getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 hover:text-zinc-600'
+                            }`}
+                          >
+                            {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {getEntryType(idx, ing) === 'recipe' ? (
+                      <Autocomplete
+                        value={ing.subRecipeId || ''}
+                        options={allRecipes.map(r => ({ id: r.id, label: r.translated_title || r.title }))}
+                        onSelect={(id, label) => {
+                          updateIngredient(idx, 'subRecipeId', id);
+                          updateIngredient(idx, 'subRecipeTitle', label);
+                        }}
+                        onClear={() => {
+                          updateIngredient(idx, 'subRecipeId', null);
+                          updateIngredient(idx, 'subRecipeTitle', null);
+                        }}
+                        placeholder={t('recipeDetail.typeToSearch')}
+                        className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                      />
+                    ) : (
+                      <Autocomplete
+                        value={ing.ingredientId || ''}
+                        options={allIngredients.map(i => ({ id: i.id, label: i.translated_name || i.name }))}
+                        onSelect={(id, label) => {
+                          updateIngredient(idx, 'ingredientId', id);
+                          updateIngredient(idx, 'ingredientName', label);
+                        }}
+                        onClear={() => {
+                          updateIngredient(idx, 'ingredientId', null);
+                          updateIngredient(idx, 'ingredientName', '');
+                        }}
+                        placeholder={t('recipeDetail.typeToSearch')}
+                        className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                      />
+                    )}
+                    {getEntryType(idx, ing) === 'recipe' && (
+                      <p className="text-[9px] text-zinc-400 mt-1">{t('recipeDetail.subRecipeCycleWarning')}</p>
+                    )}
                   </div>
                   <div className="col-span-3">
                     <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.qty')}</label>
