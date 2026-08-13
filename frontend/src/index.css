@@ -28,6 +28,10 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     scroll-behavior: smooth;
+    /* Backstop against a single overflowing element (e.g. a flex row
+       whose child ignores its container's width) silently pushing the
+       whole page into horizontal scroll on narrow/native screens. */
+    overflow-x: hidden;
   }
 
   /* Keeps scrollable content clear of the gesture-nav bar / notch cutouts on

@@ -46,7 +46,7 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
-          className={className || 'flex-1 border-none bg-zinc-50 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20'}
+          className={className || 'flex-1 min-w-0 border-none bg-zinc-50 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20'}
         />
         <input
           ref={fileInputRef}

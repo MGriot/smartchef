@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
@@ -38,13 +38,23 @@ function LibraryLink({ to, icon, label, active }: { to: string; icon: string; la
   );
 }
 
-const DEFAULT_AVATAR = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
+// Bundled locally (not a remote fetch) so it always renders offline/native.
+const DEFAULT_AVATAR = '/chef.svg';
 
 export default function AppLayout({ children, librarySection, sidebarExtra, headerActions }: AppLayoutProps) {
   const { t, i18n } = useTranslation();
   const setContentLang = useStore((s) => s.setContentLang);
   const account = useStore((s) => s.account);
   const location = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Below the `lg` breakpoint the header's own nav links are hidden (no
+  // room for them) — this dropdown is their only way to reach anything
+  // other than Home/Planner/Account on a phone, so it must close itself
+  // whenever a link inside it is actually followed.
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
 
   const handleLanguageChange = (code: string) => {
     i18n.changeLanguage(code);
@@ -66,7 +76,16 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
         className="min-h-[65px] bg-white border-b border-zinc-100 flex items-center justify-between px-8 sticky top-0 z-50"
         style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'max(2rem, env(safe-area-inset-left))', paddingRight: 'max(2rem, env(safe-area-inset-right))' }}
       >
-        <div className="flex items-center gap-12">
+        <div className="flex items-center gap-4 lg:gap-12">
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+            aria-label={t('common.menu')}
+            aria-expanded={mobileMenuOpen}
+            className="lg:hidden w-9 h-9 -ml-1.5 flex items-center justify-center rounded-full hover:bg-zinc-100 active:scale-95 transition-all shrink-0"
+          >
+            <span className="material-symbols-outlined">{mobileMenuOpen ? 'close' : 'menu'}</span>
+          </button>
           <Link to="/" className="text-2xl font-black text-primary tracking-tight">SmartChef</Link>
           <nav className="hidden lg:flex items-center gap-8">
             {NAV_LINKS.map((link) => (
@@ -113,6 +132,23 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
         </div>
       </header>
 
+      {mobileMenuOpen && (
+        <nav className="lg:hidden bg-white border-b border-zinc-100 px-4 py-3 space-y-1 shadow-sm">
+          <Link
+            to="/recipe/new"
+            className="flex items-center gap-3 px-4 py-3 bg-primary text-white rounded-xl font-bold text-sm mb-2"
+          >
+            <span className="material-symbols-outlined text-[20px]">add</span>
+            {t('nav.createRecipe')}
+          </Link>
+          {NAV_LINKS.map((link) => (
+            <Link key={link.to} to={link.to} className={isActive(link.to) ? ACTIVE_LINK : IDLE_LINK}>
+              {t(link.labelKey)}
+            </Link>
+          ))}
+        </nav>
+      )}
+
       <div className="flex min-h-[calc(100vh-65px)]">
         {librarySection && (
           <aside className="w-[280px] bg-white border-r border-zinc-100 flex flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
@@ -130,7 +166,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             </nav>
           </aside>
         )}
-        <main className={librarySection ? "flex-grow p-10 max-w-7xl mx-auto" : "flex-grow"}>
+        <main className={librarySection ? "flex-grow min-w-0 p-10 max-w-7xl mx-auto" : "flex-grow min-w-0"}>
           {children}
         </main>
       </div>

@@ -120,7 +120,7 @@ function SyncCard() {
   if (!status) return null;
 
   return (
-    <div className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mt-8">
+    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-black text-zinc-900">Multi-Device Sync</h2>
@@ -288,7 +288,7 @@ function LlmProviderCard() {
   if (!loaded) return null;
 
   return (
-    <div className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mt-8">
+    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900">AI Provider</h2>
         <p className="text-sm text-zinc-400 font-medium mt-1">
@@ -364,7 +364,7 @@ function ManageUsersCard() {
   return (
     <Link
       to="/manage-users"
-      className="flex items-center justify-between bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mt-8 hover:border-zinc-200 transition-colors"
+      className="flex items-center justify-between bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8 hover:border-zinc-200 transition-colors"
     >
       <div>
         <h2 className="text-lg font-black text-zinc-900">Manage Users</h2>
@@ -435,7 +435,7 @@ function BackupCard() {
   };
 
   return (
-    <div className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mt-8">
+    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900">Backup &amp; Restore</h2>
         <p className="text-sm text-zinc-400 font-medium mt-1">
@@ -532,7 +532,7 @@ export default function Account() {
 
   return (
     <AppLayout>
-      <div className="p-12 max-w-2xl mx-auto">
+      <div className="p-6 sm:p-12 max-w-2xl mx-auto">
         <div className="mb-10">
           <button
             onClick={() => navigate(-1)}
@@ -544,7 +544,7 @@ export default function Account() {
           <h1 className="text-4xl font-black text-zinc-900 tracking-tighter">Account</h1>
         </div>
 
-        <form onSubmit={handleSave} className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 space-y-6">
+        <form onSubmit={handleSave} className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 space-y-6">
           <div>
             <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Name</label>
             <input

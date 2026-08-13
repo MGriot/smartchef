@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
@@ -88,11 +88,35 @@ interface Collection {
   cover_images: (string | null)[];
 }
 
+// Recipe photos (uploaded or the old Unsplash-URL fallback) are plain
+// remote URLs, never cached locally — unreachable offline. Falls back to
+// a local icon (no network) instead of the browser's broken-image glyph,
+// both when there's no cover at all and when a real URL fails to load.
+function CoverImage({ src, alt, iconSize = 40 }: { src?: string | null; alt: string; iconSize?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-zinc-100 text-zinc-300">
+        <span className="material-symbols-outlined" style={{ fontSize: iconSize }}>restaurant</span>
+      </div>
+    );
+  }
+  return (
+    <img
+      alt={alt}
+      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+      src={src}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════ */
 /*  HOME – "Modern Culinary" Bento Gallery                   */
 /* ═══════════════════════════════════════════════════════════ */
 const Home: React.FC = () => {
   const { t } = useTranslation();
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
@@ -340,13 +364,7 @@ const Home: React.FC = () => {
                         <div className="aspect-[4/3] grid grid-cols-2 gap-0.5 bg-zinc-100">
                           {Array.from({ length: 4 }).map((_, i) => (
                             <div key={i} className="overflow-hidden bg-zinc-100">
-                              {covers[i] ? (
-                                <img alt="" className="w-full h-full object-cover" src={covers[i]!} />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-zinc-300">
-                                  <span className="material-symbols-outlined text-2xl">restaurant</span>
-                                </div>
-                              )}
+                              <CoverImage src={covers[i]} alt="" iconSize={24} />
                             </div>
                           ))}
                         </div>
@@ -372,6 +390,7 @@ const Home: React.FC = () => {
                 search
               </span>
               <input
+                ref={searchInputRef}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-12 pr-4 py-3.5 bg-zinc-100/80 rounded-full border-none text-sm font-body placeholder:text-zinc-400 focus:bg-white focus:ring-2 focus:ring-primary/25 focus:shadow-lg transition-all duration-200"
@@ -592,11 +611,7 @@ const Home: React.FC = () => {
                     )}
                     {/* Image */}
                     <div className="aspect-[4/3] overflow-hidden relative">
-                      <img
-                        alt={recipe.title}
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        src={recipe.cover_image_url || 'https://images.unsplash.com/photo-1495195129352-aec325a55b65?q=80&w=800'}
-                      />
+                      <CoverImage src={recipe.cover_image_url} alt={recipe.title} />
                       {/* Shimmer overlay on hover */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
@@ -705,10 +720,20 @@ const Home: React.FC = () => {
           <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
           <span className="text-[11px] font-bold mt-0.5">{t('bottomNav.home')}</span>
         </Link>
-        <Link className="flex flex-col items-center justify-center text-zinc-400 hover:text-primary transition-colors" to="#">
+        <button
+          type="button"
+          className="flex flex-col items-center justify-center text-zinc-400 hover:text-primary transition-colors"
+          onClick={() => {
+            setActiveTab('recipes');
+            setTimeout(() => {
+              searchInputRef.current?.focus();
+              searchInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 0);
+          }}
+        >
           <span className="material-symbols-outlined">search</span>
           <span className="text-[11px] font-bold mt-0.5">{t('bottomNav.search')}</span>
-        </Link>
+        </button>
         <Link className="flex flex-col items-center justify-center text-zinc-400 hover:text-primary transition-colors" to="/planner">
           <span className="material-symbols-outlined">calendar_month</span>
           <span className="text-[11px] font-bold mt-0.5">{t('bottomNav.planner')}</span>

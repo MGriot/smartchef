@@ -23,6 +23,7 @@
     "loading": "Chargement…",
     "language": "Langue",
     "account": "Compte",
+    "menu": "Menu",
     "title": "Titre",
     "addTranslation": "Ajouter une traduction",
     "languageCodeHint": "Code de langue, ex: it"
