@@ -204,15 +204,19 @@ smartchef/
 │   │   │   ├── collections.ts          # Freeform recipe collections
 │   │   │   ├── menus.ts                # Weekly meal planner
 │   │   │   ├── shopping.ts             # Shopping list generation + Markdown export
-│   │   │   ├── auth.ts                 # Single-instance login/setup (session JWT cookie)
+│   │   │   ├── auth.ts                 # Login/setup, multi-user (admin-invited), LLM provider config (session JWT cookie)
 │   │   │   ├── share.ts                # Export/import a recipe or collection as a portable file
 │   │   │   ├── sync-folder.ts          # Multi-device sync via a shared folder + native offline snapshot pull
 │   │   │   ├── backup.ts               # Manual whole-library backup export/import
+│   │   │   ├── cook-log.ts             # Cook-history calendar (GET /cook-log?from=&to=)
+│   │   │   ├── geocode.ts              # Nominatim proxy for free-text region geocoding
 │   │   │   ├── sync.ts                 # Legacy CRDT/vector-clock P2P endpoints — see "Multi-device sync" below
 │   │   │   └── uploads.ts              # Image uploads (multer + sharp)
 │   │   ├── services/
-│   │   │   ├── matrioska.engine.ts     # ⭐ Recursive portion scaling across nested sub-recipes
-│   │   │   ├── llm.parser.ts           # Ollama client — recipe extraction + ingredient-name translation
+│   │   │   ├── matrioska.engine.ts     # ⭐ Recursive portion scaling across nested sub-recipes (incl. weight/volume-based sub-recipe yield)
+│   │   │   ├── llm.parser.ts           # Provider dispatch (Ollama/Anthropic/Gemini/OpenAI) — recipe extraction, translation, ingredient-name translation
+│   │   │   ├── llm.providers.ts        # Anthropic/Gemini/OpenAI API clients
+│   │   │   ├── crypto.service.ts       # AES-256-GCM encrypt/decrypt for stored LLM API keys
 │   │   │   ├── ingredient.matcher.ts   # Fuzzy match LLM output → DB (Levenshtein), auto-creates missing ones
 │   │   │   ├── tags.service.ts         # Ingredient-driven auto-tagging
 │   │   │   ├── nutrition.service.ts    # Per-serving nutrition calculation
@@ -239,11 +243,15 @@ smartchef/
     │   │   ├── Planner.tsx              # Weekly meal planner
     │   │   ├── ShoppingList.tsx         # Shopping list
     │   │   ├── CollectionDetail.tsx     # Recipe collection view
-    │   │   ├── Login.tsx / Account.tsx  # Auth + account settings, Backup & Restore, Multi-Device Sync
+    │   │   ├── CookHistory.tsx          # Cook-history month calendar
+    │   │   ├── Login.tsx / Account.tsx  # Auth + account settings (avatar presets, LLM provider), Backup & Restore, Multi-Device Sync
+    │   │   ├── ManageUsers.tsx          # Admin-only: invite/list/remove instance users
     │   │   └── ServerConnect.tsx        # Native-app-only: connect to a remote SmartChef server
     │   ├── lib/api.ts                   # apiFetch — same-origin on web, absolute+cookie'd on native, offline fallback/outbox
     │   ├── lib/offlineStore.ts          # Native SQLite cache + write outbox
+    │   ├── lib/countries.ts             # Country code → centroid lat/lng for the region map
     │   ├── components/AppLayout.tsx     # Shared header + sidebar navigation
+    │   ├── components/RegionPicker.tsx / RegionsMap.tsx  # Recipe geolocation chip picker + Leaflet map
     │   └── store/app.store.ts           # Global state (Zustand)
     ├── android/                         # Capacitor Android project (native wrapper, see below)
     ├── nginx.conf                       # SPA routing + API proxy
@@ -281,8 +289,8 @@ All routes below live under `/api` and (aside from `/api/auth/*`) require an aut
 
 | Base path | Covers |
 |-----------|--------|
-| `/api/auth` | First-run setup, login, logout, account settings |
-| `/api/recipes` | CRUD, `?q=&tag=&tags=&ingredientCategories=&difficulty=&sort=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/parse` (AI import) |
+| `/api/auth` | First-run setup, username/password login, logout, account settings (incl. LLM provider config), admin-only user management (`/users`) |
+| `/api/recipes` | CRUD, `?q=&tag=&tags=&ingredientCategories=&regions=&difficulty=&sort=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/:id/translate/:lang` (AI translation), `/:id/collections`, `/parse` (AI import) |
 | `/api/ingredients` | Ingredients, `/categories`, nested `/api/units`, `/api/tools` |
 | `/api/techniques` | Cooking techniques library |
 | `/api/tags` | Managed tag catalog |
@@ -292,6 +300,8 @@ All routes below live under `/api` and (aside from `/api/auth/*`) require an aut
 | `/api/share` | Export/import a recipe, bulk recipes, or a collection as a portable `.smartchef.json` file |
 | `/api/sync-folder` | Multi-device sync status/trigger + native app's offline-cache snapshot pull |
 | `/api/backup` | Manual whole-library backup export/import |
+| `/api/cook-log` | Cook-history calendar (`GET ?from=&to=`), backing the "I cooked this" log |
+| `/api/geocode` | Server-side Nominatim proxy for free-text region geocoding (cached) |
 | `/api/sync` | Legacy CRDT/vector-clock P2P endpoints — see [Multi-device sync](#-multi-device-sync) |
 | `/api/uploads` | Image uploads |
 | `/health` | DB + Ollama status (no auth required) |
@@ -409,9 +419,15 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Nutrition | Per-serving calculation from ingredient nutrition data, resolved through nested sub-recipes | ✅ Complete |
 | Collections & Meal Planner & Shopping List | Freeform recipe collections; weekly planner; shopping list from a saved menu or an ad-hoc cart, aggregated or grouped view, Markdown export | ✅ Complete |
 | AI recipe import | Real Ollama-backed parsing (URL/raw text) with fuzzy ingredient/tool matching, source-language detection, progress feedback; portable-file import/export for sharing between instances | ✅ Complete |
-| Auth | Single-instance login (no per-user accounts, matches the shared-household-library model), session JWT cookie | ✅ Complete |
-| i18n | EN/IT UI + content translations (recipes, steps, categories, units, tools, tags, ingredients); ingredient names auto-translated to match a recipe's language | ✅ Complete |
-| PWA | Manifest, service worker, icons, installable | ✅ Complete |
+| Auth | Username/password login, admin-invited multi-user accounts (recipes stay a shared household cookbook — accounts drive attribution + private shopping list/planner/collections, not access control), session JWT cookie | ✅ Complete |
+| Cloud LLM providers | Optional Anthropic/Gemini/OpenAI for recipe-import parsing and AI translation, per-instance encrypted API keys (Account page); local Ollama stays the default | ✅ Complete |
+| AI recipe translation | One-click translate a recipe's title/description/steps/ingredient notes into another language via whichever LLM provider is configured | ✅ Complete |
+| Cook-history calendar | Month-view log of "I cooked this" events per recipe, linked from the recipe page | ✅ Complete |
+| Recipe geolocation | Chip-based region picker (country list + free-text sub-national, geocoded via a Nominatim proxy), Leaflet map (degrades gracefully offline), Gallery region filter | ✅ Complete |
+| Sub-recipe-as-ingredient | Pick an existing recipe as an ingredient line from the recipe editor UI; optional recipe "yield" field lets sub-recipe amounts be specified by weight/volume instead of only by servings | ✅ Complete |
+| Avatar presets | Original cartoon-chef SVGs, adaptively discovered from `frontend/src/assets/avatars/` (drop in a new file, no code change) | ✅ Complete |
+| i18n | EN/IT/FR/ES UI + content translations (recipes, steps, categories, units, tools, tags, ingredients); ingredient names auto-translated to match a recipe's language | ✅ Complete |
+| PWA | Manifest, service worker, icons, installable — service worker only registers on web; the native Android build skips it (files are already bundled in the APK) | ✅ Complete |
 | MCP Server | Exposes the recipe library via Model Context Protocol (port 3002) | ✅ Complete |
 | Native Android app | Capacitor wrapper, Tailscale-based remote HTTPS access, offline read cache + write outbox, native back-gesture handling | ✅ Complete |
 | Multi-device sync & backup | Folder-based whole-library snapshot sync (peer status + manual trigger on the Account page) and manual backup export/restore, both LWW-merged by `updated_at` | ✅ Complete |

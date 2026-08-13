@@ -97,7 +97,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             value={i18n.language}
             onChange={(e) => handleLanguageChange(e.target.value)}
             aria-label={t('common.language')}
-            className="text-xs font-bold text-zinc-500 bg-zinc-50 rounded-full px-3 py-1.5 border border-zinc-200 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+            className="text-xs font-bold text-zinc-500 bg-zinc-50 rounded-full pl-3 pr-7 py-1.5 border border-zinc-200 focus:ring-2 focus:ring-primary/20 cursor-pointer"
           >
             {SUPPORTED_LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>{l.label}</option>

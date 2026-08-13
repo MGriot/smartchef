@@ -30,14 +30,21 @@ if (isNative()) {
   }).catch(() => {});
 }
 
-// Force an immediate reload as soon as a new deployed version is detected,
-// instead of leaving the tab running stale cached JS until the user happens
-// to close and reopen it.
-const updateSW = registerSW({
-  onNeedRefresh() {
-    updateSW(true);
-  },
-});
+// PWA service worker: web only. On native, the app shell already ships
+// bundled inside the APK — no network round-trip to cache, and worse,
+// Android doesn't clear a WebView's Cache Storage across a plain
+// install-over-existing APK update, so a service worker registered by an
+// old build would keep serving its stale precached JS after every new
+// install. Force an immediate reload as soon as a new deployed *web*
+// version is detected, instead of leaving the tab running stale cached JS
+// until the user happens to close and reopen it.
+if (!isNative()) {
+  const updateSW = registerSW({
+    onNeedRefresh() {
+      updateSW(true);
+    },
+  });
+}
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
