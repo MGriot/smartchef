@@ -10,10 +10,14 @@ import RecipeSourcesEditor, { RecipeSourceEntry, SOURCE_TYPE_META } from '../com
 import ImageUrlInput from '../components/ImageUrlInput';
 import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
 import TagPicker from '../components/TagPicker';
+import RegionPicker from '../components/RegionPicker';
+import RegionsMap from '../components/RegionsMap';
 import RenderStepText from '../components/RenderStepText';
 import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
 import { apiFetch } from '../lib/api';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 
 /* ═══════════════════════════════════════════════════════════════════════
    TYPES
@@ -86,6 +90,10 @@ interface Recipe {
   updated_at: string;
   tags: string[];
   tags_display?: { name: string; translated_name: string; color: string | null }[];
+  regions: string[];
+  region_coords: Record<string, { lat: number; lng: number }>;
+  yield_amount: number | null;
+  yield_unit_id: string | null;
   cover_image_url: string;
   source_url: string | null;
   sources: RecipeSourceEntry[];
@@ -245,7 +253,10 @@ const RecipeDetail: React.FC = () => {
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
   const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
+  const [allRecipes, setAllRecipes] = useState<{ id: string; title: string; translated_title?: string | null }[]>([]);
+  const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
   const { t, i18n } = useTranslation();
+  const isOnline = useOnlineStatus();
   const contentLang = useStore((s) => s.contentLang);
   const setContentLang = useStore((s) => s.setContentLang);
   const addToShoppingCart = useStore((s) => s.addToShoppingCart);
@@ -309,15 +320,17 @@ const RecipeDetail: React.FC = () => {
     if (mode === 'edit') {
       (async () => {
         try {
-          const [tRes, uRes, iRes] = await Promise.all([
+          const [tRes, uRes, iRes, rRes] = await Promise.all([
             apiFetch(`/api/tools${contentLang ? `?lang=${contentLang}` : ''}`),
             apiFetch(`/api/units${contentLang ? `?lang=${contentLang}` : ''}`),
             apiFetch(`/api/ingredients${contentLang ? `?lang=${contentLang}` : ''}`),
+            apiFetch(`/api/recipes${contentLang ? `?lang=${contentLang}` : ''}`),
           ]);
-          const [tJson, uJson, iJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json()]);
+          const [tJson, uJson, iJson, rJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), rRes.json()]);
           setAllTools(tJson.data || []);
           setAllUnits(uJson.data || []);
           setAllIngredients(iJson.data || []);
+          setAllRecipes(rJson.data || []);
         } catch (err) { console.error('Library fetch failed:', err); }
       })();
     }
@@ -344,6 +357,42 @@ const RecipeDetail: React.FC = () => {
   }, [id, contentLang]);
 
   useEffect(() => { fetchRecipe(); }, [fetchRecipe]);
+
+  /* ── AI recipe translation ──────────────────────────────────────── */
+  const [aiTranslateLang, setAiTranslateLang] = useState(SUPPORTED_LANGUAGES.find(l => l.code !== 'en')?.code || 'en');
+  const [aiTranslating, setAiTranslating] = useState(false);
+  const [aiTranslateError, setAiTranslateError] = useState<string | null>(null);
+
+  // If the target language ever matches the recipe's own written language
+  // (e.g. once `recipe` finishes loading after this state's initial guess),
+  // bump to the next different language rather than offering a no-op translate.
+  useEffect(() => {
+    const baseLang = recipe?.language_code || draft.language_code;
+    if (baseLang && aiTranslateLang === baseLang) {
+      setAiTranslateLang(SUPPORTED_LANGUAGES.find(l => l.code !== baseLang)?.code || aiTranslateLang);
+    }
+  }, [recipe?.language_code, draft.language_code]);
+
+  const handleAiTranslate = async () => {
+    if (!id) return;
+    const langLabel = SUPPORTED_LANGUAGES.find(l => l.code === aiTranslateLang)?.label || aiTranslateLang;
+    if (!window.confirm(t('recipeDetail.aiTranslateConfirm', { lang: langLabel }))) return;
+    setAiTranslating(true);
+    setAiTranslateError(null);
+    try {
+      // LLM translation of a full recipe (title/description/steps/notes) can take
+      // several minutes on local CPU-only Ollama inference — same ceiling as
+      // RecipeImport.tsx's parse call, just above the backend's own 600s cap.
+      const res = await apiFetch(`/api/recipes/${id}/translate/${aiTranslateLang}`, { method: 'POST', timeoutMs: 650_000 });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Translation failed');
+      await fetchRecipe();
+    } catch (err) {
+      setAiTranslateError(err instanceof Error ? err.message : 'Translation failed');
+    } finally {
+      setAiTranslating(false);
+    }
+  };
 
   /* ── Kitchen Mode: fetch the sub-recipes-first step sequence, but only
      when this recipe actually has a sub-recipe ingredient — keeps the
@@ -457,6 +506,10 @@ const RecipeDetail: React.FC = () => {
         restTimeMin: draft.rest_time_min || undefined,
         rating: draft.rating === undefined ? recipe?.rating ?? null : draft.rating,
         tags: draft.tags || [],
+        regions: draft.regions || [],
+        regionCoords: draft.region_coords || {},
+        yieldAmount: draft.yield_amount || undefined,
+        yieldUnitId: draft.yield_unit_id || undefined,
         coverImageUrl: draft.cover_image_url || null,
         sourceUrl: draft.source_url || null,
         sources: draft.sources || [],
@@ -959,6 +1012,18 @@ const RecipeDetail: React.FC = () => {
         ...prev,
         ingredients: [...(prev.ingredients || []), { id: '', sortOrder: (prev.ingredients?.length || 0), ingredientId: null, ingredientName: '', quantity: 1, unitId: null, isOptional: false, notes: '' }],
       }));
+    const getEntryType = (idx: number, ing: Ingredient): 'ingredient' | 'recipe' =>
+      ingredientEntryTypes[idx] ?? (ing.subRecipeId ? 'recipe' : 'ingredient');
+    const setEntryType = (idx: number, type: 'ingredient' | 'recipe') => {
+      setIngredientEntryTypes(prev => ({ ...prev, [idx]: type }));
+      if (type === 'recipe') {
+        updateIngredient(idx, 'ingredientId', null);
+        updateIngredient(idx, 'ingredientName', '');
+      } else {
+        updateIngredient(idx, 'subRecipeId', null);
+        updateIngredient(idx, 'subRecipeTitle', null);
+      }
+    };
     const removeIngredient = (idx: number) =>
       setDraft(prev => ({
         ...prev,
@@ -1070,6 +1135,29 @@ const RecipeDetail: React.FC = () => {
               translations={draft.translations || []}
               onChange={translations => updateDraft('translations', translations)}
             />
+            <div className="mt-6 pt-6 border-t border-zinc-100">
+              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">{t('recipeDetail.aiTranslate')}</span>
+              <p className="text-xs text-zinc-400 mb-3">{t('recipeDetail.aiTranslateHint')}</p>
+              <div className="flex items-center gap-3">
+                <select
+                  value={aiTranslateLang}
+                  onChange={e => setAiTranslateLang(e.target.value)}
+                  className="border-none bg-zinc-50 rounded-xl px-4 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
+                >
+                  {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAiTranslate}
+                  disabled={aiTranslating}
+                  className="px-5 py-3 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
+                >
+                  {aiTranslating && <span className="material-symbols-outlined text-base animate-spin">sync</span>}
+                  {aiTranslating ? t('recipeDetail.aiTranslating') : t('recipeDetail.aiTranslateButton')}
+                </button>
+              </div>
+              {aiTranslateError && <p className="mt-3 text-sm text-red-600 font-medium">{aiTranslateError}</p>}
+            </div>
           </div>
 
           {/* Metadata grid */}
@@ -1089,6 +1177,28 @@ const RecipeDetail: React.FC = () => {
                 />
               </label>
             ))}
+          </div>
+
+          {/* Yield (optional — enables weight/volume amounts when this recipe is used as a sub-recipe ingredient) */}
+          <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+            <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.yield')}</h3>
+            <p className="text-xs text-zinc-400 mb-4">{t('recipeDetail.yieldHint')}</p>
+            <div className="flex gap-3 max-w-sm">
+              <input
+                type="number" step="any" value={draft.yield_amount ?? ''}
+                onChange={e => updateDraft('yield_amount', e.target.value ? parseFloat(e.target.value) : null)}
+                placeholder={t('recipeDetail.yieldAmountPlaceholder')}
+                className="flex-1 border-none bg-zinc-50 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
+              />
+              <select
+                value={draft.yield_unit_id || ''}
+                onChange={e => updateDraft('yield_unit_id', e.target.value || null)}
+                className="border-none bg-zinc-50 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="">{t('recipeDetail.unitEllipsis')}</option>
+                {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
+              </select>
+            </div>
           </div>
 
           {/* Difficulty + Tags */}
@@ -1115,6 +1225,23 @@ const RecipeDetail: React.FC = () => {
                 <TagPicker value={draft.tags || []} onChange={tags => updateDraft('tags', tags)} />
               </div>
             </div>
+          </div>
+
+          {/* Regions */}
+          <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+            <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.regions')}</h3>
+            <p className="text-xs text-zinc-400 mb-4">{t('recipeDetail.regionsHint')}</p>
+            <RegionPicker
+              value={draft.regions || []}
+              onChange={regions => updateDraft('regions', regions)}
+              coords={draft.region_coords || {}}
+              onCoordsChange={coords => updateDraft('region_coords', coords)}
+            />
+            {isOnline && (draft.regions || []).length > 0 && (
+              <div className="mt-4">
+                <RegionsMap regions={draft.regions || []} coords={draft.region_coords || {}} />
+              </div>
+            )}
           </div>
 
           {/* Sources & References */}
@@ -1169,21 +1296,57 @@ const RecipeDetail: React.FC = () => {
                   </button>
                   <div className="grid grid-cols-12 gap-4">
                     <div className="col-span-6">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.ingredient')}</label>
-                      <Autocomplete
-                        value={ing.ingredientId || ''}
-                        options={allIngredients.map(i => ({ id: i.id, label: i.translated_name || i.name }))}
-                        onSelect={(id, label) => {
-                          updateIngredient(idx, 'ingredientId', id);
-                          updateIngredient(idx, 'ingredientName', label);
-                        }}
-                        onClear={() => {
-                          updateIngredient(idx, 'ingredientId', null);
-                          updateIngredient(idx, 'ingredientName', '');
-                        }}
-                        placeholder={t('recipeDetail.typeToSearch')}
-                        className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
-                      />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[10px] uppercase font-bold text-zinc-400">{t('recipeDetail.ingredient')}</label>
+                        <div className="flex bg-zinc-100 rounded-full p-0.5">
+                          {(['ingredient', 'recipe'] as const).map((type) => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => setEntryType(idx, type)}
+                              className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                                getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 hover:text-zinc-600'
+                              }`}
+                            >
+                              {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {getEntryType(idx, ing) === 'recipe' ? (
+                        <Autocomplete
+                          value={ing.subRecipeId || ''}
+                          options={allRecipes.filter(r => r.id !== id).map(r => ({ id: r.id, label: r.translated_title || r.title }))}
+                          onSelect={(subId, label) => {
+                            updateIngredient(idx, 'subRecipeId', subId);
+                            updateIngredient(idx, 'subRecipeTitle', label);
+                          }}
+                          onClear={() => {
+                            updateIngredient(idx, 'subRecipeId', null);
+                            updateIngredient(idx, 'subRecipeTitle', null);
+                          }}
+                          placeholder={t('recipeDetail.typeToSearch')}
+                          className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                        />
+                      ) : (
+                        <Autocomplete
+                          value={ing.ingredientId || ''}
+                          options={allIngredients.map(i => ({ id: i.id, label: i.translated_name || i.name }))}
+                          onSelect={(id2, label) => {
+                            updateIngredient(idx, 'ingredientId', id2);
+                            updateIngredient(idx, 'ingredientName', label);
+                          }}
+                          onClear={() => {
+                            updateIngredient(idx, 'ingredientId', null);
+                            updateIngredient(idx, 'ingredientName', '');
+                          }}
+                          placeholder={t('recipeDetail.typeToSearch')}
+                          className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                        />
+                      )}
+                      {getEntryType(idx, ing) === 'recipe' && (
+                        <p className="text-[9px] text-zinc-400 mt-1">{t('recipeDetail.subRecipeCycleWarning')}</p>
+                      )}
                     </div>
                     <div className="col-span-3">
                       <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.qty')}</label>
@@ -1544,13 +1707,31 @@ const RecipeDetail: React.FC = () => {
           <img className="w-full h-full object-cover" src={recipe.cover_image_url || 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?q=80&w=2000'} alt={recipe.translated_title || recipe.title} />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
           <div className="absolute bottom-8 left-8 right-8">
-            {(recipe.tags_display?.[0] || recipe.tags?.[0]) && (
-              <span
-                className={`inline-block px-3 py-1 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full mb-3 ${recipe.tags_display?.[0]?.color ? '' : 'bg-primary'}`}
-                style={recipe.tags_display?.[0]?.color ? { backgroundColor: recipe.tags_display[0].color } : undefined}
-              >
-                {recipe.tags_display?.[0]?.translated_name || recipe.tags[0]}
-              </span>
+            {((recipe.tags_display && recipe.tags_display.length > 0) || recipe.tags?.[0]) && (
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {recipe.tags_display && recipe.tags_display.length > 0 ? (
+                  <>
+                    {recipe.tags_display.slice(0, 3).map((tag, i) => (
+                      <span
+                        key={i}
+                        className="inline-block px-3 py-1 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full"
+                        style={{ backgroundColor: tag.color || '#3f3f46' }}
+                      >
+                        {tag.translated_name}
+                      </span>
+                    ))}
+                    {recipe.tags_display.length > 3 && (
+                      <span className="inline-block px-3 py-1 bg-black/40 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full">
+                        +{recipe.tags_display.length - 3}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="inline-block px-3 py-1 bg-primary text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full">
+                    {recipe.tags[0]}
+                  </span>
+                )}
+              </div>
             )}
             <h1 className="text-4xl md:text-6xl font-headline font-extrabold text-white leading-none">{recipe.translated_title || recipe.title}</h1>
             {recipe.creator_name && (
@@ -1610,6 +1791,13 @@ const RecipeDetail: React.FC = () => {
             <span className="material-symbols-outlined text-base">add</span>
             {t('recipeDetail.iCookedThis')}
           </button>
+          <Link
+            to="/history"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full text-zinc-400 text-xs font-bold hover:text-primary transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">event_available</span>
+            {t('history.viewHistory')}
+          </Link>
         </div>
         <div className="mt-3 px-6 flex items-center gap-4 text-[11px] text-zinc-400 font-medium">
           <span>{t('recipeDetail.created', { date: formatDate(recipe.created_at) })}</span>
@@ -1653,6 +1841,21 @@ const RecipeDetail: React.FC = () => {
                 {addedToCart ? t('recipeDetail.addedToShoppingList') : t('recipeDetail.addToShoppingList')}
               </button>
             </div>
+
+            {/* Regions card */}
+            {recipe.regions && recipe.regions.length > 0 && (
+              <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+                <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.regions')}</h3>
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {recipe.regions.map((r) => (
+                    <span key={r} className="px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-50 text-zinc-600">
+                      {isCountryCode(r) ? `${flagEmoji(r)} ${countryDisplayName(r, i18n.language)}` : r}
+                    </span>
+                  ))}
+                </div>
+                {isOnline && <RegionsMap regions={recipe.regions} coords={recipe.region_coords || {}} />}
+              </div>
+            )}
 
             {/* Ingredients card */}
             <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">

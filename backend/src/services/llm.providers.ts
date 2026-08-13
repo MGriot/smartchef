@@ -17,10 +17,6 @@ const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-2025100
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
-function userMessage(content: string): string {
-  return `Analizza questa ricetta:\n\n${content}`;
-}
-
 export async function callAnthropic(content: string, apiKey: string, systemPrompt: string): Promise<string> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -33,7 +29,7 @@ export async function callAnthropic(content: string, apiKey: string, systemPromp
       model: ANTHROPIC_MODEL,
       max_tokens: 1500,
       system: systemPrompt,
-      messages: [{ role: "user", content: userMessage(content) }],
+      messages: [{ role: "user", content }],
       // No temperature/top_p/top_k — current Claude models return HTTP 400
       // on any non-default sampling param. No thinking config — adaptive
       // default is fine for this structured-extraction task.
@@ -59,7 +55,7 @@ export async function callGemini(content: string, apiKey: string, systemPrompt: 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: userMessage(content) }] }],
+        contents: [{ role: "user", parts: [{ text: content }] }],
       }),
       signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),
     }
@@ -84,7 +80,7 @@ export async function callOpenAI(content: string, apiKey: string, systemPrompt: 
       model: OPENAI_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage(content) },
+        { role: "user", content },
       ],
     }),
     signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),

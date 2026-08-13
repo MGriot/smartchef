@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
+import RegionPicker from '../components/RegionPicker';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 
@@ -16,6 +17,8 @@ interface Recipe {
   id: string;
   title: string;
   translated_title?: string | null;
+  description?: string | null;
+  translated_description?: string | null;
   cover_image_url: string;
   prep_time_min: number;
   cook_time_min: number;
@@ -45,14 +48,27 @@ interface IngredientCategory {
   icon?: string | null;
 }
 
-/* ── Gallery card badge: catalog tag (localized + colored) or Matrioska ── */
-const getCardBadge = (recipe: Recipe): { label: string; bg?: string; text?: string; color?: string | null } | null => {
+/* ── Gallery card badges: Matrioska + up to 3 catalog tags (localized + colored), "+N" overflow ── */
+type CardBadge = { label: string; bg?: string; text?: string; color?: string | null };
+const MAX_CARD_TAG_BADGES = 3;
+const getCardBadges = (recipe: Recipe): CardBadge[] => {
+  const badges: CardBadge[] = [];
   if (recipe.is_component) {
-    return { label: 'MATRIOSKA', bg: 'bg-orange-200/90', text: 'text-red-800' };
+    badges.push({ label: 'MATRIOSKA', bg: 'bg-orange-200/90', text: 'text-red-800' });
   }
-  const first = recipe.tags_display?.[0];
-  if (!first) return null;
-  return { label: first.translated_name.toUpperCase(), color: first.color };
+  const tagsDisplay = recipe.tags_display;
+  if (tagsDisplay && tagsDisplay.length > 0) {
+    for (const tag of tagsDisplay.slice(0, MAX_CARD_TAG_BADGES)) {
+      badges.push({ label: tag.translated_name.toUpperCase(), color: tag.color });
+    }
+    if (tagsDisplay.length > MAX_CARD_TAG_BADGES) {
+      badges.push({ label: `+${tagsDisplay.length - MAX_CARD_TAG_BADGES}`, bg: 'bg-zinc-700/90', text: 'text-white' });
+    }
+  } else if (!recipe.is_component && recipe.tags?.[0]) {
+    // Legacy free-text tag with no catalog match — still show something rather than nothing.
+    badges.push({ label: recipe.tags[0].toUpperCase(), bg: 'bg-zinc-700/90', text: 'text-white' });
+  }
+  return badges;
 };
 
 /* ── Difficulty label map (keys resolved via t() in the component) ── */
@@ -81,11 +97,15 @@ const Home: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [activeCategoryFilters, setActiveCategoryFilters] = useState<string[]>([]);
+  const [activeRegionFilters, setActiveRegionFilters] = useState<string[]>([]);
   const [catalogTags, setCatalogTags] = useState<CatalogTag[]>([]);
   const [ingredientCategories, setIngredientCategories] = useState<IngredientCategory[]>([]);
   const [showFilters, setShowFilters] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  // Seeded from a `?q=` URL param (e.g. a "used in recipes" link from an
+  // ingredient) so the initial fetch doesn't wait on the debounce below.
+  const initialQuery = new URLSearchParams(window.location.search).get('q') || '';
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
   const contentLang = useStore((s) => s.contentLang);
 
   useEffect(() => {
@@ -126,9 +146,10 @@ const Home: React.FC = () => {
   const clearAllFilters = () => {
     setActiveTagFilters([]);
     setActiveCategoryFilters([]);
+    setActiveRegionFilters([]);
     setSortBy('recently-edited');
   };
-  const activeFilterCount = activeTagFilters.length + activeCategoryFilters.length + (sortBy !== 'recently-edited' ? 1 : 0);
+  const activeFilterCount = activeTagFilters.length + activeCategoryFilters.length + activeRegionFilters.length + (sortBy !== 'recently-edited' ? 1 : 0);
 
   const tagGroups = catalogTags.reduce<Record<string, CatalogTag[]>>((acc, t) => {
     (acc[t.group_name] ||= []).push(t);
@@ -242,6 +263,7 @@ const Home: React.FC = () => {
         if (debouncedQuery) params.set('q', debouncedQuery);
         if (activeTagFilters.length > 0) params.set('tags', activeTagFilters.join(','));
         if (activeCategoryFilters.length > 0) params.set('ingredientCategories', activeCategoryFilters.join(','));
+        if (activeRegionFilters.length > 0) params.set('regions', activeRegionFilters.join(','));
         params.set('sort', sortBy);
         const res = await apiFetch(`/api/recipes?${params.toString()}`);
         const json = await res.json();
@@ -252,7 +274,7 @@ const Home: React.FC = () => {
         setLoading(false);
       }
     })();
-  }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, sortBy]);
+  }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, sortBy]);
 
   return (
     <AppLayout>
@@ -453,6 +475,11 @@ const Home: React.FC = () => {
                         })}
                       </div>
                     </div>
+
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">{t('recipeDetail.regions')}</p>
+                      <RegionPicker value={activeRegionFilters} onChange={setActiveRegionFilters} />
+                    </div>
                   </div>
                 </>
               )}
@@ -540,7 +567,7 @@ const Home: React.FC = () => {
               style={isDesktopViewport ? { animationDelay: '0.1s', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` } : { animationDelay: '0.1s' }}
             >
               {recipes.map((recipe) => {
-                const badge = getCardBadge(recipe);
+                const badges = getCardBadges(recipe);
                 const totalTime = (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0);
 
                 const selected = selectedIds.has(recipe.id);
@@ -573,15 +600,18 @@ const Home: React.FC = () => {
                       {/* Shimmer overlay on hover */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-                      {/* Tag/Matrioska badge */}
-                      {badge && (
-                        <div className="absolute top-4 left-4">
-                          <span
-                            className={`inline-flex items-center gap-1 px-3 py-1 ${badge.bg || ''} ${badge.text || 'text-white'} text-[10px] font-extrabold uppercase tracking-[0.12em] rounded-full shadow-sm backdrop-blur-sm`}
-                            style={!badge.bg ? { backgroundColor: badge.color || '#3f3f46' } : undefined}
-                          >
-                            {badge.label}
-                          </span>
+                      {/* Tag/Matrioska badges */}
+                      {badges.length > 0 && (
+                        <div className="absolute top-4 left-4 right-4 flex flex-wrap gap-1.5">
+                          {badges.map((badge, i) => (
+                            <span
+                              key={i}
+                              className={`inline-flex items-center gap-1 px-3 py-1 ${badge.bg || ''} ${badge.text || 'text-white'} text-[10px] font-extrabold uppercase tracking-[0.12em] rounded-full shadow-sm backdrop-blur-sm`}
+                              style={!badge.bg ? { backgroundColor: badge.color || '#3f3f46' } : undefined}
+                            >
+                              {badge.label}
+                            </span>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -591,6 +621,11 @@ const Home: React.FC = () => {
                       <h3 className="text-xl font-bold font-headline text-zinc-900 mb-1 group-hover:text-primary transition-colors duration-200">
                         {recipe.translated_title || recipe.title}
                       </h3>
+                      {(recipe.translated_description || recipe.description) && (
+                        <p className="text-zinc-500 text-sm mb-2 line-clamp-2">
+                          {recipe.translated_description || recipe.description}
+                        </p>
+                      )}
                       {recipe.creator_name && (
                         <p className="text-xs text-zinc-400 font-medium mb-3">by {recipe.creator_name}</p>
                       )}

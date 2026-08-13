@@ -21,6 +21,8 @@ import { authRouter }       from "./routes/auth";
 import { shareRouter }      from "./routes/share";
 import { syncFolderRouter } from "./routes/sync-folder";
 import { backupRouter }     from "./routes/backup";
+import { cookLogRouter }    from "./routes/cook-log";
+import { geocodeRouter }    from "./routes/geocode";
 import { requireAuth }      from "./middleware/requireAuth";
 import { checkOllamaHealth } from "./services/llm.parser";
 import { startSyncLoop }    from "./services/mdns.service";
@@ -70,6 +72,8 @@ app.use("/api/share",       shareRouter);
 app.use("/api/sync-folder", syncFolderRouter);
 app.use("/api/backup",      backupRouter);
 app.use("/api/uploads",     uploadsRouter);
+app.use("/api/cook-log",    cookLogRouter);
+app.use("/api/geocode",     geocodeRouter);
 app.use("/uploads",         express.static(UPLOAD_DIR));
 
 

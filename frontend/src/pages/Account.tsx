@@ -5,6 +5,13 @@ import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 
+// Adaptive to whatever's in the folder — adding/removing an SVG here
+// changes the preset grid with no code change needed.
+const avatarModules = import.meta.glob('../assets/avatars/*.svg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+const AVATAR_PRESETS = Object.keys(avatarModules)
+  .sort()
+  .map((path) => avatarModules[path]);
+
 interface SyncPeer {
   deviceId: string;
   deviceName: string;
@@ -559,6 +566,19 @@ export default function Account() {
           </div>
           <div>
             <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
+            <div className="flex flex-wrap gap-3 mb-4">
+              {AVATAR_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setAvatarUrl(preset)}
+                  className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
+                >
+                  <img src={preset} alt="" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+            <span className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">or use your own image</span>
             <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
           </div>
           <div>

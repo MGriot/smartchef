@@ -159,10 +159,15 @@ interface RawRecipeIngredient {
   sub_recipe_id: UUID | null;
   sub_recipe_title: string | null;
   sub_recipe_servings: number | null;
+  sub_recipe_yield_amount: number | null;
+  sub_recipe_yield_unit_type: string | null;
+  sub_recipe_yield_to_base_factor: number | null;
   quantity: number | null;
   quantity_text: string | null;
   unit_id: UUID | null;
   unit_symbol: string | null;
+  unit_type: string | null;
+  to_base_factor: number | null;
   notes: string | null;
   is_optional: boolean;
 }
@@ -179,13 +184,17 @@ async function loadRecipeIngredients(recipeId: UUID): Promise<RawRecipeIngredien
        ri.sub_recipe_id,
        sr.title AS sub_recipe_title,
        sr.servings AS sub_recipe_servings,
+       sr.yield_amount AS sub_recipe_yield_amount,
+       yu.unit_type AS sub_recipe_yield_unit_type,
+       yu.to_base_factor AS sub_recipe_yield_to_base_factor,
        ri.quantity, ri.quantity_text,
-       ri.unit_id, u.symbol AS unit_symbol,
+       ri.unit_id, u.symbol AS unit_symbol, u.unit_type AS unit_type, u.to_base_factor AS to_base_factor,
        ri.notes, ri.is_optional
      FROM recipe_ingredients ri
      LEFT JOIN ingredients i    ON i.id = ri.ingredient_id
      LEFT JOIN recipes sr       ON sr.id = ri.sub_recipe_id
      LEFT JOIN units u          ON u.id = ri.unit_id
+     LEFT JOIN units yu         ON yu.id = sr.yield_unit_id
      WHERE ri.recipe_id = $1
      ORDER BY ri.sort_order`,
     [recipeId]
@@ -275,11 +284,45 @@ async function resolveIngredients(
       const subTitle = row.sub_recipe_title ?? row.sub_recipe_id;
       const subBaseServings = row.sub_recipe_servings ?? 4;
 
-      // La sub-ricetta è usata come "ingrediente" → la sua quantità
-      // è il numero di porzioni-equivalenti necessarie
-      const subRequestedServings = row.quantity != null
-        ? row.quantity * scaleFactor  // quantità esplicita (es. "2 porzioni di Salsa Madre")
-        : requestedServings;           // default: stesse porzioni della ricetta padre
+      // Se la riga specifica un'unità di peso/volume E la sotto-ricetta ha
+      // una resa (yield) impostata nella STESSA categoria di unità, converti
+      // la quantità richiesta in una frazione della resa totale — permette
+      // di scrivere "200 g di Salsa Madre" invece di "porzioni".
+      // Niente conversione peso↔volume: servirebbe una densità che le
+      // ricette (a differenza degli ingredienti) non hanno.
+      let subRequestedServings: number;
+      if (
+        row.unit_id != null &&
+        (row.unit_type === "weight" || row.unit_type === "volume") &&
+        row.to_base_factor != null &&
+        row.quantity != null &&
+        row.sub_recipe_yield_amount != null &&
+        row.sub_recipe_yield_unit_type === row.unit_type &&
+        row.sub_recipe_yield_to_base_factor != null
+      ) {
+        const requiredBase = row.quantity * row.to_base_factor;
+        const yieldBase = row.sub_recipe_yield_amount * row.sub_recipe_yield_to_base_factor;
+        const fractionOfBatch = requiredBase / yieldBase;
+        subRequestedServings = fractionOfBatch * subBaseServings * scaleFactor;
+      } else if (
+        row.unit_id != null &&
+        (row.unit_type === "weight" || row.unit_type === "volume") &&
+        row.quantity != null
+      ) {
+        // L'utente ha scelto un'unità di peso/volume ma la conversione non è
+        // possibile (resa mancante o di tipo diverso) — non inventare un
+        // numero: avvisa e ricadi sul comportamento a porzioni.
+        warnings.push(
+          `⚠️ Impossibile convertire l'unità per "${subTitle}" in ${chain.at(-1) ?? "?"} — imposta la resa (yield) della sotto-ricetta nella stessa unità (peso o volume), oppure usa un'unità "porzioni"/nessuna unità.`
+        );
+        subRequestedServings = row.quantity * scaleFactor;
+      } else {
+        // La sub-ricetta è usata come "ingrediente" → la sua quantità
+        // è il numero di porzioni-equivalenti necessarie
+        subRequestedServings = row.quantity != null
+          ? row.quantity * scaleFactor  // quantità esplicita (es. "2 porzioni di Salsa Madre")
+          : requestedServings;           // default: stesse porzioni della ricetta padre
+      }
 
       const sub = await resolveIngredients(
         row.sub_recipe_id,

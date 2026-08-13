@@ -23,6 +23,7 @@ const NAV_LINKS: { to: string; labelKey: string }[] = [
   { to: '/shopping', labelKey: 'nav.shoppingList' },
   { to: '/import', labelKey: 'nav.import' },
   { to: '/library/ingredients', labelKey: 'nav.library' },
+  { to: '/history', labelKey: 'nav.history' },
 ];
 
 const IDLE_LINK = "flex items-center gap-3 px-4 py-3 text-zinc-500 hover:bg-zinc-50 rounded-xl font-semibold text-sm transition-all group";

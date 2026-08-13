@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
@@ -20,6 +21,7 @@ export default function LibraryIngredients() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
 
   // Modals state
   const [showModal, setShowModal] = useState(false);
@@ -284,7 +286,12 @@ export default function LibraryIngredients() {
           <div className="relative w-12 h-12 shrink-0">
             {ing.image_urls?.[0] ? (
               <>
-                <img src={ing.image_urls[0]} alt="" className="w-12 h-12 rounded-2xl object-cover bg-zinc-100" />
+                <img
+                  src={ing.image_urls[0]}
+                  alt=""
+                  onClick={() => setPreviewImage({ url: ing.image_urls[0], name: ing.translated_name || ing.name })}
+                  className="w-12 h-12 rounded-2xl object-cover bg-zinc-100 cursor-zoom-in"
+                />
                 <span
                   className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-[11px] text-white ring-2 ring-white"
                   style={{ backgroundColor: ing.category_color || '#71717a' }}
@@ -334,6 +341,13 @@ export default function LibraryIngredients() {
       </td>
       <td className="py-6 text-right pr-4">
          <div className="flex justify-end gap-2">
+            <Link
+              to={`/?q=${encodeURIComponent(ing.name)}`}
+              title="Used in recipes"
+              className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all"
+            >
+              <span className="material-symbols-outlined text-xl">search</span>
+            </Link>
             <button onClick={() => handleOpenModal(ing)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
               <span className="material-symbols-outlined text-xl">edit</span>
             </button>
@@ -613,6 +627,23 @@ export default function LibraryIngredients() {
                  </div>
               </form>
            </div>
+        </div>
+      )}
+
+      {/* ─── Photo Lightbox ─────────────────────────────────────────────── */}
+      {previewImage && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-6" onClick={() => setPreviewImage(null)}>
+          <div className="absolute inset-0 bg-zinc-900/80 backdrop-blur-sm" />
+          <div className="relative max-w-2xl w-full">
+            <img src={previewImage.url} alt={previewImage.name} className="w-full max-h-[80vh] object-contain rounded-3xl shadow-2xl" />
+            <p className="text-center text-white font-bold mt-4">{previewImage.name}</p>
+            <button
+              onClick={() => setPreviewImage(null)}
+              className="absolute -top-4 -right-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center text-zinc-600 hover:text-zinc-900"
+            >
+              <span className="material-symbols-outlined">close</span>
+            </button>
+          </div>
         </div>
       )}
     </>
