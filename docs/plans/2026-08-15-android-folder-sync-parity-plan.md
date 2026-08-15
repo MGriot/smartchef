@@ -22,10 +22,15 @@ Ran on a real booted emulator (not just compiled), 7 tests, all passing. One rea
 
 Real Drive/OneDrive document providers remain untestable in CI either way (task 15, manual QA).
 
-## 5. `gitfs.ts`: private-storage working copy + `/SmartChef` subfolder on both platforms
+## 5. `gitfs.ts`: private-storage working copy + `/SmartChef` subfolder on both platforms — DONE
 
-Two small, independent changes to `getSyncBasePath()`: Android now resolves to `Directory.Data` (private storage) instead of `Documents/SmartChef`; both Android's resolved path and Electron's user-chosen folder get `/SmartChef` appended, with `chooseElectronSyncFolder()` creating the subfolder if it doesn't exist yet.
-**Done when:** existing Electron folder-sync (manually verified, since there's no existing automated coverage per the design doc) still works end to end against a freshly-created `SmartChef/` subfolder; Android's local git init now happens under private storage, unreachable by the user directly (expected — nothing else depends on that being externally visible).
+`BASE_DIR` changed from `Directory.Documents` to `Directory.Data`; `ensureSyncFolderPermission()`'s Android branch dropped the `publicStorage` permission check entirely (`Directory.Data` needs no runtime grant, unlike `Documents`). `getSyncBasePath()` now appends `/SmartChef` to Electron's chosen folder (Android's `MOBILE_SYNC_DIR` constant already was `/SmartChef`, just relative to a different base now); `chooseElectronSyncFolder()` creates that subfolder immediately after picking rather than relying on the first sync tick's recursive `mkdir` to do it implicitly.
+
+Also fixed, as a direct consequence rather than scope creep: several comments and two user-facing strings (Account.tsx's Folder Sync description, SyncHistory.tsx's header) asserted "Android writes to Documents/SmartChef" as architectural fact — now false. Updated those plus the affected comments in App.tsx, standalone.ts, electronBridge.ts, gitSync.ts. Account.tsx's Android copy is deliberately a placeholder ("private for now, Drive/OneDrive folder picking is coming soon") rather than describing a folder-picker UI that doesn't exist until task 12 — not overclaiming unbuilt functionality.
+
+**Known transitional gap, expected and harmless given nothing is released yet:** Android folder-sync is now non-functional end-to-end until the SafMirror pull/push wiring (tasks 6-9) lands — the private working copy has no bridge to any other device until then. `Filesystem`, `Encoding` imports in gitfs.ts remain in use (mobile fs primitives unchanged, only `BASE_DIR`'s value changed).
+
+Verified via `tsc --noEmit` and a full `vite build` — both clean.
 
 ## 6. `androidMirror.ts`: pull logic
 
