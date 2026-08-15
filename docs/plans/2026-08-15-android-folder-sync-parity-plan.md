@@ -54,14 +54,17 @@ Hit one real test-isolation bug along the way, worth recording since it'll bite 
 
 Extended `testUtils/fakes.ts` with a matching `createFakeLocalFs()` (same flat-Map-with-derived-directories shape as the SAF tree fake) and refactored the pull tests (6a) to use it instead of their original ad hoc mock, so both test files exercise the identical fake shape — the reuse across pull/push/integration (task 10) this was scoped for from the start.
 
-## 8. Wire pull-before-init into `gitSync.ts`
+## 8. Wire pull-before-init into `gitSync.ts` — DONE
 
-Android-only branch in `syncNow()`/`initSyncRepo()`: call `androidMirror`'s pull step before the existing "no HEAD → `git.init`" check, per the design's correctness requirement. This is the task most likely to silently regress later, so its test (task 8a) should stay in the suite permanently, not be treated as a one-off validation.
-**Done when:** task 8a passes.
+`initSyncRepo()` now calls `pullFromTarget()` (Android only, `!isElectron()`) after the recipes/ingredients `mkdir`s but before the `resolveRef`/`git.init` decision, with a `.catch()` — a pull failure (no tree configured, target unreachable, permission lost) must never block local git init, since standalone mode has to keep working fully offline either way. This only runs once per app session (the existing `initDone` guard) — it's specifically about first-run correctness, not periodic sync. `syncNow()`'s own per-cycle pull/push (task 9) will call `pullFromTarget()` again on every tick regardless; the very first sync tick therefore pulls twice (once here, once there), which is harmless — the second call finds nothing new — and simpler than threading an "already pulled once" flag through two functions to avoid one redundant no-op call.
 
-### 8a. Unit test — pull-before-init ordering
+### 8a. Unit test — pull-before-init ordering — DONE
 
-Given a target with existing history and a private working copy with none, assert `git.init` never fires and the pulled history is adopted instead.
+3 tests in `gitSync.pullBeforeInit.test.ts`: adopts an already-populated target instead of `git.init`-ing a disconnected history; still `git.init`s when the target genuinely has no history yet (a real first device); still `git.init`s when no SAF tree is configured at all (today's actual state for everyone, since task 12's onboarding UI doesn't exist yet).
+
+Verified the test actually catches the regression it exists to guard against, not just correlated with the implementation: temporarily moved the `pullFromTarget()` call to *after* the `resolveRef`/`git.init` decision, re-ran the suite, confirmed the "adopts an already-populated target" test failed (`git.init` got called despite history being available on the target), then restored the correct ordering and reconfirmed all tests pass. Given the design doc explicitly calls this ordering "the task most likely to silently regress later," a test that merely happens to pass isn't enough — needed direct evidence it fails when the guarantee breaks.
+
+Required mocking `../safMirrorBridge` too (not just `../gitfs`/`@capacitor/preferences`/`isomorphic-git`) — `initSyncRepo()` calls `pullFromTarget()` with no plugin argument, so it goes through the real default parameter, the `SafMirror` singleton, which needed redirecting to the test's fake tree.
 
 ## 9. Wire push into `syncNow()`
 
