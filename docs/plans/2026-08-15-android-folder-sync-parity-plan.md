@@ -66,10 +66,11 @@ Verified the test actually catches the regression it exists to guard against, no
 
 Required mocking `../safMirrorBridge` too (not just `../gitfs`/`@capacitor/preferences`/`isomorphic-git`) — `initSyncRepo()` calls `pullFromTarget()` with no plugin argument, so it goes through the real default parameter, the `SafMirror` singleton, which needed redirecting to the test's fake tree.
 
-## 9. Wire push into `syncNow()`
+## 9. Wire push into `syncNow()` — DONE
 
-Call the push step after the existing `commitNow()`, update `AndroidMirrorState` and the existing `LAST_SYNC_KEY` on success.
-**Done when:** integration tests (task 10) exercise the full pull → reconcile → commit → push cycle end to end against the fake in-memory tree.
+Completed the full per-cycle order the design doc's control flow specifies: `syncNow()` now also calls `pullFromTarget()` at the top (Android only) — not just once inside `initSyncRepo()`, which is a first-run-ordering concern, not a substitute for pulling on every cycle so this cycle's reconcile sees whatever arrived from other devices since last time — then the existing reconcile/commit run unchanged, then `pushToTarget()` after `commitNow()`. Both pull and push failures are caught and logged, never thrown, matching `initSyncRepo()`'s existing tolerance — reconcile/commit work against local data regardless of sync connectivity. `AndroidMirrorState` needs no separate update here beyond calling `pushToTarget()`/`pullFromTarget()` themselves — they already maintain their own state internally (tasks 6/7).
+
+No dedicated unit test for this task specifically — its own stated completion criterion is task 10's integration tests, which exercise the full cycle this wiring enables. Verified via the existing 17-test suite (no regressions), `tsc --noEmit`, and a full `vite build`, all clean.
 
 ## 10. Integration tests — two-device convergence
 

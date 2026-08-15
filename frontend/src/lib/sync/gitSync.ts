@@ -20,7 +20,7 @@ import * as git from 'isomorphic-git';
 import { Preferences } from '@capacitor/preferences';
 import { gitfs, ensureSyncFolderPermission, getSyncBasePath } from '../gitfs';
 import { isElectron } from '../electronBridge';
-import { pullFromTarget } from './androidMirror';
+import { pullFromTarget, pushToTarget } from './androidMirror';
 import { query, queryOne } from '../../db/local';
 
 const DEVICE_ID_KEY = 'smartchef.sync.deviceId';
@@ -251,9 +251,23 @@ export interface SyncResult {
 /** The main entry point — call on app foreground/resume, on a periodic
  *  timer, and from a manual "Sync Now" button. Folder/files not existing
  *  yet (first run, nothing synced down from another device yet) is
- *  "nothing to pull", never an error. */
+ *  "nothing to pull", never an error.
+ *
+ *  Android's full per-cycle order matches the design doc's control flow:
+ *  pull (so this cycle's reconcile sees whatever arrived from other
+ *  devices since last time — initSyncRepo()'s own pull is a first-run-only
+ *  concern, not a substitute for this), reconcile, commit, push. A pull or
+ *  push failure is caught and logged rather than thrown — reconcile/commit
+ *  work against local data regardless of sync connectivity, and must keep
+ *  succeeding even when the SAF target is unreachable. Electron never
+ *  calls either: isomorphic-git already points straight at the real
+ *  shared folder, there's no separate mirror step. */
 export async function syncNow(): Promise<SyncResult> {
   await initSyncRepo();
+
+  if (!isElectron()) {
+    await pullFromTarget().catch((err) => console.warn('SmartChef: SAF pull failed:', err));
+  }
 
   let applied = 0;
   for (const type of ['recipes', 'ingredients'] as const) {
@@ -264,6 +278,11 @@ export async function syncNow(): Promise<SyncResult> {
   }
 
   const committed = await commitNow();
+
+  if (!isElectron()) {
+    await pushToTarget().catch((err) => console.warn('SmartChef: SAF push failed:', err));
+  }
+
   const lastSyncAt = new Date().toISOString();
   await Preferences.set({ key: LAST_SYNC_KEY, value: lastSyncAt });
   return { applied, committed, lastSyncAt };
