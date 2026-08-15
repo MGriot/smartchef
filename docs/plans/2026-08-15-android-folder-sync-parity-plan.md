@@ -42,14 +42,17 @@ Also exported `base64ToBytes`/`bytesToBase64` from `gitfs.ts` (were private help
 
 No test framework existed in the frontend yet — added Vitest (`npm test` / `vitest run`), the natural fit for a Vite project, plus a minimal `vitest.config.ts`. Built a shared in-memory fake SAF tree (`src/lib/sync/testUtils/fakes.ts`, backed by a flat `Map`, directories derived from key prefixes) for reuse across this task, task 7a, and the task 10 integration tests, per the plan's original intent to build this once. `@capacitor/preferences` and `../gitfs` are both mocked at the module level (`vi.mock`) with in-memory equivalents rather than threading fs/prefs as constructor parameters — keeps `androidMirror.ts`'s public API clean of test-only injection points. 7 tests, all passing: no-tree/empty-target no-ops, object fetch + skip-if-local, refs/HEAD/JSON write-through, JSON overwrite-on-change, multi-device registry pull with no per-device special-casing, and the knownPushedObjects update after a successful pull.
 
-## 7. `androidMirror.ts`: push logic
+## 7. `androidMirror.ts`: push logic — DONE
 
-The push half: diff the private working copy's `objects/` against `knownPushedObjects`, upload only what's missing, then always-overwrite `refs/heads/main`, `HEAD`, changed `recipes/`/`ingredients/` JSON, and this device's own `devices/<id>.json`. Enforce objects-before-refs ordering explicitly (a sequencing assertion in the test, not just informal ordering in the code).
-**Done when:** unit tests (task 7a) pass, including a simulated failure partway through that leaves the target in a state the pull logic from task 6 still interprets correctly (i.e. "nothing new yet," not corrupted).
+Implemented as designed. One asymmetry from pull worth recording: pull's skip-decision checks local existence directly (task 6's refinement, since "do I have this" is cheap to check locally and always correct); push's skip-decision has no equivalent cheap local check for "does the *target* have this" — a real check would mean a round trip, the exact cost the cache exists to avoid — so push genuinely does rely on `knownPushedObjects` as its source of truth, matching the original design. `getDeviceId()` is imported directly from `./gitSync` (confirmed safe: despite pulling in `isomorphic-git`, `@capacitor-community/sqlite` via `db/local.ts`, and `@capacitor/preferences` transitively, none of those execute anything at module-load time that fails under Vitest's Node environment — verified by running the existing pull tests unchanged after adding the import, before writing any push-specific code).
 
-### 7a. Unit tests — push logic + ordering
+### 7a. Unit tests — push logic + ordering — DONE
 
-Assert call order is objects-before-refs. Assert a device only ever writes `devices/<its-own-id>.json`. Assert already-known-pushed objects are skipped.
+7 tests: no-op with no tree configured, call-order assertion (objects before refs/HEAD, via a `writeFile` spy inspecting call sequence — not just checking end state), skip-if-known-pushed, own-device-only registry write, and two tests around a simulated mid-loop failure — confirms `refs/heads/main` is never written when an object upload throws (so a later pull sees "nothing new," not a dangling ref), and confirms whichever object succeeded *before* the failure is still remembered (so a retry doesn't redo it).
+
+Hit one real test-isolation bug along the way, worth recording since it'll bite again if not understood: `androidMirror.ts` keeps `knownPushedObjects` in a **module-level variable**, not just in the mocked `Preferences` store — clearing the fake store between tests wasn't enough, since the module-level cache survived across tests within the same file and caused a later test to wrongly treat an object as already pushed. Pull's tests never hit this because pull's skip-decision doesn't consult that cache (see above). Fixed by `vi.resetModules()` + re-importing in `beforeEach`, matching what a real app restart would do — not a workaround like giving each test a unique tree URI, which would have hidden the same latent bug in any future test that reused a tree.
+
+Extended `testUtils/fakes.ts` with a matching `createFakeLocalFs()` (same flat-Map-with-derived-directories shape as the SAF tree fake) and refactored the pull tests (6a) to use it instead of their original ad hoc mock, so both test files exercise the identical fake shape — the reuse across pull/push/integration (task 10) this was scoped for from the start.
 
 ## 8. Wire pull-before-init into `gitSync.ts`
 

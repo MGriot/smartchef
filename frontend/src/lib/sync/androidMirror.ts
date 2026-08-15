@@ -21,7 +21,8 @@
 
 import { Preferences } from '@capacitor/preferences';
 import { SafMirror, type SafMirrorPlugin } from '../safMirrorBridge';
-import { gitfs, getSyncBasePath, base64ToBytes } from '../gitfs';
+import { gitfs, getSyncBasePath, base64ToBytes, bytesToBase64 } from '../gitfs';
+import { getDeviceId } from './gitSync';
 
 const STATE_KEY = 'smartchef.sync.androidMirrorState';
 
@@ -68,13 +69,16 @@ export async function setMirrorTree(treeUri: string, treeDisplayName: string): P
   });
 }
 
-async function rememberSyncedObjects(names: string[]): Promise<void> {
-  if (!names.length) return;
+/** Called once per object immediately after a successful upload/fetch —
+ *  not batched at the end of a push/pull pass — so a partway failure still
+ *  remembers whichever objects made it through before the failure, rather
+ *  than forgetting all of them and re-transferring objects that already
+ *  succeeded on the next retry. */
+async function rememberSyncedObject(relativePath: string): Promise<void> {
   const state = await getMirrorState();
   if (!state) return;
-  const merged = new Set(state.knownPushedObjects);
-  for (const name of names) merged.add(name);
-  await setMirrorState({ ...state, knownPushedObjects: [...merged] });
+  if (state.knownPushedObjects.includes(relativePath)) return;
+  await setMirrorState({ ...state, knownPushedObjects: [...state.knownPushedObjects, relativePath] });
 }
 
 // ── local existence (source of truth for pull-skip decisions — cheap,
@@ -155,9 +159,9 @@ export async function pullFromTarget(plugin: SafMirrorPlugin = SafMirror): Promi
       if (await existsLocally(dir, relativePath)) continue;
       await fetchAndWrite(plugin, state.treeUri, dir, relativePath);
       fetchedObjectNames.push(relativePath);
+      await rememberSyncedObject(relativePath);
     }
   }
-  await rememberSyncedObjects(fetchedObjectNames);
 
   await gitfs.promises.writeFile(`${dir}/.git/refs/heads/main`, base64ToBytes(remoteRefData));
   await fetchAndWrite(plugin, state.treeUri, dir, '.git/HEAD').catch(() => {});
@@ -169,4 +173,110 @@ export async function pullFromTarget(plugin: SafMirrorPlugin = SafMirror): Promi
   await setMirrorState({ ...(await getMirrorState())!, lastSeenRemoteRef: remoteRefData });
 
   return { pulled: true, objectsFetched: fetchedObjectNames.length };
+}
+
+// ── push ──────────────────────────────────────────────────────────────
+
+async function readLocalBytes(dir: string, relativePath: string): Promise<Uint8Array | null> {
+  try {
+    const data = await gitfs.promises.readFile(`${dir}/${relativePath}`);
+    return typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  } catch {
+    return null; // not there locally — a caller-tolerable no-op, not an error
+  }
+}
+
+/** Uploads one local file if it exists. Deliberately does NOT catch a
+ *  failure from plugin.writeFile itself (SAF permission lost, target
+ *  unreachable, etc.) — that must propagate all the way out of
+ *  pushToTarget() so a failure partway through the objects loop stops
+ *  before refs/HEAD ever get pushed (see the design doc's push-ordering
+ *  rationale, and the "partial push" test below). */
+async function pushFile(plugin: SafMirrorPlugin, treeUri: string, dir: string, relativePath: string): Promise<boolean> {
+  const bytes = await readLocalBytes(dir, relativePath);
+  if (!bytes) return false;
+  await plugin.writeFile({ uri: treeUri, path: relativePath, data: bytesToBase64(bytes) });
+  return true;
+}
+
+async function pushJsonDirectory(plugin: SafMirrorPlugin, treeUri: string, dir: string, relativeDir: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await gitfs.promises.readdir(`${dir}/${relativeDir}`);
+  } catch {
+    return; // nothing local under this directory yet
+  }
+  for (const name of names) {
+    await pushFile(plugin, treeUri, dir, `${relativeDir}/${name}`);
+  }
+}
+
+/** .git/objects/<prefix>/<rest> — the two-level structure isomorphic-git
+ *  itself uses for loose objects. "info" and "pack" are the only other
+ *  entries git ever creates directly under objects/ (packed/alternates
+ *  bookkeeping, not loose objects); filtering to 2-hex-char names is
+ *  simpler than special-casing those two by name and correct either way,
+ *  since standalone mode never packs — isomorphic-git's commit/add here
+ *  only ever produces loose objects. */
+async function listLocalObjectPaths(dir: string): Promise<string[]> {
+  let prefixes: string[];
+  try {
+    prefixes = await gitfs.promises.readdir(`${dir}/.git/objects`);
+  } catch {
+    return [];
+  }
+  const paths: string[] = [];
+  for (const prefix of prefixes) {
+    if (!/^[0-9a-f]{2}$/.test(prefix)) continue;
+    let names: string[];
+    try {
+      names = await gitfs.promises.readdir(`${dir}/.git/objects/${prefix}`);
+    } catch {
+      continue;
+    }
+    for (const name of names) paths.push(`.git/objects/${prefix}/${name}`);
+  }
+  return paths;
+}
+
+export interface PushResult {
+  pushed: boolean;
+  objectsUploaded: number;
+}
+
+/** Mirrors the private working copy up to the SAF target — objects first,
+ *  then refs/HEAD, then the JSON payload (recipes/ingredients/this
+ *  device's own registry file), matching pullFromTarget()'s ordering for
+ *  the same reason: if this throws partway through the objects loop
+ *  (a real SAF failure, not a "file doesn't exist locally" no-op), refs
+ *  never get pushed, so the target stays exactly as consistent as it was
+ *  before this call — a puller sees "nothing new," never a ref pointing
+ *  at objects that didn't fully arrive. */
+export async function pushToTarget(plugin: SafMirrorPlugin = SafMirror): Promise<PushResult> {
+  const state = await getMirrorState();
+  if (!state) return { pushed: false, objectsUploaded: 0 };
+
+  const dir = await getSyncBasePath();
+  const known = new Set(state.knownPushedObjects);
+
+  const localObjectPaths = await listLocalObjectPaths(dir);
+  let objectsUploaded = 0;
+  for (const relativePath of localObjectPaths) {
+    if (known.has(relativePath)) continue;
+    if (await pushFile(plugin, state.treeUri, dir, relativePath)) {
+      objectsUploaded++;
+      await rememberSyncedObject(relativePath);
+    }
+  }
+
+  await pushFile(plugin, state.treeUri, dir, '.git/refs/heads/main');
+  await pushFile(plugin, state.treeUri, dir, '.git/HEAD');
+
+  await pushJsonDirectory(plugin, state.treeUri, dir, 'recipes');
+  await pushJsonDirectory(plugin, state.treeUri, dir, 'ingredients');
+
+  const deviceId = await getDeviceId();
+  await pushFile(plugin, state.treeUri, dir, `devices/${deviceId}.json`);
+
+  return { pushed: true, objectsUploaded };
 }

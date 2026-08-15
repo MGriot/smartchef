@@ -89,3 +89,92 @@ export function getText(tree: FakeSafTree, path: string): string | undefined {
 export function putBytes(tree: FakeSafTree, path: string, bytes: Uint8Array): void {
   tree.files.set(normalize(path), bytes);
 }
+
+// ── Fake local fs (the private working copy androidMirror.ts reads/writes
+// via gitfs.promises) — same flat-Map-with-derived-directories shape as
+// the fake SAF tree above, so push/pull tests can seed and inspect
+// "what's on this device" the same way they seed "what's on the target." ─
+
+export interface FakeLocalFs {
+  promises: {
+    readFile(path: string): Promise<Uint8Array>;
+    writeFile(path: string, data: Uint8Array | string): Promise<void>;
+    unlink(path: string): Promise<void>;
+    readdir(path: string): Promise<string[]>;
+    mkdir(path: string): Promise<void>;
+    rmdir(path: string): Promise<void>;
+    stat(path: string): Promise<Record<string, never>>;
+    lstat(path: string): Promise<Record<string, never>>;
+    rename(oldPath: string, newPath: string): Promise<void>;
+  };
+  files: Map<string, Uint8Array>;
+}
+
+export function createFakeLocalFs(): FakeLocalFs {
+  const files = new Map<string, Uint8Array>();
+
+  function childNames(dirPath: string): string[] {
+    const prefix = dirPath ? `${normalize(dirPath)}/` : '';
+    const seen = new Set<string>();
+    for (const key of files.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      const rest = key.slice(prefix.length);
+      if (!rest) continue;
+      const slash = rest.indexOf('/');
+      seen.add(slash === -1 ? rest : rest.slice(0, slash));
+    }
+    return [...seen];
+  }
+
+  const promises: FakeLocalFs['promises'] = {
+    async readFile(path) {
+      const bytes = files.get(normalize(path));
+      if (!bytes) throw new Error(`ENOENT: no such file, '${path}'`);
+      return bytes;
+    },
+    async writeFile(path, data) {
+      files.set(normalize(path), typeof data === 'string' ? new TextEncoder().encode(data) : data);
+    },
+    async unlink(path) {
+      files.delete(normalize(path));
+    },
+    async readdir(path) {
+      const names = childNames(path);
+      // Matches real fs semantics closely enough for these tests: a
+      // directory with no children at all (nothing ever written under it)
+      // throws, same as a genuinely missing directory would. An
+      // existing-but-empty directory isn't representable in this flat-map
+      // model — not a gap that matters here, since every caller in
+      // androidMirror.ts treats "throws" and "empty array" identically
+      // (nothing to do).
+      if (!names.length) throw new Error(`ENOENT: no such directory, '${path}'`);
+      return names;
+    },
+    async mkdir() {},
+    async rmdir() {},
+    async stat(path) {
+      if (!files.has(normalize(path))) throw new Error(`ENOENT: no such file, '${path}'`);
+      return {};
+    },
+    async lstat(path) {
+      return promises.stat(path);
+    },
+    async rename(oldPath, newPath) {
+      const bytes = files.get(normalize(oldPath));
+      if (!bytes) throw new Error(`ENOENT: no such file, '${oldPath}'`);
+      files.delete(normalize(oldPath));
+      files.set(normalize(newPath), bytes);
+    },
+  };
+
+  return { promises, files };
+}
+
+export function putLocalText(fs: FakeLocalFs, path: string, text: string): void {
+  fs.files.set(normalize(path), new TextEncoder().encode(text));
+}
+
+export function getLocalText(fs: FakeLocalFs, path: string): string | undefined {
+  const bytes = fs.files.get(normalize(path));
+  return bytes ? new TextDecoder().decode(bytes) : undefined;
+}

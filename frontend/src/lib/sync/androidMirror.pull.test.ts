@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createFakeSafTree, putText } from './testUtils/fakes';
+import { createFakeSafTree, putText, createFakeLocalFs, putLocalText, getLocalText } from './testUtils/fakes';
 
 // androidMirror.ts's own state (AndroidMirrorState) lives in
 // @capacitor/preferences — fake it with a plain in-memory map.
@@ -14,29 +14,11 @@ vi.mock('@capacitor/preferences', () => ({
 }));
 
 // The private working copy androidMirror.ts reads/writes via
-// gitfs.promises + getSyncBasePath() — faked the same way, a flat map
-// keyed by normalized path.
-const localFiles = new Map<string, Uint8Array>();
-function normalize(path: string): string {
-  return path.replace(/^\/+/, '');
-}
+// gitfs.promises + getSyncBasePath() — faked with the same in-memory
+// local fs the push tests use, so both exercise the identical shape.
+const localFs = createFakeLocalFs();
 vi.mock('../gitfs', () => ({
-  gitfs: {
-    promises: {
-      stat: async (path: string) => {
-        if (!localFiles.has(normalize(path))) throw new Error('ENOENT');
-        return {};
-      },
-      writeFile: async (path: string, data: Uint8Array) => {
-        localFiles.set(normalize(path), data);
-      },
-      readFile: async (path: string) => {
-        const bytes = localFiles.get(normalize(path));
-        if (!bytes) throw new Error('ENOENT');
-        return bytes;
-      },
-    },
-  },
+  gitfs: localFs,
   getSyncBasePath: async () => '/private',
   base64ToBytes: (b64: string) => new Uint8Array(Buffer.from(b64, 'base64')),
   bytesToBase64: (bytes: Uint8Array) => Buffer.from(bytes).toString('base64'),
@@ -45,13 +27,12 @@ vi.mock('../gitfs', () => ({
 const { pullFromTarget, setMirrorTree, getMirrorState } = await import('./androidMirror');
 
 function localText(path: string): string | undefined {
-  const bytes = localFiles.get(normalize(path));
-  return bytes ? new TextDecoder().decode(bytes) : undefined;
+  return getLocalText(localFs, path);
 }
 
 beforeEach(() => {
   prefsStore.clear();
-  localFiles.clear();
+  localFs.files.clear();
 });
 
 describe('pullFromTarget', () => {
@@ -93,7 +74,7 @@ describe('pullFromTarget', () => {
     putText(tree, '.git/refs/heads/main', 'commit-abc123\n');
     putText(tree, '.git/objects/ab/cdef01', 'object-bytes');
     // Pretend we already have this exact object locally.
-    localFiles.set('private/.git/objects/ab/cdef01', new TextEncoder().encode('object-bytes'));
+    putLocalText(localFs, '/private/.git/objects/ab/cdef01', 'object-bytes');
 
     const readFileSpy = vi.spyOn(tree.plugin, 'readFile');
     const result = await pullFromTarget(tree.plugin);
@@ -107,7 +88,7 @@ describe('pullFromTarget', () => {
     const tree = createFakeSafTree('fake://tree');
     putText(tree, '.git/refs/heads/main', 'commit-abc123\n');
     putText(tree, 'recipes/r1.json', '{"id":"r1","title":"New Title"}');
-    localFiles.set('private/recipes/r1.json', new TextEncoder().encode('{"id":"r1","title":"Stale Title"}'));
+    putLocalText(localFs, '/private/recipes/r1.json', '{"id":"r1","title":"Stale Title"}');
 
     await pullFromTarget(tree.plugin);
 
