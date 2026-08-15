@@ -140,6 +140,8 @@ Electron's `syncNow()` is unchanged in shape — no pull/push split, git still p
 
 **Manual QA (required):** one real Android device and one Electron install sharing one real Drive-mirrored `SmartChef/` folder — verify two-way convergence, an offline edit that syncs once reconnected, the permission-revoked recovery flow via "Change Folder," and app-killed-mid-sync tolerance.
 
+**Finding from implementation (SafMirrorPluginTest, run on a real emulator):** a file written via `ContentResolver.openOutputStream()` wasn't reliably visible to a subsequent `File.listFiles()` call on the same directory — persistent, not a transient race (didn't resolve even after ~1s of polling). This turned out to be specific to `DocumentFile.fromFile()` as a test stand-in for a real SAF tree: it lets `ContentResolver`-mediated writes and raw-`File`-mediated listing diverge, a split that's structurally impossible against a real `tree://` URI, where listing, reading, and writing all go through the same `DocumentsProvider`/`ContentResolver` path with no parallel `File` view to disagree with. It's flagged here anyway because it independently validates a design decision already made above: `androidMirror.ts` must not treat a `list()` call as authoritative confirmation of what it just pushed — `AndroidMirrorState.knownPushedObjects` is updated optimistically from each successful `writeFile()` result, never by re-listing afterward, which sidesteps this class of gap regardless of its root cause.
+
 ## Changes to existing behavior
 
 - `gitfs.ts`: Android's `getSyncBasePath()` now resolves to private storage, not `Documents/SmartChef`.

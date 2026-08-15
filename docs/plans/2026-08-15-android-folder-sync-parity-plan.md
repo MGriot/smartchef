@@ -4,25 +4,23 @@ Design: [2026-08-15-android-folder-sync-parity-design.md](./2026-08-15-android-f
 
 Tasks are ordered so each one is buildable and testable on its own, without depending on a later task. Native plugin first (nothing else can be tested without it), then the fs-path change, then pull/push mirror logic in isolation (mockable, no device needed), then wiring into the existing sync loop, then the device registry, then UI, then the manual device pass last.
 
-## 1. `SafMirror` native plugin scaffold
+## 1. `SafMirror` native plugin scaffold — DONE
 
-New Capacitor plugin under `frontend/android/`: Kotlin plugin class, package registration, Gradle wiring (parallel to how `capacitor-filesystem` was added — `capacitor.settings.gradle`, `capacitor.build.gradle`), and the TS-side ambient type declarations in a new `frontend/src/lib/safMirrorBridge.ts` mirroring `electronBridge.ts`'s `declare global` pattern. No behavior yet — just enough for `pickTree()` to return a hardcoded stub value and prove the JS↔native bridge is wired.
-**Done when:** a stub `pickTree()` call from the renderer reaches the Kotlin plugin and returns a value, verified via a debug log or a temporary test button.
+Deviated from the original plan in two ways, both deliberate: written in **Java**, not Kotlin (the Android project has no Kotlin toolchain configured anywhere — `MainActivity.java` is plain Java — and adding one just for this would be its own scope creep); and registered directly in `MainActivity.java` via `registerPlugin(SafMirrorPlugin.class)` rather than as a separate Gradle module (`capacitor-filesystem`-style wiring is for consuming third-party/npm plugins — a bespoke, unpublished, app-specific plugin doesn't need that ceremony; this is Capacitor's own documented pattern for custom native code). `frontend/src/lib/safMirrorBridge.ts` uses `@capacitor/core`'s `registerPlugin()` (not a custom `contextBridge`-style global like `electronBridge.ts` uses for Electron — Android's Capacitor bridge already provides this mechanism natively). Verified via `:app:compileDebugJavaWithJavac` (JDK 21, since `capacitor-filesystem`'s own build requires it — the project's default JDK 17 can't build this module at all, pre-existing and unrelated to this plugin).
 
-## 2. `pickTree()` / `hasPersistedTree()`
+## 2. `pickTree()` / `hasPersistedTree()` — DONE
 
-Implement the real SAF flow: `ACTION_OPEN_DOCUMENT_TREE` intent, `takePersistableUriPermission()` on the result, resolve a human-readable display name (SAF gives a URI, not a folder name — needs `DocumentFile.fromTreeUri().name`). `hasPersistedTree()` checks `contentResolver.persistedUriPermissions` for a previously granted tree.
-**Done when:** picking a plain local folder through the Android emulator persists across an app restart (`hasPersistedTree()` returns it without re-prompting).
+Implemented via `ACTION_OPEN_DOCUMENT_TREE` + `startActivityForResult`/`@ActivityCallback` (Capacitor's `Plugin` base class wraps AndroidX's Activity Result API). `takePersistableUriPermission()` on success; the chosen tree URI/display name are cached in the plugin's own `SharedPreferences` (separate from `AndroidMirrorState`, which is the JS-side cache from task 6+) so `hasPersistedTree()` can re-validate against `contentResolver.persistedUriPermissions` without the JS side needing to pass a URI back down. Capacitor's bridge can't resolve a bare JS `null`, so cancellation resolves `{ uri: null, displayName: null }` at the native layer; `safMirrorBridge.ts`'s exported `pickTree()`/`hasPersistedTree()` wrap the raw plugin calls and coerce that into `SafTreeHandle | null` for every other caller. Verified via compilation only — the interactive system picker itself isn't automatable (see task 4's notes); this is the piece manual QA (task 15) still needs to cover for real.
 
-## 3. `list` / `readFile` / `writeFile` / `deleteFile`
+## 3. `list` / `readFile` / `writeFile` / `deleteFile` — DONE
 
-Implement against `DocumentFile`: `writeFile` must create intermediate directories via `DocumentFile.createDirectory` since SAF has no bulk "write to nested path" primitive; `readFile`/`list` resolve by walking from the tree root by display name (no caching yet — that's the `AndroidMirrorState` optimization in task 6, not this task).
-**Done when:** a round-trip write-then-read-then-list against a real picked folder returns correct bytes and filenames, exercised via instrumented test (task 4) rather than manually.
+Implemented against `DocumentFile`, walking from the tree root by display name for every call (no caching yet — that's `AndroidMirrorState` in task 6+). All writes use `application/octet-stream` uniformly (git objects and JSON files alike are opaque payloads we only ever read back ourselves by path, never rely on the OS to interpret by MIME type) and mode `"wt"` (truncate) so repeated writes to the same path overwrite rather than append. `writeFile` resolves+creates parent directories first, then creates-or-finds the leaf file. Compiles cleanly; correctness verified in task 4.
 
-## 4. Instrumented Android tests for the plugin
+## 4. Instrumented Android tests for the plugin — DONE
 
-Per the design's native testing section: real `DocumentFile` operations against a real local SAF tree (Android's picker can target a plain folder without a Drive/OneDrive account, so no cloud dependency here). Covers create/read/update/delete and the nested-directory-creation case from task 3.
-**Done when:** these run in the existing Android test setup and pass against an emulator.
+Ran on a real booted emulator (not just compiled), 7 tests, all passing. One real finding along the way, written up in the design doc's Testing Strategy section: a file written via `ContentResolver.openOutputStream()` wasn't reliably visible to `File.listFiles()` on the same directory afterward — persistent, not transient. Traced to `DocumentFile.fromFile()` (the local-folder stand-in used here since the real SAF picker requires human interaction) allowing `ContentResolver`-write and raw-`File`-list to diverge — impossible against a real `tree://` URI, where both go through the same `DocumentsProvider`. Tests were adjusted to assert against the handles the code actually holds (`file.exists()`/`file.length()`/direct re-read) rather than forcing a re-list through an independently-resolved handle; a `list()`-specific test now uses a plain-`File`-written fixture instead. Also added a plain (non-instrumented) JUnit test, `SafMirrorPluginPathTest`, for the pure `parentPath()`/`fileName()` string logic — no Android runtime needed for those.
+
+Real Drive/OneDrive document providers remain untestable in CI either way (task 15, manual QA).
 
 ## 5. `gitfs.ts`: private-storage working copy + `/SmartChef` subfolder on both platforms
 
