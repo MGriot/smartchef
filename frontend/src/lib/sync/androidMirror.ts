@@ -99,13 +99,50 @@ async function fetchAndWrite(plugin: SafMirrorPlugin, treeUri: string, dir: stri
   await gitfs.promises.writeFile(`${dir}/${relativePath}`, base64ToBytes(data));
 }
 
-/** Pulls every JSON file under a target directory unconditionally — these
- *  are few and small, so a content-hash-based skip isn't worth the
- *  complexity; reconcileEntity() in gitSync.ts already no-ops on rows
- *  whose updated_at isn't newer, so an unchanged file being re-fetched and
- *  re-written costs a little I/O, not correctness. Tolerates the target
- *  directory not existing yet (e.g. no devices/ written by anyone so far). */
-async function pullJsonDirectory(plugin: SafMirrorPlugin, treeUri: string, dir: string, relativeDir: string): Promise<void> {
+function parseUpdatedAt(bytes: Uint8Array): string | null {
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as { updated_at?: unknown };
+    return typeof parsed.updated_at === 'string' ? parsed.updated_at : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readLocalBytesOrNull(dir: string, relativePath: string): Promise<Uint8Array | null> {
+  try {
+    const data = await gitfs.promises.readFile(`${dir}/${relativePath}`);
+    return typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  } catch {
+    return null;
+  }
+}
+
+/** Pulls every JSON file under a target directory. `compareUpdatedAt`
+ *  controls how "overwrite if different" is actually decided:
+ *
+ *  - true (recipes/ingredients): a local file this device wrote but
+ *    hasn't pushed yet must not be clobbered by an older remote copy —
+ *    that would silently discard the local edit from the file (and so
+ *    from the shared history), even though reconcileEntity()'s own
+ *    updated_at check would still protect SQLite for THIS device. A third
+ *    device pulling later would only ever see the older remote content,
+ *    with no record the newer edit ever existed. So this compares
+ *    updated_at fields and skips the overwrite when the local copy is the
+ *    same age or newer, exactly mirroring reconcileEntity()'s own
+ *    comparison one layer up.
+ *  - false (devices/<id>.json): no comparison needed — each device only
+ *    ever writes its own file, so there's no conflict to protect against;
+ *    whatever's remote is authoritative for every *other* device's file.
+ *
+ *  Tolerates the target directory not existing yet (e.g. no devices/
+ *  written by anyone so far). */
+async function pullJsonDirectory(
+  plugin: SafMirrorPlugin,
+  treeUri: string,
+  dir: string,
+  relativeDir: string,
+  compareUpdatedAt: boolean
+): Promise<void> {
   let entries;
   try {
     ({ entries } = await plugin.list({ uri: treeUri, path: relativeDir }));
@@ -114,7 +151,21 @@ async function pullJsonDirectory(plugin: SafMirrorPlugin, treeUri: string, dir: 
   }
   for (const entry of entries) {
     if (entry.isDirectory) continue;
-    await fetchAndWrite(plugin, treeUri, dir, `${relativeDir}/${entry.name}`);
+    const relativePath = `${relativeDir}/${entry.name}`;
+
+    if (compareUpdatedAt) {
+      const { data } = await plugin.readFile({ uri: treeUri, path: relativePath });
+      const remoteBytes = base64ToBytes(data);
+      const localBytes = await readLocalBytesOrNull(dir, relativePath);
+      const remoteUpdatedAt = parseUpdatedAt(remoteBytes);
+      const localUpdatedAt = localBytes && parseUpdatedAt(localBytes);
+      if (localUpdatedAt && remoteUpdatedAt && remoteUpdatedAt <= localUpdatedAt) {
+        continue; // local copy is the same age or newer — ours wins, don't overwrite an unpushed edit
+      }
+      await gitfs.promises.writeFile(`${dir}/${relativePath}`, remoteBytes);
+    } else {
+      await fetchAndWrite(plugin, treeUri, dir, relativePath);
+    }
   }
 }
 
@@ -166,9 +217,9 @@ export async function pullFromTarget(plugin: SafMirrorPlugin = SafMirror): Promi
   await gitfs.promises.writeFile(`${dir}/.git/refs/heads/main`, base64ToBytes(remoteRefData));
   await fetchAndWrite(plugin, state.treeUri, dir, '.git/HEAD').catch(() => {});
 
-  await pullJsonDirectory(plugin, state.treeUri, dir, 'recipes');
-  await pullJsonDirectory(plugin, state.treeUri, dir, 'ingredients');
-  await pullJsonDirectory(plugin, state.treeUri, dir, 'devices');
+  await pullJsonDirectory(plugin, state.treeUri, dir, 'recipes', true);
+  await pullJsonDirectory(plugin, state.treeUri, dir, 'ingredients', true);
+  await pullJsonDirectory(plugin, state.treeUri, dir, 'devices', false);
 
   await setMirrorState({ ...(await getMirrorState())!, lastSeenRemoteRef: remoteRefData });
 

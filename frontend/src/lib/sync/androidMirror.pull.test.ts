@@ -95,6 +95,45 @@ describe('pullFromTarget', () => {
     expect(localText('/private/recipes/r1.json')).toBe('{"id":"r1","title":"New Title"}');
   });
 
+  it('does NOT overwrite a local recipe/ingredient edit that is newer than the remote copy', async () => {
+    await setMirrorTree('fake://tree', 'Fake');
+    const tree = createFakeSafTree('fake://tree');
+    putText(tree, '.git/refs/heads/main', 'commit-abc123\n');
+    putText(tree, 'recipes/r1.json', '{"id":"r1","title":"Old remote edit","updated_at":"2026-01-01T00:00:00.000Z"}');
+    // This device wrote a newer edit locally that hasn't been pushed yet —
+    // pull must not clobber it, or the edit would be silently lost from
+    // the shared history (see androidMirror.ts's pullJsonDirectory doc).
+    putLocalText(
+      localFs,
+      '/private/recipes/r1.json',
+      '{"id":"r1","title":"Unpushed local edit","updated_at":"2026-01-02T00:00:00.000Z"}'
+    );
+
+    await pullFromTarget(tree.plugin);
+
+    expect(localText('/private/recipes/r1.json')).toBe(
+      '{"id":"r1","title":"Unpushed local edit","updated_at":"2026-01-02T00:00:00.000Z"}'
+    );
+  });
+
+  it('DOES overwrite a local recipe/ingredient file when the remote copy is newer', async () => {
+    await setMirrorTree('fake://tree', 'Fake');
+    const tree = createFakeSafTree('fake://tree');
+    putText(tree, '.git/refs/heads/main', 'commit-abc123\n');
+    putText(tree, 'recipes/r1.json', '{"id":"r1","title":"Newer remote edit","updated_at":"2026-01-02T00:00:00.000Z"}');
+    putLocalText(
+      localFs,
+      '/private/recipes/r1.json',
+      '{"id":"r1","title":"Older local copy","updated_at":"2026-01-01T00:00:00.000Z"}'
+    );
+
+    await pullFromTarget(tree.plugin);
+
+    expect(localText('/private/recipes/r1.json')).toBe(
+      '{"id":"r1","title":"Newer remote edit","updated_at":"2026-01-02T00:00:00.000Z"}'
+    );
+  });
+
   it('pulls every device registry file without treating any device specially', async () => {
     await setMirrorTree('fake://tree', 'Fake');
     const tree = createFakeSafTree('fake://tree');

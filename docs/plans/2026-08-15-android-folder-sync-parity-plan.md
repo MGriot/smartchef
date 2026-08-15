@@ -72,10 +72,21 @@ Completed the full per-cycle order the design doc's control flow specifies: `syn
 
 No dedicated unit test for this task specifically — its own stated completion criterion is task 10's integration tests, which exercise the full cycle this wiring enables. Verified via the existing 17-test suite (no regressions), `tsc --noEmit`, and a full `vite build`, all clean.
 
-## 10. Integration tests — two-device convergence
+## 10. Integration tests — two-device convergence — DONE
 
-Two `androidMirror` instances sharing one fake in-memory SAF tree (reusing the task 6/7 mocks). Scenarios: device A creates a recipe, device B syncs and sees it; both devices edit different recipes concurrently (no conflict); both edit the *same* recipe concurrently (LWW-by-`updated_at` applies, exercised through the mirror layer for the first time — the logic itself already exists in `reconcileEntity()`).
-**Done when:** all three scenarios pass without a real device.
+Two fully independent "device" module instances (own `localFs`, own fake db, own mirror/device-id state, each via its own `vi.doMock()` registrations + `vi.resetModules()` + fresh dynamic import of `./gitSync`/`./androidMirror`) sharing one fake SAF tree, driving the real `syncNow()` cycle end to end — not just `androidMirror.ts`'s pull/push logic in isolation the way tasks 6a/7a did. All three scenarios from the design pass: device A creates, device B syncs and sees it; concurrent edits to different recipes converge on both without conflict; concurrent edits to the *same* recipe converge via LWW.
+
+Two real bugs surfaced building this, both fixed rather than routed around:
+
+1. **`readFile` didn't honor the `'utf8'` option.** `createFakeLocalFs()` (from tasks 6a/7a) always returned raw bytes; `reconcileEntity()` in `gitSync.ts` calls `readFile(path, 'utf8')` expecting a string back. `JSON.parse()` on a stringified byte array fails silently — caught by `reconcileEntity()`'s own "corrupt file, skip, retry next tick" handling, so nothing ever surfaced as an error, it just never reconciled. Fixed by making the fake mirror `gitfs.ts`'s real two-argument contract (`isUtf8Request` logic included) — this is a shared fake used by every test file, so the fix benefits tasks 6a/7a too even though they never happened to trigger it (`androidMirror.ts` itself never requests utf8 — only `gitSync.ts` does).
+
+2. **Pull could silently discard a not-yet-pushed local edit** — see the design doc's "Correction found during implementation" note. This is the more consequential one: it meant the *same-recipe LWW* scenario didn't just fail to converge correctly, it converged on the wrong device's data. Fixed in `pullJsonDirectory()` by comparing `updated_at` before overwriting `recipes/`/`ingredients/` files (not `devices/`, which doesn't need it — see the design doc). Added two new dedicated pull tests (6a) for this specifically, alongside the integration-level coverage here.
+
+Both fixes were verified the same way as task 8a's ordering test: temporarily disabled each one, confirmed the relevant test(s) failed as expected (not just "still green by luck"), then restored the fix and reconfirmed the full 22-test suite passes.
+
+Also needed to mock `isomorphic-git` itself in this test file (not just `../gitfs`/`@capacitor/preferences`/`../safMirrorBridge`/`../../db/local`) — real `git.init`/`commit`/`resolveRef`/`statusMatrix` need a fully spec-compliant fs (proper `Stats` objects, `ENOENT` codes) that `createFakeLocalFs()` was never built to provide, and building that fidelity would have mostly re-tested git plumbing tasks 6a/7a/8a already cover. The mock operates at the same level as `gitSync.pullBeforeInit.test.ts`'s: `resolveRef` succeeds iff a local ref file exists, `init`/`commit` write a plausible ref, `statusMatrix` always reports a change. What's real: `reconcileEntity()`/`upsertFlatRow()`/the LWW comparisons — the actual logic this task exists to verify.
+
+Extended `testUtils/fakes.ts` with `createFakeDb()` — routes by matching the small, fixed set of SQL templates `gitSync.ts` actually generates (the recipes/ingredients upsert, the `updated_at` LWW `SELECT`, and no-op handling for the `recipe_ingredients`/`recipe_steps`/`recipe_tools` child-table calls `reconcileRecipeChildren()` always issues) rather than a real SQL engine — throws on anything unrecognized so a future change to those templates fails loudly here instead of silently no-op'ing.
 
 ## 11. Device registry
 

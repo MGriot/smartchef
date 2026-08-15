@@ -75,8 +75,10 @@ interface SafEntry { name: string; isDirectory: boolean; size: number }
 |---|---|
 | `.git/objects/**` | Content-addressed & immutable — skip if the target already has a file of that name |
 | `.git/refs/heads/main`, `.git/HEAD` | Always overwrite if different (tiny files, change every commit) |
-| `recipes/*.json`, `ingredients/*.json` | Always overwrite if different — the real LWW-by-`updated_at` payload |
+| `recipes/*.json`, `ingredients/*.json` | Overwrite only if the remote copy's `updated_at` is newer than the local copy's — see note below |
 | `devices/<deviceId>.json` (new) | Always overwrite, but only your own file — never another device's |
+
+**Correction found during implementation (task 10):** "always overwrite if different" for `recipes/*.json`/`ingredients/*.json` was under-specified when first written — it was implemented in tasks 6/6a as unconditional overwrite, reasoning that `reconcileEntity()`'s own `updated_at` check downstream in `gitSync.ts` would protect SQLite regardless. That protects SQLite for the device doing the pulling, but not the *file* — if this device has a local edit that's newer than the target but hasn't been pushed yet, an unconditional pull overwrite destroys that edit at the file level before `reconcileEntity()` ever sees it, permanently losing it from the shared history (and from this device's own SQLite too, since reconcile only ever sees the post-overwrite, older content). A two-device integration test (task 10) surfaced this converging on the wrong answer; fixed by having the pull step itself compare `updated_at` before overwriting — the same comparison `reconcileEntity()` already does, just one layer earlier, where it can still make a difference. `devices/<id>.json` doesn't need this: each device only ever writes its own file, so there's no local edit to protect against.
 
 **New shared device registry**, a `gitSync.ts` change affecting both platforms:
 

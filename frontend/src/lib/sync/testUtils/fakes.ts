@@ -95,9 +95,22 @@ export function putBytes(tree: FakeSafTree, path: string, bytes: Uint8Array): vo
 // the fake SAF tree above, so push/pull tests can seed and inspect
 // "what's on this device" the same way they seed "what's on the target." ─
 
+function isUtf8Request(options: unknown): boolean {
+  if (typeof options === 'string') return /utf-?8/i.test(options);
+  if (options && typeof options === 'object' && 'encoding' in options) {
+    return /utf-?8/i.test(String((options as { encoding?: string }).encoding ?? ''));
+  }
+  return false;
+}
+
 export interface FakeLocalFs {
   promises: {
-    readFile(path: string): Promise<Uint8Array>;
+    // Matches gitfs.ts's real readFile(path, options?) contract — callers
+    // like reconcileEntity() in gitSync.ts pass 'utf8' expecting a string
+    // back, not raw bytes; getting that wrong here means JSON.parse()
+    // silently fails on a stringified byte array and every reconcile
+    // looks like "corrupt file, skip" with no visible error.
+    readFile(path: string, options?: unknown): Promise<Uint8Array | string>;
     writeFile(path: string, data: Uint8Array | string): Promise<void>;
     unlink(path: string): Promise<void>;
     readdir(path: string): Promise<string[]>;
@@ -127,10 +140,10 @@ export function createFakeLocalFs(): FakeLocalFs {
   }
 
   const promises: FakeLocalFs['promises'] = {
-    async readFile(path) {
+    async readFile(path, options) {
       const bytes = files.get(normalize(path));
       if (!bytes) throw new Error(`ENOENT: no such file, '${path}'`);
-      return bytes;
+      return isUtf8Request(options) ? new TextDecoder().decode(bytes) : bytes;
     },
     async writeFile(path, data) {
       files.set(normalize(path), typeof data === 'string' ? new TextEncoder().encode(data) : data);
@@ -177,4 +190,74 @@ export function putLocalText(fs: FakeLocalFs, path: string, text: string): void 
 export function getLocalText(fs: FakeLocalFs, path: string): string | undefined {
   const bytes = fs.files.get(normalize(path));
   return bytes ? new TextDecoder().decode(bytes) : undefined;
+}
+
+// ── Fake db/local — just enough of gitSync.ts's actual query()/queryOne()
+// surface to support the two-device convergence integration tests (10):
+// the recipes/ingredients upsert (INSERT ... ON CONFLICT(id) DO UPDATE),
+// the "SELECT updated_at ... WHERE id = $1" LWW check, and the recipe
+// child-table (recipe_ingredients/recipe_steps/recipe_tools) DELETE+INSERT
+// calls reconcileRecipeChildren() always issues — those are accepted as
+// no-ops rather than modeled, since convergence at the recipe-row level is
+// what these tests need, not full relational fidelity. Routes by matching
+// against the exact, small, fixed set of SQL templates gitSync.ts actually
+// generates (not a real SQL parser) — throws on anything unrecognized so
+// a future change to those templates fails loudly here instead of
+// silently no-op'ing. ─────────────────────────────────────────────────────
+
+export interface FakeDb {
+  query(sql: string, values?: unknown[]): Promise<unknown[]>;
+  queryOne<T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<T | undefined>;
+  tables: {
+    recipes: Map<string, Record<string, unknown>>;
+    ingredients: Map<string, Record<string, unknown>>;
+  };
+}
+
+const CHILD_TABLE_NOOP = /^(DELETE FROM recipe_(ingredients|steps|tools)|INSERT INTO recipe_(ingredients|steps|tools))\b/;
+
+export function createFakeDb(): FakeDb {
+  const recipes = new Map<string, Record<string, unknown>>();
+  const ingredients = new Map<string, Record<string, unknown>>();
+
+  function tableFor(name: string): Map<string, Record<string, unknown>> | null {
+    if (name === 'recipes') return recipes;
+    if (name === 'ingredients') return ingredients;
+    return null;
+  }
+
+  async function query(sql: string, values: unknown[] = []): Promise<unknown[]> {
+    const trimmed = sql.trim();
+
+    if (trimmed.startsWith('INSERT INTO recipes') || trimmed.startsWith('INSERT INTO ingredients')) {
+      const match = trimmed.match(/INSERT INTO (\w+) \(([^)]+)\)/);
+      if (!match) throw new Error(`fake db: could not parse upsert: ${sql}`);
+      const table = tableFor(match[1])!;
+      const columns = match[2].split(',').map((c) => c.trim());
+      const row: Record<string, unknown> = {};
+      columns.forEach((col, i) => {
+        row[col] = values[i];
+      });
+      table.set(String(row.id), row);
+      return [];
+    }
+
+    if (CHILD_TABLE_NOOP.test(trimmed)) return [];
+
+    throw new Error(`fake db: unrecognized query — ${sql}`);
+  }
+
+  async function queryOne<T>(sql: string, values: unknown[] = []): Promise<T | undefined> {
+    const trimmed = sql.trim();
+    const match = trimmed.match(/^SELECT updated_at FROM (\w+) WHERE id = \$1$/);
+    if (match) {
+      const table = tableFor(match[1]);
+      if (!table) throw new Error(`fake db: unknown table '${match[1]}'`);
+      const row = table.get(String(values[0]));
+      return row ? ({ updated_at: row.updated_at } as unknown as T) : undefined;
+    }
+    throw new Error(`fake db: unrecognized queryOne — ${sql}`);
+  }
+
+  return { query, queryOne, tables: { recipes, ingredients } };
 }
