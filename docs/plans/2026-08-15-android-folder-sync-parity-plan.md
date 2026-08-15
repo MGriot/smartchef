@@ -32,14 +32,15 @@ Also fixed, as a direct consequence rather than scope creep: several comments an
 
 Verified via `tsc --noEmit` and a full `vite build` — both clean.
 
-## 6. `androidMirror.ts`: pull logic
+## 6. `androidMirror.ts`: pull logic — DONE
 
-New file. Given the plugin from task 3, implement the pull half of the design's mirror semantics table: list `.git/objects/` on the target, diff against `AndroidMirrorState.knownPushedObjects` (define this type now), fetch anything missing into the private working copy, then always-overwrite-pull `refs/heads/main`, `HEAD`, `recipes/*.json`, `ingredients/*.json`, and `devices/*.json`. Pure logic against an injected plugin interface — no real device needed.
-**Done when:** unit tests (task 6a) pass against a mocked `SafMirrorPlugin`.
+Implemented as designed, with one refinement worth recording: rather than trusting `AndroidMirrorState.knownPushedObjects` as the skip-fetch source of truth for pull (which the design doc's task wording implied), pull decides what to fetch by checking **local existence directly** via `gitfs.promises.stat` — cheap, and always correct even if the cache is stale (app reinstalled, storage cleared) or was never populated (e.g. objects that arrived via a route other than this device's own prior pushes). The cache is still updated after a successful pull (renamed in a doc comment from "push-only" to "known synced both ways" — the field itself is unchanged, `knownPushedObjects`, to avoid a churn-only rename), so a subsequent push doesn't redundantly re-upload something just pulled. `pullFromTarget()` takes the plugin as a parameter (defaulting to the real `SafMirror` singleton) specifically so tests can inject a fake — no test-only exports or internal restructuring needed.
 
-### 6a. Unit tests — pull logic
+Also exported `base64ToBytes`/`bytesToBase64` from `gitfs.ts` (were private helpers) rather than duplicating them — `androidMirror.ts` needs the identical conversion for `SafMirrorPlugin` calls, which also speak base64.
 
-Mock `SafMirrorPlugin` with a fake in-memory tree. Verify: objects already known-pushed are never re-fetched; refs/JSON/devices files are always pulled if different; a device never treats another device's `devices/*.json` specially (just reads it).
+### 6a. Unit tests — pull logic — DONE
+
+No test framework existed in the frontend yet — added Vitest (`npm test` / `vitest run`), the natural fit for a Vite project, plus a minimal `vitest.config.ts`. Built a shared in-memory fake SAF tree (`src/lib/sync/testUtils/fakes.ts`, backed by a flat `Map`, directories derived from key prefixes) for reuse across this task, task 7a, and the task 10 integration tests, per the plan's original intent to build this once. `@capacitor/preferences` and `../gitfs` are both mocked at the module level (`vi.mock`) with in-memory equivalents rather than threading fs/prefs as constructor parameters — keeps `androidMirror.ts`'s public API clean of test-only injection points. 7 tests, all passing: no-tree/empty-target no-ops, object fetch + skip-if-local, refs/HEAD/JSON write-through, JSON overwrite-on-change, multi-device registry pull with no per-device special-casing, and the knownPushedObjects update after a successful pull.
 
 ## 7. `androidMirror.ts`: push logic
 
