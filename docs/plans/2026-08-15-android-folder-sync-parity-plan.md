@@ -98,10 +98,17 @@ One deliberate choice worth recording: `@capacitor/device` is imported *dynamica
 
 **Done when — verified:** extended `androidMirror.convergence.test.ts` (task 10's two-device harness) with a new `describe('device registry (task 11)')` block: after both devices call `syncNow()`, each one's `devices/<id>.json` exists on the shared fake tree with `deviceId`/`platform` matching and a `lastSyncAt` at or after the moment the test started; a second sync cycle for device A refreshes only A's record (`lastSyncAt` moves forward) while B's stays byte-for-byte unchanged. Verified the same way as tasks 8a/10: temporarily commented out the `writeDeviceRecord()` call in `syncNow()`, reran the suite, confirmed the new test failed (`JSON.parse("undefined")` — the file was never written), then restored it and reconfirmed all 23 tests pass. Also clean: `tsc --noEmit`, `vite build`.
 
-## 12. Account.tsx: folder picker parity + device list + paused-sync state
+## 12. Account.tsx: folder picker parity + device list + paused-sync state — IMPLEMENTED, MANUAL VERIFICATION OUTSTANDING
 
-Remove the `isElectron()` gate on "Change Folder," wire it to `pickTree()` on Android. Add the editable device-name field. Surface the "sync paused — folder access lost" state from task 13's error handling. Add a simple list of `devices/*.json` entries ("last synced 2h ago from Mom's Tablet").
-**Done when:** manually verified in the running app on both platforms (this is UI, not unit-testable in the way tasks above are).
+Removed the `isElectron()` gate on "Change Folder" — it now branches: Electron keeps `chooseElectronSyncFolder()`, Android calls `pickTree()` (from `safMirrorBridge.ts`) then `setMirrorTree()` (from `androidMirror.ts`) to persist the choice, then syncs immediately either way so the UI reflects the new folder/tree without waiting for the next periodic tick. The "Sync Folder" display now reads `getSyncBasePath()` on Electron (the user-visible chosen path, unchanged) but `getMirrorState()`'s `treeDisplayName` on Android (the SAF tree's display name — Android's actual git working directory, private storage, was never meaningful to show a user).
+
+Added an editable "Device Name" field, wired to `gitSync.ts`'s new `getDeviceName()`/`setDeviceName()` (task 11) — saves on blur, then triggers an immediate sync so `devices/<id>.json` and the device list below reflect the change right away rather than waiting for the next periodic cycle.
+
+Added a "Known Devices" list, sourced from a new `listDeviceRecords()` in `gitSync.ts` (reads every `devices/*.json`, skips corrupt/partial files the same way `reconcileEntity()` does, sorts newest-`lastSyncAt`-first) — reused as-is by task 14's `SyncHistory.tsx` rather than duplicating the read logic there.
+
+Added the paused-state banner: Android-only (`getSyncPauseReason()` from task 13; Electron has no separate mirror step to ever set it), shown above the rest of the card when non-null, pointing at the existing "Change Folder" button as the recovery path — matching the design doc's stated flow exactly.
+
+**Done when — outstanding:** the plan's own criterion for this task is manual verification in a running app on both platforms, not something unit tests can cover. Verified so far: `tsc --noEmit` clean, `vite build` clean, and the code paths were read through against `androidMirror.ts`/`gitSync.ts`'s actual exports (no typos in dynamic import destructuring, which `tsc --noEmit` alone wouldn't have caught for a couple of these since some payload shapes are duck-typed across the dynamic `import()` boundary). This sandbox has no real Android device/emulator and no packaged Electron shell to launch, and `FolderSyncCard` only renders once standalone mode is set up, which itself needs the native SQLite plugin unavailable in a bare browser dev server — so the actual click-through (folder picker opens, device name persists, paused banner appears when access is revoked, device list updates after a peer syncs) still needs a real run, same as task 15. Left un-suffixed with "DONE" for that reason.
 
 ## 13. Permission-lost error handling — DONE
 

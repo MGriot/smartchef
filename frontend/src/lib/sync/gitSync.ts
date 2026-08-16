@@ -303,6 +303,32 @@ async function writeDeviceRecord(): Promise<void> {
   await gitfs.promises.writeFile(`${dir}/devices/${id}.json`, JSON.stringify(record, null, 2));
 }
 
+/** Every device that's ever synced through this shared folder, newest
+ *  `lastSyncAt` first — Account.tsx's device list and SyncHistory.tsx both
+ *  read this. A corrupt/partially-written file (same mid-cloud-sync
+ *  tolerance as reconcileEntity()) is skipped rather than failing the
+ *  whole list. Empty (not an error) when nothing's synced yet. */
+export async function listDeviceRecords(): Promise<DeviceRecord[]> {
+  const { dir } = await dirs();
+  let names: string[];
+  try {
+    names = await gitfs.promises.readdir(`${dir}/devices`);
+  } catch {
+    return [];
+  }
+  const records: DeviceRecord[] = [];
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      const raw = (await gitfs.promises.readFile(`${dir}/devices/${name}`, 'utf8')) as string;
+      records.push(JSON.parse(raw) as DeviceRecord);
+    } catch {
+      continue;
+    }
+  }
+  return records.sort((a, b) => b.lastSyncAt.localeCompare(a.lastSyncAt));
+}
+
 export interface SyncResult {
   applied: number;
   committed: boolean;

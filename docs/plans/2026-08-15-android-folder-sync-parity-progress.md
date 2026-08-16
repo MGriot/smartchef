@@ -31,11 +31,47 @@ is fully finished and verified.
 **Task 11: DONE.**
 
 ## Task 12 — Account.tsx: folder picker parity + device list + paused-sync state
-Blocked on task 13 (needs a real paused state to surface) — **doing task 13
-first**, out of plan-doc order. The plan doc lists 12 before 13, but 12's
-own spec says "surface the paused state from task 13's error handling" —
-building the UI to read a state that doesn't exist yet would mean
-re-touching Account.tsx a second time once 13 lands. Not started.
+
+Was blocked on task 13 (needs a real paused state to surface) — did task 13
+first, out of plan-doc order (see task 13's note below and the plan doc).
+
+- [x] Add `listDeviceRecords()` to `gitSync.ts` (reads `devices/*.json`,
+      skips corrupt files, sorted newest-first) — shared with task 14
+- [x] Remove the `isElectron()` gate on "Change Folder"; Android branch
+      calls `pickTree()` + `setMirrorTree()`, then syncs immediately
+- [x] "Sync Folder" display: `getSyncBasePath()` on Electron,
+      `getMirrorState().treeDisplayName` on Android
+- [x] Editable "Device Name" field → `setDeviceName()`, save-on-blur,
+      triggers an immediate sync
+- [x] "Known Devices" list using `listDeviceRecords()`
+- [x] Paused-state banner (Android-only, `getSyncPauseReason()`) pointing at
+      "Change Folder" as the recovery path
+- [x] `tsc --noEmit` clean, `vite build` clean, full test suite still green
+- [x] Plan doc write-up (marked IMPLEMENTED, not DONE — see below)
+- [ ] **Manual verification on a real Android device/emulator and a
+      packaged Electron build** — not possible from this sandbox (no
+      device/emulator, no packaged shell, and `FolderSyncCard` only renders
+      in standalone mode, which needs the native SQLite plugin a bare
+      browser dev server doesn't have). This is the same kind of gap task
+      15 already exists to cover — flagging it here rather than claiming
+      the done-when criterion (manual verification) is satisfied when it
+      isn't.
+- [x] Commit `gitSync.ts`'s `listDeviceRecords()` (clean/isolated diff)
+- [ ] **`Account.tsx` is NOT committed.** Its working-tree diff against HEAD
+      is the *entire* `FolderSyncCard`/`DeviceRecord` region plus a large
+      amount of other pre-existing, never-committed work from earlier in
+      this branch (standalone-mode UI, LLM provider card, etc. — none of it
+      authored this session, none of it part of the SAF-sync-parity plan),
+      interleaved in the same functions with no clean seam to split my
+      edit out along. Sweeping all of that into a task-12 commit would
+      misrepresent whose work it is and bloat this plan's history with
+      unrelated changes. Left as an uncommitted edit for the user to review
+      and commit (with the rest of that pre-existing Account.tsx work, or
+      separately) on their own terms.
+
+**Task 12: code complete, manual verification outstanding — see task 15.
+`gitSync.ts` piece committed; `Account.tsx` piece deliberately left
+uncommitted (see above).**
 
 ## Task 13 — Permission-lost error handling
 
@@ -60,9 +96,9 @@ re-touching Account.tsx a second time once 13 lands. Not started.
       the test failed, restored
 - [x] Full suite green (24/24), `tsc --noEmit` clean, `vite build` clean
 - [x] Plan doc write-up
-- [ ] Commit
+- [x] Commit (99d863a)
 
-**Task 13: DONE** (pending commit).
+**Task 13: DONE.**
 
 ## Task 14 — SyncHistory.tsx: show device registry alongside commit history
 Not started.
