@@ -24,6 +24,7 @@ import { pullFromTarget, pushToTarget } from './androidMirror';
 import { query, queryOne } from '../../db/local';
 
 const DEVICE_ID_KEY = 'smartchef.sync.deviceId';
+const DEVICE_NAME_KEY = 'smartchef.sync.deviceName';
 const LAST_SYNC_KEY = 'smartchef.sync.lastSyncAt';
 
 /** Resolved fresh on every call (cheap — getSyncBasePath() is itself
@@ -50,6 +51,33 @@ export async function getDeviceId(): Promise<string> {
   await Preferences.set({ key: DEVICE_ID_KEY, value: id });
   deviceId = id;
   return id;
+}
+
+/** Human-friendly name for this device's devices/<id>.json — a user-set
+ *  override (Account.tsx, task 12) always wins; otherwise falls back to
+ *  @capacitor/device's reported model name; otherwise the anonymous
+ *  device-xxxxxxxx id itself, matching the design doc's fallback chain.
+ *  Loaded dynamically rather than imported at module scope so every
+ *  existing sync test — none of which mock @capacitor/device — keeps
+ *  working unchanged: the web implementation throws without a real
+ *  navigator.userAgent (true in Vitest's node environment, never true in
+ *  an actual browser/WebView), and that failure is just another case of
+ *  "fall back to the device id," not a bug to route around. */
+export async function getDeviceName(): Promise<string> {
+  const { value } = await Preferences.get({ key: DEVICE_NAME_KEY });
+  if (value) return value;
+  try {
+    const { Device } = await import('@capacitor/device');
+    const { model } = await Device.getInfo();
+    if (model) return model;
+  } catch {
+    // No usable Device API in this environment — fall through to the id.
+  }
+  return getDeviceId();
+}
+
+export async function setDeviceName(name: string): Promise<void> {
+  await Preferences.set({ key: DEVICE_NAME_KEY, value: name });
 }
 
 let initDone = false;
@@ -242,6 +270,39 @@ async function reconcileEntity(type: EntityType, fileName: string): Promise<bool
   return true;
 }
 
+// ── Device registry — devices/<id>.json, one file per device, disjoint by
+// writer so no merge logic is needed (see the design doc's Data Model
+// section). Not committed to git (commitNow() only stages recipes/
+// ingredients) — always-fresh state, not history. androidMirror.ts's
+// pushToTarget()/pullFromTarget() already read/write this same path;
+// this is what actually puts real content there. ─────────────────────────
+
+export interface DeviceRecord {
+  deviceId: string;
+  deviceName: string;
+  platform: 'android' | 'electron';
+  lastSyncAt: string;
+}
+
+/** Writes only this device's own devices/<id>.json, never another
+ *  device's. Electron writes straight into the shared folder (no separate
+ *  mirror step, same as recipes/ingredients); Android writes into the
+ *  private working copy, where pushToTarget() picks it up like any other
+ *  push target file — so this must run before that push, per the design
+ *  doc's control-flow step 4. No explicit mkdir: gitfs.writeFile() creates
+ *  parent directories recursively on both platforms. */
+async function writeDeviceRecord(): Promise<void> {
+  const { dir } = await dirs();
+  const id = await getDeviceId();
+  const record: DeviceRecord = {
+    deviceId: id,
+    deviceName: await getDeviceName(),
+    platform: isElectron() ? 'electron' : 'android',
+    lastSyncAt: new Date().toISOString(),
+  };
+  await gitfs.promises.writeFile(`${dir}/devices/${id}.json`, JSON.stringify(record, null, 2));
+}
+
 export interface SyncResult {
   applied: number;
   committed: boolean;
@@ -256,12 +317,14 @@ export interface SyncResult {
  *  Android's full per-cycle order matches the design doc's control flow:
  *  pull (so this cycle's reconcile sees whatever arrived from other
  *  devices since last time — initSyncRepo()'s own pull is a first-run-only
- *  concern, not a substitute for this), reconcile, commit, push. A pull or
+ *  concern, not a substitute for this), reconcile, commit, write this
+ *  device's own devices/<id>.json with a fresh lastSyncAt, push. A pull or
  *  push failure is caught and logged rather than thrown — reconcile/commit
  *  work against local data regardless of sync connectivity, and must keep
- *  succeeding even when the SAF target is unreachable. Electron never
- *  calls either: isomorphic-git already points straight at the real
- *  shared folder, there's no separate mirror step. */
+ *  succeeding even when the SAF target is unreachable. Electron runs the
+ *  same device-record write (both platforms share one registry) but never
+ *  pulls/pushes: isomorphic-git already points straight at the real shared
+ *  folder, there's no separate mirror step. */
 export async function syncNow(): Promise<SyncResult> {
   await initSyncRepo();
 
@@ -278,6 +341,8 @@ export async function syncNow(): Promise<SyncResult> {
   }
 
   const committed = await commitNow();
+
+  await writeDeviceRecord().catch((err) => console.warn('SmartChef: writing device record failed:', err));
 
   if (!isElectron()) {
     await pushToTarget().catch((err) => console.warn('SmartChef: SAF push failed:', err));

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createFakeSafTree, createFakeLocalFs, createFakeDb, type FakeSafTree, type FakeDb } from './testUtils/fakes';
+import { createFakeSafTree, createFakeLocalFs, createFakeDb, getText, type FakeSafTree, type FakeDb } from './testUtils/fakes';
 
 // Real isomorphic-git needs a fully spec-compliant fs (proper Stats
 // objects, ENOENT error codes, etc.) that createFakeLocalFs() was never
@@ -59,6 +59,7 @@ vi.mock('isomorphic-git', () => ({
 interface Device {
   syncNow: () => Promise<{ applied: number; committed: boolean; lastSyncAt: string }>;
   writeEntityFile: (type: 'recipes' | 'ingredients', id: string, data: Record<string, unknown>) => Promise<void>;
+  getDeviceId: () => Promise<string>;
   db: FakeDb;
 }
 
@@ -92,7 +93,7 @@ async function createDevice(tree: FakeSafTree): Promise<Device> {
   const androidMirror = await import('./androidMirror');
   await androidMirror.setMirrorTree(tree.uri, 'Fake');
 
-  return { syncNow: gitSync.syncNow, writeEntityFile: gitSync.writeEntityFile, db };
+  return { syncNow: gitSync.syncNow, writeEntityFile: gitSync.writeEntityFile, getDeviceId: gitSync.getDeviceId, db };
 }
 
 let tree: FakeSafTree;
@@ -151,5 +152,34 @@ describe('two-device convergence (syncNow end to end)', () => {
 
     expect(deviceA.db.tables.recipes.get('r1')).toMatchObject({ title: 'B version (newer)' });
     expect(deviceB.db.tables.recipes.get('r1')).toMatchObject({ title: 'B version (newer)' });
+  });
+});
+
+describe('device registry (task 11)', () => {
+  it('each device writes its own devices/<id>.json to the shared target on syncNow(), without touching the other\'s', async () => {
+    const deviceA = await createDevice(tree);
+    const deviceB = await createDevice(tree);
+    const idA = await deviceA.getDeviceId();
+    const idB = await deviceB.getDeviceId();
+    expect(idA).not.toBe(idB);
+
+    const before = new Date().toISOString();
+    await deviceA.syncNow();
+    await deviceB.syncNow();
+
+    const recordA = JSON.parse(getText(tree, `devices/${idA}.json`)!);
+    const recordB = JSON.parse(getText(tree, `devices/${idB}.json`)!);
+
+    expect(recordA).toMatchObject({ deviceId: idA, platform: 'android' });
+    expect(recordB).toMatchObject({ deviceId: idB, platform: 'android' });
+    expect(recordA.lastSyncAt >= before).toBe(true);
+    expect(recordB.lastSyncAt >= before).toBe(true);
+
+    // A second cycle for A must refresh its own record without disturbing B's.
+    await deviceA.syncNow();
+    const recordARefreshed = JSON.parse(getText(tree, `devices/${idA}.json`)!);
+    const recordBUnchanged = JSON.parse(getText(tree, `devices/${idB}.json`)!);
+    expect(recordARefreshed.lastSyncAt >= recordA.lastSyncAt).toBe(true);
+    expect(recordBUnchanged).toEqual(recordB);
   });
 });
