@@ -8,6 +8,9 @@ vi.mock('@capacitor/preferences', () => ({
     set: async ({ key, value }: { key: string; value: string }) => {
       prefsStore.set(key, value);
     },
+    remove: async ({ key }: { key: string }) => {
+      prefsStore.delete(key);
+    },
   },
 }));
 

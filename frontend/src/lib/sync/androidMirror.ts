@@ -25,6 +25,7 @@ import { gitfs, getSyncBasePath, base64ToBytes, bytesToBase64 } from '../gitfs';
 import { getDeviceId } from './gitSync';
 
 const STATE_KEY = 'smartchef.sync.androidMirrorState';
+const PAUSE_REASON_KEY = 'smartchef.sync.pauseReason';
 
 export interface AndroidMirrorState {
   treeUri: string;
@@ -51,6 +52,29 @@ export async function getMirrorState(): Promise<AndroidMirrorState | null> {
 async function setMirrorState(state: AndroidMirrorState): Promise<void> {
   cachedState = state;
   await Preferences.set({ key: STATE_KEY, value: JSON.stringify(state) });
+}
+
+// ── Sync-paused state (design doc's "SAF permission lost" error path) —
+// set when a pull/push call fails against an already-configured target
+// (permission revoked, provider uninstalled, target unreachable), cleared
+// the next time either succeeds. Deliberately NOT set for "no tree chosen
+// yet" (getMirrorState() returns null) or "target has no history yet"
+// (pullFromTarget()'s own early return) — neither is an error, just not
+// yet configured. Read by Account.tsx (task 12) to show a "sync paused —
+// folder access lost" prompt alongside the existing "Change Folder" button,
+// which re-invoking pickTree() naturally clears on its own next sync. ─────
+
+export async function getSyncPauseReason(): Promise<string | null> {
+  const { value } = await Preferences.get({ key: PAUSE_REASON_KEY });
+  return value ?? null;
+}
+
+async function setSyncPauseReason(reason: string | null): Promise<void> {
+  if (reason) {
+    await Preferences.set({ key: PAUSE_REASON_KEY, value: reason });
+  } else {
+    await Preferences.remove({ key: PAUSE_REASON_KEY });
+  }
 }
 
 /** Called once a SAF tree has been picked (from onboarding, or Account's
@@ -198,32 +222,45 @@ export async function pullFromTarget(plugin: SafMirrorPlugin = SafMirror): Promi
     return { pulled: false, objectsFetched: 0 }; // target has no history yet
   }
 
-  const fetchedObjectNames: string[] = [];
-  const prefixListing = await plugin.list({ uri: state.treeUri, path: '.git/objects' }).catch(() => ({ entries: [] }));
-  for (const prefixDir of prefixListing.entries) {
-    if (!prefixDir.isDirectory) continue;
-    const objectListing = await plugin
-      .list({ uri: state.treeUri, path: `.git/objects/${prefixDir.name}` })
-      .catch(() => ({ entries: [] }));
-    for (const objectFile of objectListing.entries) {
-      const relativePath = `.git/objects/${prefixDir.name}/${objectFile.name}`;
-      if (await existsLocally(dir, relativePath)) continue;
-      await fetchAndWrite(plugin, state.treeUri, dir, relativePath);
-      fetchedObjectNames.push(relativePath);
-      await rememberSyncedObject(relativePath);
+  // Everything past this point talks to a target we know exists (the
+  // refs/heads/main read above succeeded) — a failure from here on is a
+  // real problem (permission revoked, provider unreachable), not "nothing
+  // to pull yet", so it's recorded as the pause reason and re-thrown
+  // rather than swallowed. gitSync.ts's syncNow() already wraps this whole
+  // call in a .catch(), which is what actually keeps syncNow() itself from
+  // throwing — this only adds the visible "why" behind that catch.
+  try {
+    const fetchedObjectNames: string[] = [];
+    const prefixListing = await plugin.list({ uri: state.treeUri, path: '.git/objects' }).catch(() => ({ entries: [] }));
+    for (const prefixDir of prefixListing.entries) {
+      if (!prefixDir.isDirectory) continue;
+      const objectListing = await plugin
+        .list({ uri: state.treeUri, path: `.git/objects/${prefixDir.name}` })
+        .catch(() => ({ entries: [] }));
+      for (const objectFile of objectListing.entries) {
+        const relativePath = `.git/objects/${prefixDir.name}/${objectFile.name}`;
+        if (await existsLocally(dir, relativePath)) continue;
+        await fetchAndWrite(plugin, state.treeUri, dir, relativePath);
+        fetchedObjectNames.push(relativePath);
+        await rememberSyncedObject(relativePath);
+      }
     }
+
+    await gitfs.promises.writeFile(`${dir}/.git/refs/heads/main`, base64ToBytes(remoteRefData));
+    await fetchAndWrite(plugin, state.treeUri, dir, '.git/HEAD').catch(() => {});
+
+    await pullJsonDirectory(plugin, state.treeUri, dir, 'recipes', true);
+    await pullJsonDirectory(plugin, state.treeUri, dir, 'ingredients', true);
+    await pullJsonDirectory(plugin, state.treeUri, dir, 'devices', false);
+
+    await setMirrorState({ ...(await getMirrorState())!, lastSeenRemoteRef: remoteRefData });
+    await setSyncPauseReason(null);
+
+    return { pulled: true, objectsFetched: fetchedObjectNames.length };
+  } catch (err) {
+    await setSyncPauseReason(err instanceof Error ? err.message : 'SAF pull failed');
+    throw err;
   }
-
-  await gitfs.promises.writeFile(`${dir}/.git/refs/heads/main`, base64ToBytes(remoteRefData));
-  await fetchAndWrite(plugin, state.treeUri, dir, '.git/HEAD').catch(() => {});
-
-  await pullJsonDirectory(plugin, state.treeUri, dir, 'recipes', true);
-  await pullJsonDirectory(plugin, state.treeUri, dir, 'ingredients', true);
-  await pullJsonDirectory(plugin, state.treeUri, dir, 'devices', false);
-
-  await setMirrorState({ ...(await getMirrorState())!, lastSeenRemoteRef: remoteRefData });
-
-  return { pulled: true, objectsFetched: fetchedObjectNames.length };
 }
 
 // ── push ──────────────────────────────────────────────────────────────
@@ -310,24 +347,36 @@ export async function pushToTarget(plugin: SafMirrorPlugin = SafMirror): Promise
   const dir = await getSyncBasePath();
   const known = new Set(state.knownPushedObjects);
 
-  const localObjectPaths = await listLocalObjectPaths(dir);
+  // Same try/catch/rethrow shape as pullFromTarget(): a failure here is
+  // recorded as the pause reason before propagating, so it's still visible
+  // to Account.tsx even though gitSync.ts's syncNow() catches it and keeps
+  // going. The rethrow itself is required, not optional — see pushFile()'s
+  // own docstring on why a mid-loop failure must still propagate all the
+  // way out of this function (objects-before-refs ordering).
   let objectsUploaded = 0;
-  for (const relativePath of localObjectPaths) {
-    if (known.has(relativePath)) continue;
-    if (await pushFile(plugin, state.treeUri, dir, relativePath)) {
-      objectsUploaded++;
-      await rememberSyncedObject(relativePath);
+  try {
+    const localObjectPaths = await listLocalObjectPaths(dir);
+    for (const relativePath of localObjectPaths) {
+      if (known.has(relativePath)) continue;
+      if (await pushFile(plugin, state.treeUri, dir, relativePath)) {
+        objectsUploaded++;
+        await rememberSyncedObject(relativePath);
+      }
     }
+
+    await pushFile(plugin, state.treeUri, dir, '.git/refs/heads/main');
+    await pushFile(plugin, state.treeUri, dir, '.git/HEAD');
+
+    await pushJsonDirectory(plugin, state.treeUri, dir, 'recipes');
+    await pushJsonDirectory(plugin, state.treeUri, dir, 'ingredients');
+
+    const deviceId = await getDeviceId();
+    await pushFile(plugin, state.treeUri, dir, `devices/${deviceId}.json`);
+
+    await setSyncPauseReason(null);
+    return { pushed: true, objectsUploaded };
+  } catch (err) {
+    await setSyncPauseReason(err instanceof Error ? err.message : 'SAF push failed');
+    throw err;
   }
-
-  await pushFile(plugin, state.treeUri, dir, '.git/refs/heads/main');
-  await pushFile(plugin, state.treeUri, dir, '.git/HEAD');
-
-  await pushJsonDirectory(plugin, state.treeUri, dir, 'recipes');
-  await pushJsonDirectory(plugin, state.treeUri, dir, 'ingredients');
-
-  const deviceId = await getDeviceId();
-  await pushFile(plugin, state.treeUri, dir, `devices/${deviceId}.json`);
-
-  return { pushed: true, objectsUploaded };
 }
