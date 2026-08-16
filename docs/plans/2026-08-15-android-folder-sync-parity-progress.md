@@ -26,7 +26,9 @@ is fully finished and verified.
 - [x] `vite build` clean
 - [x] Write up the "## 11. Device registry — DONE" section in the plan doc
       (implementation notes, any deviations/findings, verification done)
-- [ ] Commit
+- [x] Commit (cc81fee)
+
+**Task 11: DONE.**
 
 ## Task 12 — Account.tsx: folder picker parity + device list + paused-sync state
 Not started.
