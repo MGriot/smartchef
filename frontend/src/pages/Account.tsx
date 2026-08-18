@@ -18,6 +18,13 @@ interface SyncPeer {
   lastSeenAt: string;
 }
 
+interface DeviceRecord {
+  deviceId: string;
+  deviceName: string;
+  platform: 'android' | 'electron';
+  lastSyncAt: string;
+}
+
 interface SyncStatus {
   enabled: boolean;
   deviceId: string;
@@ -81,6 +88,233 @@ function formatRelativeTime(iso: string): string {
   const hours = Math.round(mins / 60);
   if (hours < 24) return `${hours} hr ago`;
   return `${Math.round(hours / 24)} day(s) ago`;
+}
+
+function FolderSyncCard() {
+  const navigate = useNavigate();
+  const [standalone, setStandalone] = useState(false);
+  const [electron, setElectron] = useState(false);
+  const [folderPath, setFolderPath] = useState<string | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [deviceName, setDeviceNameState] = useState('');
+  const [savedDeviceName, setSavedDeviceName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [pauseReason, setPauseReason] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [choosingFolder, setChoosingFolder] = useState(false);
+  const [result, setResult] = useState<{ applied: number; committed: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshDevices = async () => {
+    const { listDeviceRecords } = await import('../lib/sync/gitSync');
+    setDevices(await listDeviceRecords());
+  };
+
+  const refreshPauseReason = async () => {
+    if (electron) return; // Electron has no separate mirror step to pause
+    const { getSyncPauseReason } = await import('../lib/sync/androidMirror');
+    setPauseReason(await getSyncPauseReason());
+  };
+
+  useEffect(() => {
+    Promise.all([
+      import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()),
+      import('../lib/electronBridge').then(({ isElectron }) => isElectron()),
+    ]).then(async ([isStandalone, isElectronApp]) => {
+      setStandalone(isStandalone);
+      setElectron(isElectronApp);
+      if (!isStandalone) return;
+      const { getLastSyncAt, getDeviceId, getDeviceName } = await import('../lib/sync/gitSync');
+      setLastSyncAt(await getLastSyncAt());
+      setDeviceId(await getDeviceId());
+      const name = await getDeviceName();
+      setDeviceNameState(name);
+      setSavedDeviceName(name);
+      await refreshDevices();
+      if (isElectronApp) {
+        const { getSyncBasePath } = await import('../lib/gitfs');
+        setFolderPath(await getSyncBasePath().catch(() => null));
+      } else {
+        const { getMirrorState, getSyncPauseReason } = await import('../lib/sync/androidMirror');
+        const state = await getMirrorState();
+        setFolderPath(state?.treeDisplayName ?? null);
+        setPauseReason(await getSyncPauseReason());
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSyncNow = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const { syncNow } = await import('../lib/sync/gitSync');
+      const r = await syncNow();
+      setResult({ applied: r.applied, committed: r.committed });
+      setLastSyncAt(r.lastSyncAt);
+      await Promise.all([refreshDevices(), refreshPauseReason()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleChangeFolder = async () => {
+    setChoosingFolder(true);
+    setError(null);
+    try {
+      if (electron) {
+        const { chooseElectronSyncFolder } = await import('../lib/gitfs');
+        const chosen = await chooseElectronSyncFolder();
+        if (chosen) {
+          setFolderPath(chosen);
+          await handleSyncNow();
+        }
+      } else {
+        const { pickTree } = await import('../lib/safMirrorBridge');
+        const { setMirrorTree } = await import('../lib/sync/androidMirror');
+        const handle = await pickTree();
+        if (handle) {
+          await setMirrorTree(handle.uri, handle.displayName);
+          setFolderPath(handle.displayName);
+          await handleSyncNow();
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change folder');
+    } finally {
+      setChoosingFolder(false);
+    }
+  };
+
+  const handleSaveDeviceName = async () => {
+    const trimmed = deviceName.trim();
+    if (!trimmed || trimmed === savedDeviceName) return;
+    setSavingName(true);
+    try {
+      const { setDeviceName } = await import('../lib/sync/gitSync');
+      await setDeviceName(trimmed);
+      setSavedDeviceName(trimmed);
+      await handleSyncNow(); // so devices/<id>.json and the list below reflect it right away
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save device name');
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  if (!standalone) return null;
+
+  return (
+    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-lg font-black text-zinc-900">Folder Sync</h2>
+          <p className="text-sm text-zinc-400 font-medium mt-1">
+            {electron
+              ? "Point this at a folder your other devices can also reach - e.g. one already inside your OneDrive/Drive desktop folder, or a Syncthing-managed folder."
+              : "Pick a Drive/OneDrive (or any SAF-registered) folder your other devices can also reach."}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        {pauseReason && (
+          <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-4 py-3 flex items-start gap-2">
+            <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
+            Sync paused — folder access lost ({pauseReason}). Use "Change Folder" below to reconnect.
+          </p>
+        )}
+
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Device Name</label>
+          <div className="flex gap-2 max-w-sm">
+            <input
+              type="text"
+              value={deviceName}
+              onChange={(e) => setDeviceNameState(e.target.value)}
+              onBlur={handleSaveDeviceName}
+              placeholder={deviceId ?? ''}
+              className="flex-1 bg-zinc-50 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium px-4 py-2.5 text-sm"
+            />
+            {savingName && <span className="material-symbols-outlined text-lg text-zinc-400 animate-spin self-center">sync</span>}
+          </div>
+        </div>
+
+        <div className="flex gap-8 flex-wrap">
+          <div>
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">This Device</p>
+            <p className="text-sm font-bold text-zinc-900">{deviceId ?? '—'}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Last Sync</p>
+            <p className="text-sm font-bold text-zinc-900">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Sync Folder</p>
+            <p className="text-sm font-bold text-zinc-900 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? 'None chosen yet'}</p>
+          </div>
+        </div>
+
+        {devices.length > 0 && (
+          <div>
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Known Devices</p>
+            <div className="space-y-1.5">
+              {devices.map((d) => (
+                <div key={d.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 rounded-xl">
+                  <span className="text-sm font-bold text-zinc-700">
+                    {d.deviceName}
+                    {d.deviceId === deviceId && <span className="text-zinc-400 font-medium"> (this device)</span>}
+                  </span>
+                  <span className="text-xs text-zinc-400">{formatRelativeTime(d.lastSyncAt)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+        {result && (
+          <p className="text-xs text-zinc-500 font-medium">
+            {result.applied > 0 ? `Pulled in ${result.applied} change${result.applied === 1 ? '' : 's'}.` : 'Nothing new from other devices.'}
+            {result.committed ? ' Your own changes were committed.' : ''}
+          </p>
+        )}
+
+        <div className="flex gap-3 flex-wrap">
+          <button
+            type="button"
+            onClick={handleSyncNow}
+            disabled={syncing}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
+            {syncing ? 'Syncing…' : 'Sync Now'}
+          </button>
+          <button
+            type="button"
+            onClick={handleChangeFolder}
+            disabled={choosingFolder}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-lg">folder_open</span>
+            {choosingFolder ? 'Choosing…' : 'Change Folder'}
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/sync-history')}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98]"
+          >
+            <span className="material-symbols-outlined text-lg">history</span>
+            History
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SyncCard() {
@@ -615,6 +849,7 @@ export default function Account() {
         <LlmProviderCard />
         <BackupCard />
         <SyncCard />
+        <FolderSyncCard />
       </div>
     </AppLayout>
   );
