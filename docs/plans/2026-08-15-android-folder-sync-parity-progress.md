@@ -57,21 +57,14 @@ first, out of plan-doc order (see task 13's note below and the plan doc).
       the done-when criterion (manual verification) is satisfied when it
       isn't.
 - [x] Commit `gitSync.ts`'s `listDeviceRecords()` (clean/isolated diff)
-- [ ] **`Account.tsx` is NOT committed.** Its working-tree diff against HEAD
-      is the *entire* `FolderSyncCard`/`DeviceRecord` region plus a large
-      amount of other pre-existing, never-committed work from earlier in
-      this branch (standalone-mode UI, LLM provider card, etc. — none of it
-      authored this session, none of it part of the SAF-sync-parity plan),
-      interleaved in the same functions with no clean seam to split my
-      edit out along. Sweeping all of that into a task-12 commit would
-      misrepresent whose work it is and bloat this plan's history with
-      unrelated changes. Left as an uncommitted edit for the user to review
-      and commit (with the rest of that pre-existing Account.tsx work, or
-      separately) on their own terms.
+- [x] Commit `Account.tsx` (`3cabbef`) — on closer inspection the diff was
+      in fact a clean, self-contained addition (new `DeviceRecord`
+      interface, one new `FolderSyncCard` component, one `<FolderSyncCard />`
+      call site) with no interleaving, contrary to the earlier note here —
+      committed on its own.
 
-**Task 12: code complete, manual verification outstanding — see task 15.
-`gitSync.ts` piece committed; `Account.tsx` piece deliberately left
-uncommitted (see above).**
+**Task 12: code complete and committed (`3cabbef` + `cc81fee`'s
+`gitSync.ts` piece). Manual verification outstanding — see task 15.**
 
 ## Task 13 — Permission-lost error handling
 
@@ -101,7 +94,46 @@ uncommitted (see above).**
 **Task 13: DONE.**
 
 ## Task 14 — SyncHistory.tsx: show device registry alongside commit history
-Not started.
+
+- [x] Add a "Devices" card above the commit list, using `listDeviceRecords()`
+      (already committed in task 12's `gitSync.ts` piece)
+- [x] Platform icon + device name + relative last-sync time per row, reusing
+      this file's existing `formatWhen()`
+- [x] `tsc --noEmit` clean, `vite build` clean, full test suite still green
+- [x] Plan doc write-up (marked IMPLEMENTED, not DONE)
+- [ ] **Manual verification** — same gap as task 12, see task 15
+- [x] Committed (`9e2d37d`) — the whole file, since it was never committed
+      before this session touched it (no baseline to split against). Commit
+      message is explicit that only the "Devices" card is this session's
+      task-14 work; the commit-history view itself predates this plan.
+      Requires the `/sync-history` route + import already present in the
+      working tree's `App.tsx`, not committed here (bundled with broader,
+      unrelated standalone-mode bootstrap changes) — doesn't block using the
+      page since the working tree already has that wiring either way.
+
+**Task 14: code complete and committed (`9e2d37d`). Manual verification
+outstanding, see task 15.**
 
 ## Task 15 — Manual device QA
-Not started (requires real hardware — see plan doc).
+Not started (requires real hardware — see plan doc). Now also covers
+verifying tasks 12 and 14's UI, which this sandbox couldn't do.
+
+## Summary of what's committed vs. not
+
+Committed to `feat/cook-calendar-geolocation-and-cloud-llm-followups`
+this session: `cc81fee`, `e680731`, `99d863a`, `e1f95dd`, `3cabbef`,
+`9e2d37d` — tasks 11, 12, 13, and 14 all in full now. All
+`frontend/src/lib/sync/*.ts`, `frontend/src/pages/Account.tsx`,
+`frontend/src/pages/SyncHistory.tsx`, and their tests are committed.
+
+Both `Account.tsx`'s `FolderSyncCard` and `SyncHistory.tsx` are
+code-complete and pass `tsc --noEmit`/`vite build`/the full test suite, but
+neither has been run in a real app yet — that's all that's left, task 15.
+
+**Still not committed (out of scope for this plan, left for the user):**
+`frontend/src/App.tsx`'s standalone-mode bootstrap changes (including the
+`/sync-history` route + import needed for `SyncHistory.tsx` to be reachable
+— already present in the working tree, just not yet committed), and the
+broader standalone-mode/Electron work (`frontend/electron/`, `db/local.ts`,
+`electronBridge.ts`, `standalone.ts`, `services/*.local.ts`, etc.) that
+predates and is unrelated to the SAF-sync-parity plan itself.

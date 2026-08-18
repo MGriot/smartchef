@@ -98,7 +98,7 @@ One deliberate choice worth recording: `@capacitor/device` is imported *dynamica
 
 **Done when — verified:** extended `androidMirror.convergence.test.ts` (task 10's two-device harness) with a new `describe('device registry (task 11)')` block: after both devices call `syncNow()`, each one's `devices/<id>.json` exists on the shared fake tree with `deviceId`/`platform` matching and a `lastSyncAt` at or after the moment the test started; a second sync cycle for device A refreshes only A's record (`lastSyncAt` moves forward) while B's stays byte-for-byte unchanged. Verified the same way as tasks 8a/10: temporarily commented out the `writeDeviceRecord()` call in `syncNow()`, reran the suite, confirmed the new test failed (`JSON.parse("undefined")` — the file was never written), then restored it and reconfirmed all 23 tests pass. Also clean: `tsc --noEmit`, `vite build`.
 
-## 12. Account.tsx: folder picker parity + device list + paused-sync state — IMPLEMENTED, MANUAL VERIFICATION OUTSTANDING
+## 12. Account.tsx: folder picker parity + device list + paused-sync state — IMPLEMENTED + COMMITTED (`3cabbef`), MANUAL VERIFICATION OUTSTANDING
 
 Removed the `isElectron()` gate on "Change Folder" — it now branches: Electron keeps `chooseElectronSyncFolder()`, Android calls `pickTree()` (from `safMirrorBridge.ts`) then `setMirrorTree()` (from `androidMirror.ts`) to persist the choice, then syncs immediately either way so the UI reflects the new folder/tree without waiting for the next periodic tick. The "Sync Folder" display now reads `getSyncBasePath()` on Electron (the user-visible chosen path, unchanged) but `getMirrorState()`'s `treeDisplayName` on Android (the SAF tree's display name — Android's actual git working directory, private storage, was never meaningful to show a user).
 
@@ -122,10 +122,13 @@ Four existing test files mock `@capacitor/preferences` with only `get`/`set` —
 
 **Done when — verified:** new `androidMirror.syncPause.test.ts`, single-device harness (same shape as task 10's `createDevice()`, real `syncNow()` end to end). One clean cycle first, then a plugin `writeFile` mock starts throwing `EACCES` mid-cycle (simulating permission revoked between two syncs, not "never configured"): asserts `syncNow()` still resolves rather than rejecting, the same-cycle local write still reaches the fake SQLite (reconcile runs before push in `syncNow()`'s order, so this also demonstrates the full local pipeline stays live even though the *previous* cycle's data would otherwise be at risk of never leaving the device), `getSyncPauseReason()` returns a message matching the thrown error, and — the recovery case — a subsequent successful cycle clears it back to `null`. Verified the same way as every other task in this plan: commented out the `setSyncPauseReason()` call in `pushToTarget()`'s catch block, confirmed the new test failed (pause reason stayed `null` after the simulated failure), restored it, reconfirmed all 24 tests pass. Also clean: `tsc --noEmit`, `vite build`.
 
-## 14. SyncHistory.tsx: show device registry alongside commit history
+## 14. SyncHistory.tsx: show device registry alongside commit history — IMPLEMENTED + COMMITTED (`9e2d37d`), MANUAL VERIFICATION OUTSTANDING
 
-Small addition to the existing read-only history view from task 11's data.
-**Done when:** manually verified.
+Added a "Devices" card above the existing commit list, using the same `listDeviceRecords()` (task 12/`gitSync.ts`) Account.tsx's device list uses — one read path, two display sites, per the design doc's stated intent ("`SyncHistory.tsx`/`Account.tsx` list all files under `devices/`"). Each row shows a platform icon (`phone_android`/`computer`), the device name, and `formatWhen()` (this file's existing relative-time helper, already used for commits — reused rather than duplicating `Account.tsx`'s separately-named `formatRelativeTime()`, since they're two different implementations of the same idea and this file already had its own).
+
+**Done when — outstanding:** same situation as task 12 — this is UI needing a real run to verify, and this sandbox has neither a device/emulator nor a working standalone-mode browser session (needs the native SQLite plugin). `tsc --noEmit` and `vite build` are clean; the actual rendering (icons, name, relative time, ordering) is unverified.
+
+**Committed (`9e2d37d`)** as a single new-file commit, since it was already untracked (never committed by any prior commit in this branch) before this session touched it — there was no earlier baseline to split the diff against. Its pre-existing content — the entire commit-history view, `formatWhen()`, `describeChange()` — predates and is unrelated to this plan's scope; the commit message says so explicitly rather than implying this session authored all of it.
 
 ## 15. Manual device QA (not automatable, required before calling this done)
 
