@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
-import { apiFetch } from '../lib/api';
+import { apiFetch, isNative } from '../lib/api';
 
 // Adaptive to whatever's in the folder — adding/removing an SVG here
 // changes the preset grid with no code change needed.
@@ -51,7 +51,7 @@ function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
 
   return (
     <div className="mt-4 p-4 bg-zinc-50 rounded-2xl space-y-2">
-      {changes.length === 0 && summary.conflicts.length === 0 ? (
+      {changes.length === 0 && (summary.conflicts ?? []).length === 0 ? (
         <p className="text-xs text-zinc-400 font-medium">Nothing changed — already up to date.</p>
       ) : (
         <>
@@ -64,7 +64,7 @@ function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
               ))}
             </div>
           )}
-          {summary.conflicts.length > 0 && (
+          {(summary.conflicts ?? []).length > 0 && (
             <div className="space-y-1 pt-1">
               {summary.conflicts.map((msg, i) => (
                 <p key={i} className="text-[11px] text-amber-700 leading-snug flex items-start gap-1.5">
@@ -88,6 +88,182 @@ function formatRelativeTime(iso: string): string {
   const hours = Math.round(mins / 60);
   if (hours < 24) return `${hours} hr ago`;
   return `${Math.round(hours / 24)} day(s) ago`;
+}
+
+interface DisplayConflict {
+  id: string;
+  entityType: string;
+  entityId: string;
+  fieldName: string;
+  localValue: unknown;
+  remoteValue: unknown;
+  entityName: string;
+}
+
+function conflictValuePreview(value: unknown): string {
+  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  return String(value);
+}
+
+function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict; onResolve: (chosen: 'local' | 'remote') => void }) {
+  const [ops, setOps] = useState<{ type: 'same' | 'removed' | 'added'; text: string }[] | null>(null);
+  const isArrayField = Array.isArray(conflict.localValue) || Array.isArray(conflict.remoteValue);
+
+  useEffect(() => {
+    if (!isArrayField) return;
+    import('../lib/lineDiff').then(({ diffLines }) => {
+      setOps(diffLines(conflict.localValue as string[], conflict.remoteValue as string[]));
+    });
+  }, [conflict, isArrayField]);
+
+  if (isArrayField) {
+    return (
+      <div className="space-y-2">
+        <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
+          <div className="px-3 py-1.5 bg-zinc-50 border-b border-zinc-200 flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
+            <span className="flex items-center gap-1 text-red-600"><span className="w-2 h-2 rounded-sm bg-red-200 inline-block" />only in mine</span>
+            <span className="flex items-center gap-1 text-emerald-600"><span className="w-2 h-2 rounded-sm bg-emerald-200 inline-block" />only in theirs</span>
+          </div>
+          <div className="divide-y divide-zinc-100">
+            {(ops ?? []).map((op, i) => (
+              <div
+                key={i}
+                className={`px-3 py-1.5 text-xs font-medium flex gap-2 ${
+                  op.type === 'removed' ? 'bg-red-50 text-red-800' : op.type === 'added' ? 'bg-emerald-50 text-emerald-800' : 'text-zinc-600'
+                }`}
+              >
+                <span className="font-black w-3 shrink-0">{op.type === 'removed' ? '−' : op.type === 'added' ? '+' : ''}</span>
+                {op.text}
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="text-[11px] text-zinc-400">
+          Resolving this field isn't available yet — it needs the full sync engine, not just this preview.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 bg-white rounded-xl p-3 border border-zinc-200">
+      <div className="text-xs text-zinc-600 font-medium">
+        <span className="font-black text-zinc-800">mine:</span> {conflictValuePreview(conflict.localValue)}
+        <span className="mx-2 text-zinc-300">|</span>
+        <span className="font-black text-zinc-800">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
+      </div>
+      <div className="flex gap-2 shrink-0">
+        <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 rounded-lg text-[11px] font-black text-zinc-700 hover:bg-zinc-200">Mine</button>
+        <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Theirs</button>
+      </div>
+    </div>
+  );
+}
+
+function ConflictEntityGroup({
+  entityConflicts, openField, onOpenField, onResolve,
+}: {
+  entityConflicts: DisplayConflict[];
+  openField: string;
+  onOpenField: (fieldName: string) => void;
+  onResolve: (id: string, chosen: 'local' | 'remote') => void;
+}) {
+  return (
+    <div className="bg-zinc-50 rounded-2xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm font-black text-zinc-800">{entityConflicts[0].entityName}</p>
+        <span className="px-2.5 py-0.5 bg-white border border-zinc-200 rounded-full text-[10px] font-black text-zinc-500 capitalize">
+          {entityConflicts[0].entityType} · {entityConflicts.length} conflict{entityConflicts.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {entityConflicts.map((c) => (
+          <button
+            key={c.fieldName}
+            type="button"
+            onClick={() => onOpenField(c.fieldName)}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${openField === c.fieldName ? 'bg-zinc-900 text-white' : 'bg-white border border-zinc-200 text-zinc-600'}`}
+          >
+            {c.fieldName}
+          </button>
+        ))}
+      </div>
+      {entityConflicts.filter((c) => c.fieldName === openField).map((c) => (
+        <ConflictFieldDiff key={c.id} conflict={c} onResolve={(chosen) => onResolve(c.id, chosen)} />
+      ))}
+    </div>
+  );
+}
+
+/** wayfinder ticket 06 (standalone-storage-sync map) — entity-grouped
+ *  Conflicts list (the prototyped Variant C), folded into production and
+ *  wired to conflicts.local.ts's real data instead of mock data. Renders
+ *  nothing when there are no pending conflicts — currently that's always,
+ *  since nothing creates a sync_conflicts row until the Sync Engine
+ *  (ticket 02/03's remainder) exists; this UI is ready ahead of it. */
+function ConflictsCard() {
+  const [conflicts, setConflicts] = useState<DisplayConflict[] | null>(null);
+  const [openField, setOpenField] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    const { listPendingConflicts, getEntityDisplayName } = await import('../services/conflicts.local');
+    const pending = await listPendingConflicts();
+    const withNames = await Promise.all(
+      pending.map(async (c) => ({
+        ...c,
+        entityName: (await getEntityDisplayName(c.entityType, c.entityId)) ?? `${c.entityType} ${c.entityId.slice(0, 8)}…`,
+      }))
+    );
+    setConflicts(withNames);
+  };
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleResolve = async (id: string, chosen: 'local' | 'remote') => {
+    setError(null);
+    try {
+      const { resolveConflict, applyResolvedConflict } = await import('../services/conflicts.local');
+      const resolved = await resolveConflict(id, chosen);
+      if (resolved) await applyResolvedConflict(resolved);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not resolve conflict');
+    }
+    await refresh();
+  };
+
+  if (!conflicts || conflicts.length === 0) return null;
+
+  const groups = new Map<string, DisplayConflict[]>();
+  for (const c of conflicts) {
+    const key = `${c.entityType}:${c.entityId}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(c);
+  }
+
+  return (
+    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
+      <h2 className="text-lg font-black text-zinc-900 mb-1">Needs Your Attention</h2>
+      <p className="text-sm text-zinc-400 font-medium mb-4">
+        {groups.size} item{groups.size === 1 ? '' : 's'} changed differently on two devices.
+      </p>
+      {error && <p className="text-sm text-red-600 font-medium mb-3">{error}</p>}
+      <div className="space-y-3">
+        {[...groups.entries()].map(([key, entityConflicts]) => (
+          <ConflictEntityGroup
+            key={key}
+            entityConflicts={entityConflicts}
+            openField={openField[key] ?? entityConflicts[0].fieldName}
+            onOpenField={(fieldName) => setOpenField((s) => ({ ...s, [key]: fieldName }))}
+            onResolve={handleResolve}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function FolderSyncCard() {
@@ -162,6 +338,23 @@ function FolderSyncCard() {
     }
   };
 
+  // A freshly (re-)chosen target has no way to know about rows this device
+  // already had before Folder Sync (or this specific sync bug fix) ever
+  // existed — normal create/update calls only ever touch the one row
+  // involved, so nothing retroactively "catches up" an old row on its own.
+  // Re-writing every local row's entity file here means picking a new
+  // folder always leaves it correctly populated, not just newly-edited
+  // rows — including recovering from a sync target that got wiped/
+  // corrupted (as happened testing this against Google Drive earlier).
+  const resyncAllLocalData = async () => {
+    const [{ resyncAllRecipes }, { resyncAllIngredients }] = await Promise.all([
+      import('../services/recipes.local'),
+      import('../services/ingredients.local'),
+    ]);
+    await resyncAllIngredients();
+    await resyncAllRecipes();
+  };
+
   const handleChangeFolder = async () => {
     setChoosingFolder(true);
     setError(null);
@@ -170,7 +363,10 @@ function FolderSyncCard() {
         const { chooseElectronSyncFolder } = await import('../lib/gitfs');
         const chosen = await chooseElectronSyncFolder();
         if (chosen) {
+          const { resetSyncRepoInit } = await import('../lib/sync/gitSync');
+          resetSyncRepoInit();
           setFolderPath(chosen);
+          await resyncAllLocalData();
           await handleSyncNow();
         }
       } else {
@@ -180,6 +376,7 @@ function FolderSyncCard() {
         if (handle) {
           await setMirrorTree(handle.uri, handle.displayName);
           setFolderPath(handle.displayName);
+          await resyncAllLocalData();
           await handleSyncNow();
         }
       }
@@ -314,6 +511,31 @@ function FolderSyncCard() {
         </div>
       </div>
     </div>
+  );
+}
+
+function OfflineDownloadsCard() {
+  const navigate = useNavigate();
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    import('../lib/offlineStore').then(({ listDownloadedRecipes }) => listDownloadedRecipes()).then((r) => setCount(r.length)).catch(() => setCount(0));
+  }, []);
+
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('/downloads')}
+      className="w-full flex items-center justify-between gap-4 bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8 text-left hover:border-zinc-200 transition-colors"
+    >
+      <div>
+        <h2 className="text-lg font-black text-zinc-900">Offline Downloads</h2>
+        <p className="text-sm text-zinc-400 font-medium mt-1">
+          {count === null ? 'Loading…' : count === 0 ? 'No recipes downloaded for offline viewing yet.' : `${count} recipe${count === 1 ? '' : 's'} downloaded for offline viewing.`}
+        </p>
+      </div>
+      <span className="material-symbols-outlined text-zinc-400">chevron_right</span>
+    </button>
   );
 }
 
@@ -620,7 +842,7 @@ function BackupCard() {
     setExporting(true);
     setError(null);
     try {
-      const res = await apiFetch('/api/backup/export');
+      const res = await apiFetch('/api/backup/export', { timeoutMs: 120_000 });
       const json = await res.json();
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Export failed');
       const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
@@ -718,10 +940,90 @@ function BackupCard() {
   );
 }
 
+function StandaloneProfileCard() {
+  const [name, setName] = useState('');
+  const [savedName, setSavedName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    import('../lib/standalone').then(({ getStandaloneProfile }) => getStandaloneProfile()).then((profile) => {
+      setName(profile?.name ?? '');
+      setSavedName(profile?.name ?? '');
+    });
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === savedName) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const { setStandaloneName } = await import('../lib/standalone');
+      await setStandaloneName(trimmed);
+      setSavedName(trimmed);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save name');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    const { clearStandaloneProfile } = await import('../lib/standalone');
+    await clearStandaloneProfile();
+    window.location.href = '/';
+  };
+
+  return (
+    <form onSubmit={handleSave} className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 space-y-6">
+      <div>
+        <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Name</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+        />
+        <p className="text-xs text-zinc-400 mt-2">
+          No password in offline mode — this device's data is already private to you. Used to label recipes you create and cooks you log.
+        </p>
+      </div>
+      {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+      <div className="flex gap-4 pt-2">
+        <button
+          type="submit"
+          disabled={saving || !name.trim() || name.trim() === savedName}
+          className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
+          {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
+        </button>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
+        >
+          Log Out
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function Account() {
   const navigate = useNavigate();
   const account = useStore((s) => s.account);
   const setAccount = useStore((s) => s.setAccount);
+  const [standalone, setStandalone] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setStandalone);
+  }, []);
 
   const [name, setName] = useState(account?.name ?? '');
   const [username, setUsername] = useState(account?.username ?? '');
@@ -778,77 +1080,83 @@ export default function Account() {
           <h1 className="text-4xl font-black text-zinc-900 tracking-tighter">Account</h1>
         </div>
 
-        <form onSubmit={handleSave} className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 space-y-6">
-          <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Username</label>
-            <input
-              type="text"
-              autoCapitalize="none"
-              value={username}
-              onChange={(e) => setUsername(e.target.value.toLowerCase())}
-              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
-            <div className="flex flex-wrap gap-3 mb-4">
-              {AVATAR_PRESETS.map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => setAvatarUrl(preset)}
-                  className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
-                >
-                  <img src={preset} alt="" className="w-full h-full object-cover" />
-                </button>
-              ))}
+        {standalone === null ? null : standalone ? (
+          <StandaloneProfileCard />
+        ) : (
+          <form onSubmit={handleSave} className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 space-y-6">
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+              />
             </div>
-            <span className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">or use your own image</span>
-            <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
-          </div>
-          <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">New Password (leave blank to keep current)</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
-            />
-          </div>
-          {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
-          <div className="flex gap-4 pt-2">
-            <button
-              type="submit"
-              disabled={saving || !name}
-              className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
-              {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
-            </button>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
-            >
-              Log Out
-            </button>
-          </div>
-        </form>
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Username</label>
+              <input
+                type="text"
+                autoCapitalize="none"
+                value={username}
+                onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
+              <div className="flex flex-wrap gap-3 mb-4">
+                {AVATAR_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setAvatarUrl(preset)}
+                    className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
+                  >
+                    <img src={preset} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+              <span className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">or use your own image</span>
+              <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">New Password (leave blank to keep current)</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+              />
+            </div>
+            {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+            <div className="flex gap-4 pt-2">
+              <button
+                type="submit"
+                disabled={saving || !name}
+                className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
+                {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
+              >
+                Log Out
+              </button>
+            </div>
+          </form>
+        )}
 
-        {account?.role === 'admin' && <ManageUsersCard />}
+        {!standalone && account?.role === 'admin' && <ManageUsersCard />}
         <LlmProviderCard />
         <BackupCard />
         <SyncCard />
+        {isNative() && !standalone && <OfflineDownloadsCard />}
+        {standalone && <ConflictsCard />}
         <FolderSyncCard />
       </div>
     </AppLayout>

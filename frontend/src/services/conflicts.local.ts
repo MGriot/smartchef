@@ -109,6 +109,87 @@ export interface ResolvedConflict {
   chosenValue: unknown;
 }
 
+// ── Applying a resolution back onto the entity ──────────────────────────
+// entity_type/field_name only ever originate from the (future) Sync Engine
+// writing legitimate conflict records, never from user input — but since a
+// column name can't be a bound SQL parameter, each is still checked against
+// an explicit allowlist before being interpolated, rather than trusted blind.
+
+const TABLE_BY_ENTITY: Record<string, string> = {
+  recipe: 'recipes',
+  ingredient: 'ingredients',
+  tool: 'tools',
+  tag: 'tags',
+  technique: 'techniques',
+};
+
+const NAME_COLUMN_BY_ENTITY: Record<string, string> = {
+  recipe: 'title',
+  ingredient: 'name',
+  tool: 'name',
+  tag: 'name',
+  technique: 'name',
+};
+
+// recipes.steps/ingredients/tools are normalized child tables, not columns
+// on recipes — merged as whole-array fields per ADR 0002. Writing a
+// resolved value back means the same delete+insert path recipes.local.ts's
+// own create/update logic already uses for its nested rows, which isn't
+// reachable as a standalone "write just this one field" operation yet.
+const ARRAY_FIELDS = new Set(['steps', 'ingredients', 'tools']);
+
+/** Exposed so the Conflicts list UI can tell which fields it can't offer a
+ *  resolution button for yet, without duplicating this list. */
+export const ARRAY_FIELD_NAMES: ReadonlySet<string> = ARRAY_FIELDS;
+
+const SCALAR_FIELDS_BY_ENTITY: Record<string, Set<string>> = {
+  recipe: new Set([
+    'title', 'description', 'difficulty', 'servings', 'prep_time_min', 'cook_time_min',
+    'rest_time_min', 'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url',
+    'source_url', 'is_component', 'language_code',
+  ]),
+  ingredient: new Set([
+    'name', 'description', 'icon', 'calories_kcal', 'protein_g', 'carbs_g',
+    'fat_g', 'fiber_g', 'sugar_g', 'sodium_mg', 'category_id',
+  ]),
+  tool: new Set(['name', 'category', 'description', 'icon']),
+  tag: new Set(['name', 'group_name', 'color', 'icon', 'sort_order']),
+  technique: new Set(['name', 'description', 'icon']),
+};
+
+/** Writes a resolved conflict's chosen value onto the entity's own row and
+ *  bumps updated_at, so the change rides the next normal sync/push per
+ *  ticket 03's dirty-tracking — same as any other local edit. Scalar
+ *  fields only; the three whole-array recipe fields throw (see ARRAY_FIELDS
+ *  above) rather than silently doing the wrong thing. */
+export async function applyResolvedConflict(resolved: ResolvedConflict): Promise<void> {
+  const table = TABLE_BY_ENTITY[resolved.entityType];
+  if (!table) {
+    throw new Error(`applyResolvedConflict: unknown entity type '${resolved.entityType}'`);
+  }
+  if (ARRAY_FIELDS.has(resolved.fieldName)) {
+    throw new Error(
+      `applyResolvedConflict: '${resolved.fieldName}' is a whole-array field — writing it back requires the ` +
+      `nested delete+insert path the future Sync Engine will use, not a plain column UPDATE. Not yet implemented.`
+    );
+  }
+  const allowedFields = SCALAR_FIELDS_BY_ENTITY[resolved.entityType];
+  if (!allowedFields?.has(resolved.fieldName)) {
+    throw new Error(`applyResolvedConflict: '${resolved.fieldName}' is not a recognized scalar field on '${resolved.entityType}'`);
+  }
+  await query(`UPDATE ${table} SET ${resolved.fieldName} = $1, updated_at = now() WHERE id = $2`, [resolved.chosenValue, resolved.entityId]);
+}
+
+/** The entity's own display name (title/name column), for the Conflicts
+ *  list UI. Null if the entity type is unrecognized or the row is gone. */
+export async function getEntityDisplayName(entityType: string, entityId: string): Promise<string | null> {
+  const table = TABLE_BY_ENTITY[entityType];
+  const nameColumn = NAME_COLUMN_BY_ENTITY[entityType];
+  if (!table || !nameColumn) return null;
+  const row = await queryOne<{ name: unknown }>(`SELECT ${nameColumn} as name FROM ${table} WHERE id = $1`, [entityId]);
+  return row ? String(row.name) : null;
+}
+
 /** Resolves a pending conflict by deleting its record and reporting which
  *  value the user picked. Applying that value back onto the entity's own
  *  row — and letting it ride the next normal sync per its bumped

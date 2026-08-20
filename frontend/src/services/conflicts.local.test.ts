@@ -18,9 +18,30 @@ interface Row {
 const rows: Row[] = [];
 let now = 0;
 
+// Generic entity tables (recipes/ingredients/etc.) — just enough to exercise
+// applyResolvedConflict()/getEntityDisplayName()'s SELECT <col>/UPDATE <col>
+// shape, not full relational fidelity.
+const entityTables: Record<string, Map<string, Record<string, unknown>>> = {
+  recipes: new Map(),
+  ingredients: new Map(),
+  tools: new Map(),
+  tags: new Map(),
+  techniques: new Map(),
+};
+
 vi.mock('../db/local', () => ({
   query: vi.fn(async (sql: string, params: unknown[] = []) => {
     const trimmed = sql.trim();
+
+    const updateMatch = trimmed.match(/^UPDATE (\w+) SET (\w+) = \$1, updated_at = now\(\) WHERE id = \$2$/);
+    if (updateMatch) {
+      const [, table, col] = updateMatch;
+      const [value, id] = params;
+      const row = entityTables[table]?.get(id as string);
+      if (!row) throw new Error(`fake db/local: no row '${id}' in '${table}'`);
+      row[col] = value;
+      return [];
+    }
 
     if (trimmed.startsWith('INSERT INTO sync_conflicts')) {
       const [id, entity_type, entity_id, field_name, base_value, local_value, remote_value] = params as string[];
@@ -62,15 +83,23 @@ vi.mock('../db/local', () => ({
       const [id] = params as string[];
       return rows.find((r) => r.id === id) ?? null;
     }
+    const selectMatch = trimmed.match(/^SELECT (\w+) as name FROM (\w+) WHERE id = \$1$/);
+    if (selectMatch) {
+      const [, col, table] = selectMatch;
+      const [id] = params as string[];
+      const row = entityTables[table]?.get(id);
+      return row ? { name: row[col] } : null;
+    }
     throw new Error(`fake db/local: unrecognized queryOne — ${sql}`);
   }),
 }));
 
-const { upsertConflict, listPendingConflicts, listPendingConflictsForEntity, resolveConflict } = await import('./conflicts.local');
+const { upsertConflict, listPendingConflicts, listPendingConflictsForEntity, resolveConflict, applyResolvedConflict, getEntityDisplayName } = await import('./conflicts.local');
 
 beforeEach(() => {
   rows.length = 0;
   now = 0;
+  for (const table of Object.values(entityTables)) table.clear();
 });
 
 describe('upsertConflict', () => {
@@ -147,5 +176,51 @@ describe('resolveConflict', () => {
 
   it('returns null for an id that is not a pending conflict', async () => {
     expect(await resolveConflict('does-not-exist', 'local')).toBeNull();
+  });
+});
+
+describe('applyResolvedConflict', () => {
+  it('writes the chosen value onto the entity row for a recognized scalar field', async () => {
+    entityTables.ingredients.set('i1', { id: 'i1', calories_kcal: 120 });
+
+    await applyResolvedConflict({ entityType: 'ingredient', entityId: 'i1', fieldName: 'calories_kcal', chosenValue: 95 });
+
+    expect(entityTables.ingredients.get('i1')?.calories_kcal).toBe(95);
+  });
+
+  it('rejects an unrecognized field name rather than trusting it into SQL', async () => {
+    entityTables.ingredients.set('i1', { id: 'i1' });
+    await expect(
+      applyResolvedConflict({ entityType: 'ingredient', entityId: 'i1', fieldName: 'DROP TABLE ingredients', chosenValue: 'x' })
+    ).rejects.toThrow(/not a recognized/);
+  });
+
+  it('rejects an unknown entity type', async () => {
+    await expect(
+      applyResolvedConflict({ entityType: 'not-a-real-entity', entityId: 'x', fieldName: 'name', chosenValue: 'x' })
+    ).rejects.toThrow();
+  });
+
+  it('rejects the whole-array recipe fields — not a plain column, needs the future Sync Engine write-back path', async () => {
+    entityTables.recipes.set('r1', { id: 'r1' });
+    await expect(
+      applyResolvedConflict({ entityType: 'recipe', entityId: 'r1', fieldName: 'steps', chosenValue: ['a'] })
+    ).rejects.toThrow(/whole-array/);
+  });
+});
+
+describe('getEntityDisplayName', () => {
+  it('reads a recipe by its title column', async () => {
+    entityTables.recipes.set('r1', { id: 'r1', title: "Grandma's Lasagna" });
+    expect(await getEntityDisplayName('recipe', 'r1')).toBe("Grandma's Lasagna");
+  });
+
+  it('reads an ingredient by its name column', async () => {
+    entityTables.ingredients.set('i1', { id: 'i1', name: 'Tomato Sauce' });
+    expect(await getEntityDisplayName('ingredient', 'i1')).toBe('Tomato Sauce');
+  });
+
+  it('returns null for a missing entity', async () => {
+    expect(await getEntityDisplayName('recipe', 'does-not-exist')).toBeNull();
   });
 });
