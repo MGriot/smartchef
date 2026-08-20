@@ -29,9 +29,49 @@ const entityTables: Record<string, Map<string, Record<string, unknown>>> = {
   techniques: new Map(),
 };
 
+// recipe_ingredients/recipe_steps/recipe_tools — normalized child tables
+// writeArrayField() delete+reinserts into, keyed by table name, each row a
+// plain object. No `id`-keyed Map here (recipe_tools has no `id` column at
+// all, a composite recipe_id+tool_id key instead) — a flat array per table
+// is enough to exercise delete-then-reinsert semantics.
+const childTables: Record<string, Array<Record<string, unknown>>> = {
+  recipe_ingredients: [],
+  recipe_steps: [],
+  recipe_tools: [],
+};
+
 vi.mock('../db/local', () => ({
   query: vi.fn(async (sql: string, params: unknown[] = []) => {
     const trimmed = sql.trim();
+    // Multi-line INSERT/DELETE templates (readability in the real SQL)
+    // collapse to one line here so the same regexes match regardless of
+    // how the production query string wraps.
+    const normalized = trimmed.replace(/\s+/g, ' ');
+
+    const childDeleteMatch = normalized.match(/^DELETE FROM (recipe_ingredients|recipe_steps|recipe_tools) WHERE recipe_id = \$1$/);
+    if (childDeleteMatch) {
+      const [, table] = childDeleteMatch;
+      const [recipeId] = params as string[];
+      childTables[table] = childTables[table].filter((r) => r.recipe_id !== recipeId);
+      return [];
+    }
+
+    const childInsertMatch = normalized.match(/^INSERT INTO (recipe_ingredients|recipe_steps) \(([^)]+)\) VALUES \(([^)]+)\)$/);
+    if (childInsertMatch) {
+      const [, table, columnsRaw] = childInsertMatch;
+      const columns = columnsRaw.split(',').map((c) => c.trim());
+      const row: Record<string, unknown> = {};
+      columns.forEach((col, i) => { row[col] = params[i]; });
+      childTables[table].push(row);
+      return [];
+    }
+
+    if (normalized === 'INSERT INTO recipe_tools (recipe_id, tool_id) VALUES ($1, $2) ON CONFLICT DO NOTHING') {
+      const [recipeId, toolId] = params as string[];
+      const already = childTables.recipe_tools.some((r) => r.recipe_id === recipeId && r.tool_id === toolId);
+      if (!already) childTables.recipe_tools.push({ recipe_id: recipeId, tool_id: toolId });
+      return [];
+    }
 
     const updateMatch = trimmed.match(/^UPDATE (\w+) SET (\w+) = \$1, updated_at = now\(\) WHERE id = \$2$/);
     if (updateMatch) {
@@ -120,6 +160,7 @@ beforeEach(() => {
   rows.length = 0;
   now = 0;
   for (const table of Object.values(entityTables)) table.clear();
+  for (const table of Object.keys(childTables)) childTables[table] = [];
 });
 
 describe('upsertConflict', () => {
@@ -256,28 +297,36 @@ describe('applyEntityMergeResult', () => {
     expect(pending[0]).toMatchObject({ fieldName: 'title', localValue: "Grandma's Lasagna", remoteValue: "Nonna's Lasagna" });
   });
 
-  it('reports whole-array fast-forwards as unsupported rather than silently dropping or crashing', async () => {
+  it('writes a whole-array fast-forward (steps) as a delete+reinsert of recipe_steps', async () => {
     entityTables.recipes.set('r1', { id: 'r1' });
+    childTables.recipe_steps.push({ id: 'stale', recipe_id: 'r1', step_number: 1, description: 'Old step' });
 
     const outcome = await applyEntityMergeResult('recipe', 'r1', {
-      applied: { steps: ['a', 'b', 'c'] },
+      applied: { steps: [{ id: 's1', step_number: 1, description: 'Boil water', tool_ids: '[]', step_ingredients: '[]' }] },
       conflicts: [],
     });
 
-    expect(outcome).toEqual({ appliedFields: [], unsupportedFields: ['steps'], conflictsRecorded: 0 });
+    expect(outcome).toEqual({ appliedFields: ['steps'], unsupportedFields: [], conflictsRecorded: 0 });
+    expect(childTables.recipe_steps).toEqual([
+      { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
+    ]);
   });
 
-  it('applies scalar fields and reports unsupported array fields in the same call', async () => {
+  it('applies scalar and whole-array fields together in the same call', async () => {
     entityTables.recipes.set('r1', { id: 'r1', servings: 4 });
 
     const outcome = await applyEntityMergeResult('recipe', 'r1', {
-      applied: { servings: 6, steps: ['a'] },
+      applied: { servings: 6, toolIds: ['knife', 'pan'] },
       conflicts: [],
     });
 
     expect(entityTables.recipes.get('r1')?.servings).toBe(6);
-    expect(outcome.appliedFields).toEqual(['servings']);
-    expect(outcome.unsupportedFields).toEqual(['steps']);
+    expect(outcome.appliedFields.sort()).toEqual(['servings', 'toolIds']);
+    expect(outcome.unsupportedFields).toEqual([]);
+    expect(childTables.recipe_tools).toEqual([
+      { recipe_id: 'r1', tool_id: 'knife' },
+      { recipe_id: 'r1', tool_id: 'pan' },
+    ]);
   });
 
   it('rejects an unrecognized field rather than trusting it into SQL', async () => {
@@ -338,10 +387,22 @@ describe('createEntity', () => {
     expect(row).toEqual({ id: 'i1', name: 'Tomato Sauce' });
   });
 
-  it('drops whole-array fields — a brand-new recipe still needs the not-yet-implemented nested write path', async () => {
-    await createEntity('recipe', 'r1', { title: 'Lasagna', steps: ['a', 'b'] });
+  it('writes whole-array fields (steps/ingredients/toolIds) via the child tables, not as scalar columns', async () => {
+    await createEntity('recipe', 'r1', {
+      title: 'Lasagna',
+      steps: [{ id: 's1', step_number: 1, description: 'Boil water', tool_ids: '[]', step_ingredients: '[]' }],
+      ingredients: [{ id: 'ri1', sort_order: 0, ingredient_id: 'tomato', quantity: 2, is_optional: 0 }],
+      toolIds: ['pot'],
+    });
 
     expect(entityTables.recipes.get('r1')).toEqual({ id: 'r1', title: 'Lasagna' });
+    expect(childTables.recipe_steps).toEqual([
+      { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
+    ]);
+    expect(childTables.recipe_ingredients).toEqual([
+      { id: 'ri1', recipe_id: 'r1', sort_order: 0, ingredient_id: 'tomato', subtype_id: null, sub_recipe_id: null, quantity: 2, quantity_text: null, unit_id: null, notes: null, is_optional: 0 },
+    ]);
+    expect(childTables.recipe_tools).toEqual([{ recipe_id: 'r1', tool_id: 'pot' }]);
   });
 
   it('does nothing if the entity already exists (ON CONFLICT DO NOTHING) rather than clobbering it', async () => {
@@ -350,6 +411,15 @@ describe('createEntity', () => {
     await createEntity('recipe', 'r1', { title: 'Would-be overwrite' });
 
     expect(entityTables.recipes.get('r1')).toEqual({ id: 'r1', title: 'Original' });
+  });
+
+  it('does not touch an existing recipe\'s own steps when the row already existed (a losing race)', async () => {
+    entityTables.recipes.set('r1', { id: 'r1', title: 'Original' });
+    childTables.recipe_steps.push({ id: 'existing-step', recipe_id: 'r1', description: 'Keep me' });
+
+    await createEntity('recipe', 'r1', { title: 'Would-be overwrite', steps: [{ id: 'intruder', description: 'Should not land' }] });
+
+    expect(childTables.recipe_steps).toEqual([{ id: 'existing-step', recipe_id: 'r1', description: 'Keep me' }]);
   });
 
   it('rejects an unknown entity type', async () => {

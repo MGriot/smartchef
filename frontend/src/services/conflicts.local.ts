@@ -133,7 +133,8 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
     scalarFields: new Set([
       'title', 'description', 'difficulty', 'servings', 'prep_time_min', 'cook_time_min',
       'rest_time_min', 'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url',
-      'source_url', 'is_component', 'language_code',
+      'source_url', 'is_component', 'language_code', 'tags', 'regions', 'region_coords',
+      'sources', 'creator_name',
     ]),
   },
   ingredient: {
@@ -209,6 +210,96 @@ async function writeScalarField(config: EntityConfig, entityType: string, entity
   await query(`UPDATE ${config.table} SET ${fieldName} = $1, updated_at = now() WHERE id = $2`, [value, entityId]);
 }
 
+// recipes.steps/ingredients/toolIds are normalized child tables (recipe_
+// steps/recipe_ingredients/recipe_tools), so "writing" one means a delete-
+// then-reinsert of that table's rows for this recipe — the same pattern
+// recipes.local.ts's own updateRecipe() uses, not a column UPDATE. The
+// value shape here is exactly what gitSync.ts's writeEntityFile() captured
+// in the first place (recipes.local.ts's syncRecipe(): raw `SELECT * FROM
+// recipe_ingredients`/`recipe_steps` rows, and a bare array of tool ids —
+// see that function's own comment) — so each row's fields are read by
+// their snake_case DB column names directly, not through the camelCase
+// RecipeInput shape createRecipe()/updateRecipe() take from the UI, which
+// this data never passed through.
+interface RawRecipeIngredientRow {
+  id?: string;
+  sort_order?: number;
+  ingredient_id?: string | null;
+  subtype_id?: string | null;
+  sub_recipe_id?: string | null;
+  quantity?: number | null;
+  quantity_text?: string | null;
+  unit_id?: string | null;
+  notes?: string | null;
+  is_optional?: number | null;
+}
+
+interface RawRecipeStepRow {
+  id?: string;
+  step_number?: number;
+  title?: string | null;
+  description?: string;
+  duration_min?: number | null;
+  tool_ids?: unknown;
+  notes?: string | null;
+  image_url?: string | null;
+  step_ingredients?: unknown;
+}
+
+/** Writes one whole-array field's complete value onto a recipe's child
+ *  tables, replacing whatever was there — correct for both a brand-new
+ *  entity (nothing to replace yet) and a fast-forwarded existing one
+ *  (ADR 0002: no per-row identity across devices, so a changed array field
+ *  is one opaque value, not row-level deltas). Ids from the incoming rows
+ *  are preserved rather than regenerated, so re-syncing the same
+ *  unchanged value is idempotent instead of accumulating new row ids each
+ *  cycle. */
+async function writeArrayField(entityType: string, entityId: string, fieldName: string, value: unknown): Promise<void> {
+  if (entityType !== 'recipe' || !ARRAY_FIELDS.has(fieldName)) {
+    throw new Error(`writeArrayField: '${fieldName}' is not a whole-array field on '${entityType}'`);
+  }
+
+  if (fieldName === 'ingredients') {
+    await query(`DELETE FROM recipe_ingredients WHERE recipe_id = $1`, [entityId]);
+    for (const row of (value as RawRecipeIngredientRow[] | null) ?? []) {
+      await query(
+        `INSERT INTO recipe_ingredients
+           (id, recipe_id, sort_order, ingredient_id, subtype_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          row.id ?? newId(), entityId, row.sort_order ?? 0, row.ingredient_id ?? null, row.subtype_id ?? null,
+          row.sub_recipe_id ?? null, row.quantity ?? null, row.quantity_text ?? null, row.unit_id ?? null,
+          row.notes ?? null, row.is_optional ?? 0,
+        ]
+      );
+    }
+    return;
+  }
+
+  if (fieldName === 'steps') {
+    await query(`DELETE FROM recipe_steps WHERE recipe_id = $1`, [entityId]);
+    for (const row of (value as RawRecipeStepRow[] | null) ?? []) {
+      await query(
+        `INSERT INTO recipe_steps
+           (id, recipe_id, step_number, title, description, duration_min, tool_ids, notes, image_url, step_ingredients)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          row.id ?? newId(), entityId, row.step_number ?? 0, row.title ?? null, row.description ?? '',
+          row.duration_min ?? null, row.tool_ids ?? '[]', row.notes ?? null, row.image_url ?? null,
+          row.step_ingredients ?? '[]',
+        ]
+      );
+    }
+    return;
+  }
+
+  // toolIds
+  await query(`DELETE FROM recipe_tools WHERE recipe_id = $1`, [entityId]);
+  for (const toolId of (value as string[] | null) ?? []) {
+    await query(`INSERT INTO recipe_tools (recipe_id, tool_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [entityId, toolId]);
+  }
+}
+
 /** Writes a resolved conflict's chosen value onto the entity's own row. */
 export async function applyResolvedConflict(resolved: ResolvedConflict): Promise<void> {
   const config = ENTITY_CONFIG[resolved.entityType];
@@ -219,13 +310,12 @@ export async function applyResolvedConflict(resolved: ResolvedConflict): Promise
 }
 
 export interface ApplyMergeOutcome {
-  /** Scalar fields actually written onto the entity row. */
+  /** Fields actually written — scalar columns via writeScalarField(), the
+   *  three whole-array recipe fields via writeArrayField(). */
   appliedFields: string[];
-  /** Fields that fast-forwarded per the merge but couldn't be written here
-   *  — currently just the three whole-array recipe fields, same reason as
-   *  applyResolvedConflict(). Reported rather than silently dropped, so a
-   *  caller (the future Sync Engine) can't mistake "not applied" for
-   *  "nothing changed." */
+  /** Always empty today (every field getMergeableFieldNames() can produce
+   *  is now writable) — kept so a caller can't mistake "not applied" for
+   *  "nothing changed" if a future field type isn't wired up here yet. */
   unsupportedFields: string[];
   conflictsRecorded: number;
 }
@@ -235,10 +325,10 @@ export interface ApplyMergeOutcome {
  *  row via upsertConflict() first (recorded regardless of what happens
  *  next, so a later field write failure can never lose an already-detected
  *  conflict — the two halves are independent, same as mergeEntity() itself
- *  treats fields independently), then fast-forwarded scalar fields get
- *  written. This is what a future Sync Engine's pull step would call once
- *  it can actually fetch base/local/remote values out of git objects —
- *  this function doesn't care where those values came from. */
+ *  treats fields independently), then fast-forwarded fields get written.
+ *  Called from the Sync Engine's pull step (mergeBridge.ts) once it's
+ *  fetched base/local/remote values out of git objects — this function
+ *  doesn't care where those values came from. */
 export async function applyEntityMergeResult(
   entityType: string,
   entityId: string,
@@ -265,10 +355,10 @@ export async function applyEntityMergeResult(
 
   for (const [fieldName, value] of Object.entries(result.applied)) {
     if (ARRAY_FIELDS.has(fieldName)) {
-      unsupportedFields.push(fieldName);
-      continue;
+      await writeArrayField(entityType, entityId, fieldName, value);
+    } else {
+      await writeScalarField(config, entityType, entityId, fieldName, value);
     }
-    await writeScalarField(config, entityType, entityId, fieldName, value);
     appliedFields.push(fieldName);
   }
 
@@ -297,21 +387,30 @@ export async function entityExists(entityType: string, entityId: string): Promis
  *  accidentally let the row's own id field silently retarget the insert).
  *  ON CONFLICT DO NOTHING — if the row somehow already exists (a race with
  *  another write), this is a no-op rather than clobbering it; the caller
- *  should have checked entityExists() first for a normal call. Still
- *  ignores whole-array fields (steps/ingredients/tools), same reason as
- *  applyEntityMergeResult() — a brand-new recipe's nested rows need the
- *  same not-yet-implemented delete+insert path recipes.local.ts's own
- *  create logic already has. */
+ *  should have checked entityExists() first for a normal call. For a
+ *  recipe, also writes whole-array fields (steps/ingredients/toolIds) via
+ *  writeArrayField() — but only when this call is the one actually
+ *  creating the row (checked *before* the INSERT, not after: entityExists()
+ *  would read back true either way once the row is there, so checking
+ *  post-insert couldn't tell "I just created this" from "it was already
+ *  here" and would let a losing race overwrite the real row's nested data). */
 export async function createEntity(entityType: string, entityId: string, fields: Record<string, unknown>): Promise<void> {
   const config = ENTITY_CONFIG[entityType];
   if (!config) {
     throw new Error(`createEntity: unknown entity type '${entityType}'`);
   }
+  const alreadyExists = await entityExists(entityType, entityId);
   const recognized = Object.entries(fields).filter(([k]) => config.scalarFields.has(k) && !ARRAY_FIELDS.has(k));
   const columns = ['id', ...recognized.map(([k]) => k)];
   const values: unknown[] = [entityId, ...recognized.map(([, v]) => v)];
   const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
   await query(`INSERT INTO ${config.table} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT(id) DO NOTHING`, values);
+
+  if (!alreadyExists && entityType === 'recipe') {
+    for (const fieldName of ARRAY_FIELDS) {
+      if (fieldName in fields) await writeArrayField(entityType, entityId, fieldName, fields[fieldName]);
+    }
+  }
 }
 
 /** The entity's own display name (title/name column), for the Conflicts
