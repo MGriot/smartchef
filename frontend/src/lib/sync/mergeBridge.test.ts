@@ -71,7 +71,7 @@ function baseKey(localOid: string, remoteOid: string): string {
 describe('mergeRemoteIntoLocal', () => {
   it('does nothing when local and remote are the same commit', async () => {
     const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'same-oid', 'same-oid');
-    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0 });
+    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [] });
   });
 
   it('creates a brand-new entity that only exists on the remote side', async () => {
@@ -83,6 +83,7 @@ describe('mergeRemoteIntoLocal', () => {
 
     expect(result.entitiesCreated).toBe(1);
     expect(dbEntities.recipe.get('r1')).toEqual({ id: 'r1', title: 'Lasagna', servings: 4 });
+    expect(result.touchedEntities).toEqual([{ entityType: 'recipe', entityId: 'r1', finalFields: { title: 'Lasagna', servings: 4 } }]);
   });
 
   it('fast-forwards a field that only changed on the remote for an entity that already exists locally', async () => {
@@ -95,6 +96,9 @@ describe('mergeRemoteIntoLocal', () => {
 
     expect(result.entitiesUpdated).toBe(1);
     expect(dbEntities.recipe.get('r1')?.servings).toBe(6);
+    // finalFields = local's last-committed content overlaid with the fast-forwarded field —
+    // ready to re-serialize into the Hidden Clone's next commit as-is.
+    expect(result.touchedEntities).toEqual([{ entityType: 'recipe', entityId: 'r1', finalFields: { title: 'Lasagna', servings: 6 } }]);
   });
 
   it('records a conflict when both sides changed the same field to different values', async () => {
@@ -119,7 +123,16 @@ describe('mergeRemoteIntoLocal', () => {
 
     const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'local', 'remote');
 
-    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0 });
+    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [] });
+  });
+
+  it('treats every remote entity as new when this device has no local commits yet (first sync)', async () => {
+    trees['remote'] = { 'recipes/r1.json': { title: 'Lasagna', servings: 4 } };
+
+    const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', null, 'remote');
+
+    expect(result.entitiesCreated).toBe(1);
+    expect(dbEntities.recipe.get('r1')).toEqual({ id: 'r1', title: 'Lasagna', servings: 4 });
   });
 
   it('merges across both entity types (recipes and ingredients) in one call', async () => {

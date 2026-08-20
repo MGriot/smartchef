@@ -1,11 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createFakeSafTree, createFakeLocalFs, createFakeDb } from './testUtils/fakes';
+import { createFakeSafTree, createFakeLocalFs } from './testUtils/fakes';
 import type { SafMirrorPlugin } from '../safMirrorBridge';
 
-// Single-device harness, same shape as androidMirror.convergence.test.ts's
-// createDevice() (isomorphic-git mocked at the same level, fresh module
-// state per test via vi.resetModules()) — this test only needs one device
-// misbehaving mid-cycle, not two devices converging.
+// Exercises gitSync.ts's new object/ref-transport sync cycle (rewritten for
+// the standalone-storage-sync map's architecture) rather than the
+// superseded androidMirror.ts pushToTarget()/pullFromTarget() call chain —
+// but the pause-reason state itself (androidMirror.ts's
+// getSyncPauseReason()/setSyncPauseReason(), read by Account.tsx's "sync
+// paused" banner) predates that rewrite and still needs to light up on a
+// real transport failure here.
+//
+// resolveRef is mocked to ignore which ref is asked for and always report
+// "resolved-oid" once *some* refs/heads/main file exists locally — this
+// collapses local HEAD and the remote-tracking ref to the same oid
+// whenever both exist, so this test never drives Structured Merge
+// (mergeBridge.ts, and by extension services/conflicts.local.ts's real
+// SQLite-backed module) — deliberately out of scope here, already covered
+// by mergeBridge.test.ts's own mocks.
 vi.mock('isomorphic-git', () => ({
   resolveRef: async ({ fs, dir }: { fs: { promises: { stat: (p: string) => Promise<unknown> } }; dir: string }) => {
     await fs.promises.stat(`${dir}/.git/refs/heads/main`);
@@ -30,10 +41,9 @@ vi.mock('isomorphic-git', () => ({
 }));
 
 describe('sync pause state (task 13)', () => {
-  it('a mid-cycle SAF write failure sets the paused state without syncNow() throwing, and the local write still reconciles', async () => {
+  it('a transport failure sets the paused state without syncNow() throwing, and recovery clears it', async () => {
     const tree = createFakeSafTree('fake://target');
     const localFs = createFakeLocalFs();
-    const db = createFakeDb();
     const prefsStore = new Map<string, string>();
 
     vi.doMock('@capacitor/preferences', () => ({
@@ -59,6 +69,9 @@ describe('sync pause state (task 13)', () => {
     // Fails every write from the moment `revoked` flips true — simulating
     // permission being revoked partway through a sync cycle (provider
     // uninstalled, URI permission externally revoked, app storage cleared).
+    // Reads stay healthy, matching how SAF permission loss actually
+    // presents (an already-open document tree can still be listed/read for
+    // a while after write access is pulled).
     let revoked = false;
     const flakyPlugin: SafMirrorPlugin = {
       ...tree.plugin,
@@ -68,7 +81,6 @@ describe('sync pause state (task 13)', () => {
       },
     };
     vi.doMock('../safMirrorBridge', () => ({ SafMirror: flakyPlugin }));
-    vi.doMock('../../db/local', () => ({ query: db.query, queryOne: db.queryOne }));
 
     vi.resetModules();
     const gitSync = await import('./gitSync');
@@ -86,10 +98,6 @@ describe('sync pause state (task 13)', () => {
     await gitSync.writeEntityFile('recipes', 'r2', { id: 'r2', title: 'Stew', updated_at: '2026-01-02T00:00:00.000Z' });
 
     await expect(gitSync.syncNow()).resolves.toBeDefined(); // must not throw
-
-    // The local write still made it all the way to "SQLite" — sync being
-    // paused doesn't block the app's normal local-first behavior.
-    expect(db.tables.recipes.get('r2')).toMatchObject({ title: 'Stew' });
 
     expect(await androidMirror.getSyncPauseReason()).toMatch(/permission denied/);
 

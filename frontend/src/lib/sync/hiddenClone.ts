@@ -63,6 +63,11 @@ export async function ensureHiddenCloneInitialized(): Promise<HiddenCloneDirs> {
   if (!hasGit) {
     await git.init({ fs: gitfs, dir, gitdir, defaultBranch: 'main' });
   }
+  // Idempotent either way (mkdir tolerates "already exists" on both
+  // platforms' gitfs.ts backends) — cheap enough to run every call rather
+  // than gating it behind the hasGit check above.
+  await gitfs.promises.mkdir(`${dir}/recipes`);
+  await gitfs.promises.mkdir(`${dir}/ingredients`);
   initDone = true;
   return { dir, gitdir };
 }

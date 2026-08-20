@@ -70,7 +70,11 @@ export async function getSyncPauseReason(): Promise<string | null> {
   return value ?? null;
 }
 
-async function setSyncPauseReason(reason: string | null): Promise<void> {
+/** Exported so gitSync.ts's own syncNowInternal() (the new object/ref-
+ *  transport-based sync cycle) can report a real transport failure here
+ *  too — this state and its Account.tsx UI predate that rewrite and
+ *  didn't move, only what drives it did. */
+export async function setSyncPauseReason(reason: string | null): Promise<void> {
   if (reason) {
     await Preferences.set({ key: PAUSE_REASON_KEY, value: reason });
   } else {

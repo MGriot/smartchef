@@ -71,6 +71,13 @@ const HEAD_PATH = '.git/HEAD';
  *  turning every merge into a no-op fast-forward. */
 export const DEFAULT_REMOTE_TRACKING_REF_PATH = '.git/refs/remotes/sync-folder/main';
 
+/** The same ref, in the form isomorphic-git's own ref-name-taking calls
+ *  (resolveRef, findMergeBase's callers, etc.) expect — relative to
+ *  gitdir, no leading `.git/`. Exported alongside the file-path form so a
+ *  caller resolving this ref never has to hand-derive one from the other
+ *  and risk the two drifting apart. */
+export const DEFAULT_REMOTE_TRACKING_REF_NAME = 'refs/remotes/sync-folder/main';
+
 async function existsLocally(fs: LocalFs, dir: string, relativePath: string): Promise<boolean> {
   try {
     await fs.stat(`${dir}/${relativePath}`);

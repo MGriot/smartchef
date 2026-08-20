@@ -45,26 +45,46 @@ function entityIdsFromFiles(files: string[], dirName: string): string[] {
   return files.filter((f) => f.startsWith(prefix) && f.endsWith('.json')).map((f) => f.slice(prefix.length, -'.json'.length));
 }
 
+export interface TouchedEntity {
+  entityType: string;
+  entityId: string;
+  /** The complete post-merge JSON for this entity — local's own last-
+   *  committed content overlaid with whatever fields fast-forwarded (or,
+   *  for a brand-new entity, the complete remote content). Shaped for the
+   *  caller to feed straight into a writeEntityFile()-style re-commit, so
+   *  the Hidden Clone's own history reflects the merge outcome too, not
+   *  just Local Storage — otherwise the next sync's merge-base comparison
+   *  would still see the pre-merge value on this device's side. */
+  finalFields: Record<string, unknown>;
+}
+
 export interface MergeBridgeResult {
   entitiesCreated: number;
   entitiesUpdated: number;
   conflictsRecorded: number;
+  touchedEntities: TouchedEntity[];
 }
 
 /** Merges a freshly-fetched remote commit into local state. No-op (all
- *  zero) when localOid === remoteOid — nothing to reconcile. Does NOT
+ *  zero) when localOid === remoteOid — nothing to reconcile. `localOid`
+ *  may be null — a genuinely fresh Hidden Clone with no commits of its own
+ *  yet (this device's very first sync) — in which case there's no merge-
+ *  base to find and no local tree to list; every remote entity is treated
+ *  as new, the same "doesn't exist locally -> create" path an established
+ *  device's brand-new-elsewhere entities already go through. Does NOT
  *  advance any ref or touch the working tree itself; the caller (syncNow())
  *  owns deciding what the Hidden Clone's own next commit looks like once
  *  Local Storage reflects the merge outcome. */
-export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid: string, remoteOid: string): Promise<MergeBridgeResult> {
-  const result: MergeBridgeResult = { entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0 };
+export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid: string | null, remoteOid: string): Promise<MergeBridgeResult> {
+  const result: MergeBridgeResult = { entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [] };
   if (localOid === remoteOid) return result;
 
-  const mergeBaseOids = await git.findMergeBase({ fs: gitfs, dir, gitdir, oids: [localOid, remoteOid] });
-  const baseOid: string | null = mergeBaseOids[0] ?? null;
+  const baseOid: string | null = localOid
+    ? (await git.findMergeBase({ fs: gitfs, dir, gitdir, oids: [localOid, remoteOid] }))[0] ?? null
+    : null;
 
   const [localFiles, remoteFiles] = await Promise.all([
-    git.listFiles({ fs: gitfs, dir, gitdir, ref: localOid }),
+    localOid ? git.listFiles({ fs: gitfs, dir, gitdir, ref: localOid }) : Promise.resolve([]),
     git.listFiles({ fs: gitfs, dir, gitdir, ref: remoteOid }),
   ]);
 
@@ -87,7 +107,10 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
 
       if (await entityExists(entityType, id)) {
         const outcome = await applyEntityMergeResult(entityType, id, merged);
-        if (outcome.appliedFields.length > 0) result.entitiesUpdated++;
+        if (outcome.appliedFields.length > 0) {
+          result.entitiesUpdated++;
+          result.touchedEntities.push({ entityType, entityId: id, finalFields: { ...localJson, ...merged.applied } });
+        }
         result.conflictsRecorded += outcome.conflictsRecorded;
       } else if (remoteJson) {
         // Doesn't exist locally at all yet — nothing to merge into, this
@@ -99,6 +122,7 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
         // whole-array fields, same safety net as the merge path.
         await createEntity(entityType, id, remoteJson);
         result.entitiesCreated++;
+        result.touchedEntities.push({ entityType, entityId: id, finalFields: remoteJson });
       }
       // Neither exists locally nor has a remote value to create from
       // shouldn't be reachable (id came from one of the two file lists),
