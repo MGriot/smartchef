@@ -92,6 +92,18 @@ ipcMain.handle('smartchef-get-local-storage-dir', async () => {
   return path.join(app.getPath('documents'), 'SmartChef');
 });
 
+// Hidden Clone's base directory (wayfinder ticket 03 remainder) — each
+// device's own private git working copy that actually does commits/merges,
+// distinct from both Local Storage above (the live db/images) and the
+// user-picked Sync Folder (pickSyncFolder()). Lives under Electron's own
+// app-data directory (never the user's visible Documents), created lazily
+// (only once a Sync Folder is configured) by whichever code path calls
+// git.init against this path for the first time — this handler only
+// resolves where that is, it doesn't create anything itself.
+ipcMain.handle('smartchef-get-hidden-clone-dir', async () => {
+  return path.join(app.getPath('userData'), 'sync-clone');
+});
+
 // Filesystem primitives for gitfs.ts's isomorphic-git adapter (see
 // frontend/src/lib/gitfs.ts) — every call is best-effort/idempotent in the
 // same spots the mobile @capacitor/filesystem-backed adapter already is

@@ -161,16 +161,31 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
   },
 };
 
-// recipes.steps/ingredients/tools are normalized child tables, not columns
-// on recipes — merged as whole-array fields per ADR 0002. Writing a
+// recipes.steps/ingredients/toolIds are normalized child tables, not
+// columns on recipes — merged as whole-array fields per ADR 0002. Writing a
 // resolved value back means the same delete+insert path recipes.local.ts's
 // own create/update logic already uses for its nested rows, which isn't
 // reachable as a standalone "write just this one field" operation yet.
-const ARRAY_FIELDS = new Set(['steps', 'ingredients', 'tools']);
+// Field name is `toolIds`, matching the actual key gitSync.ts's
+// writeEntityFile()/recipes.local.ts already serialize recipe tool
+// associations under — NOT `tools` (ticket 02's Answer uses "tools" as
+// shorthand for the concept; the real entity JSON's key is toolIds).
+const ARRAY_FIELDS = new Set(['steps', 'ingredients', 'toolIds']);
 
 /** Exposed so the Conflicts list UI can tell which fields it can't offer a
  *  resolution button for yet, without duplicating this list. */
 export const ARRAY_FIELD_NAMES: ReadonlySet<string> = ARRAY_FIELDS;
+
+/** The full set of field names Structured Merge should compare for an
+ *  entity type — scalar columns plus, for recipes, the three whole-array
+ *  pseudo-fields. Exported so the Sync Engine's merge bridge doesn't need
+ *  its own copy of this list to hand to structuredMerge.ts's mergeEntity(). */
+export function getMergeableFieldNames(entityType: string): string[] | null {
+  const config = ENTITY_CONFIG[entityType];
+  if (!config) return null;
+  const arrayFields = entityType === 'recipe' ? [...ARRAY_FIELDS] : [];
+  return [...config.scalarFields, ...arrayFields];
+}
 
 /** Writes one allowlisted scalar field's value onto an entity row and
  *  bumps updated_at, so the change rides the next normal sync/push per
@@ -258,6 +273,45 @@ export async function applyEntityMergeResult(
   }
 
   return { appliedFields, unsupportedFields, conflictsRecorded: result.conflicts.length };
+}
+
+/** True if this entity type is recognized AND a row with this id already
+ *  exists in Local Storage — the Sync Engine's pull step needs this to
+ *  decide between creating a brand-new entity introduced by another
+ *  device (INSERT) and merging into one that already exists here
+ *  (applyEntityMergeResult()'s UPDATE-per-field path). */
+export async function entityExists(entityType: string, entityId: string): Promise<boolean> {
+  const config = ENTITY_CONFIG[entityType];
+  if (!config) return false;
+  const row = await queryOne(`SELECT id FROM ${config.table} WHERE id = $1`, [entityId]);
+  return row !== null;
+}
+
+/** Creates a brand-new entity row from a complete field set (typically an
+ *  entire remote entity JSON, as extracted from a git blob) — used when
+ *  the Sync Engine's pull step finds an entity on the remote side that
+ *  doesn't exist locally at all yet, so there's nothing to merge into.
+ *  Unlike applyEntityMergeResult()'s per-field UPDATE, this is a plain
+ *  INSERT of every recognized scalar field present in `fields` (id is
+ *  supplied separately, not read off `fields`, so a caller can't
+ *  accidentally let the row's own id field silently retarget the insert).
+ *  ON CONFLICT DO NOTHING — if the row somehow already exists (a race with
+ *  another write), this is a no-op rather than clobbering it; the caller
+ *  should have checked entityExists() first for a normal call. Still
+ *  ignores whole-array fields (steps/ingredients/tools), same reason as
+ *  applyEntityMergeResult() — a brand-new recipe's nested rows need the
+ *  same not-yet-implemented delete+insert path recipes.local.ts's own
+ *  create logic already has. */
+export async function createEntity(entityType: string, entityId: string, fields: Record<string, unknown>): Promise<void> {
+  const config = ENTITY_CONFIG[entityType];
+  if (!config) {
+    throw new Error(`createEntity: unknown entity type '${entityType}'`);
+  }
+  const recognized = Object.entries(fields).filter(([k]) => config.scalarFields.has(k) && !ARRAY_FIELDS.has(k));
+  const columns = ['id', ...recognized.map(([k]) => k)];
+  const values: unknown[] = [entityId, ...recognized.map(([, v]) => v)];
+  const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+  await query(`INSERT INTO ${config.table} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT(id) DO NOTHING`, values);
 }
 
 /** The entity's own display name (title/name column), for the Conflicts

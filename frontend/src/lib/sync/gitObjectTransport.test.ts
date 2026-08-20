@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createFakeLocalFs, putLocalText, getLocalText, createFakeRemoteTransport, putRemoteText, getRemoteText } from './testUtils/fakes';
-import { pushObjectsAndRefs, pullObjectsAndRefs } from './gitObjectTransport';
+import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_PATH } from './gitObjectTransport';
 
 let localFs: ReturnType<typeof createFakeLocalFs>;
 
@@ -85,19 +85,38 @@ describe('pullObjectsAndRefs', () => {
     expect(result).toEqual({ pulled: false, objectsFetched: 0, fetchedObjectPaths: [] });
   });
 
-  it('fetches remote objects and refs/HEAD into the local Hidden Clone', async () => {
+  it('fetches remote objects and writes the ref to the local tracking path — never to refs/heads/main', async () => {
     const remote = createFakeRemoteTransport();
     putRemoteText(remote, '.git/objects/ab/cdef01', 'object-bytes');
     putRemoteText(remote, '.git/refs/heads/main', 'commit-abc123\n');
-    putRemoteText(remote, '.git/HEAD', 'ref: refs/heads/main\n');
 
     const result = await pullObjectsAndRefs(localFs.promises, '/hidden-clone', remote);
 
     expect(result.pulled).toBe(true);
     expect(result.objectsFetched).toBe(1);
     expect(getLocalText(localFs, '/hidden-clone/.git/objects/ab/cdef01')).toBe('object-bytes');
-    expect(getLocalText(localFs, '/hidden-clone/.git/refs/heads/main')).toBe('commit-abc123\n');
-    expect(getLocalText(localFs, '/hidden-clone/.git/HEAD')).toBe('ref: refs/heads/main\n');
+    expect(getLocalText(localFs, `/hidden-clone/${DEFAULT_REMOTE_TRACKING_REF_PATH}`)).toBe('commit-abc123\n');
+    expect(getLocalText(localFs, '/hidden-clone/.git/refs/heads/main')).toBeUndefined();
+  });
+
+  it('never clobbers an existing local branch ref — the whole point of writing to a tracking ref instead', async () => {
+    putLocalText(localFs, '/hidden-clone/.git/refs/heads/main', 'local-commit-999\n');
+    const remote = createFakeRemoteTransport();
+    putRemoteText(remote, '.git/refs/heads/main', 'remote-commit-abc\n');
+
+    await pullObjectsAndRefs(localFs.promises, '/hidden-clone', remote);
+
+    expect(getLocalText(localFs, '/hidden-clone/.git/refs/heads/main')).toBe('local-commit-999\n');
+    expect(getLocalText(localFs, `/hidden-clone/${DEFAULT_REMOTE_TRACKING_REF_PATH}`)).toBe('remote-commit-abc\n');
+  });
+
+  it('accepts a custom tracking ref path', async () => {
+    const remote = createFakeRemoteTransport();
+    putRemoteText(remote, '.git/refs/heads/main', 'commit-abc123\n');
+
+    await pullObjectsAndRefs(localFs.promises, '/hidden-clone', remote, '.git/refs/remotes/custom/main');
+
+    expect(getLocalText(localFs, '/hidden-clone/.git/refs/remotes/custom/main')).toBe('commit-abc123\n');
   });
 
   it('never re-fetches an object already present locally', async () => {
@@ -113,7 +132,7 @@ describe('pullObjectsAndRefs', () => {
     expect(readSpy).not.toHaveBeenCalledWith('.git/objects/ab/cdef01');
   });
 
-  it('fetches objects before writing refs/HEAD — call order, not just end state', async () => {
+  it('fetches objects before writing the tracking ref — call order, not just end state', async () => {
     const remote = createFakeRemoteTransport();
     putRemoteText(remote, '.git/objects/ab/cdef01', 'object-bytes');
     putRemoteText(remote, '.git/refs/heads/main', 'commit-abc123\n');
@@ -123,20 +142,9 @@ describe('pullObjectsAndRefs', () => {
 
     const paths = writeSpy.mock.calls.map((call) => call[0]);
     const objectIndex = paths.indexOf('/hidden-clone/.git/objects/ab/cdef01');
-    const refIndex = paths.indexOf('/hidden-clone/.git/refs/heads/main');
+    const refIndex = paths.indexOf(`/hidden-clone/${DEFAULT_REMOTE_TRACKING_REF_PATH}`);
     expect(objectIndex).toBeGreaterThanOrEqual(0);
     expect(objectIndex).toBeLessThan(refIndex);
-  });
-
-  it('tolerates a missing remote HEAD file — refs/heads/main is what matters', async () => {
-    const remote = createFakeRemoteTransport();
-    putRemoteText(remote, '.git/refs/heads/main', 'commit-abc123\n');
-    // no .git/HEAD on the remote at all
-
-    const result = await pullObjectsAndRefs(localFs.promises, '/hidden-clone', remote);
-
-    expect(result.pulled).toBe(true);
-    expect(getLocalText(localFs, '/hidden-clone/.git/refs/heads/main')).toBe('commit-abc123\n');
   });
 });
 
@@ -163,7 +171,10 @@ describe('two-device convergence', () => {
     expect(pullResult.objectsFetched).toBe(2);
     expect(getLocalText(deviceB, '/hidden-clone/.git/objects/aa/1234ab')).toBe('recipe blob content');
     expect(getLocalText(deviceB, '/hidden-clone/.git/objects/bb/5678cd')).toBe('commit object content');
-    expect(getLocalText(deviceB, '/hidden-clone/.git/refs/heads/main')).toBe('commit-aa1234\n');
+    // Device B has no local commits of its own yet, so its tracking ref
+    // simply reflects what device A pushed — the interesting case (a local
+    // ref surviving a pull untouched) is covered separately above.
+    expect(getLocalText(deviceB, `/hidden-clone/${DEFAULT_REMOTE_TRACKING_REF_PATH}`)).toBe('commit-aa1234\n');
   });
 
   it('a second push cycle only uploads what changed since the first', async () => {

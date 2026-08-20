@@ -54,8 +54,22 @@ export interface LocalFs {
   stat(path: string): Promise<unknown>;
 }
 
+/** The canonical ref name both sides agree on — read from this path in the
+ *  local Hidden Clone on push, written to this same path on the remote. */
 const REF_PATH = '.git/refs/heads/main';
 const HEAD_PATH = '.git/HEAD';
+
+/** Where pullObjectsAndRefs() writes the Sync Folder's ref locally, by
+ *  default — a remote-tracking ref, NOT refs/heads/main. Overwriting the
+ *  local branch directly (what the superseded androidMirror.ts did, and
+ *  what an earlier version of this module also did) is fine under a
+ *  file-level-reconcile design where the ref is just for SyncHistory.tsx's
+ *  display, but it would be actively wrong here: Structured Merge needs
+ *  local HEAD to keep pointing at this device's own last commit so it can
+ *  compute a real merge-base against the fetched remote history. Clobber
+ *  it and the "local" side of every 3-way merge silently becomes "remote",
+ *  turning every merge into a no-op fast-forward. */
+export const DEFAULT_REMOTE_TRACKING_REF_PATH = '.git/refs/remotes/sync-folder/main';
 
 async function existsLocally(fs: LocalFs, dir: string, relativePath: string): Promise<boolean> {
   try {
@@ -149,11 +163,25 @@ export interface PullResult {
 
 /** Fetches objects and the ref from the Sync Folder into this device's
  *  Hidden Clone — objects first, matching pushObjectsAndRefs()'s ordering
- *  for the same reason (a local ref must never point at an object set that
- *  didn't fully arrive). Does not touch the working tree — the caller runs
- *  an actual checkout (a local-only isomorphic-git operation) afterward if
- *  it wants the fetched history reflected in checked-out files. */
-export async function pullObjectsAndRefs(fs: LocalFs, localDir: string, remote: RemoteTransport): Promise<PullResult> {
+ *  for the same reason (a ref must never point at an object set that
+ *  didn't fully arrive).
+ *
+ *  Writes the fetched ref to `trackingRefPath` (default
+ *  DEFAULT_REMOTE_TRACKING_REF_PATH), NOT to refs/heads/main — local HEAD
+ *  keeps pointing at this device's own last commit throughout, exactly
+ *  like a real `git fetch` (as opposed to `git pull`, which fetches *and*
+ *  merges/fast-forwards). Merging the tracking ref into local history —
+ *  fast-forwarding when there's nothing to reconcile, running Structured
+ *  Merge when there is — is the caller's job. Does not touch the working
+ *  tree either way; the caller runs an actual checkout (a local-only
+ *  isomorphic-git operation) afterward if it wants any of this reflected
+ *  in checked-out files. */
+export async function pullObjectsAndRefs(
+  fs: LocalFs,
+  localDir: string,
+  remote: RemoteTransport,
+  trackingRefPath: string = DEFAULT_REMOTE_TRACKING_REF_PATH
+): Promise<PullResult> {
   if (!(await remote.exists(REF_PATH))) {
     return { pulled: false, objectsFetched: 0, fetchedObjectPaths: [] };
   }
@@ -173,14 +201,7 @@ export async function pullObjectsAndRefs(fs: LocalFs, localDir: string, remote: 
   }
 
   const refBytes = await remote.readFile(REF_PATH);
-  await fs.writeFile(`${localDir}/${REF_PATH}`, refBytes);
-  try {
-    const headBytes = await remote.readFile(HEAD_PATH);
-    await fs.writeFile(`${localDir}/${HEAD_PATH}`, headBytes);
-  } catch {
-    // HEAD is a nice-to-have mirror of refs/heads/main — its absence on
-    // the remote isn't fatal, refs/heads/main is what actually matters.
-  }
+  await fs.writeFile(`${localDir}/${trackingRefPath}`, refBytes);
 
   return { pulled: true, objectsFetched: fetchedObjectPaths.length, fetchedObjectPaths };
 }

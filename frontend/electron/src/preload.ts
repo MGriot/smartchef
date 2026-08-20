@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('smartchefElectron', {
   // and content-addressed images actually live, not the (future) Hidden
   // Clone/Sync Folder.
   getLocalStorageDir: () => ipcRenderer.invoke('smartchef-get-local-storage-dir'),
+  // Hidden Clone (wayfinder ticket 03 remainder) — each device's own
+  // private git working copy, distinct from both Local Storage above and
+  // the user-chosen Sync Folder (pickSyncFolder()). Lives under Electron's
+  // own app-data directory, never inside the user's visible Documents.
+  getHiddenCloneDir: () => ipcRenderer.invoke('smartchef-get-hidden-clone-dir'),
   fs: {
     readFile: (path: string, encoding?: string) => ipcRenderer.invoke('smartchef-fs-readFile', path, encoding),
     writeFile: (path: string, data: string | Uint8Array) => ipcRenderer.invoke('smartchef-fs-writeFile', path, data),

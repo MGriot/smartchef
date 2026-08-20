@@ -43,6 +43,20 @@ vi.mock('../db/local', () => ({
       return [];
     }
 
+    const insertMatch = trimmed.match(/^INSERT INTO (\w+) \(([^)]+)\) VALUES \(([^)]+)\) ON CONFLICT\(id\) DO NOTHING$/);
+    if (insertMatch && insertMatch[1] !== 'sync_conflicts') {
+      const [, table, columnsRaw] = insertMatch;
+      const columns = columnsRaw.split(',').map((c) => c.trim());
+      const targetTable = entityTables[table];
+      if (!targetTable) throw new Error(`fake db/local: unknown table '${table}'`);
+      const id = params[0] as string;
+      if (targetTable.has(id)) return []; // ON CONFLICT DO NOTHING
+      const row: Record<string, unknown> = {};
+      columns.forEach((col, i) => { row[col] = params[i]; });
+      targetTable.set(id, row);
+      return [];
+    }
+
     if (trimmed.startsWith('INSERT INTO sync_conflicts')) {
       const [id, entity_type, entity_id, field_name, base_value, local_value, remote_value] = params as string[];
       const existing = rows.find((r) => r.entity_type === entity_type && r.entity_id === entity_id && r.field_name === field_name);
@@ -83,6 +97,12 @@ vi.mock('../db/local', () => ({
       const [id] = params as string[];
       return rows.find((r) => r.id === id) ?? null;
     }
+    const existsMatch = trimmed.match(/^SELECT id FROM (\w+) WHERE id = \$1$/);
+    if (existsMatch) {
+      const [, table] = existsMatch;
+      const [id] = params as string[];
+      return entityTables[table]?.has(id) ? { id } : null;
+    }
     const selectMatch = trimmed.match(/^SELECT (\w+) as name FROM (\w+) WHERE id = \$1$/);
     if (selectMatch) {
       const [, col, table] = selectMatch;
@@ -94,7 +114,7 @@ vi.mock('../db/local', () => ({
   }),
 }));
 
-const { upsertConflict, listPendingConflicts, listPendingConflictsForEntity, resolveConflict, applyResolvedConflict, getEntityDisplayName, applyEntityMergeResult } = await import('./conflicts.local');
+const { upsertConflict, listPendingConflicts, listPendingConflictsForEntity, resolveConflict, applyResolvedConflict, getEntityDisplayName, applyEntityMergeResult, entityExists, createEntity, getMergeableFieldNames } = await import('./conflicts.local');
 
 beforeEach(() => {
   rows.length = 0;
@@ -286,6 +306,74 @@ describe('applyEntityMergeResult', () => {
     await expect(
       applyEntityMergeResult('not-a-real-entity', 'x', { applied: {}, conflicts: [] })
     ).rejects.toThrow();
+  });
+});
+
+describe('entityExists', () => {
+  it('is false for an id that has no row', async () => {
+    expect(await entityExists('recipe', 'nope')).toBe(false);
+  });
+
+  it('is true once a row with that id exists', async () => {
+    entityTables.recipes.set('r1', { id: 'r1' });
+    expect(await entityExists('recipe', 'r1')).toBe(true);
+  });
+
+  it('is false for an unrecognized entity type', async () => {
+    expect(await entityExists('not-a-real-entity', 'x')).toBe(false);
+  });
+});
+
+describe('createEntity', () => {
+  it('inserts a new row with every recognized scalar field', async () => {
+    await createEntity('ingredient', 'i1', { name: 'Tomato Sauce', calories_kcal: 95, category_id: 'c1' });
+
+    expect(entityTables.ingredients.get('i1')).toEqual({ id: 'i1', name: 'Tomato Sauce', calories_kcal: 95, category_id: 'c1' });
+  });
+
+  it('drops unrecognized fields rather than trusting them into SQL', async () => {
+    await createEntity('ingredient', 'i1', { name: 'Tomato Sauce', 'DROP TABLE ingredients': 'x' });
+
+    const row = entityTables.ingredients.get('i1');
+    expect(row).toEqual({ id: 'i1', name: 'Tomato Sauce' });
+  });
+
+  it('drops whole-array fields — a brand-new recipe still needs the not-yet-implemented nested write path', async () => {
+    await createEntity('recipe', 'r1', { title: 'Lasagna', steps: ['a', 'b'] });
+
+    expect(entityTables.recipes.get('r1')).toEqual({ id: 'r1', title: 'Lasagna' });
+  });
+
+  it('does nothing if the entity already exists (ON CONFLICT DO NOTHING) rather than clobbering it', async () => {
+    entityTables.recipes.set('r1', { id: 'r1', title: 'Original' });
+
+    await createEntity('recipe', 'r1', { title: 'Would-be overwrite' });
+
+    expect(entityTables.recipes.get('r1')).toEqual({ id: 'r1', title: 'Original' });
+  });
+
+  it('rejects an unknown entity type', async () => {
+    await expect(createEntity('not-a-real-entity', 'x', {})).rejects.toThrow();
+  });
+});
+
+describe('getMergeableFieldNames', () => {
+  it('includes the three whole-array pseudo-fields for recipes, using the real toolIds key', () => {
+    const fields = getMergeableFieldNames('recipe')!;
+    expect(fields).toContain('steps');
+    expect(fields).toContain('ingredients');
+    expect(fields).toContain('toolIds');
+    expect(fields).not.toContain('tools');
+  });
+
+  it('does not include whole-array fields for a non-recipe entity type', () => {
+    const fields = getMergeableFieldNames('ingredient')!;
+    expect(fields).not.toContain('steps');
+    expect(fields).toContain('name');
+  });
+
+  it('returns null for an unrecognized entity type', () => {
+    expect(getMergeableFieldNames('not-a-real-entity')).toBeNull();
   });
 });
 

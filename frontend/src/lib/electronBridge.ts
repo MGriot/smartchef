@@ -19,6 +19,7 @@ declare global {
     smartchefElectron?: {
       pickSyncFolder: () => Promise<string | null>;
       getLocalStorageDir: () => Promise<string>;
+      getHiddenCloneDir: () => Promise<string>;
       fs: {
         readFile: (path: string, encoding?: string) => Promise<string | Uint8Array>;
         writeFile: (path: string, data: string | Uint8Array) => Promise<void>;
@@ -58,6 +59,18 @@ export async function getLocalStorageDir(): Promise<string> {
     throw new Error('getLocalStorageDir() is only available in the Electron app');
   }
   return window.smartchefElectron.getLocalStorageDir();
+}
+
+/** Hidden Clone's absolute base directory on this device — each device's
+ *  own private git working copy, distinct from both getLocalStorageDir()
+ *  and the sync folder pickSyncFolder() targets. Electron-only, same guard
+ *  as pickSyncFolder(); Android's equivalent is a fixed Directory.Data
+ *  subfolder resolved directly in lib/sync/hiddenClone.ts (no IPC needed). */
+export async function getHiddenCloneDir(): Promise<string> {
+  if (!window.smartchefElectron) {
+    throw new Error('getHiddenCloneDir() is only available in the Electron app');
+  }
+  return window.smartchefElectron.getHiddenCloneDir();
 }
 
 /** The IPC-backed fs primitives gitfs.ts uses on Electron — throws if
