@@ -267,6 +267,21 @@ describe('applyEntityMergeResult', () => {
     ).rejects.toThrow(/not a recognized/);
   });
 
+  it('records conflicts before attempting field writes — an unrecognized field later in the same call cannot lose an already-detected conflict', async () => {
+    entityTables.recipes.set('r1', { id: 'r1' });
+
+    await expect(
+      applyEntityMergeResult('recipe', 'r1', {
+        applied: { 'DROP TABLE recipes': 'x' },
+        conflicts: [{ fieldName: 'title', baseValue: 'A', localValue: 'B', remoteValue: 'C' }],
+      })
+    ).rejects.toThrow(/not a recognized/);
+
+    const pending = await listPendingConflictsForEntity('recipe', 'r1');
+    expect(pending).toHaveLength(1);
+    expect(pending[0].fieldName).toBe('title');
+  });
+
   it('rejects an unknown entity type', async () => {
     await expect(
       applyEntityMergeResult('not-a-real-entity', 'x', { applied: {}, conflicts: [] })

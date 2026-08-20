@@ -37,6 +37,14 @@ describe('mergeField', () => {
     expect(mergeField(base, base, remote)).toEqual({ type: 'fast-forward', value: remote });
   });
 
+  it('is unchanged when two devices independently edit a whole-array field to the same result', () => {
+    const base = ['Preheat oven', 'Bake'];
+    const converged = ['Preheat oven', 'Brown the beef', 'Bake'];
+    // local and remote are different array instances but deep-equal —
+    // both devices happened to make the exact same edit independently.
+    expect(mergeField(base, [...converged], [...converged])).toEqual({ type: 'unchanged' });
+  });
+
   it('is unchanged for two nulls', () => {
     expect(mergeField(null, null, null)).toEqual({ type: 'unchanged' });
   });

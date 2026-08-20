@@ -9,6 +9,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne } from "../db/local";
+import type { EntityMergeResult } from "../lib/structuredMerge";
 
 function newId(): string {
   return crypto.randomUUID();
@@ -171,31 +172,35 @@ const ARRAY_FIELDS = new Set(['steps', 'ingredients', 'tools']);
  *  resolution button for yet, without duplicating this list. */
 export const ARRAY_FIELD_NAMES: ReadonlySet<string> = ARRAY_FIELDS;
 
-/** Writes a resolved conflict's chosen value onto the entity's own row and
+/** Writes one allowlisted scalar field's value onto an entity row and
  *  bumps updated_at, so the change rides the next normal sync/push per
- *  ticket 03's dirty-tracking — same as any other local edit. Scalar
- *  fields only; the three whole-array recipe fields throw (see ARRAY_FIELDS
- *  above) rather than silently doing the wrong thing. */
+ *  ticket 03's dirty-tracking — same as any other local edit. Shared by
+ *  applyResolvedConflict() and applyEntityMergeResult(), the two places
+ *  that write a merge/resolution outcome back onto Local Storage. Throws
+ *  for the three whole-array fields or any name outside the entity's
+ *  allowlist — callers decide whether that's fatal (applyResolvedConflict,
+ *  a single-field operation) or something to catch and report per-field
+ *  (applyEntityMergeResult, a batch). */
+async function writeScalarField(config: EntityConfig, entityType: string, entityId: string, fieldName: string, value: unknown): Promise<void> {
+  if (ARRAY_FIELDS.has(fieldName)) {
+    throw new Error(
+      `writeScalarField: '${fieldName}' is a whole-array field — writing it back requires the nested ` +
+      `delete+insert path the future Sync Engine will use, not a plain column UPDATE. Not yet implemented.`
+    );
+  }
+  if (!config.scalarFields.has(fieldName)) {
+    throw new Error(`writeScalarField: '${fieldName}' is not a recognized scalar field on '${entityType}'`);
+  }
+  await query(`UPDATE ${config.table} SET ${fieldName} = $1, updated_at = now() WHERE id = $2`, [value, entityId]);
+}
+
+/** Writes a resolved conflict's chosen value onto the entity's own row. */
 export async function applyResolvedConflict(resolved: ResolvedConflict): Promise<void> {
   const config = ENTITY_CONFIG[resolved.entityType];
   if (!config) {
     throw new Error(`applyResolvedConflict: unknown entity type '${resolved.entityType}'`);
   }
-  if (ARRAY_FIELDS.has(resolved.fieldName)) {
-    throw new Error(
-      `applyResolvedConflict: '${resolved.fieldName}' is a whole-array field — writing it back requires the ` +
-      `nested delete+insert path the future Sync Engine will use, not a plain column UPDATE. Not yet implemented.`
-    );
-  }
-  if (!config.scalarFields.has(resolved.fieldName)) {
-    throw new Error(`applyResolvedConflict: '${resolved.fieldName}' is not a recognized scalar field on '${resolved.entityType}'`);
-  }
-  await query(`UPDATE ${config.table} SET ${resolved.fieldName} = $1, updated_at = now() WHERE id = $2`, [resolved.chosenValue, resolved.entityId]);
-}
-
-export interface EntityMergeResultInput {
-  applied: Record<string, unknown>;
-  conflicts: Array<{ fieldName: string; baseValue: unknown; localValue: unknown; remoteValue: unknown }>;
+  await writeScalarField(config, resolved.entityType, resolved.entityId, resolved.fieldName, resolved.chosenValue);
 }
 
 export interface ApplyMergeOutcome {
@@ -211,35 +216,22 @@ export interface ApplyMergeOutcome {
 }
 
 /** The other half of structuredMerge.ts's mergeEntity() — takes its result
- *  for one entity and makes it real: fast-forwarded scalar fields get
- *  written (allowlisted, same as applyResolvedConflict()), and each
- *  conflict becomes a sync_conflicts row via upsertConflict(). This is
- *  what a future Sync Engine's pull step would call once it can actually
- *  fetch base/local/remote values out of git objects — this function
- *  doesn't care where those values came from. */
+ *  for one entity and makes it real: each conflict becomes a sync_conflicts
+ *  row via upsertConflict() first (recorded regardless of what happens
+ *  next, so a later field write failure can never lose an already-detected
+ *  conflict — the two halves are independent, same as mergeEntity() itself
+ *  treats fields independently), then fast-forwarded scalar fields get
+ *  written. This is what a future Sync Engine's pull step would call once
+ *  it can actually fetch base/local/remote values out of git objects —
+ *  this function doesn't care where those values came from. */
 export async function applyEntityMergeResult(
   entityType: string,
   entityId: string,
-  result: EntityMergeResultInput
+  result: EntityMergeResult
 ): Promise<ApplyMergeOutcome> {
   const config = ENTITY_CONFIG[entityType];
   if (!config) {
     throw new Error(`applyEntityMergeResult: unknown entity type '${entityType}'`);
-  }
-
-  const appliedFields: string[] = [];
-  const unsupportedFields: string[] = [];
-
-  for (const [fieldName, value] of Object.entries(result.applied)) {
-    if (ARRAY_FIELDS.has(fieldName)) {
-      unsupportedFields.push(fieldName);
-      continue;
-    }
-    if (!config.scalarFields.has(fieldName)) {
-      throw new Error(`applyEntityMergeResult: '${fieldName}' is not a recognized scalar field on '${entityType}'`);
-    }
-    await query(`UPDATE ${config.table} SET ${fieldName} = $1, updated_at = now() WHERE id = $2`, [value, entityId]);
-    appliedFields.push(fieldName);
   }
 
   for (const conflict of result.conflicts) {
@@ -251,6 +243,18 @@ export async function applyEntityMergeResult(
       localValue: conflict.localValue,
       remoteValue: conflict.remoteValue,
     });
+  }
+
+  const appliedFields: string[] = [];
+  const unsupportedFields: string[] = [];
+
+  for (const [fieldName, value] of Object.entries(result.applied)) {
+    if (ARRAY_FIELDS.has(fieldName)) {
+      unsupportedFields.push(fieldName);
+      continue;
+    }
+    await writeScalarField(config, entityType, entityId, fieldName, value);
+    appliedFields.push(fieldName);
   }
 
   return { appliedFields, unsupportedFields, conflictsRecorded: result.conflicts.length };
