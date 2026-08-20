@@ -192,6 +192,69 @@ export function getLocalText(fs: FakeLocalFs, path: string): string | undefined 
   return bytes ? new TextDecoder().decode(bytes) : undefined;
 }
 
+// ── Fake remote transport (gitObjectTransport.ts's RemoteTransport shape)
+// — a plain content-addressed-agnostic key/value store, deliberately
+// simpler than the SAF tree fake above (no pickTree/isDirectory bookkeeping
+// needed): exists/readFile/writeFile/listDir over a flat Map, same
+// normalize-path convention as the fakes above so paths compare identically
+// across all three fakes in a test. Platform-agnostic by design — the same
+// shape an Electron-direct-fs transport or a future SafMirror-backed one
+// would both implement. ───────────────────────────────────────────────────
+
+export interface FakeRemoteTransport {
+  exists(relativePath: string): Promise<boolean>;
+  readFile(relativePath: string): Promise<Uint8Array>;
+  writeFile(relativePath: string, data: Uint8Array): Promise<void>;
+  listDir(relativePath: string): Promise<string[]>;
+  files: Map<string, Uint8Array>;
+}
+
+export function createFakeRemoteTransport(): FakeRemoteTransport {
+  const files = new Map<string, Uint8Array>();
+
+  function childNames(dirPath: string): string[] {
+    const prefix = dirPath ? `${normalize(dirPath)}/` : '';
+    const seen = new Set<string>();
+    for (const key of files.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      const rest = key.slice(prefix.length);
+      if (!rest) continue;
+      const slash = rest.indexOf('/');
+      seen.add(slash === -1 ? rest : rest.slice(0, slash));
+    }
+    return [...seen];
+  }
+
+  return {
+    files,
+    async exists(relativePath) {
+      return files.has(normalize(relativePath));
+    },
+    async readFile(relativePath) {
+      const bytes = files.get(normalize(relativePath));
+      if (!bytes) throw new Error(`ENOENT: no such file, '${relativePath}'`);
+      return bytes;
+    },
+    async writeFile(relativePath, data) {
+      files.set(normalize(relativePath), data);
+    },
+    async listDir(relativePath) {
+      // Missing directory -> empty list, not an error: a fresh remote with
+      // no history yet is the normal case, not a failure.
+      return childNames(relativePath);
+    },
+  };
+}
+
+export function putRemoteText(remote: FakeRemoteTransport, path: string, text: string): void {
+  remote.files.set(normalize(path), new TextEncoder().encode(text));
+}
+
+export function getRemoteText(remote: FakeRemoteTransport, path: string): string | undefined {
+  const bytes = remote.files.get(normalize(path));
+  return bytes ? new TextDecoder().decode(bytes) : undefined;
+}
+
 // ── Fake db/local — just enough of gitSync.ts's actual query()/queryOne()
 // surface to support the two-device convergence integration tests (10):
 // the recipes/ingredients upsert (INSERT ... ON CONFLICT(id) DO UPDATE),
