@@ -29,6 +29,9 @@ interface Ingredient {
   unitSymbol?: string | null;
   isOptional: boolean;
   notes: string | null;
+  /** Optional "Per il condimento"/"Per l'impasto" style group header — see
+   *  RecipeIngredientInput.groupName in recipes.local.ts. */
+  groupName?: string | null;
 }
 
 interface StepIngredientRef {
@@ -48,6 +51,7 @@ interface Step {
   description: string;
   durationMin: number | null;
   toolIds: string[];
+  techniqueIds: string[];
   notes: string | null;
   imageUrl: string | null;
   stepIngredients: StepIngredientRef[];
@@ -103,7 +107,7 @@ const RecipeCreate: React.FC = () => {
   const [allTools, setAllTools] = useState<Tool[]>([]);
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
-  const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
+  const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; icon: string | null; translated_name?: string | null }[]>([]);
   const [allRecipes, setAllRecipes] = useState<{ id: string; title: string; translated_title?: string | null }[]>([]);
   // Per-row "Ingredient" vs "Recipe" toggle for the ingredient picker — not
   // persisted, purely a UI switch between the two Autocomplete data sources.
@@ -169,7 +173,7 @@ const RecipeCreate: React.FC = () => {
   const addStep = () =>
     setDraft(prev => ({
       ...prev,
-      steps: [...(prev.steps || []), { id: '', stepNumber: (prev.steps?.length || 0) + 1, title: '', description: '', durationMin: null, toolIds: [], notes: '', imageUrl: null, stepIngredients: [], translations: [] }],
+      steps: [...(prev.steps || []), { id: '', stepNumber: (prev.steps?.length || 0) + 1, title: '', description: '', durationMin: null, toolIds: [], techniqueIds: [], notes: '', imageUrl: null, stepIngredients: [], translations: [] }],
     }));
 
   const toggleStepIngredient = (stepIdx: number, ingredientSortOrder: number) =>
@@ -279,7 +283,7 @@ const RecipeCreate: React.FC = () => {
   const addIngredient = () =>
     setDraft(prev => ({
       ...prev,
-      ingredients: [...(prev.ingredients || []), { id: '', sortOrder: (prev.ingredients?.length || 0), ingredientId: null, ingredientName: '', quantity: 1, unitId: null, isOptional: false, notes: '' }],
+      ingredients: [...(prev.ingredients || []), { id: '', sortOrder: (prev.ingredients?.length || 0), ingredientId: null, ingredientName: '', quantity: 1, unitId: null, isOptional: false, notes: '', groupName: null }],
     }));
 
   const getEntryType = (idx: number, ing: Ingredient): 'ingredient' | 'recipe' =>
@@ -363,6 +367,7 @@ const RecipeCreate: React.FC = () => {
           unitId: ing.unitId || undefined,
           isOptional: ing.isOptional || false,
           notes: ing.notes || undefined,
+          groupName: ing.groupName || undefined,
         })),
         steps: (draft.steps || []).map((s, i) => ({
           stepNumber: i + 1,
@@ -370,6 +375,7 @@ const RecipeCreate: React.FC = () => {
           description: s.description,
           durationMin: s.durationMin || undefined,
           toolIds: s.toolIds || [],
+          techniqueIds: s.techniqueIds || [],
           notes: s.notes || undefined,
           imageUrl: s.imageUrl || null,
           stepIngredients: s.stepIngredients || [],
@@ -678,7 +684,16 @@ const RecipeCreate: React.FC = () => {
                       {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
                     </select>
                   </div>
-                  <div className="col-span-12">
+                  <div className="col-span-6">
+                    <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.groupOptional')}</label>
+                    <input
+                      type="text" value={ing.groupName || ''}
+                      onChange={e => updateIngredient(idx, 'groupName', e.target.value || null)}
+                      className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                      placeholder={t('recipeDetail.groupPlaceholder')}
+                    />
+                  </div>
+                  <div className="col-span-6">
                     <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.chefsNoteOptional')}</label>
                     <input
                       type="text" value={ing.notes || ''}
@@ -789,6 +804,33 @@ const RecipeCreate: React.FC = () => {
                     </div>
                   </div>
                 </div>
+
+                {allTechniques.length > 0 && (
+                  <div className="mt-4">
+                    <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {allTechniques.map(tech => {
+                        const isUsed = (step.techniqueIds || []).includes(tech.id);
+                        return (
+                          <button
+                            key={tech.id}
+                            onClick={() => {
+                              const current = step.techniqueIds || [];
+                              const next = current.includes(tech.id) ? current.filter(id => id !== tech.id) : [...current, tech.id];
+                              updateStep(idx, 'techniqueIds', next);
+                            }}
+                            className={`p-1.5 rounded-lg border transition-all ${
+                              isUsed ? 'bg-primary text-white border-primary' : 'bg-white text-zinc-400 border-zinc-100 hover:border-zinc-300'
+                            }`}
+                            title={tech.translated_name || tech.name}
+                          >
+                            <RenderFaIcon name={tech.icon || 'FaFire'} className="text-lg" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {(draft.ingredients || []).length > 0 && (
                   <div className="mt-4">

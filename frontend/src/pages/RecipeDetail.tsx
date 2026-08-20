@@ -15,7 +15,7 @@ import RegionsMap from '../components/RegionsMap';
 import RenderStepText from '../components/RenderStepText';
 import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
-import { apiFetch } from '../lib/api';
+import { apiFetch, isNative } from '../lib/api';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 
@@ -37,6 +37,9 @@ interface Ingredient {
   notes: string | null;
   translatedNotes?: string | null;
   translations?: TranslationEntry[];
+  /** Optional "Per il condimento"/"Per l'impasto" style group header — see
+   *  RecipeIngredientInput.groupName in recipes.local.ts. */
+  groupName?: string | null;
 }
 
 interface StepIngredientRef {
@@ -58,6 +61,7 @@ interface Step {
   translatedDescription?: string | null;
   durationMin: number | null;
   toolIds: string[];
+  techniqueIds: string[];
   notes: string | null;
   translatedNotes?: string | null;
   imageUrl: string | null;
@@ -70,6 +74,13 @@ interface Tool {
   name: string;
   icon: string | null;
   category: string | null;
+  translated_name?: string | null;
+}
+
+interface Technique {
+  id: string;
+  name: string;
+  icon: string | null;
   translated_name?: string | null;
 }
 
@@ -103,6 +114,7 @@ interface Recipe {
   ingredients: Ingredient[];
   steps: Step[];
   tools: Tool[];
+  techniques: Technique[];
   creator_name?: string | null;
   creator_avatar_url?: string | null;
 }
@@ -117,6 +129,7 @@ interface CookSequenceStep {
   description: string;
   durationMin: number | null;
   toolIds: string[];
+  techniqueIds: string[];
   imageUrl: string | null;
   notes: string | null;
 }
@@ -125,8 +138,14 @@ interface CookSequenceIngredientRef {
   ingredientName: string;
   quantity: number | null;
   unitSymbol: string | null;
+  groupName: string | null;
 }
 interface CookSequenceToolRef {
+  id: string;
+  name: string;
+  icon: string | null;
+}
+interface CookSequenceTechniqueRef {
   id: string;
   name: string;
   icon: string | null;
@@ -138,6 +157,7 @@ interface CookSequenceSection {
   steps: CookSequenceStep[];
   ingredients: CookSequenceIngredientRef[];
   tools: CookSequenceToolRef[];
+  techniques: CookSequenceTechniqueRef[];
 }
 
 /* ── Nutrition ───────────────────────────────────────────────────────── */
@@ -246,13 +266,15 @@ const RecipeDetail: React.FC = () => {
   const [loadingCollections, setLoadingCollections] = useState(false);
   const [cookSequence, setCookSequence] = useState<CookSequenceSection[] | null>(null);
   const [nutrition, setNutrition] = useState<RecipeNutritionResult | null>(null);
+  const [downloaded, setDownloaded] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   // Edit-mode draft state
   const [draft, setDraft] = useState<Partial<Recipe>>({});
   const [allTools, setAllTools] = useState<Tool[]>([]);
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
-  const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
+  const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; icon: string | null; translated_name?: string | null }[]>([]);
   const [allRecipes, setAllRecipes] = useState<{ id: string; title: string; translated_title?: string | null }[]>([]);
   const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
   const { t, i18n } = useTranslation();
@@ -357,6 +379,32 @@ const RecipeDetail: React.FC = () => {
   }, [id, contentLang]);
 
   useEffect(() => { fetchRecipe(); }, [fetchRecipe]);
+
+  /* ── Offline download status (native only — Android/Electron server-mode
+     offline cache, opt-in per recipe alongside the whole-library cache) ── */
+  useEffect(() => {
+    if (!isNative() || !id) return;
+    import('../lib/offlineStore').then(({ isRecipeDownloaded }) => isRecipeDownloaded(id)).then(setDownloaded).catch(() => {});
+  }, [id]);
+
+  const handleToggleDownload = async () => {
+    if (!id || !recipe) return;
+    setDownloading(true);
+    try {
+      const { downloadRecipeOffline, removeDownloadedRecipe } = await import('../lib/offlineStore');
+      if (downloaded) {
+        await removeDownloadedRecipe(id);
+        setDownloaded(false);
+      } else {
+        await downloadRecipeOffline(recipe as unknown as { id: string } & Record<string, unknown>);
+        setDownloaded(true);
+      }
+    } catch (err) {
+      console.error('Offline download toggle failed:', err);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   /* ── AI recipe translation ──────────────────────────────────────── */
   const [aiTranslateLang, setAiTranslateLang] = useState(SUPPORTED_LANGUAGES.find(l => l.code !== 'en')?.code || 'en');
@@ -525,6 +573,7 @@ const RecipeDetail: React.FC = () => {
           unitId: ing.unitId || undefined,
           isOptional: ing.isOptional || false,
           notes: ing.notes || undefined,
+          groupName: ing.groupName || undefined,
           translations: ing.translations || [],
         })),
         steps: (draft.steps || []).map((s, i) => ({
@@ -533,6 +582,7 @@ const RecipeDetail: React.FC = () => {
           description: s.description,
           durationMin: s.durationMin || undefined,
           toolIds: s.toolIds || [],
+          techniqueIds: s.techniqueIds || [],
           notes: s.notes || undefined,
           imageUrl: s.imageUrl || null,
           stepIngredients: s.stepIngredients || [],
@@ -710,6 +760,21 @@ const RecipeDetail: React.FC = () => {
                         </div>
                       )}
 
+                      {step.techniqueIds && step.techniqueIds.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {step.techniqueIds.map(tid => {
+                            const tech = section.techniques.find(t => t.id === tid);
+                            if (!tech) return null;
+                            return (
+                              <div key={tid} className="flex items-center gap-1.5 px-2 py-1 bg-zinc-700/50 rounded-lg border border-zinc-600/30">
+                                <RenderFaIcon name={tech.icon || 'FaFire'} className="text-primary text-sm" />
+                                <span className="text-[10px] uppercase font-bold text-zinc-400">{tech.name}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       {step.durationMin && (
                         <div className="flex items-center gap-2 text-sm text-zinc-400 mb-4">
                           <span className="material-symbols-outlined text-sm">timer</span>
@@ -837,6 +902,22 @@ const RecipeDetail: React.FC = () => {
                       </div>
                     )}
 
+                    {/* Step Techniques */}
+                    {step.techniqueIds && step.techniqueIds.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {step.techniqueIds.map(tid => {
+                          const tech = recipe.techniques?.find(t => t.id === tid);
+                          if (!tech) return null;
+                          return (
+                            <div key={tid} className="flex items-center gap-1.5 px-2 py-1 bg-zinc-700/50 rounded-lg border border-zinc-600/30">
+                              <RenderFaIcon name={tech.icon || 'FaFire'} className="text-primary text-sm" />
+                              <span className="text-[10px] uppercase font-bold text-zinc-400">{tech.translated_name || tech.name}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     {step.durationMin && (
                       <div className="flex items-center gap-2 text-sm text-zinc-400 mb-4">
                         <span className="material-symbols-outlined text-sm">timer</span>
@@ -902,7 +983,7 @@ const RecipeDetail: React.FC = () => {
     const addStep = () =>
       setDraft(prev => ({
         ...prev,
-        steps: [...(prev.steps || []), { id: '', stepNumber: (prev.steps?.length || 0) + 1, title: '', description: '', durationMin: null, toolIds: [], notes: '', imageUrl: null, stepIngredients: [], translations: [] }],
+        steps: [...(prev.steps || []), { id: '', stepNumber: (prev.steps?.length || 0) + 1, title: '', description: '', durationMin: null, toolIds: [], techniqueIds: [], notes: '', imageUrl: null, stepIngredients: [], translations: [] }],
       }));
     const removeStep = (idx: number) =>
       setDraft(prev => ({
@@ -1010,7 +1091,7 @@ const RecipeDetail: React.FC = () => {
     const addIngredient = () =>
       setDraft(prev => ({
         ...prev,
-        ingredients: [...(prev.ingredients || []), { id: '', sortOrder: (prev.ingredients?.length || 0), ingredientId: null, ingredientName: '', quantity: 1, unitId: null, isOptional: false, notes: '' }],
+        ingredients: [...(prev.ingredients || []), { id: '', sortOrder: (prev.ingredients?.length || 0), ingredientId: null, ingredientName: '', quantity: 1, unitId: null, isOptional: false, notes: '', groupName: null }],
       }));
     const getEntryType = (idx: number, ing: Ingredient): 'ingredient' | 'recipe' =>
       ingredientEntryTypes[idx] ?? (ing.subRecipeId ? 'recipe' : 'ingredient');
@@ -1371,7 +1452,16 @@ const RecipeDetail: React.FC = () => {
                         {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
                       </select>
                     </div>
-                    <div className="col-span-12">
+                    <div className="col-span-6">
+                      <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.groupOptional')}</label>
+                      <input
+                        type="text" value={ing.groupName || ''}
+                        onChange={e => updateIngredient(idx, 'groupName', e.target.value || null)}
+                        className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                        placeholder={t('recipeDetail.groupPlaceholder')}
+                      />
+                    </div>
+                    <div className="col-span-6">
                       <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.chefsNoteOptional')}</label>
                       <input
                         type="text" value={ing.notes || ''}
@@ -1495,6 +1585,33 @@ const RecipeDetail: React.FC = () => {
                     </div>
                   </div>
 
+                  {allTechniques.length > 0 && (
+                    <div className="mt-4">
+                      <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {allTechniques.map(tech => {
+                          const isUsed = (step.techniqueIds || []).includes(tech.id);
+                          return (
+                            <button
+                              key={tech.id}
+                              onClick={() => {
+                                const current = step.techniqueIds || [];
+                                const next = current.includes(tech.id) ? current.filter(id => id !== tech.id) : [...current, tech.id];
+                                updateStep(idx, 'techniqueIds', next);
+                              }}
+                              className={`p-1.5 rounded-lg border transition-all ${
+                                isUsed ? 'bg-primary text-white border-primary' : 'bg-white text-zinc-400 border-zinc-100 hover:border-zinc-300'
+                              }`}
+                              title={tech.translated_name || tech.name}
+                            >
+                              <RenderFaIcon name={tech.icon || 'FaFire'} className="text-lg" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {(draft.ingredients || []).length > 0 && (
                     <div className="mt-4">
                       <label className="block text-[10px] uppercase font-bold text-zinc-400 mb-1">{t('recipeDetail.ingredientsUsedInStep')}</label>
@@ -1603,6 +1720,20 @@ const RecipeDetail: React.FC = () => {
     </button>
   );
 
+  const downloadButton = isNative() ? (
+    <button
+      onClick={handleToggleDownload}
+      disabled={downloading}
+      className={`flex items-center gap-1.5 transition-colors disabled:opacity-50 ${downloaded ? 'text-primary' : 'text-zinc-500 hover:text-primary'}`}
+      aria-label={downloaded ? 'Remove offline download' : 'Download for offline'}
+      title={downloaded ? 'Downloaded for offline — tap to remove' : 'Download for offline'}
+    >
+      <span className="material-symbols-outlined text-[20px]">
+        {downloading ? 'sync' : downloaded ? 'download_done' : 'download'}
+      </span>
+    </button>
+  ) : null;
+
   const shoppingListHeaderButton = (
     <button
       onClick={() => {
@@ -1691,6 +1822,7 @@ const RecipeDetail: React.FC = () => {
 
   const headerActions = (
     <>
+      {downloadButton}
       {shoppingListHeaderButton}
       {collectionHeaderButton}
       {exportHeaderButton}
@@ -1861,8 +1993,16 @@ const RecipeDetail: React.FC = () => {
             <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
               <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.ingredients')}</h3>
               <div className="space-y-1">
-                {sortedIngredients.map((ing, idx) => (
+                {sortedIngredients.map((ing, idx) => {
+                  const prevGroupName = idx > 0 ? sortedIngredients[idx - 1].groupName : null;
+                  const showGroupHeader = !!ing.groupName && ing.groupName !== prevGroupName;
+                  return (
                   <div key={idx}>
+                    {showGroupHeader && (
+                      <p className="px-3 pt-4 pb-1 text-xs uppercase tracking-wider text-zinc-400 font-bold first:pt-0">
+                        {ing.groupName}
+                      </p>
+                    )}
                     <div className={`flex items-center justify-between py-3 px-3 rounded-xl transition-colors hover:bg-zinc-50 ${ing.subRecipeId ? 'bg-zinc-50/60' : ''}`}>
                       <div className="flex items-center gap-2">
                         {ing.subRecipeId && (
@@ -1887,7 +2027,8 @@ const RecipeDetail: React.FC = () => {
                       />
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -1900,6 +2041,21 @@ const RecipeDetail: React.FC = () => {
                     <div key={tool.id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 rounded-xl border border-zinc-100">
                       <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-primary text-lg" />
                       <span className="text-xs font-bold text-zinc-600">{tool.translated_name || tool.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Techniques card */}
+            {recipe.techniques && recipe.techniques.length > 0 && (
+              <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.techniques')}</h3>
+                <div className="flex flex-wrap gap-2">
+                  {recipe.techniques.map(tech => (
+                    <div key={tech.id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 rounded-xl border border-zinc-100">
+                      <RenderFaIcon name={tech.icon || 'FaFire'} className="text-primary text-lg" />
+                      <span className="text-xs font-bold text-zinc-600">{tech.translated_name || tech.name}</span>
                     </div>
                   ))}
                 </div>

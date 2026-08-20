@@ -345,6 +345,13 @@ export async function getRecipe(id: string, lang?: string) {
       unitId: row.unit_id,
       isOptional: !!row.is_optional,
       notes: row.notes,
+      // `ri.*` above already selects group_name, but it wasn't being copied
+      // onto the returned object — added so the "Per il condimento" style
+      // group headers (see RecipeIngredientInput.groupName above) actually
+      // reach the frontend. camelCased to match this push block's existing
+      // convention (ingredientName, unitSymbol, ...) and matrioska.local.ts's
+      // CookSequenceIngredientRef.groupName.
+      groupName: row.group_name as string | null,
       translatedNotes,
       translations: rowTranslations.map(t => ({ lang: t.language_code, notes: t.notes })),
     });
