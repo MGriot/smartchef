@@ -62,14 +62,17 @@ export interface UpsertConflictInput {
  *  both sides since the common ancestor. One live row per (entity, field):
  *  a repeated sync before the user resolves the existing conflict refreshes
  *  remote_value/base_value/detected_at in place rather than accumulating
- *  duplicates. */
+ *  duplicates. `local_value` deliberately is NOT refreshed on an upsert —
+ *  it stays pinned to what this device's field held when the conflict was
+ *  first detected, matching "the conflicted field keeps showing this
+ *  device's own local value, untouched" (ticket 04's Answer); only the
+ *  incoming remote side is expected to change across repeated syncs. */
 export async function upsertConflict(input: UpsertConflictInput): Promise<void> {
   await query(
     `INSERT INTO sync_conflicts (id, entity_type, entity_id, field_name, base_value, local_value, remote_value, detected_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, now())
      ON CONFLICT(entity_type, entity_id, field_name) DO UPDATE SET
        base_value = excluded.base_value,
-       local_value = excluded.local_value,
        remote_value = excluded.remote_value,
        detected_at = now()`,
     [

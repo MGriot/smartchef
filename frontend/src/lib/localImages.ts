@@ -15,7 +15,7 @@
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 import { isElectron, electronFs, getLocalStorageDir } from './electronBridge';
-import { bytesToBase64 } from './gitfs';
+import { bytesToBase64, base64ToBytes } from './gitfs';
 
 const ANDROID_BASE_DIR = Directory.Data;
 const ANDROID_LOCAL_STORAGE_SUBDIR = 'SmartChef-local';
@@ -77,10 +77,7 @@ function androidImageFs(): ImageFs {
     },
     async readFile(rel) {
       const { data } = await Filesystem.readFile({ path: path(rel), directory: ANDROID_BASE_DIR });
-      const binary = atob(data as string);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      return bytes;
+      return base64ToBytes(data as string);
     },
     async writeFile(rel, data) {
       await Filesystem.writeFile({ path: path(rel), directory: ANDROID_BASE_DIR, data: bytesToBase64(data), recursive: true });

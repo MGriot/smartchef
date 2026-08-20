@@ -27,8 +27,9 @@ vi.mock('../db/local', () => ({
       const existing = rows.find((r) => r.entity_type === entity_type && r.entity_id === entity_id && r.field_name === field_name);
       const detected_at = `t${now++}`;
       if (existing) {
+        // local_value deliberately NOT overwritten on upsert — see
+        // conflicts.local.ts's upsertConflict() doc comment.
         existing.base_value = base_value;
-        existing.local_value = local_value;
         existing.remote_value = remote_value;
         existing.detected_at = detected_at;
       } else {
@@ -92,6 +93,18 @@ describe('upsertConflict', () => {
     const all = await listPendingConflicts();
     expect(all).toHaveLength(1);
     expect(all[0].remoteValue).toBe('D');
+  });
+
+  it('does not refresh local_value on a repeated upsert — it stays pinned to what was first detected', async () => {
+    await upsertConflict({ entityType: 'recipe', entityId: 'r1', fieldName: 'title', baseValue: 'A', localValue: 'first-local', remoteValue: 'C' });
+    // Second sync: remote moved on again, and (hypothetically) this device's
+    // own field also changed locally in between — but the pinned local_value
+    // should NOT pick that up, since the conflict already captured it.
+    await upsertConflict({ entityType: 'recipe', entityId: 'r1', fieldName: 'title', baseValue: 'A', localValue: 'second-local', remoteValue: 'D' });
+
+    const [conflict] = await listPendingConflicts();
+    expect(conflict.localValue).toBe('first-local');
+    expect(conflict.remoteValue).toBe('D');
   });
 
   it('keeps conflicts on different fields of the same entity independent', async () => {
