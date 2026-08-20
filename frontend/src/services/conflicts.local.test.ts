@@ -94,7 +94,7 @@ vi.mock('../db/local', () => ({
   }),
 }));
 
-const { upsertConflict, listPendingConflicts, listPendingConflictsForEntity, resolveConflict, applyResolvedConflict, getEntityDisplayName } = await import('./conflicts.local');
+const { upsertConflict, listPendingConflicts, listPendingConflictsForEntity, resolveConflict, applyResolvedConflict, getEntityDisplayName, applyEntityMergeResult } = await import('./conflicts.local');
 
 beforeEach(() => {
   rows.length = 0;
@@ -206,6 +206,71 @@ describe('applyResolvedConflict', () => {
     await expect(
       applyResolvedConflict({ entityType: 'recipe', entityId: 'r1', fieldName: 'steps', chosenValue: ['a'] })
     ).rejects.toThrow(/whole-array/);
+  });
+});
+
+describe('applyEntityMergeResult', () => {
+  it('writes fast-forwarded scalar fields onto the entity row', async () => {
+    entityTables.ingredients.set('i1', { id: 'i1', calories_kcal: 110, name: 'Tomato Sauce' });
+
+    const outcome = await applyEntityMergeResult('ingredient', 'i1', {
+      applied: { calories_kcal: 95 },
+      conflicts: [],
+    });
+
+    expect(entityTables.ingredients.get('i1')?.calories_kcal).toBe(95);
+    expect(outcome).toEqual({ appliedFields: ['calories_kcal'], unsupportedFields: [], conflictsRecorded: 0 });
+  });
+
+  it('records a Conflict for each conflict in the merge result instead of applying it', async () => {
+    entityTables.recipes.set('r1', { id: 'r1', title: "Grandma's Lasagna" });
+
+    const outcome = await applyEntityMergeResult('recipe', 'r1', {
+      applied: {},
+      conflicts: [{ fieldName: 'title', baseValue: 'Lasagna', localValue: "Grandma's Lasagna", remoteValue: "Nonna's Lasagna" }],
+    });
+
+    expect(outcome.conflictsRecorded).toBe(1);
+    const pending = await listPendingConflictsForEntity('recipe', 'r1');
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ fieldName: 'title', localValue: "Grandma's Lasagna", remoteValue: "Nonna's Lasagna" });
+  });
+
+  it('reports whole-array fast-forwards as unsupported rather than silently dropping or crashing', async () => {
+    entityTables.recipes.set('r1', { id: 'r1' });
+
+    const outcome = await applyEntityMergeResult('recipe', 'r1', {
+      applied: { steps: ['a', 'b', 'c'] },
+      conflicts: [],
+    });
+
+    expect(outcome).toEqual({ appliedFields: [], unsupportedFields: ['steps'], conflictsRecorded: 0 });
+  });
+
+  it('applies scalar fields and reports unsupported array fields in the same call', async () => {
+    entityTables.recipes.set('r1', { id: 'r1', servings: 4 });
+
+    const outcome = await applyEntityMergeResult('recipe', 'r1', {
+      applied: { servings: 6, steps: ['a'] },
+      conflicts: [],
+    });
+
+    expect(entityTables.recipes.get('r1')?.servings).toBe(6);
+    expect(outcome.appliedFields).toEqual(['servings']);
+    expect(outcome.unsupportedFields).toEqual(['steps']);
+  });
+
+  it('rejects an unrecognized field rather than trusting it into SQL', async () => {
+    entityTables.recipes.set('r1', { id: 'r1' });
+    await expect(
+      applyEntityMergeResult('recipe', 'r1', { applied: { 'DROP TABLE recipes': 'x' }, conflicts: [] })
+    ).rejects.toThrow(/not a recognized/);
+  });
+
+  it('rejects an unknown entity type', async () => {
+    await expect(
+      applyEntityMergeResult('not-a-real-entity', 'x', { applied: {}, conflicts: [] })
+    ).rejects.toThrow();
   });
 });
 

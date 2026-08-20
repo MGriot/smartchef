@@ -193,6 +193,69 @@ export async function applyResolvedConflict(resolved: ResolvedConflict): Promise
   await query(`UPDATE ${config.table} SET ${resolved.fieldName} = $1, updated_at = now() WHERE id = $2`, [resolved.chosenValue, resolved.entityId]);
 }
 
+export interface EntityMergeResultInput {
+  applied: Record<string, unknown>;
+  conflicts: Array<{ fieldName: string; baseValue: unknown; localValue: unknown; remoteValue: unknown }>;
+}
+
+export interface ApplyMergeOutcome {
+  /** Scalar fields actually written onto the entity row. */
+  appliedFields: string[];
+  /** Fields that fast-forwarded per the merge but couldn't be written here
+   *  — currently just the three whole-array recipe fields, same reason as
+   *  applyResolvedConflict(). Reported rather than silently dropped, so a
+   *  caller (the future Sync Engine) can't mistake "not applied" for
+   *  "nothing changed." */
+  unsupportedFields: string[];
+  conflictsRecorded: number;
+}
+
+/** The other half of structuredMerge.ts's mergeEntity() — takes its result
+ *  for one entity and makes it real: fast-forwarded scalar fields get
+ *  written (allowlisted, same as applyResolvedConflict()), and each
+ *  conflict becomes a sync_conflicts row via upsertConflict(). This is
+ *  what a future Sync Engine's pull step would call once it can actually
+ *  fetch base/local/remote values out of git objects — this function
+ *  doesn't care where those values came from. */
+export async function applyEntityMergeResult(
+  entityType: string,
+  entityId: string,
+  result: EntityMergeResultInput
+): Promise<ApplyMergeOutcome> {
+  const config = ENTITY_CONFIG[entityType];
+  if (!config) {
+    throw new Error(`applyEntityMergeResult: unknown entity type '${entityType}'`);
+  }
+
+  const appliedFields: string[] = [];
+  const unsupportedFields: string[] = [];
+
+  for (const [fieldName, value] of Object.entries(result.applied)) {
+    if (ARRAY_FIELDS.has(fieldName)) {
+      unsupportedFields.push(fieldName);
+      continue;
+    }
+    if (!config.scalarFields.has(fieldName)) {
+      throw new Error(`applyEntityMergeResult: '${fieldName}' is not a recognized scalar field on '${entityType}'`);
+    }
+    await query(`UPDATE ${config.table} SET ${fieldName} = $1, updated_at = now() WHERE id = $2`, [value, entityId]);
+    appliedFields.push(fieldName);
+  }
+
+  for (const conflict of result.conflicts) {
+    await upsertConflict({
+      entityType,
+      entityId,
+      fieldName: conflict.fieldName,
+      baseValue: conflict.baseValue,
+      localValue: conflict.localValue,
+      remoteValue: conflict.remoteValue,
+    });
+  }
+
+  return { appliedFields, unsupportedFields, conflictsRecorded: result.conflicts.length };
+}
+
 /** The entity's own display name (title/name column), for the Conflicts
  *  list UI. Null if the entity type is unrecognized or the row is gone. */
 export async function getEntityDisplayName(entityType: string, entityId: string): Promise<string | null> {
