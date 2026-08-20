@@ -9,19 +9,27 @@
 // exists(): a local stat() is cheap enough to call unconditionally, per
 // gitObjectTransport.ts's own docstring.
 //
-// Resolves against getSyncBasePath() — the same chosen-folder+/SmartChef
-// path the old design already used as its git working-tree dir. Reusing
-// it here is deliberate: it's the same physical location the user already
-// picked (chooseElectronSyncFolder()), just reinterpreted as a bare-style
-// remote (objects/refs only) instead of a live working tree.
+// Resolves against the raw picked Sync Folder (gitfs.ts's
+// getElectronFolder()) — the folder root itself, no subfolder appended.
+// This must match androidRemoteTransport.ts's own convention (the picked
+// SAF tree root, no subfolder either): both platforms' RemoteTransport
+// need to agree on the exact same physical location within whatever
+// Syncthing folder the user shares between devices, or they silently push/
+// pull to two different places and never see each other's data. (Earlier
+// version of this file used gitfs.ts's getSyncBasePath(), which appends a
+// `/SmartChef` subfolder — a leftover from the pre-rewrite design where
+// Electron used the picked folder directly as its own git working tree.
+// That's exactly the bug this comment is warning against; see gitfs.ts's
+// getElectronFolder() docstring for the full story.)
 // ════════════════════════════════════════════════════════════════════════
 
 import { electronFs } from '../electronBridge';
-import { getSyncBasePath } from '../gitfs';
+import { getElectronFolder } from '../gitfs';
 import type { RemoteTransport } from './gitObjectTransport';
 
 export async function createElectronRemoteTransport(): Promise<RemoteTransport> {
-  const base = await getSyncBasePath();
+  const base = await getElectronFolder();
+  if (!base) throw new Error('No sync folder chosen yet — call chooseElectronSyncFolder() first.');
   const resolve = (relativePath: string) => `${base}/${relativePath}`;
 
   return {

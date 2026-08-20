@@ -319,8 +319,8 @@ function FolderSyncCard() {
       setSavedDeviceName(name);
       await refreshDevices();
       if (isElectronApp) {
-        const { getSyncBasePath } = await import('../lib/gitfs');
-        setFolderPath(await getSyncBasePath().catch(() => null));
+        const { getElectronFolder } = await import('../lib/gitfs');
+        setFolderPath(await getElectronFolder().catch(() => null));
       } else {
         const { getMirrorState, getSyncPauseReason } = await import('../lib/sync/androidMirror');
         const state = await getMirrorState();

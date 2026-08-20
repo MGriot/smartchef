@@ -85,7 +85,18 @@ class NotFoundError extends Error {
 
 let cachedElectronFolder: string | null | undefined; // undefined = not loaded yet
 
-async function getElectronFolder(): Promise<string | null> {
+/** The raw folder the user picked via chooseElectronSyncFolder() — no
+ *  subfolder appended. This is the Sync Folder's actual root: Android's
+ *  RemoteTransport (androidRemoteTransport.ts) writes `.git/**`/`devices/**`
+ *  directly under the picked SAF tree with no subfolder either, so
+ *  electronRemoteTransport.ts must resolve against this, not
+ *  getSyncBasePath() below (see its own history: getSyncBasePath()'s
+ *  `/SmartChef` suffix is a leftover from the pre-rewrite design where
+ *  Electron used the picked folder directly as its own git working tree —
+ *  using it here silently pointed Electron's push/pull at a different
+ *  physical location than Android's, so the two devices never saw each
+ *  other's data despite Syncthing successfully replicating the folder). */
+export async function getElectronFolder(): Promise<string | null> {
   if (cachedElectronFolder !== undefined) return cachedElectronFolder;
   const { value } = await Preferences.get({ key: ELECTRON_FOLDER_KEY });
   cachedElectronFolder = value ?? null;
@@ -94,19 +105,12 @@ async function getElectronFolder(): Promise<string | null> {
 
 /** Opens the native folder picker and persists the choice. Electron only —
  *  called from the "Use offline on this device" first-run flow and from
- *  the Folder Sync card's "Change Folder" button. Stores and returns the
- *  raw picked folder (not SmartChef-suffixed) since that's what's shown to
- *  the user — getSyncBasePath() is what appends the SmartChef subfolder
- *  for the actual sync root. Creates that subfolder immediately (rather
- *  than waiting for the first sync tick to create it as a side effect of
- *  mkdir's recursive parent creation) purely so it's visible to the user
- *  right away. */
+ *  the Folder Sync card's "Change Folder" button. */
 export async function chooseElectronSyncFolder(): Promise<string | null> {
   const chosen = await pickSyncFolder();
   if (!chosen) return null;
   cachedElectronFolder = chosen;
   await Preferences.set({ key: ELECTRON_FOLDER_KEY, value: chosen });
-  await electronFs().mkdir(`${chosen}/SmartChef`);
   return chosen;
 }
 

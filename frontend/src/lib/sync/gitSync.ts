@@ -172,7 +172,7 @@ async function getConfiguredRemoteTransport(): Promise<RemoteTransport | null> {
     try {
       return await createElectronRemoteTransport();
     } catch {
-      return null; // no folder chosen yet — chooseElectronSyncFolder() throws in getSyncBasePath() until it has been
+      return null; // no folder chosen yet — createElectronRemoteTransport() throws until chooseElectronSyncFolder() has run
     }
   }
   const state = await getMirrorState();
