@@ -69,6 +69,10 @@ interface Recipe {
   id: string;
   title: string;
   description: string;
+  /** How to store leftovers ("Come conservare"). */
+  storage_instructions: string | null;
+  /** General tips/notes distinct from description ("Consigli"). */
+  tips: string | null;
   difficulty: 'easy' | 'medium' | 'hard' | 'expert';
   servings: number;
   prep_time_min: number | null;
@@ -117,6 +121,8 @@ const RecipeCreate: React.FC = () => {
   const [draft, setDraft] = useState<Partial<Recipe>>({
     title: '',
     description: '',
+    storage_instructions: null,
+    tips: null,
     difficulty: 'medium',
     servings: 4,
     prep_time_min: null,
@@ -342,6 +348,8 @@ const RecipeCreate: React.FC = () => {
       const body = {
         title: draft.title,
         description: draft.description || '',
+        storageInstructions: draft.storage_instructions || undefined,
+        tips: draft.tips || undefined,
         difficulty: draft.difficulty || 'medium',
         servings: draft.servings || 4,
         prepTimeMin: draft.prep_time_min || undefined,
@@ -456,6 +464,24 @@ const RecipeCreate: React.FC = () => {
               onChange={e => updateDraft('description', e.target.value)}
               className="w-full border-none bg-zinc-50 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px]"
               placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
+            />
+          </label>
+          <label className="block mb-6">
+            <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>
+            <textarea
+              value={draft.storage_instructions || ''}
+              onChange={e => updateDraft('storage_instructions', e.target.value || null)}
+              className="w-full border-none bg-zinc-50 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+              placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
+            />
+          </label>
+          <label className="block mb-6">
+            <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">{t('recipeDetail.tips')}</span>
+            <textarea
+              value={draft.tips || ''}
+              onChange={e => updateDraft('tips', e.target.value || null)}
+              className="w-full border-none bg-zinc-50 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+              placeholder={t('recipeDetail.tipsPlaceholder')}
             />
           </label>
           <label className="block">

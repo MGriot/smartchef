@@ -90,6 +90,10 @@ interface Recipe {
   translated_title?: string | null;
   description: string | null;
   translated_description?: string | null;
+  /** How to store leftovers ("Come conservare"). */
+  storage_instructions: string | null;
+  /** General tips/notes distinct from description ("Consigli"). */
+  tips: string | null;
   difficulty: 'easy' | 'medium' | 'hard' | 'expert';
   servings: number;
   prep_time_min: number;
@@ -547,6 +551,8 @@ const RecipeDetail: React.FC = () => {
       const body = {
         title: draft.title,
         description: draft.description || '',
+        storageInstructions: draft.storage_instructions || undefined,
+        tips: draft.tips || undefined,
         difficulty: draft.difficulty || 'medium',
         servings: draft.servings || 4,
         prepTimeMin: draft.prep_time_min || undefined,
@@ -1197,6 +1203,24 @@ const RecipeDetail: React.FC = () => {
                 onChange={e => updateDraft('description', e.target.value)}
                 className="w-full border-none bg-zinc-50 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px]"
                 placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
+              />
+            </label>
+            <label className="block mb-6">
+              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>
+              <textarea
+                value={draft.storage_instructions || ''}
+                onChange={e => updateDraft('storage_instructions', e.target.value || null)}
+                className="w-full border-none bg-zinc-50 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+                placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
+              />
+            </label>
+            <label className="block mb-6">
+              <span className="text-xs uppercase tracking-wider text-zinc-400 font-bold mb-2 block">{t('recipeDetail.tips')}</span>
+              <textarea
+                value={draft.tips || ''}
+                onChange={e => updateDraft('tips', e.target.value || null)}
+                className="w-full border-none bg-zinc-50 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+                placeholder={t('recipeDetail.tipsPlaceholder')}
               />
             </label>
             <label className="block">
@@ -2059,6 +2083,22 @@ const RecipeDetail: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Storage card */}
+            {recipe.storage_instructions && (
+              <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.storageInstructions')}</h3>
+                <p className="text-[15px] leading-relaxed text-zinc-600 whitespace-pre-wrap">{recipe.storage_instructions}</p>
+              </div>
+            )}
+
+            {/* Tips card */}
+            {recipe.tips && (
+              <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.tips')}</h3>
+                <p className="text-[15px] leading-relaxed text-zinc-600 whitespace-pre-wrap">{recipe.tips}</p>
               </div>
             )}
 

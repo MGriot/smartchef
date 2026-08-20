@@ -123,6 +123,11 @@ export interface RecipeInput {
   sources?: unknown[];
   isComponent?: boolean;
   languageCode?: string;
+  /** How to store leftovers ("Come conservare"). See
+   *  db/migrations/033_recipe_storage_and_tips.sql. */
+  storageInstructions?: string | null;
+  /** General tips/notes distinct from the recipe's own short description. */
+  tips?: string | null;
   ingredients?: RecipeIngredientInput[];
   steps?: RecipeStepInput[];
   toolIds?: string[];
@@ -490,12 +495,13 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
   await withTransaction(async (client) => {
     await client.query(
       `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,
-         cook_time_min,rest_time_min,rating,yield_amount,yield_unit_id,tags,regions,region_coords,cover_image_url,source_url,sources,is_component,language_code,creator_name)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+         cook_time_min,rest_time_min,rating,yield_amount,yield_unit_id,tags,regions,region_coords,cover_image_url,source_url,sources,is_component,language_code,creator_name,storage_instructions,tips)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
       [recipeId, d.title, d.description ?? null, d.difficulty ?? 'medium', d.servings ?? 4, d.prepTimeMin ?? null,
        d.cookTimeMin ?? null, d.restTimeMin ?? null, d.rating ?? null, d.yieldAmount ?? null, d.yieldUnitId ?? null,
        d.tags ?? [], d.regions ?? [], d.regionCoords ?? {}, d.coverImageUrl ?? null, d.sourceUrl ?? null,
-       d.sources ?? [], d.isComponent ?? false, d.languageCode ?? null, creatorName]
+       d.sources ?? [], d.isComponent ?? false, d.languageCode ?? null, creatorName,
+       d.storageInstructions ?? null, d.tips ?? null]
     );
 
     for (const ing of d.ingredients ?? []) {
@@ -553,12 +559,12 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
          title=$2, description=$3, difficulty=$4, servings=$5,
          prep_time_min=$6, cook_time_min=$7, rest_time_min=$8, rating=$9,
          yield_amount=$10, yield_unit_id=$11, tags=$12, regions=$13, region_coords=$14, cover_image_url=$15, source_url=$16, sources=$17, is_component=$18,
-         language_code=$19, updated_at=now()
+         language_code=$19, storage_instructions=$20, tips=$21, updated_at=now()
        WHERE id=$1`,
       [id, d.title, d.description ?? null, d.difficulty ?? 'medium', d.servings ?? 4, d.prepTimeMin ?? null,
        d.cookTimeMin ?? null, d.restTimeMin ?? null, d.rating ?? null, d.yieldAmount ?? null, d.yieldUnitId ?? null,
        d.tags ?? [], d.regions ?? [], d.regionCoords ?? {}, d.coverImageUrl ?? null, d.sourceUrl ?? null, d.sources ?? [], d.isComponent ?? false,
-       d.languageCode ?? null]
+       d.languageCode ?? null, d.storageInstructions ?? null, d.tips ?? null]
     );
 
     await client.query("DELETE FROM recipe_ingredients WHERE recipe_id=$1", [id]);

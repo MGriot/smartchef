@@ -134,7 +134,7 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
       'title', 'description', 'difficulty', 'servings', 'prep_time_min', 'cook_time_min',
       'rest_time_min', 'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url',
       'source_url', 'is_component', 'language_code', 'tags', 'regions', 'region_coords',
-      'sources', 'creator_name',
+      'sources', 'creator_name', 'storage_instructions', 'tips',
     ]),
   },
   ingredient: {

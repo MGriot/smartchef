@@ -310,6 +310,11 @@ CREATE TABLE IF NOT EXISTS recipes (
   language_code   TEXT,
   times_cooked    INTEGER NOT NULL DEFAULT 0,
   creator_name    TEXT,
+  -- "Come conservare" / "Consigli" — see
+  -- db/migrations/033_recipe_storage_and_tips.sql. Backfilled onto
+  -- pre-existing local DBs via addColumnIfMissing() below.
+  storage_instructions TEXT,
+  tips            TEXT,
   sync_status     TEXT DEFAULT 'local',
   created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at      TEXT DEFAULT CURRENT_TIMESTAMP
@@ -501,6 +506,8 @@ export async function initLocalSchema(): Promise<void> {
     await db.execute(SCHEMA_SQL);
     await addColumnIfMissing(db, 'recipe_ingredients', 'group_name', 'TEXT');
     await addColumnIfMissing(db, 'recipe_steps', 'technique_ids', "TEXT DEFAULT '[]'");
+    await addColumnIfMissing(db, 'recipes', 'storage_instructions', 'TEXT');
+    await addColumnIfMissing(db, 'recipes', 'tips', 'TEXT');
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {
       await db.execute(SEED_SQL);
