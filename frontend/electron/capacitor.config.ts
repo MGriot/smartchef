@@ -2,8 +2,14 @@ import type { CapacitorConfig } from '@capacitor/cli';
 import * as os from 'os';
 import * as path from 'path';
 
-// Kept in sync with electron/capacitor.config.ts's own copy — see that
-// file for why this needs to be an absolute path with basename "SmartChef".
+// Local Storage's default location (wayfinder ticket 03, standalone-storage-
+// sync map): a visible, discoverable folder rather than a hidden app-data
+// directory. @capacitor-community/sqlite's Electron implementation resolves
+// electronWindowsLocation/electronMacLocation/electronLinuxLocation as an
+// absolute path directly (not appending an extra AppName subfolder) as long
+// as the path's own basename already matches capacitor.config's `appName`
+// below — both are "SmartChef", so the db ends up directly in this folder,
+// not SmartChef/SmartChef.
 const LOCAL_STORAGE_DIR = path.join(os.homedir(), 'Documents', 'SmartChef');
 
 const config: CapacitorConfig = {
