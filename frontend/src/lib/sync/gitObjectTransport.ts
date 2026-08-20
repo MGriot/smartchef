@@ -16,10 +16,16 @@
 // philosophy as structuredMerge.ts: this only moves bytes between a local
 // git dir and a RemoteTransport — it has no idea whether that transport is
 // Electron's direct filesystem or a future SafMirror-backed one, and it
-// keeps no state of its own between calls (a caller wanting to skip
-// repeated remote.exists() round-trips across many sync cycles can layer a
-// cache on top of its own RemoteTransport implementation — that's the
-// transport's concern, not this module's).
+// keeps no state of its own between calls. Unlike androidMirror.ts's
+// pushToTarget() (which skips re-checking an object via a persisted
+// knownPushedObjects cache, specifically because a SAF round-trip per
+// object was too costly to do unconditionally), pushObjectsAndRefs() below
+// always calls remote.exists() per object — correct everywhere, but a real
+// cost on a transport where existence checks are expensive. A future
+// SafMirror-backed RemoteTransport MUST recreate that caching itself (e.g.
+// wrapping exists() with a persisted "known to exist" set, same shape as
+// androidMirror.ts's) — Electron's direct-fs transport, by contrast, can
+// likely get away with the unconditional check, since a local stat() is cheap.
 //
 // Does NOT touch the working tree — checking out files from the objects
 // this pulls in is a separate, purely local step (isomorphic-git's own
@@ -73,8 +79,10 @@ async function readLocalBytes(fs: LocalFs, dir: string, relativePath: string): P
  *  itself uses for loose objects. Filtering to 2-hex-char prefix names
  *  skips "info"/"pack" (packed/alternates bookkeeping git also creates
  *  directly under objects/) — standalone mode's commit/add only ever
- *  produces loose objects, so there's nothing to pack here anyway. */
-async function listLocalObjectPaths(fs: LocalFs, dir: string): Promise<string[]> {
+ *  produces loose objects, so there's nothing to pack here anyway.
+ *  Exported so androidMirror.ts's own (otherwise identical) copy could be
+ *  replaced by this one rather than the two drifting independently. */
+export async function listLocalObjectPaths(fs: LocalFs, dir: string): Promise<string[]> {
   let prefixes: string[];
   try {
     prefixes = await fs.readdir(`${dir}/.git/objects`);

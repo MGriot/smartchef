@@ -23,6 +23,7 @@ import { Preferences } from '@capacitor/preferences';
 import { SafMirror, type SafMirrorPlugin } from '../safMirrorBridge';
 import { gitfs, getSyncBasePath, base64ToBytes, bytesToBase64 } from '../gitfs';
 import { getDeviceId } from './gitSync';
+import { listLocalObjectPaths } from './gitObjectTransport';
 
 const STATE_KEY = 'smartchef.sync.androidMirrorState';
 const PAUSE_REASON_KEY = 'smartchef.sync.pauseReason';
@@ -309,34 +310,6 @@ async function pushJsonDirectory(plugin: SafMirrorPlugin, treeUri: string, dir: 
   }
 }
 
-/** .git/objects/<prefix>/<rest> — the two-level structure isomorphic-git
- *  itself uses for loose objects. "info" and "pack" are the only other
- *  entries git ever creates directly under objects/ (packed/alternates
- *  bookkeeping, not loose objects); filtering to 2-hex-char names is
- *  simpler than special-casing those two by name and correct either way,
- *  since standalone mode never packs — isomorphic-git's commit/add here
- *  only ever produces loose objects. */
-async function listLocalObjectPaths(dir: string): Promise<string[]> {
-  let prefixes: string[];
-  try {
-    prefixes = await gitfs.promises.readdir(`${dir}/.git/objects`);
-  } catch {
-    return [];
-  }
-  const paths: string[] = [];
-  for (const prefix of prefixes) {
-    if (!/^[0-9a-f]{2}$/.test(prefix)) continue;
-    let names: string[];
-    try {
-      names = await gitfs.promises.readdir(`${dir}/.git/objects/${prefix}`);
-    } catch {
-      continue;
-    }
-    for (const name of names) paths.push(`.git/objects/${prefix}/${name}`);
-  }
-  return paths;
-}
-
 export interface PushResult {
   pushed: boolean;
   objectsUploaded: number;
@@ -365,7 +338,7 @@ export async function pushToTarget(plugin: SafMirrorPlugin = SafMirror): Promise
   // way out of this function (objects-before-refs ordering).
   let objectsUploaded = 0;
   try {
-    const localObjectPaths = await listLocalObjectPaths(dir);
+    const localObjectPaths = await listLocalObjectPaths(gitfs.promises, dir);
     for (const relativePath of localObjectPaths) {
       if (known.has(relativePath)) continue;
       if (await pushFile(plugin, state.treeUri, dir, relativePath)) {
