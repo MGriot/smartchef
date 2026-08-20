@@ -15,9 +15,12 @@
 // entity introduced by another device, applyEntityMergeResult() for one
 // already known here.
 //
-// Recipes/ingredients only (matching the old design's scope — tools/tags/
-// techniques were never committed to git there either); expanding that is
-// a separate, later piece.
+// Covers every entity type gitSync.ts's ALL_ENTITY_DIRS commits — recipes,
+// ingredients, tools, tags, techniques. getMergeableFieldNames() (services/
+// conflicts.local.ts) is what actually gates this per entity type: an
+// entry here with no field list (returns null) is just skipped, so this
+// list can stay a superset without harm — see the `if (!fieldNames)
+// continue` below.
 // ════════════════════════════════════════════════════════════════════════
 
 import * as git from 'isomorphic-git';
@@ -28,6 +31,9 @@ import { entityExists, createEntity, applyEntityMergeResult, getMergeableFieldNa
 const ENTITY_DIRS: Array<{ dirName: string; entityType: string }> = [
   { dirName: 'recipes', entityType: 'recipe' },
   { dirName: 'ingredients', entityType: 'ingredient' },
+  { dirName: 'tools', entityType: 'tool' },
+  { dirName: 'tags', entityType: 'tag' },
+  { dirName: 'techniques', entityType: 'technique' },
 ];
 
 async function readEntityJson(dir: string, gitdir: string, oid: string | null, filepath: string): Promise<Record<string, unknown> | null> {

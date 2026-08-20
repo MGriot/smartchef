@@ -32,7 +32,7 @@ vi.mock('isomorphic-git', () => ({
 // verifies the bridge's orchestration (create vs. merge, which fields,
 // conflicts recorded) without re-exercising that module's own SQL, which
 // conflicts.local.test.ts already covers thoroughly.
-const dbEntities: Record<string, Map<string, Record<string, unknown>>> = { recipe: new Map(), ingredient: new Map() };
+const dbEntities: Record<string, Map<string, Record<string, unknown>>> = { recipe: new Map(), ingredient: new Map(), tool: new Map() };
 const dbConflicts: Array<{ entityType: string; entityId: string; fieldName: string }> = [];
 
 vi.mock('../../services/conflicts.local', () => ({
@@ -48,7 +48,10 @@ vi.mock('../../services/conflicts.local', () => ({
     return { appliedFields: Object.keys(result.applied), unsupportedFields: [], conflictsRecorded: result.conflicts.length };
   },
   getMergeableFieldNames: (entityType: string) =>
-    entityType === 'recipe' ? ['title', 'servings', 'steps'] : entityType === 'ingredient' ? ['name', 'calories_kcal'] : null,
+    entityType === 'recipe' ? ['title', 'servings', 'steps']
+    : entityType === 'ingredient' ? ['name', 'calories_kcal']
+    : entityType === 'tool' ? ['name', 'deleted_at']
+    : null,
 }));
 
 let mergeRemoteIntoLocal: typeof import('./mergeBridge').mergeRemoteIntoLocal;
@@ -57,6 +60,7 @@ beforeEach(async () => {
   for (const key of Object.keys(trees)) delete trees[key];
   dbEntities.recipe.clear();
   dbEntities.ingredient.clear();
+  dbEntities.tool.clear();
   dbConflicts.length = 0;
   vi.resetModules();
   ({ mergeRemoteIntoLocal } = await import('./mergeBridge'));
@@ -148,5 +152,27 @@ describe('mergeRemoteIntoLocal', () => {
     expect(result.entitiesCreated).toBe(2);
     expect(dbEntities.recipe.has('r1')).toBe(true);
     expect(dbEntities.ingredient.has('i1')).toBe(true);
+  });
+
+  it('also covers non-recipe/ingredient entity types wired into ENTITY_DIRS (e.g. tools)', async () => {
+    trees['local'] = {};
+    trees['remote'] = { 'tools/t1.json': { name: 'Whisk' } };
+
+    const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', null, 'remote');
+
+    expect(result.entitiesCreated).toBe(1);
+    expect(dbEntities.tool.get('t1')).toEqual({ id: 't1', name: 'Whisk' });
+  });
+
+  it('propagates a soft-delete tombstone (deleted_at) as a fast-forwarded field, same as any other scalar', async () => {
+    dbEntities.tool.set('t1', { id: 't1', name: 'Whisk', deleted_at: null });
+    trees[baseKey('local', 'remote')] = { 'tools/t1.json': { name: 'Whisk', deleted_at: null } };
+    trees['local'] = { 'tools/t1.json': { name: 'Whisk', deleted_at: null } };
+    trees['remote'] = { 'tools/t1.json': { name: 'Whisk', deleted_at: '2026-08-20T00:00:00.000Z' } };
+
+    const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'local', 'remote');
+
+    expect(result.entitiesUpdated).toBe(1);
+    expect(dbEntities.tool.get('t1')?.deleted_at).toBe('2026-08-20T00:00:00.000Z');
   });
 });

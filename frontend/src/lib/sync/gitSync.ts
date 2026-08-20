@@ -14,8 +14,14 @@
 // watcher) keeps working with no changes of its own; only what happens
 // inside changed.
 //
-// Recipes/ingredients only, matching the superseded design's own scope —
-// tools/tags/techniques were never committed to git there either.
+// Covers recipes, ingredients, tools, tags, and techniques — every entity
+// type standalone mode has local CRUD for. Each gets its own top-level
+// directory in the Hidden Clone (see ENTITY_TYPE_TO_DIR below); adding a
+// new synced entity type means adding one entry there, one to
+// mergeBridge.ts's ENTITY_DIRS, one to hiddenClone.ts's directory list,
+// and one to commitNowInternal()'s statusMatrix/add filepaths — all four
+// need to agree, or a change lands in the Hidden Clone but silently never
+// gets committed, pushed, or merged.
 // ════════════════════════════════════════════════════════════════════════
 
 import * as git from 'isomorphic-git';
@@ -48,8 +54,15 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-type EntityType = 'recipes' | 'ingredients';
-const ENTITY_TYPE_TO_DIR: Record<string, EntityType> = { recipe: 'recipes', ingredient: 'ingredients' };
+type EntityType = 'recipes' | 'ingredients' | 'tools' | 'tags' | 'techniques';
+const ENTITY_TYPE_TO_DIR: Record<string, EntityType> = {
+  recipe: 'recipes',
+  ingredient: 'ingredients',
+  tool: 'tools',
+  tag: 'tags',
+  technique: 'techniques',
+};
+const ALL_ENTITY_DIRS: EntityType[] = ['recipes', 'ingredients', 'tools', 'tags', 'techniques'];
 
 let deviceId: string | null = null;
 
@@ -136,18 +149,18 @@ export function scheduleCommit(delayMs = 2000): void {
   }, delayMs);
 }
 
-/** Stages and commits whatever changed under recipes/ or ingredients/ in
- *  the Hidden Clone — a no-op if nothing did. Unwrapped core — call this
+/** Stages and commits whatever changed under any of ALL_ENTITY_DIRS in the
+ *  Hidden Clone — a no-op if nothing did. Unwrapped core — call this
  *  directly (not the serialized commitNow() export) from anywhere that's
  *  already running inside serialize(), e.g. syncNowInternal() below;
  *  going through commitNow() there would deadlock. */
 async function commitNowInternal(): Promise<boolean> {
   const { dir, gitdir } = await ensureHiddenCloneInitialized();
-  const matrix = await git.statusMatrix({ fs: gitfs, dir, gitdir, filepaths: ['recipes', 'ingredients'] });
+  const matrix = await git.statusMatrix({ fs: gitfs, dir, gitdir, filepaths: ALL_ENTITY_DIRS });
   const changed = matrix.some(([, head, workdir, stage]) => !(head === 1 && workdir === 1 && stage === 1));
   if (!changed) return false;
 
-  await git.add({ fs: gitfs, dir, gitdir, filepath: ['recipes', 'ingredients'] });
+  await git.add({ fs: gitfs, dir, gitdir, filepath: ALL_ENTITY_DIRS });
   const id = await getDeviceId();
   const changedCount = matrix.filter(([, head, workdir]) => head !== workdir).length;
   await git.commit({

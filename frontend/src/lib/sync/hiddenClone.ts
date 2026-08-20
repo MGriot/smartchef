@@ -65,9 +65,13 @@ export async function ensureHiddenCloneInitialized(): Promise<HiddenCloneDirs> {
   }
   // Idempotent either way (mkdir tolerates "already exists" on both
   // platforms' gitfs.ts backends) — cheap enough to run every call rather
-  // than gating it behind the hasGit check above.
-  await gitfs.promises.mkdir(`${dir}/recipes`);
-  await gitfs.promises.mkdir(`${dir}/ingredients`);
+  // than gating it behind the hasGit check above. Kept in sync by hand with
+  // gitSync.ts's ALL_ENTITY_DIRS (importing it here would be circular,
+  // since gitSync.ts is what imports this module) — every synced entity
+  // type needs its directory pre-created here too.
+  for (const entityDir of ['recipes', 'ingredients', 'tools', 'tags', 'techniques']) {
+    await gitfs.promises.mkdir(`${dir}/${entityDir}`);
+  }
   initDone = true;
   return { dir, gitdir };
 }

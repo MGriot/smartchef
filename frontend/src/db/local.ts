@@ -394,6 +394,7 @@ CREATE TABLE IF NOT EXISTS techniques (
   created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_techniques_name_active ON techniques(name) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS technique_translations (
   id            TEXT PRIMARY KEY,

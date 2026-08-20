@@ -148,17 +148,21 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
   tool: {
     table: 'tools',
     nameColumn: 'name',
-    scalarFields: new Set(['name', 'category', 'description', 'icon']),
+    // deleted_at included so a soft-delete on one device (createTool()/
+    // updateTool()/deleteTool() in ingredients.local.ts) fast-forwards
+    // through Structured Merge like any other field, instead of the
+    // deletion silently never reaching other devices.
+    scalarFields: new Set(['name', 'category', 'description', 'icon', 'image_urls', 'deleted_at']),
   },
   tag: {
     table: 'tags',
     nameColumn: 'name',
-    scalarFields: new Set(['name', 'group_name', 'color', 'icon', 'sort_order']),
+    scalarFields: new Set(['name', 'group_name', 'color', 'icon', 'sort_order', 'exclude_tag_ids', 'deleted_at']),
   },
   technique: {
     table: 'techniques',
     nameColumn: 'name',
-    scalarFields: new Set(['name', 'description', 'icon']),
+    scalarFields: new Set(['name', 'description', 'icon', 'image_urls', 'deleted_at']),
   },
 };
 

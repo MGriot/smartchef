@@ -442,6 +442,12 @@ describe('getMergeableFieldNames', () => {
     expect(fields).toContain('name');
   });
 
+  it('includes deleted_at for tool/tag/technique, so a soft-delete propagates through merge like any scalar field', () => {
+    expect(getMergeableFieldNames('tool')).toContain('deleted_at');
+    expect(getMergeableFieldNames('tag')).toContain('deleted_at');
+    expect(getMergeableFieldNames('technique')).toContain('deleted_at');
+  });
+
   it('returns null for an unrecognized entity type', () => {
     expect(getMergeableFieldNames('not-a-real-entity')).toBeNull();
   });

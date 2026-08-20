@@ -1,0 +1,620 @@
+// ════════════════════════════════════════════════════════════════════════
+// SmartChef — Recipes (standalone port)
+// Ported from backend/src/routes/recipes.ts. The riskiest file in Stage 1
+// — 9 dynamic listing params, unnest()/ANY()/&&-array operators, and
+// json_agg/jsonb_build_object/FILTER(WHERE...) nested-JSON assembly, none
+// of which SQLite has. Structural changes, applied consistently:
+//   - json_agg(...) nested ingredient/step/tool assembly → fetched as flat
+//     per-recipe queries and assembled into the same nested shape here in
+//     TS. Not a workaround — arguably simpler than the SQL it replaces.
+//   - tag/tags/regions array-membership filtering (&&, ANY(), unnest()) →
+//     no SQL array type in SQLite, so these apply as a JS .filter() after
+//     the SQL-filterable clauses (q, ingredientCategories, difficulty,
+//     component, lang) have already narrowed the row set.
+//   - ingredientCategories' `= ANY($N::uuid[])` → an IN (...) built from
+//     one `$N` placeholder per value (see inPlaceholders below), so the
+//     existing $N→? translation in db/local.ts handles it unmodified.
+//   - ILIKE → LIKE.
+//   - creator_id → dropped (no accounts table in standalone mode);
+//     recipes.creator_name is a plain denormalized column set at create
+//     time from the local profile's display name (see lib/standalone.ts).
+//
+// Deliberately NOT ported in this stage (narrow scope per the Seventeenth-
+// slice plan) — nutrition, AI translation, LLM import, and collection
+// membership all depend on services/tables outside Stage 1's boundary.
+// Each throws a clear "not available offline yet" error instead of
+// silently no-oping; localRouter.ts is what actually decides which paths
+// route here at all.
+// ════════════════════════════════════════════════════════════════════════
+
+import { query, queryOne, withTransaction, type LocalClient } from "../db/local";
+import { calculatePortions, resolveCookSequence } from "./matrioska.local";
+import { computeAutoTagNames, unionTagNames } from "./tags.local";
+
+function newId(): string {
+  return crypto.randomUUID();
+}
+
+// Fire-and-forget — a sync failure (folder unreachable, permission not
+// granted yet, etc.) must never surface as a save failure. Dynamically
+// imported since gitSync.ts pulls in isomorphic-git/@capacitor/filesystem,
+// which only matter on native (this whole file only ever runs there
+// anyway, reached exclusively through localRouter.ts's standalone-mode
+// dispatch — see lib/api.ts).
+async function syncRecipe(id: string): Promise<void> {
+  try {
+    const row = await queryOne<Record<string, unknown>>('SELECT * FROM recipes WHERE id=$1', [id]);
+    if (!row) return;
+    const ingredients = await query<Record<string, unknown>>('SELECT * FROM recipe_ingredients WHERE recipe_id=$1', [id]);
+    const steps = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1', [id]);
+    const toolRows = await query<{ tool_id: string }>('SELECT tool_id FROM recipe_tools WHERE recipe_id=$1', [id]);
+    const { writeEntityFile } = await import('../lib/sync/gitSync');
+    await writeEntityFile('recipes', id, { ...row, ingredients, steps, toolIds: toolRows.map(t => t.tool_id) });
+  } catch (err) {
+    console.error('SmartChef sync (recipe) failed:', err);
+  }
+}
+
+/** Re-writes every local recipe's entity file regardless of whether
+ *  anything actually changed — see ingredients.local.ts's
+ *  resyncAllIngredients() for why this exists and where it's called from. */
+export async function resyncAllRecipes(): Promise<number> {
+  const rows = await query<{ id: string }>("SELECT id FROM recipes WHERE sync_status != 'deleted'");
+  for (const row of rows) await syncRecipe(row.id);
+  return rows.length;
+}
+
+function inPlaceholders(params: unknown[], values: unknown[]): string {
+  return values.map(v => { params.push(v); return `$${params.length}`; }).join(', ');
+}
+
+// ── Types ──────────────────────────────────────────────────────────────
+
+export interface RecipeIngredientInput {
+  sortOrder: number;
+  ingredientId?: string;
+  subtypeId?: string;
+  subRecipeId?: string;
+  quantity?: number;
+  quantityText?: string;
+  unitId?: string;
+  notes?: string;
+  isOptional?: boolean;
+  translations?: Array<{ lang: string; notes?: string | null }>;
+}
+
+export interface RecipeStepInput {
+  stepNumber: number;
+  title?: string | null;
+  description: string;
+  durationMin?: number | null;
+  toolIds?: string[];
+  notes?: string | null;
+  imageUrl?: string | null;
+  translations?: Array<{ lang: string; title?: string | null; description?: string | null; notes?: string | null }>;
+  stepIngredients?: unknown[];
+}
+
+export interface RecipeInput {
+  id?: string;
+  title: string;
+  description?: string | null;
+  difficulty?: string;
+  servings?: number;
+  prepTimeMin?: number | null;
+  cookTimeMin?: number | null;
+  restTimeMin?: number | null;
+  rating?: number | null;
+  yieldAmount?: number | null;
+  yieldUnitId?: string | null;
+  tags?: string[];
+  regions?: string[];
+  regionCoords?: Record<string, { lat: number; lng: number }>;
+  coverImageUrl?: string | null;
+  sourceUrl?: string | null;
+  sources?: unknown[];
+  isComponent?: boolean;
+  languageCode?: string;
+  ingredients?: RecipeIngredientInput[];
+  steps?: RecipeStepInput[];
+  toolIds?: string[];
+  translations?: Array<{ lang: string; title?: string | null; description?: string | null }>;
+}
+
+// ── GET /recipes ───────────────────────────────────────────────────────
+
+const SORT_OPTIONS: Record<string, string> = {
+  "recently-edited": "r.updated_at DESC",
+  "newest": "r.created_at DESC",
+  "oldest": "r.created_at ASC",
+  "alphabetical": "r.title ASC",
+};
+
+export interface ListRecipesParams {
+  q?: string;
+  tag?: string;
+  tags?: string;
+  ingredientCategories?: string;
+  regions?: string;
+  difficulty?: string;
+  component?: string;
+  lang?: string;
+  sort?: string;
+}
+
+async function buildTagsDisplay(tagNames: string[], lang?: string): Promise<Array<{ name: string; translated_name: string; color: string | null }>> {
+  const result = [];
+  for (const name of tagNames) {
+    const tag = await queryOne<{ name: string; color: string | null; id: string }>(
+      `SELECT id, name, color FROM tags WHERE lower(name) = lower($1)`,
+      [name]
+    );
+    let translatedName: string | null = null;
+    if (lang && tag) {
+      translatedName = (await queryOne<{ name: string }>(
+        `SELECT name FROM tag_translations WHERE tag_id = $1 AND LOWER(language_code) = LOWER($2)`,
+        [tag.id, lang]
+      ))?.name ?? null;
+    }
+    result.push({ name, translated_name: translatedName ?? tag?.name ?? name, color: tag?.color ?? null });
+  }
+  return result;
+}
+
+export async function listRecipes(params: ListRecipesParams) {
+  const { q, tag, tags, ingredientCategories, regions, difficulty, component, lang, sort } = params;
+  const sqlParams: unknown[] = [];
+  let langJoin = "";
+  let translatedCols = "NULL AS translated_title, NULL AS translated_description";
+  if (lang) {
+    sqlParams.push(lang);
+    langJoin = `LEFT JOIN recipe_translations rt ON rt.recipe_id = r.id AND rt.language_code = $${sqlParams.length}`;
+    translatedCols = "rt.title AS translated_title, rt.description AS translated_description";
+  }
+
+  let sql = `
+    SELECT r.*, ${translatedCols},
+           (SELECT COUNT(*) FROM recipe_ingredients cri2 WHERE cri2.recipe_id = r.id) AS ingredient_count,
+           r.creator_name AS creator_name, NULL AS creator_avatar_url
+    FROM recipes r
+    ${langJoin}
+    WHERE r.sync_status != 'deleted'
+  `;
+
+  if (q) {
+    sqlParams.push(`%${q}%`);
+    const p = sqlParams.length;
+    sql += ` AND (
+      r.title LIKE $${p} OR r.description LIKE $${p} OR EXISTS (
+        SELECT 1 FROM recipe_ingredients qri
+        JOIN ingredients qi ON qi.id = qri.ingredient_id
+        LEFT JOIN ingredient_translations qit ON qit.ingredient_id = qi.id
+        WHERE qri.recipe_id = r.id AND (qi.name LIKE $${p} OR qit.translated_name LIKE $${p})
+      )
+    )`;
+  }
+  if (ingredientCategories) {
+    const catList = ingredientCategories.split(",").map(c => c.trim()).filter(Boolean);
+    if (catList.length > 0) {
+      sql += ` AND EXISTS (
+        SELECT 1 FROM recipe_ingredients cri
+        JOIN ingredients ci ON ci.id = cri.ingredient_id
+        WHERE cri.recipe_id = r.id AND ci.category_id IN (${inPlaceholders(sqlParams, catList)})
+      )`;
+    }
+  }
+  if (difficulty) {
+    sqlParams.push(difficulty);
+    sql += ` AND r.difficulty = $${sqlParams.length}`;
+  }
+  if (component !== undefined) {
+    sqlParams.push(component === "true");
+    sql += ` AND r.is_component = $${sqlParams.length}`;
+  }
+
+  const orderBy = sort === "alphabetical" && lang
+    ? "COALESCE(rt.title, r.title) ASC"
+    : SORT_OPTIONS[String(sort)] ?? SORT_OPTIONS["recently-edited"];
+  sql += ` ORDER BY ${orderBy}`;
+
+  let recipes = await query<Record<string, unknown>>(sql, sqlParams);
+
+  // Array-membership filters have no SQL equivalent here — applied in JS
+  // against the already-narrowed row set.
+  if (tag) {
+    recipes = recipes.filter(r => (JSON.parse((r.tags as string) ?? '[]') as string[]).includes(tag));
+  }
+  if (tags) {
+    const tagList = tags.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+    if (tagList.length > 0) {
+      recipes = recipes.filter(r => {
+        const rTags = (JSON.parse((r.tags as string) ?? '[]') as string[]).map(t => t.toLowerCase());
+        return tagList.some(t => rTags.includes(t));
+      });
+    }
+  }
+  if (regions) {
+    const regionList = regions.split(",").map(r => r.trim()).filter(Boolean);
+    if (regionList.length > 0) {
+      recipes = recipes.filter(r => {
+        const rRegions = JSON.parse((r.regions as string) ?? '[]') as string[];
+        return regionList.some(reg => rRegions.includes(reg));
+      });
+    }
+  }
+
+  const result = [];
+  for (const r of recipes) {
+    const tagNames = JSON.parse((r.tags as string) ?? '[]') as string[];
+    result.push({
+      ...r,
+      tags: tagNames,
+      tags_display: await buildTagsDisplay(tagNames, lang),
+      regions: JSON.parse((r.regions as string) ?? '[]'),
+      region_coords: JSON.parse((r.region_coords as string) ?? '{}'),
+      sources: JSON.parse((r.sources as string) ?? '[]'),
+    });
+  }
+  return { data: result, total: result.length };
+}
+
+// ── GET /recipes/:id ───────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function getRecipe(id: string, lang?: string) {
+  if (!UUID_RE.test(id)) return null;
+
+  const params: unknown[] = [id];
+  let langJoin = "";
+  let translatedCols = "NULL AS translated_title, NULL AS translated_description";
+  if (lang) {
+    params.push(lang);
+    langJoin = `LEFT JOIN recipe_translations rct ON rct.recipe_id = r.id AND LOWER(rct.language_code) = LOWER($2)`;
+    translatedCols = "rct.title AS translated_title, rct.description AS translated_description";
+  }
+
+  const recipe = await queryOne<Record<string, unknown>>(
+    `SELECT r.*, ${translatedCols}, r.creator_name AS creator_name, NULL AS creator_avatar_url
+     FROM recipes r
+     ${langJoin}
+     WHERE r.id = $1`,
+    params
+  );
+  if (!recipe) return null;
+
+  const tagNames = JSON.parse((recipe.tags as string) ?? '[]') as string[];
+  const tagsDisplay = await buildTagsDisplay(tagNames, lang);
+
+  const translations = await query<{ language_code: string; title: string | null; description: string | null }>(
+    `SELECT language_code, title, description FROM recipe_translations WHERE recipe_id = $1`,
+    [id]
+  );
+
+  // ── Ingredients ──────────────────────────────────────────────────────
+  const ingredientRows = await query<Record<string, unknown>>(
+    `SELECT ri.*, i.name AS ingredient_name, sr.title AS sub_recipe_title, u.symbol AS unit_symbol
+     FROM recipe_ingredients ri
+     LEFT JOIN ingredients i ON i.id = ri.ingredient_id
+     LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
+     LEFT JOIN units u ON u.id = ri.unit_id
+     WHERE ri.recipe_id = $1
+     ORDER BY ri.sort_order`,
+    [id]
+  );
+  const ingredients = [];
+  for (const row of ingredientRows) {
+    let ingredientName = row.ingredient_name as string | null;
+    let translatedNotes: string | null = null;
+    if (lang) {
+      if (row.ingredient_id) {
+        const it = await queryOne<{ translated_name: string }>(
+          `SELECT translated_name FROM ingredient_translations WHERE ingredient_id = $1 AND LOWER(language_code) = LOWER($2)`,
+          [row.ingredient_id, lang]
+        );
+        ingredientName = it?.translated_name ?? ingredientName;
+      }
+      const rit = await queryOne<{ notes: string }>(
+        `SELECT notes FROM recipe_ingredient_translations WHERE recipe_ingredient_id = $1 AND LOWER(language_code) = LOWER($2)`,
+        [row.id, lang]
+      );
+      translatedNotes = rit?.notes ?? null;
+    }
+    const rowTranslations = await query<{ language_code: string; notes: string | null }>(
+      `SELECT language_code, notes FROM recipe_ingredient_translations WHERE recipe_ingredient_id = $1`,
+      [row.id]
+    );
+    ingredients.push({
+      id: row.id,
+      sortOrder: row.sort_order,
+      ingredientId: row.ingredient_id,
+      ingredientName,
+      subRecipeId: row.sub_recipe_id,
+      subRecipeTitle: row.sub_recipe_title,
+      quantity: row.quantity,
+      quantityText: row.quantity_text,
+      unitSymbol: row.unit_symbol,
+      unitId: row.unit_id,
+      isOptional: !!row.is_optional,
+      notes: row.notes,
+      translatedNotes,
+      translations: rowTranslations.map(t => ({ lang: t.language_code, notes: t.notes })),
+    });
+  }
+
+  // ── Steps ────────────────────────────────────────────────────────────
+  const stepRows = await query<Record<string, unknown>>(
+    `SELECT * FROM recipe_steps WHERE recipe_id = $1 ORDER BY step_number`,
+    [id]
+  );
+  const steps = [];
+  for (const row of stepRows) {
+    let translatedTitle: string | null = null;
+    let translatedDescription: string | null = null;
+    let translatedNotes: string | null = null;
+    if (lang) {
+      const rst = await queryOne<{ title: string | null; description: string | null; notes: string | null }>(
+        `SELECT title, description, notes FROM recipe_step_translations WHERE step_id = $1 AND LOWER(language_code) = LOWER($2)`,
+        [row.id, lang]
+      );
+      translatedTitle = rst?.title ?? null;
+      translatedDescription = rst?.description ?? null;
+      translatedNotes = rst?.notes ?? null;
+    }
+    const rowTranslations = await query<{ language_code: string; title: string | null; description: string | null; notes: string | null }>(
+      `SELECT language_code, title, description, notes FROM recipe_step_translations WHERE step_id = $1`,
+      [row.id]
+    );
+    steps.push({
+      id: row.id,
+      stepNumber: row.step_number,
+      title: row.title,
+      description: row.description,
+      translatedTitle,
+      translatedDescription,
+      translatedNotes,
+      durationMin: row.duration_min,
+      toolIds: JSON.parse((row.tool_ids as string) ?? '[]'),
+      notes: row.notes,
+      imageUrl: row.image_url,
+      stepIngredients: JSON.parse((row.step_ingredients as string) ?? '[]'),
+      translations: rowTranslations.map(t => ({ lang: t.language_code, title: t.title, description: t.description, notes: t.notes })),
+    });
+  }
+
+  // ── Tools ────────────────────────────────────────────────────────────
+  const toolRows = await query<{ id: string; name: string; icon: string | null }>(
+    `SELECT t.id, t.name, t.icon FROM recipe_tools rt JOIN tools t ON t.id = rt.tool_id WHERE rt.recipe_id = $1`,
+    [id]
+  );
+  const tools = [];
+  for (const t of toolRows) {
+    const translatedName = lang
+      ? (await queryOne<{ name: string }>(`SELECT name FROM tool_translations WHERE tool_id = $1 AND LOWER(language_code) = LOWER($2)`, [t.id, lang]))?.name ?? null
+      : null;
+    tools.push({ id: t.id, name: t.name, icon: t.icon, translated_name: translatedName });
+  }
+
+  return {
+    ...recipe,
+    tags: tagNames,
+    tags_display: tagsDisplay,
+    regions: JSON.parse((recipe.regions as string) ?? '[]'),
+    region_coords: JSON.parse((recipe.region_coords as string) ?? '{}'),
+    sources: JSON.parse((recipe.sources as string) ?? '[]'),
+    translations: translations.map(t => ({ lang: t.language_code, title: t.title, description: t.description })),
+    ingredients,
+    steps,
+    tools,
+  };
+}
+
+// ── Shared create/update logic ────────────────────────────────────────
+
+async function upsertRecipeTranslations(client: LocalClient, recipeId: string, translations?: RecipeInput['translations']) {
+  if (!translations) return;
+  await client.query("DELETE FROM recipe_translations WHERE recipe_id=$1", [recipeId]);
+  for (const t of translations) {
+    if (!t.lang || (!t.title && !t.description)) continue;
+    await client.query(
+      `INSERT INTO recipe_translations (id, recipe_id, language_code, title, description) VALUES ($1, $2, $3, $4, $5)`,
+      [newId(), recipeId, t.lang, t.title || null, t.description || null]
+    );
+  }
+}
+
+async function insertStepTranslations(client: LocalClient, stepId: string, translations?: RecipeStepInput['translations']) {
+  if (!translations) return;
+  for (const t of translations) {
+    if (!t.lang || (!t.title && !t.description && !t.notes)) continue;
+    await client.query(
+      `INSERT INTO recipe_step_translations (id, step_id, language_code, title, description, notes) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [newId(), stepId, t.lang, t.title || null, t.description || null, t.notes || null]
+    );
+  }
+}
+
+async function insertIngredientTranslations(client: LocalClient, recipeIngredientId: string, translations?: RecipeIngredientInput['translations']) {
+  if (!translations) return;
+  for (const t of translations) {
+    if (!t.lang || !t.notes) continue;
+    await client.query(
+      `INSERT INTO recipe_ingredient_translations (id, recipe_ingredient_id, language_code, notes) VALUES ($1, $2, $3, $4)`,
+      [newId(), recipeIngredientId, t.lang, t.notes]
+    );
+  }
+}
+
+// ── POST /recipes ──────────────────────────────────────────────────────
+
+export async function createRecipe(d: RecipeInput, creatorName: string | null): Promise<{ id: string }> {
+  const recipeId = d.id ?? newId();
+
+  await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,
+         cook_time_min,rest_time_min,rating,yield_amount,yield_unit_id,tags,regions,region_coords,cover_image_url,source_url,sources,is_component,language_code,creator_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+      [recipeId, d.title, d.description ?? null, d.difficulty ?? 'medium', d.servings ?? 4, d.prepTimeMin ?? null,
+       d.cookTimeMin ?? null, d.restTimeMin ?? null, d.rating ?? null, d.yieldAmount ?? null, d.yieldUnitId ?? null,
+       d.tags ?? [], d.regions ?? [], d.regionCoords ?? {}, d.coverImageUrl ?? null, d.sourceUrl ?? null,
+       d.sources ?? [], d.isComponent ?? false, d.languageCode ?? null, creatorName]
+    );
+
+    for (const ing of d.ingredients ?? []) {
+      const recipeIngredientId = newId();
+      await client.query(
+        `INSERT INTO recipe_ingredients
+           (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
+            quantity,quantity_text,unit_id,notes,is_optional)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [recipeIngredientId, recipeId, ing.sortOrder, ing.ingredientId ?? null,
+         ing.subtypeId ?? null, ing.subRecipeId ?? null, ing.quantity ?? null,
+         ing.quantityText ?? null, ing.unitId ?? null, ing.notes ?? null, ing.isOptional ?? false]
+      );
+      await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
+    }
+
+    for (const step of d.steps ?? []) {
+      const stepId = newId();
+      await client.query(
+        `INSERT INTO recipe_steps
+           (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [stepId, recipeId, step.stepNumber, step.title ?? null,
+         step.description, step.durationMin ?? null, step.toolIds ?? [], step.notes ?? null,
+         step.imageUrl ?? null, step.stepIngredients ?? []]
+      );
+      await insertStepTranslations(client, stepId, step.translations);
+    }
+
+    for (const toolId of d.toolIds ?? []) {
+      await client.query(
+        "INSERT INTO recipe_tools (recipe_id,tool_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        [recipeId, toolId]
+      );
+    }
+
+    const autoTags = await computeAutoTagNames(client, recipeId);
+    const finalTags = unionTagNames(d.tags ?? [], autoTags);
+    await client.query("UPDATE recipes SET tags=$1 WHERE id=$2", [finalTags, recipeId]);
+
+    await upsertRecipeTranslations(client, recipeId, d.translations);
+  });
+
+  await syncRecipe(recipeId);
+  return { id: recipeId };
+}
+
+// ── PUT /recipes/:id ──────────────────────────────────────────────────
+
+export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: string }> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE recipes SET
+         title=$2, description=$3, difficulty=$4, servings=$5,
+         prep_time_min=$6, cook_time_min=$7, rest_time_min=$8, rating=$9,
+         yield_amount=$10, yield_unit_id=$11, tags=$12, regions=$13, region_coords=$14, cover_image_url=$15, source_url=$16, sources=$17, is_component=$18,
+         language_code=$19, updated_at=now()
+       WHERE id=$1`,
+      [id, d.title, d.description ?? null, d.difficulty ?? 'medium', d.servings ?? 4, d.prepTimeMin ?? null,
+       d.cookTimeMin ?? null, d.restTimeMin ?? null, d.rating ?? null, d.yieldAmount ?? null, d.yieldUnitId ?? null,
+       d.tags ?? [], d.regions ?? [], d.regionCoords ?? {}, d.coverImageUrl ?? null, d.sourceUrl ?? null, d.sources ?? [], d.isComponent ?? false,
+       d.languageCode ?? null]
+    );
+
+    await client.query("DELETE FROM recipe_ingredients WHERE recipe_id=$1", [id]);
+    for (const ing of d.ingredients ?? []) {
+      const recipeIngredientId = newId();
+      await client.query(
+        `INSERT INTO recipe_ingredients
+           (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
+            quantity,quantity_text,unit_id,notes,is_optional)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [recipeIngredientId, id, ing.sortOrder, ing.ingredientId ?? null,
+         ing.subtypeId ?? null, ing.subRecipeId ?? null, ing.quantity ?? null,
+         ing.quantityText ?? null, ing.unitId ?? null, ing.notes ?? null, ing.isOptional ?? false]
+      );
+      await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
+    }
+
+    await client.query("DELETE FROM recipe_steps WHERE recipe_id=$1", [id]);
+    for (const step of d.steps ?? []) {
+      const stepId = newId();
+      await client.query(
+        `INSERT INTO recipe_steps
+           (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [stepId, id, step.stepNumber, step.title ?? null,
+         step.description, step.durationMin ?? null, step.toolIds ?? [], step.notes ?? null,
+         step.imageUrl ?? null, step.stepIngredients ?? []]
+      );
+      await insertStepTranslations(client, stepId, step.translations);
+    }
+
+    await client.query("DELETE FROM recipe_tools WHERE recipe_id=$1", [id]);
+    for (const toolId of d.toolIds ?? []) {
+      await client.query(
+        "INSERT INTO recipe_tools (recipe_id,tool_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        [id, toolId]
+      );
+    }
+
+    const autoTags = await computeAutoTagNames(client, id);
+    const finalTags = unionTagNames(d.tags ?? [], autoTags);
+    await client.query("UPDATE recipes SET tags=$1 WHERE id=$2", [finalTags, id]);
+
+    await upsertRecipeTranslations(client, id, d.translations);
+  });
+
+  await syncRecipe(id);
+  return { id };
+}
+
+// ── PATCH /recipes/:id/rating ──────────────────────────────────────────
+
+export async function patchRating(id: string, rating: number | null): Promise<void> {
+  await query("UPDATE recipes SET rating=$1, updated_at=now() WHERE id=$2", [rating, id]);
+}
+
+// ── POST /recipes/:id/cooked ───────────────────────────────────────────
+// No RETURNING here (unlike the server route) — SQLite's `run()` doesn't
+// reliably surface RETURNING columns through this plugin, so this does the
+// increment and the read-back as two plain statements instead. Same net
+// effect, doesn't touch updated_at (cooking a recipe isn't editing it).
+
+export async function logCooked(id: string, cookedByName: string | null): Promise<{ timesCooked: number } | null> {
+  const existing = await queryOne<{ times_cooked: number }>("SELECT times_cooked FROM recipes WHERE id=$1", [id]);
+  if (!existing) return null;
+  const timesCooked = existing.times_cooked + 1;
+  await query("UPDATE recipes SET times_cooked = $1 WHERE id=$2", [timesCooked, id]);
+  await query("INSERT INTO cook_log (id, recipe_id, cooked_by_name) VALUES ($1, $2, $3)", [newId(), id, cookedByName]);
+  return { timesCooked };
+}
+
+// ── DELETE /recipes/:id ────────────────────────────────────────────────
+
+export async function deleteRecipe(id: string): Promise<void> {
+  await query("UPDATE recipes SET sync_status='deleted', updated_at=now() WHERE id=$1", [id]);
+  // Written out (not removed) so the deletion itself propagates through
+  // sync — a file simply vanishing from the folder can't be told apart
+  // from "another device hasn't created it yet" by a device that pulls
+  // later, whereas a row with sync_status='deleted' unambiguously can.
+  await syncRecipe(id);
+}
+
+// ── Portions / cook-sequence ────────────────────────────────────────────
+
+export async function getPortions(id: string, servings: number) {
+  return calculatePortions(id, servings);
+}
+
+export async function getCookSequenceFor(id: string) {
+  return { sections: await resolveCookSequence(id) };
+}
+
+// ── Not yet ported (Stage 2+) ──────────────────────────────────────────
+
+export function notAvailableOffline(feature: string): never {
+  throw new Error(`"${feature}" isn't available in offline mode yet — connect to a server to use it.`);
+}
