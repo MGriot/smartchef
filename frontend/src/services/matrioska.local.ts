@@ -31,6 +31,15 @@ export interface PortionCalculationResult {
 
 const MAX_DEPTH = 20; // protezione contro ricorsione infinita
 
+// Sopra/sotto questa soglia, un cambio di porzioni non è più "un po' di
+// più/meno" ma un salto di scala — ingredienti come lievito o spezie non
+// scalano linearmente a quel punto, così come tempi di cottura e dimensioni
+// di teglie/pentole. Cookidoo mostra lo stesso tipo di avviso (oltre alla
+// capacità massima del boccale, che qui non si applica) ogni volta che le
+// porzioni vengono personalizzate oltre la resa originale della ricetta.
+const LARGE_SCALE_FACTOR = 3;
+const SMALL_SCALE_FACTOR = 0.25;
+
 // ── Cook sequence (Kitchen Mode: sub-recipes before the main recipe) ──────
 
 export interface CookSequenceStep {
@@ -40,6 +49,7 @@ export interface CookSequenceStep {
   description: string;
   durationMin: number | null;
   toolIds: UUID[];
+  techniqueIds: UUID[];
   imageUrl: string | null;
   notes: string | null;
 }
@@ -49,9 +59,16 @@ export interface CookSequenceIngredientRef {
   ingredientName: string;
   quantity: number | null;
   unitSymbol: string | null;
+  groupName: string | null;
 }
 
 export interface CookSequenceToolRef {
+  id: UUID;
+  name: string;
+  icon: string | null;
+}
+
+export interface CookSequenceTechniqueRef {
   id: UUID;
   name: string;
   icon: string | null;
@@ -64,6 +81,7 @@ export interface CookSequenceSection {
   steps: CookSequenceStep[];
   ingredients: CookSequenceIngredientRef[];
   tools: CookSequenceToolRef[];
+  techniques: CookSequenceTechniqueRef[];
 }
 
 interface SubRecipeRef {
@@ -84,7 +102,7 @@ async function loadSubRecipeRefs(recipeId: UUID): Promise<SubRecipeRef[]> {
 
 async function loadRecipeStepsRaw(recipeId: UUID): Promise<Array<Record<string, unknown>>> {
   return query(
-    `SELECT id, step_number, title, description, duration_min, tool_ids, image_url, notes
+    `SELECT id, step_number, title, description, duration_min, tool_ids, technique_ids, image_url, notes
      FROM recipe_steps
      WHERE recipe_id = $1
      ORDER BY step_number`,
@@ -101,15 +119,34 @@ async function loadRecipeSteps(recipeId: UUID): Promise<CookSequenceStep[]> {
     description: r.description as string,
     durationMin: (r.duration_min as number) ?? null,
     toolIds: JSON.parse((r.tool_ids as string) ?? '[]'),
+    techniqueIds: JSON.parse((r.technique_ids as string) ?? '[]'),
     imageUrl: (r.image_url as string) ?? null,
     notes: (r.notes as string) ?? null,
   }));
 }
 
+/** Resolves the union of technique ids tagged across a section's own steps
+ *  into name/icon refs — mirrors loadSectionTools() below, just sourced
+ *  from steps[].techniqueIds (an array column on recipe_steps) instead of
+ *  a recipe_tools join table, since technique tagging never got one. */
+async function loadSectionTechniques(steps: CookSequenceStep[]): Promise<CookSequenceTechniqueRef[]> {
+  const ids = new Set<UUID>();
+  for (const step of steps) for (const id of step.techniqueIds) ids.add(id);
+  const refs: CookSequenceTechniqueRef[] = [];
+  for (const id of ids) {
+    const rows = await query<{ id: string; name: string; icon: string | null }>(
+      `SELECT id, name, icon FROM techniques WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    if (rows[0]) refs.push(rows[0]);
+  }
+  return refs;
+}
+
 async function loadSectionIngredients(recipeId: UUID): Promise<CookSequenceIngredientRef[]> {
-  const rows = await query<{ sort_order: number; ingredient_name: string; quantity: number | null; unit_symbol: string | null }>(
+  const rows = await query<{ sort_order: number; ingredient_name: string; quantity: number | null; unit_symbol: string | null; group_name: string | null }>(
     `SELECT ri.sort_order, COALESCE(i.name, sr.title) AS ingredient_name,
-            ri.quantity, u.symbol AS unit_symbol
+            ri.quantity, u.symbol AS unit_symbol, ri.group_name
      FROM recipe_ingredients ri
      LEFT JOIN ingredients i ON i.id = ri.ingredient_id
      LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
@@ -123,6 +160,7 @@ async function loadSectionIngredients(recipeId: UUID): Promise<CookSequenceIngre
     ingredientName: r.ingredient_name,
     quantity: r.quantity,
     unitSymbol: r.unit_symbol,
+    groupName: r.group_name,
   }));
 }
 
@@ -172,6 +210,7 @@ async function resolveCookSequenceRecursive(
     loadSectionIngredients(recipeId),
     loadSectionTools(recipeId),
   ]);
+  const techniques = await loadSectionTechniques(steps);
   sections.push({
     recipeId,
     recipeTitle: recipeRow[0]?.title ?? "?",
@@ -179,6 +218,7 @@ async function resolveCookSequenceRecursive(
     steps,
     ingredients,
     tools,
+    techniques,
   });
 
   return sections;
@@ -410,6 +450,13 @@ export async function calculatePortions(
     0,
     new Set()
   );
+
+  const scaleFactor = baseServings > 0 ? requestedServings / baseServings : 1;
+  if (scaleFactor > LARGE_SCALE_FACTOR || scaleFactor < SMALL_SCALE_FACTOR) {
+    warnings.push(
+      `⚠️ Ricetta scalata di ${scaleFactor.toFixed(2)}x rispetto alla resa originale — i tempi di cottura, le dimensioni di teglie/pentole e alcuni ingredienti (es. lievito, spezie) potrebbero non scalare linearmente. Controlla i passaggi prima di procedere.`
+    );
+  }
 
   const aggregated = aggregateIngredients(ingredients);
 

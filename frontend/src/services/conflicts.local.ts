@@ -236,6 +236,7 @@ interface RawRecipeIngredientRow {
   unit_id?: string | null;
   notes?: string | null;
   is_optional?: number | null;
+  group_name?: string | null;
 }
 
 interface RawRecipeStepRow {
@@ -245,6 +246,7 @@ interface RawRecipeStepRow {
   description?: string;
   duration_min?: number | null;
   tool_ids?: unknown;
+  technique_ids?: unknown;
   notes?: string | null;
   image_url?: string | null;
   step_ingredients?: unknown;
@@ -268,12 +270,12 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
     for (const row of (value as RawRecipeIngredientRow[] | null) ?? []) {
       await query(
         `INSERT INTO recipe_ingredients
-           (id, recipe_id, sort_order, ingredient_id, subtype_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+           (id, recipe_id, sort_order, ingredient_id, subtype_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional, group_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           row.id ?? newId(), entityId, row.sort_order ?? 0, row.ingredient_id ?? null, row.subtype_id ?? null,
           row.sub_recipe_id ?? null, row.quantity ?? null, row.quantity_text ?? null, row.unit_id ?? null,
-          row.notes ?? null, row.is_optional ?? 0,
+          row.notes ?? null, row.is_optional ?? 0, row.group_name ?? null,
         ]
       );
     }
@@ -285,12 +287,12 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
     for (const row of (value as RawRecipeStepRow[] | null) ?? []) {
       await query(
         `INSERT INTO recipe_steps
-           (id, recipe_id, step_number, title, description, duration_min, tool_ids, notes, image_url, step_ingredients)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+           (id, recipe_id, step_number, title, description, duration_min, tool_ids, technique_ids, notes, image_url, step_ingredients)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           row.id ?? newId(), entityId, row.step_number ?? 0, row.title ?? null, row.description ?? '',
-          row.duration_min ?? null, row.tool_ids ?? '[]', row.notes ?? null, row.image_url ?? null,
-          row.step_ingredients ?? '[]',
+          row.duration_min ?? null, row.tool_ids ?? '[]', row.technique_ids ?? '[]', row.notes ?? null,
+          row.image_url ?? null, row.step_ingredients ?? '[]',
         ]
       );
     }

@@ -308,7 +308,7 @@ describe('applyEntityMergeResult', () => {
 
     expect(outcome).toEqual({ appliedFields: ['steps'], unsupportedFields: [], conflictsRecorded: 0 });
     expect(childTables.recipe_steps).toEqual([
-      { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
+      { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', technique_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
     ]);
   });
 
@@ -397,10 +397,10 @@ describe('createEntity', () => {
 
     expect(entityTables.recipes.get('r1')).toEqual({ id: 'r1', title: 'Lasagna' });
     expect(childTables.recipe_steps).toEqual([
-      { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
+      { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', technique_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
     ]);
     expect(childTables.recipe_ingredients).toEqual([
-      { id: 'ri1', recipe_id: 'r1', sort_order: 0, ingredient_id: 'tomato', subtype_id: null, sub_recipe_id: null, quantity: 2, quantity_text: null, unit_id: null, notes: null, is_optional: 0 },
+      { id: 'ri1', recipe_id: 'r1', sort_order: 0, ingredient_id: 'tomato', subtype_id: null, sub_recipe_id: null, quantity: 2, quantity_text: null, unit_id: null, notes: null, is_optional: 0, group_name: null },
     ]);
     expect(childTables.recipe_tools).toEqual([{ recipe_id: 'r1', tool_id: 'pot' }]);
   });

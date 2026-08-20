@@ -80,6 +80,11 @@ export interface RecipeIngredientInput {
   unitId?: string;
   notes?: string;
   isOptional?: boolean;
+  /** Optional "Per il condimento"/"Per l'impasto" style header — ingredients
+   *  sharing the same (non-null) groupName render under one heading in
+   *  sortOrder position, distinct rows with groupName=null render ungrouped.
+   *  See db/migrations/031_recipe_ingredient_groups.sql. */
+  groupName?: string | null;
   translations?: Array<{ lang: string; notes?: string | null }>;
 }
 
@@ -89,6 +94,9 @@ export interface RecipeStepInput {
   description: string;
   durationMin?: number | null;
   toolIds?: string[];
+  /** Cooking technique(s) this step uses (e.g. "Sautéing") — same shape as
+   *  toolIds. See db/migrations/032_recipe_step_technique_ids.sql. */
+  techniqueIds?: string[];
   notes?: string | null;
   imageUrl?: string | null;
   translations?: Array<{ lang: string; title?: string | null; description?: string | null; notes?: string | null }>;
@@ -375,6 +383,7 @@ export async function getRecipe(id: string, lang?: string) {
       translatedNotes,
       durationMin: row.duration_min,
       toolIds: JSON.parse((row.tool_ids as string) ?? '[]'),
+      techniqueIds: JSON.parse((row.technique_ids as string) ?? '[]'),
       notes: row.notes,
       imageUrl: row.image_url,
       stepIngredients: JSON.parse((row.step_ingredients as string) ?? '[]'),
@@ -395,6 +404,26 @@ export async function getRecipe(id: string, lang?: string) {
     tools.push({ id: t.id, name: t.name, icon: t.icon, translated_name: translatedName });
   }
 
+  // ── Techniques ───────────────────────────────────────────────────────
+  // Every technique tagged on any step, resolved once here (not per-step)
+  // so the recipe view can render a tappable technique chip the same way
+  // it does for tools — mirrors the Tools section above exactly, just
+  // sourced from steps[].techniqueIds instead of a recipe_tools join.
+  const techniqueIdSet = new Set<string>();
+  for (const s of steps) for (const tid of s.techniqueIds as string[]) techniqueIdSet.add(tid);
+  const techniques = [];
+  for (const techniqueId of techniqueIdSet) {
+    const t = await queryOne<{ id: string; name: string; icon: string | null }>(
+      `SELECT id, name, icon FROM techniques WHERE id = $1 AND deleted_at IS NULL`,
+      [techniqueId]
+    );
+    if (!t) continue;
+    const translatedName = lang
+      ? (await queryOne<{ name: string }>(`SELECT name FROM technique_translations WHERE technique_id = $1 AND LOWER(language_code) = LOWER($2)`, [t.id, lang]))?.name ?? null
+      : null;
+    techniques.push({ id: t.id, name: t.name, icon: t.icon, translated_name: translatedName });
+  }
+
   return {
     ...recipe,
     tags: tagNames,
@@ -406,6 +435,7 @@ export async function getRecipe(id: string, lang?: string) {
     ingredients,
     steps,
     tools,
+    techniques,
   };
 }
 
@@ -466,11 +496,12 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
       await client.query(
         `INSERT INTO recipe_ingredients
            (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
-            quantity,quantity_text,unit_id,notes,is_optional)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            quantity,quantity_text,unit_id,notes,is_optional,group_name)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [recipeIngredientId, recipeId, ing.sortOrder, ing.ingredientId ?? null,
          ing.subtypeId ?? null, ing.subRecipeId ?? null, ing.quantity ?? null,
-         ing.quantityText ?? null, ing.unitId ?? null, ing.notes ?? null, ing.isOptional ?? false]
+         ing.quantityText ?? null, ing.unitId ?? null, ing.notes ?? null, ing.isOptional ?? false,
+         ing.groupName ?? null]
       );
       await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
     }
@@ -479,11 +510,11 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
       const stepId = newId();
       await client.query(
         `INSERT INTO recipe_steps
-           (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients,technique_ids)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [stepId, recipeId, step.stepNumber, step.title ?? null,
          step.description, step.durationMin ?? null, step.toolIds ?? [], step.notes ?? null,
-         step.imageUrl ?? null, step.stepIngredients ?? []]
+         step.imageUrl ?? null, step.stepIngredients ?? [], step.techniqueIds ?? []]
       );
       await insertStepTranslations(client, stepId, step.translations);
     }
@@ -529,11 +560,12 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
       await client.query(
         `INSERT INTO recipe_ingredients
            (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
-            quantity,quantity_text,unit_id,notes,is_optional)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            quantity,quantity_text,unit_id,notes,is_optional,group_name)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [recipeIngredientId, id, ing.sortOrder, ing.ingredientId ?? null,
          ing.subtypeId ?? null, ing.subRecipeId ?? null, ing.quantity ?? null,
-         ing.quantityText ?? null, ing.unitId ?? null, ing.notes ?? null, ing.isOptional ?? false]
+         ing.quantityText ?? null, ing.unitId ?? null, ing.notes ?? null, ing.isOptional ?? false,
+         ing.groupName ?? null]
       );
       await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
     }
@@ -543,11 +575,11 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
       const stepId = newId();
       await client.query(
         `INSERT INTO recipe_steps
-           (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients,technique_ids)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [stepId, id, step.stepNumber, step.title ?? null,
          step.description, step.durationMin ?? null, step.toolIds ?? [], step.notes ?? null,
-         step.imageUrl ?? null, step.stepIngredients ?? []]
+         step.imageUrl ?? null, step.stepIngredients ?? [], step.techniqueIds ?? []]
       );
       await insertStepTranslations(client, stepId, step.translations);
     }

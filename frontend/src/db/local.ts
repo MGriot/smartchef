@@ -336,6 +336,11 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
   notes            TEXT,
   image_url        TEXT,
   step_ingredients TEXT DEFAULT '[]',
+  -- Cooking technique(s) this step uses (e.g. "Sautéing") — same
+  -- array-of-id shape as tool_ids above, see
+  -- db/migrations/032_recipe_step_technique_ids.sql for the Postgres side.
+  -- Backfilled onto pre-existing local DBs via addColumnIfMissing() below.
+  technique_ids    TEXT DEFAULT '[]',
   created_at       TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_recipe_steps_recipe ON recipe_steps(recipe_id);
@@ -363,6 +368,12 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
   unit_id       TEXT REFERENCES units(id),
   notes         TEXT,
   is_optional   INTEGER DEFAULT 0,
+  -- Optional "Per il condimento"/"Per l'impasto" style header for a run of
+  -- consecutive ingredients — see db/migrations/031_recipe_ingredient_groups.sql
+  -- for the Postgres side of this same column. NULL = no group (unchanged
+  -- behavior). Also backfilled onto pre-existing local DBs via
+  -- addColumnIfMissing() below, since this table already shipped without it.
+  group_name    TEXT,
   created_at    TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
@@ -466,6 +477,20 @@ INSERT INTO ingredient_categories (id, name, icon, color, sort_order) VALUES
 
 let initPromise: Promise<void> | null = null;
 
+// SCHEMA_SQL's `CREATE TABLE IF NOT EXISTS` is a no-op against a database
+// that already has the table from an earlier app version — a real device
+// that installed standalone mode before a column existed won't retroactively
+// get it just because SCHEMA_SQL's text changed; the table's already there,
+// so the CREATE never runs again. Each column added after a table first
+// shipped needs one call here, alongside the flat schema itself.
+async function addColumnIfMissing(db: SQLiteDBConnection, table: string, column: string, ddlType: string): Promise<void> {
+  const info = await db.query(`PRAGMA table_info(${table})`);
+  const exists = (info.values ?? []).some((row: { name?: string }) => row.name === column);
+  if (!exists) {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddlType}`);
+  }
+}
+
 /** Idempotent — safe to call on every app start. Creates the schema if
  *  this is a brand-new local DB, seeds a starter catalog on the very
  *  first run only. */
@@ -474,6 +499,8 @@ export async function initLocalSchema(): Promise<void> {
   initPromise = (async () => {
     const db = await getDb();
     await db.execute(SCHEMA_SQL);
+    await addColumnIfMissing(db, 'recipe_ingredients', 'group_name', 'TEXT');
+    await addColumnIfMissing(db, 'recipe_steps', 'technique_ids', "TEXT DEFAULT '[]'");
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {
       await db.execute(SEED_SQL);
