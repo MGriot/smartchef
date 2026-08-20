@@ -115,20 +115,49 @@ export interface ResolvedConflict {
 // column name can't be a bound SQL parameter, each is still checked against
 // an explicit allowlist before being interpolated, rather than trusted blind.
 
-const TABLE_BY_ENTITY: Record<string, string> = {
-  recipe: 'recipes',
-  ingredient: 'ingredients',
-  tool: 'tools',
-  tag: 'tags',
-  technique: 'techniques',
-};
+interface EntityConfig {
+  table: string;
+  nameColumn: string;
+  scalarFields: Set<string>;
+}
 
-const NAME_COLUMN_BY_ENTITY: Record<string, string> = {
-  recipe: 'title',
-  ingredient: 'name',
-  tool: 'name',
-  tag: 'name',
-  technique: 'name',
+// One entry per conflictable entity type — table, display-name column, and
+// the allowlisted scalar fields applyResolvedConflict() may write. Kept as
+// a single map (rather than parallel per-concern maps) so a new entity type
+// is one entry, not four scattered edits.
+const ENTITY_CONFIG: Record<string, EntityConfig> = {
+  recipe: {
+    table: 'recipes',
+    nameColumn: 'title',
+    scalarFields: new Set([
+      'title', 'description', 'difficulty', 'servings', 'prep_time_min', 'cook_time_min',
+      'rest_time_min', 'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url',
+      'source_url', 'is_component', 'language_code',
+    ]),
+  },
+  ingredient: {
+    table: 'ingredients',
+    nameColumn: 'name',
+    scalarFields: new Set([
+      'name', 'description', 'icon', 'calories_kcal', 'protein_g', 'carbs_g',
+      'fat_g', 'fiber_g', 'sugar_g', 'sodium_mg', 'category_id',
+    ]),
+  },
+  tool: {
+    table: 'tools',
+    nameColumn: 'name',
+    scalarFields: new Set(['name', 'category', 'description', 'icon']),
+  },
+  tag: {
+    table: 'tags',
+    nameColumn: 'name',
+    scalarFields: new Set(['name', 'group_name', 'color', 'icon', 'sort_order']),
+  },
+  technique: {
+    table: 'techniques',
+    nameColumn: 'name',
+    scalarFields: new Set(['name', 'description', 'icon']),
+  },
 };
 
 // recipes.steps/ingredients/tools are normalized child tables, not columns
@@ -142,29 +171,14 @@ const ARRAY_FIELDS = new Set(['steps', 'ingredients', 'tools']);
  *  resolution button for yet, without duplicating this list. */
 export const ARRAY_FIELD_NAMES: ReadonlySet<string> = ARRAY_FIELDS;
 
-const SCALAR_FIELDS_BY_ENTITY: Record<string, Set<string>> = {
-  recipe: new Set([
-    'title', 'description', 'difficulty', 'servings', 'prep_time_min', 'cook_time_min',
-    'rest_time_min', 'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url',
-    'source_url', 'is_component', 'language_code',
-  ]),
-  ingredient: new Set([
-    'name', 'description', 'icon', 'calories_kcal', 'protein_g', 'carbs_g',
-    'fat_g', 'fiber_g', 'sugar_g', 'sodium_mg', 'category_id',
-  ]),
-  tool: new Set(['name', 'category', 'description', 'icon']),
-  tag: new Set(['name', 'group_name', 'color', 'icon', 'sort_order']),
-  technique: new Set(['name', 'description', 'icon']),
-};
-
 /** Writes a resolved conflict's chosen value onto the entity's own row and
  *  bumps updated_at, so the change rides the next normal sync/push per
  *  ticket 03's dirty-tracking — same as any other local edit. Scalar
  *  fields only; the three whole-array recipe fields throw (see ARRAY_FIELDS
  *  above) rather than silently doing the wrong thing. */
 export async function applyResolvedConflict(resolved: ResolvedConflict): Promise<void> {
-  const table = TABLE_BY_ENTITY[resolved.entityType];
-  if (!table) {
+  const config = ENTITY_CONFIG[resolved.entityType];
+  if (!config) {
     throw new Error(`applyResolvedConflict: unknown entity type '${resolved.entityType}'`);
   }
   if (ARRAY_FIELDS.has(resolved.fieldName)) {
@@ -173,20 +187,18 @@ export async function applyResolvedConflict(resolved: ResolvedConflict): Promise
       `nested delete+insert path the future Sync Engine will use, not a plain column UPDATE. Not yet implemented.`
     );
   }
-  const allowedFields = SCALAR_FIELDS_BY_ENTITY[resolved.entityType];
-  if (!allowedFields?.has(resolved.fieldName)) {
+  if (!config.scalarFields.has(resolved.fieldName)) {
     throw new Error(`applyResolvedConflict: '${resolved.fieldName}' is not a recognized scalar field on '${resolved.entityType}'`);
   }
-  await query(`UPDATE ${table} SET ${resolved.fieldName} = $1, updated_at = now() WHERE id = $2`, [resolved.chosenValue, resolved.entityId]);
+  await query(`UPDATE ${config.table} SET ${resolved.fieldName} = $1, updated_at = now() WHERE id = $2`, [resolved.chosenValue, resolved.entityId]);
 }
 
 /** The entity's own display name (title/name column), for the Conflicts
  *  list UI. Null if the entity type is unrecognized or the row is gone. */
 export async function getEntityDisplayName(entityType: string, entityId: string): Promise<string | null> {
-  const table = TABLE_BY_ENTITY[entityType];
-  const nameColumn = NAME_COLUMN_BY_ENTITY[entityType];
-  if (!table || !nameColumn) return null;
-  const row = await queryOne<{ name: unknown }>(`SELECT ${nameColumn} as name FROM ${table} WHERE id = $1`, [entityId]);
+  const config = ENTITY_CONFIG[entityType];
+  if (!config) return null;
+  const row = await queryOne<{ name: unknown }>(`SELECT ${config.nameColumn} as name FROM ${config.table} WHERE id = $1`, [entityId]);
   return row ? String(row.name) : null;
 }
 

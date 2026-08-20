@@ -110,6 +110,17 @@ export async function chooseElectronSyncFolder(): Promise<string | null> {
   return chosen;
 }
 
+/** Un-persists the chosen sync folder entirely — for a "Remove"/"undo" step
+ *  in a picker UI (e.g. ServerConnect.tsx's onboarding flow) where the user
+ *  picked a folder via chooseElectronSyncFolder() but then backed out
+ *  before it should ever take effect. Distinct from simply not calling
+ *  chooseElectronSyncFolder() in the first place, since that call already
+ *  persisted the choice. */
+export async function clearElectronSyncFolder(): Promise<void> {
+  cachedElectronFolder = null;
+  await Preferences.remove({ key: ELECTRON_FOLDER_KEY });
+}
+
 /** isomorphic-git's `dir` — private storage on Android, or the user-chosen
  *  Electron path. Throws on Electron if no folder has been chosen yet
  *  (callers must run chooseElectronSyncFolder() first, during onboarding). */
@@ -262,6 +273,26 @@ async function rename(oldPath: string, newPath: string): Promise<void> {
   await Filesystem.rename({ from: normalize(oldPath), to: normalize(newPath), directory: BASE_DIR });
 }
 
+// isomorphic-git's FileSystem wrapper eagerly does `fs[command].bind(fs)`
+// for every command in its required list — including readlink/symlink —
+// at construction time, before any git operation runs, regardless of
+// whether that particular operation would ever touch a symlink. Without
+// these two, every single isomorphic-git call (git.init, commit,
+// resolveRef, statusMatrix, ...) crashes immediately with "Cannot read
+// properties of undefined (reading 'bind')", since `fs.readlink` is
+// `undefined` and `undefined.bind` throws. This app's git working copies
+// never contain symlinks (only recipes/ingredients JSON plus git's own
+// plain objects/refs) and stat() above never reports isSymbolicLink() as
+// true, so isomorphic-git never actually invokes these beyond the initial
+// bind — they only need to exist, not do anything useful.
+async function readlink(path: string): Promise<string> {
+  throw new NotFoundError(path);
+}
+
+async function symlink(_target: string, path: string): Promise<void> {
+  throw new NotFoundError(path);
+}
+
 /** Call once before any git operation. Mobile: just ensures /SmartChef
  *  exists under private storage — no permission prompt needed, unlike the
  *  old Directory.Documents-based path this replaced; Directory.Data is
@@ -277,5 +308,5 @@ export async function ensureSyncFolderPermission(): Promise<void> {
 }
 
 export const gitfs = {
-  promises: { readFile, writeFile, unlink, readdir, mkdir, rmdir, stat, lstat: stat, rename },
+  promises: { readFile, writeFile, unlink, readdir, mkdir, rmdir, stat, lstat: stat, rename, readlink, symlink },
 };

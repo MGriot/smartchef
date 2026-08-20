@@ -207,15 +207,24 @@ function ConflictsCard() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = async () => {
-    const { listPendingConflicts, getEntityDisplayName } = await import('../services/conflicts.local');
-    const pending = await listPendingConflicts();
-    const withNames = await Promise.all(
-      pending.map(async (c) => ({
-        ...c,
-        entityName: (await getEntityDisplayName(c.entityType, c.entityId)) ?? `${c.entityType} ${c.entityId.slice(0, 8)}…`,
-      }))
-    );
-    setConflicts(withNames);
+    try {
+      const { listPendingConflicts, getEntityDisplayName } = await import('../services/conflicts.local');
+      const pending = await listPendingConflicts();
+      const withNames = await Promise.all(
+        pending.map(async (c) => ({
+          ...c,
+          entityName: (await getEntityDisplayName(c.entityType, c.entityId)) ?? `${c.entityType} ${c.entityId.slice(0, 8)}…`,
+        }))
+      );
+      setConflicts(withNames);
+    } catch (err) {
+      // Stays invisible (conflicts left null, same as the loading state)
+      // rather than showing an error card for a feature that's supposed to
+      // render nothing until there's something real to show — but at least
+      // doesn't crash the rest of the Account page over an unhandled
+      // rejection the way an unguarded refresh() would.
+      console.error('ConflictsCard: could not load pending conflicts', err);
+    }
   };
 
   useEffect(() => {
@@ -359,26 +368,16 @@ function FolderSyncCard() {
     setChoosingFolder(true);
     setError(null);
     try {
-      if (electron) {
-        const { chooseElectronSyncFolder } = await import('../lib/gitfs');
-        const chosen = await chooseElectronSyncFolder();
-        if (chosen) {
+      const { pickAndPersistSyncFolder } = await import('../lib/syncFolderPicker');
+      const picked = await pickAndPersistSyncFolder();
+      if (picked) {
+        if (electron) {
           const { resetSyncRepoInit } = await import('../lib/sync/gitSync');
           resetSyncRepoInit();
-          setFolderPath(chosen);
-          await resyncAllLocalData();
-          await handleSyncNow();
         }
-      } else {
-        const { pickTree } = await import('../lib/safMirrorBridge');
-        const { setMirrorTree } = await import('../lib/sync/androidMirror');
-        const handle = await pickTree();
-        if (handle) {
-          await setMirrorTree(handle.uri, handle.displayName);
-          setFolderPath(handle.displayName);
-          await resyncAllLocalData();
-          await handleSyncNow();
-        }
+        setFolderPath(picked.displayName);
+        await resyncAllLocalData();
+        await handleSyncNow();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not change folder');

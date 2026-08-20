@@ -93,6 +93,16 @@ export async function setMirrorTree(treeUri: string, treeDisplayName: string): P
   });
 }
 
+/** Un-persists the chosen mirror tree entirely — for a "Remove"/"undo" step
+ *  in a picker UI (e.g. ServerConnect.tsx's onboarding flow) where the user
+ *  picked a tree via setMirrorTree() but then backed out before it should
+ *  ever take effect. Distinct from simply not calling setMirrorTree() in
+ *  the first place, since that call already persisted the choice. */
+export async function clearMirrorTree(): Promise<void> {
+  cachedState = null;
+  await Preferences.remove({ key: STATE_KEY });
+}
+
 /** Called once per object immediately after a successful upload/fetch —
  *  not batched at the end of a push/pull pass — so a partway failure still
  *  remembers whichever objects made it through before the failure, rather

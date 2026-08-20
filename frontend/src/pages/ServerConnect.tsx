@@ -27,25 +27,24 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
     setChoosingFolder(true);
     setError(null);
     try {
-      const { isElectron } = await import('../lib/electronBridge');
-      if (isElectron()) {
-        const { chooseElectronSyncFolder } = await import('../lib/gitfs');
-        const chosen = await chooseElectronSyncFolder();
-        if (chosen) setSyncFolderName(chosen);
-      } else {
-        const { pickTree } = await import('../lib/safMirrorBridge');
-        const { setMirrorTree } = await import('../lib/sync/androidMirror');
-        const handle = await pickTree();
-        if (handle) {
-          await setMirrorTree(handle.uri, handle.displayName);
-          setSyncFolderName(handle.displayName);
-        }
-      }
+      const { pickAndPersistSyncFolder } = await import('../lib/syncFolderPicker');
+      const picked = await pickAndPersistSyncFolder();
+      if (picked) setSyncFolderName(picked.displayName);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not choose a sync folder');
     } finally {
       setChoosingFolder(false);
     }
+  };
+
+  // The picker above already persisted the choice (both platforms' pickers
+  // do that as a side effect) — undoing it in the UI alone isn't enough,
+  // or submitting would wire up sync against a folder the user thought
+  // they'd backed out of.
+  const handleRemoveSyncFolder = async () => {
+    setSyncFolderName(null);
+    const { clearPersistedSyncFolder } = await import('../lib/syncFolderPicker');
+    await clearPersistedSyncFolder().catch(() => {});
   };
 
   const handleStartOffline = async (e: React.FormEvent) => {
@@ -189,7 +188,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                 {syncFolderName ? (
                   <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2.5 border border-zinc-200">
                     <span className="text-xs font-bold text-zinc-700 truncate">{syncFolderName}</span>
-                    <button type="button" onClick={() => setSyncFolderName(null)} className="text-[11px] font-black text-zinc-400 hover:text-red-600">Remove</button>
+                    <button type="button" onClick={handleRemoveSyncFolder} className="text-[11px] font-black text-zinc-400 hover:text-red-600">Remove</button>
                   </div>
                 ) : (
                   <div className="flex gap-2">
