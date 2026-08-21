@@ -275,6 +275,12 @@ const RecipeDetail: React.FC = () => {
 
   // Edit-mode draft state
   const [draft, setDraft] = useState<Partial<Recipe>>({});
+  // Raw-text edit: a straight JSON view of `draft` for fast copy/paste
+  // editing, alternative to the GUI form below — same `draft` state and
+  // `handleSave`, just a different way of producing edits into it.
+  const [rawTextMode, setRawTextMode] = useState(false);
+  const [rawText, setRawText] = useState('');
+  const [rawTextError, setRawTextError] = useState<string | null>(null);
   const [allTools, setAllTools] = useState<Tool[]>([]);
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
@@ -544,7 +550,16 @@ const RecipeDetail: React.FC = () => {
   };
 
   /* ── Save recipe (edit mode) ────────────────────────────────────── */
-  const handleSave = async () => {
+  // Captured under a different name so handleSave below can shadow `draft`
+  // locally (see its own comment) without a TDZ conflict against the outer
+  // state binding of the same name.
+  const outerDraft = draft;
+  // Accepts an explicit draft (raw-text mode's handleSaveClick, right after
+  // parsing new JSON) so a save can never race the setDraft() that would
+  // otherwise need a render to land before this function's own `draft`
+  // closure saw it.
+  const handleSave = async (explicitDraft?: Partial<Recipe>) => {
+    const draft = explicitDraft ?? outerDraft;
     if (!id || !draft.title) return;
     setSaving(true);
     try {
@@ -597,15 +612,20 @@ const RecipeDetail: React.FC = () => {
         toolIds: (draft.tools || []).map(t => t.id),
       };
 
-      await apiFetch(`/api/recipes/${id}`, {
+      const res = await apiFetch(`/api/recipes/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        const result = await res.json().catch(() => ({}));
+        throw new Error(result.error ? JSON.stringify(result.error) : `Save failed (${res.status})`);
+      }
       await fetchRecipe();
       setMode('view');
     } catch (err) {
       console.error('Save failed:', err);
+      alert(err instanceof Error ? err.message : 'Save failed.');
     } finally {
       setSaving(false);
     }
@@ -981,6 +1001,45 @@ const RecipeDetail: React.FC = () => {
   if (mode === 'edit') {
     const updateDraft = (field: string, value: unknown) =>
       setDraft(prev => ({ ...prev, [field]: value }));
+
+    const enterRawTextMode = () => {
+      setRawText(JSON.stringify(draft, null, 2));
+      setRawTextError(null);
+      setRawTextMode(true);
+    };
+    // Returns the parsed draft (and leaves raw mode active with an error
+    // shown) on invalid JSON — null in that case — so callers — the toggle
+    // button and the Save button both — can bail out instead of silently
+    // discarding whatever the user typed.
+    const applyRawText = (): Partial<Recipe> | null => {
+      try {
+        const parsed = JSON.parse(rawText);
+        setDraft(parsed);
+        setRawTextError(null);
+        return parsed;
+      } catch (err) {
+        setRawTextError(err instanceof Error ? err.message : 'Invalid JSON');
+        return null;
+      }
+    };
+    const handleSaveClick = () => {
+      if (rawTextMode) {
+        const parsed = applyRawText();
+        if (!parsed) return;
+        setRawTextMode(false);
+        handleSave(parsed);
+        return;
+      }
+      handleSave();
+    };
+    const toggleRawText = () => {
+      if (rawTextMode) {
+        if (!applyRawText()) return;
+        setRawTextMode(false);
+      } else {
+        enterRawTextMode();
+      }
+    };
     const updateStep = (idx: number, field: string, value: unknown) =>
       setDraft(prev => ({
         ...prev,
@@ -1147,12 +1206,21 @@ const RecipeDetail: React.FC = () => {
       <div className="min-h-screen bg-[#fafaf5] font-body">
         {/* Header */}
         <header className="bg-[#fafaf5]/90 backdrop-blur-md sticky top-0 z-50 border-b border-zinc-200/60 px-8 py-4 flex items-center justify-between">
-          <button onClick={() => { setDraft(recipe); setMode('view'); }} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-800 transition-colors">
+          <button onClick={() => { setDraft(recipe); setRawTextMode(false); setRawTextError(null); setMode('view'); }} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-800 transition-colors">
             <span className="material-symbols-outlined">close</span>
             <span className="text-sm font-bold">{t('common.cancel')}</span>
           </button>
           <h2 className="text-lg font-headline font-bold text-zinc-800">{t('recipeDetail.editRecipe')}</h2>
           <div className="flex items-center gap-3">
+            <button
+              onClick={toggleRawText}
+              disabled={saving}
+              title={rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
+              className="flex items-center gap-2 px-4 py-2 text-zinc-500 hover:bg-zinc-100 rounded-full font-bold text-sm transition-all disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-sm">{rawTextMode ? 'edit_note' : 'code'}</span>
+              {rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
+            </button>
             <button
               onClick={handleDelete}
               disabled={saving}
@@ -1162,7 +1230,7 @@ const RecipeDetail: React.FC = () => {
               {t('common.delete')}
             </button>
             <button
-              onClick={handleSave}
+              onClick={handleSaveClick}
               disabled={saving}
               className="flex items-center gap-2 px-5 py-2 bg-primary text-white rounded-full font-bold text-sm hover:bg-primary/90 transition-all disabled:opacity-50"
             >
@@ -1172,6 +1240,20 @@ const RecipeDetail: React.FC = () => {
           </div>
         </header>
 
+        {rawTextMode ? (
+          <main className="max-w-4xl mx-auto px-6 py-10 space-y-4">
+            <p className="text-sm text-zinc-500">{t('recipeDetail.rawTextEditHint')}</p>
+            {rawTextError && (
+              <p className="text-sm text-red-600 font-medium bg-red-50 rounded-xl px-4 py-3">{rawTextError}</p>
+            )}
+            <textarea
+              value={rawText}
+              onChange={e => setRawText(e.target.value)}
+              spellCheck={false}
+              className="w-full h-[70vh] rounded-3xl border border-zinc-200 bg-white p-6 font-mono text-xs leading-relaxed focus:ring-2 focus:ring-primary/20 focus:outline-none"
+            />
+          </main>
+        ) : (
         <main className="max-w-4xl mx-auto px-6 py-10 space-y-8">
           {/* Title & description */}
           <div className="bg-white rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
@@ -1711,6 +1793,7 @@ const RecipeDetail: React.FC = () => {
             </div>
           </div>
         </main>
+        )}
       </div>
     );
   }

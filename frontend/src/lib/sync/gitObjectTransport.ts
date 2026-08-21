@@ -78,6 +78,51 @@ export const DEFAULT_REMOTE_TRACKING_REF_PATH = '.git/refs/remotes/sync-folder/m
  *  and risk the two drifting apart. */
 export const DEFAULT_REMOTE_TRACKING_REF_NAME = 'refs/remotes/sync-folder/main';
 
+// Every object transfer used to be one fully-sequential await per object —
+// correct, but on a transport where a single exists()/readFile()/writeFile()
+// round-trip has real per-call overhead (Android's Storage Access Framework
+// especially; Electron's IPC-to-main-process less so but still nonzero),
+// a sync cycle touching hundreds of loose objects (this design never packs
+// or garbage-collects — see listLocalObjectPaths()'s docstring) meant
+// hundreds of round-trips in series. Running a bounded number of them
+// concurrently instead is the actual fix for "sync takes a long time."
+//
+// Results land at their *original* index, not completion order — so a
+// caller that cares about the input ordering (existing tests assert an
+// exact uploadedObjectPaths array) still gets it, even though the workers
+// below finish in whatever order their I/O actually resolves.
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
+/** How many objects a push/pull touches at once — tuned down, not up:
+ *  Android's SAF backend serializes access to the same tree from its own
+ *  side in places, so pushing this much higher stops helping and just adds
+ *  contention. Electron's direct-fs transport would tolerate more, but one
+ *  shared constant is simpler than a per-platform tune and this is already
+ *  a large win over concurrency 1. */
+const TRANSFER_CONCURRENCY = 8;
+
+export interface TransferProgress {
+  phase: 'push' | 'pull';
+  done: number;
+  total: number;
+}
+
 async function existsLocally(fs: LocalFs, dir: string, relativePath: string): Promise<boolean> {
   try {
     await fs.stat(`${dir}/${relativePath}`);
@@ -133,22 +178,36 @@ export interface PushResult {
 }
 
 /** Uploads this device's Hidden Clone up to the Sync Folder — objects
- *  first, then the ref/HEAD. A failure partway through the objects loop
- *  (a real transport failure, not "nothing to upload") is deliberately NOT
- *  caught here — it must propagate so refs never get written after a
- *  partial object upload, leaving the remote exactly as consistent as
- *  before this call for a puller to see. */
-export async function pushObjectsAndRefs(fs: LocalFs, localDir: string, remote: RemoteTransport): Promise<PushResult> {
+ *  first (up to TRANSFER_CONCURRENCY at once — see mapWithConcurrency()'s
+ *  docstring for why this used to be one at a time), then the ref/HEAD. A
+ *  failure partway through the objects loop (a real transport failure, not
+ *  "nothing to upload") is deliberately NOT caught here — it must
+ *  propagate so refs never get written after a partial object upload,
+ *  leaving the remote exactly as consistent as before this call for a
+ *  puller to see. */
+export async function pushObjectsAndRefs(
+  fs: LocalFs,
+  localDir: string,
+  remote: RemoteTransport,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<PushResult> {
   const localObjectPaths = await listLocalObjectPaths(fs, localDir);
-  const uploadedObjectPaths: string[] = [];
+  let done = 0;
 
-  for (const relativePath of localObjectPaths) {
-    if (await remote.exists(relativePath)) continue; // immutable, content-addressed — already there is already done
-    const bytes = await readLocalBytes(fs, localDir, relativePath);
-    if (!bytes) continue; // listed a moment ago but gone now — tolerate the race, nothing to upload
-    await remote.writeFile(relativePath, bytes);
-    uploadedObjectPaths.push(relativePath);
-  }
+  const outcomes = await mapWithConcurrency(localObjectPaths, TRANSFER_CONCURRENCY, async (relativePath) => {
+    let uploaded: string | null = null;
+    if (!(await remote.exists(relativePath))) { // immutable, content-addressed — already there is already done
+      const bytes = await readLocalBytes(fs, localDir, relativePath);
+      if (bytes) { // listed a moment ago but gone now — tolerate the race, nothing to upload
+        await remote.writeFile(relativePath, bytes);
+        uploaded = relativePath;
+      }
+    }
+    done++;
+    onProgress?.({ phase: 'push', done, total: localObjectPaths.length });
+    return uploaded;
+  });
+  const uploadedObjectPaths = outcomes.filter((p): p is string => p !== null);
 
   const refBytes = await readLocalBytes(fs, localDir, REF_PATH);
   if (!refBytes) {
@@ -187,25 +246,33 @@ export async function pullObjectsAndRefs(
   fs: LocalFs,
   localDir: string,
   remote: RemoteTransport,
-  trackingRefPath: string = DEFAULT_REMOTE_TRACKING_REF_PATH
+  trackingRefPath: string = DEFAULT_REMOTE_TRACKING_REF_PATH,
+  onProgress?: (progress: TransferProgress) => void
 ): Promise<PullResult> {
   if (!(await remote.exists(REF_PATH))) {
     return { pulled: false, objectsFetched: 0, fetchedObjectPaths: [] };
   }
 
-  const fetchedObjectPaths: string[] = [];
-  const prefixes = await remote.listDir('.git/objects');
-  for (const prefix of prefixes) {
-    if (!/^[0-9a-f]{2}$/.test(prefix)) continue;
-    const names = await remote.listDir(`.git/objects/${prefix}`);
-    for (const name of names) {
-      const relativePath = `.git/objects/${prefix}/${name}`;
-      if (await existsLocally(fs, localDir, relativePath)) continue;
+  const prefixes = (await remote.listDir('.git/objects')).filter((p) => /^[0-9a-f]{2}$/.test(p));
+  // One listDir call per 2-hex prefix directory (up to 256 of them) used to
+  // happen in series too — gathered concurrently for the same reason the
+  // object transfers below are.
+  const nameLists = await mapWithConcurrency(prefixes, TRANSFER_CONCURRENCY, (prefix) => remote.listDir(`.git/objects/${prefix}`));
+  const candidatePaths = prefixes.flatMap((prefix, i) => nameLists[i].map((name) => `.git/objects/${prefix}/${name}`));
+
+  let done = 0;
+  const outcomes = await mapWithConcurrency(candidatePaths, TRANSFER_CONCURRENCY, async (relativePath) => {
+    let fetched: string | null = null;
+    if (!(await existsLocally(fs, localDir, relativePath))) {
       const bytes = await remote.readFile(relativePath);
       await fs.writeFile(`${localDir}/${relativePath}`, bytes);
-      fetchedObjectPaths.push(relativePath);
+      fetched = relativePath;
     }
-  }
+    done++;
+    onProgress?.({ phase: 'pull', done, total: candidatePaths.length });
+    return fetched;
+  });
+  const fetchedObjectPaths = outcomes.filter((p): p is string => p !== null);
 
   const refBytes = await remote.readFile(REF_PATH);
   await fs.writeFile(`${localDir}/${trackingRefPath}`, refBytes);

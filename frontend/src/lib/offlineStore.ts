@@ -39,6 +39,11 @@ async function getDb(): Promise<SQLiteDBConnection> {
         body TEXT,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS downloaded_recipes (
+        id TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        downloaded_at TEXT NOT NULL
+      );
     `);
     return database;
   })();
@@ -101,6 +106,63 @@ export async function getCacheTimestamp(): Promise<string | null> {
 
 export async function hasCachedData(): Promise<boolean> {
   return (await getCacheTimestamp()) !== null;
+}
+
+// ── Per-recipe offline downloads ────────────────────────────────────────
+// A second, opt-in layer on top of the whole-library snapshot cache above:
+// snapshot_cache holds list-view fields for every recipe (title,
+// coverImageUrl, etc. — see api.ts's OFFLINE_CREATABLE_ENTITIES for the
+// exact shape), not the full ingredients/steps/tools detail GET
+// /api/recipes/:id normally returns. A recipe explicitly downloaded here
+// stores that full detail response instead, so its detail page still works
+// offline even for recipes the whole-library cache never captured in full.
+// Doesn't touch snapshot_cache or the outbox — independent, additive, and
+// safe to clear without affecting either.
+
+export async function downloadRecipeOffline(recipe: { id: string } & Record<string, unknown>): Promise<void> {
+  const db = await getDb();
+  await db.run(
+    `INSERT INTO downloaded_recipes (id, data, downloaded_at) VALUES (?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET data=excluded.data, downloaded_at=excluded.downloaded_at`,
+    [recipe.id, JSON.stringify(recipe), new Date().toISOString()]
+  );
+}
+
+export async function removeDownloadedRecipe(id: string): Promise<void> {
+  const db = await getDb();
+  await db.run('DELETE FROM downloaded_recipes WHERE id = ?', [id]);
+}
+
+export async function isRecipeDownloaded(id: string): Promise<boolean> {
+  const db = await getDb();
+  const result = await db.query('SELECT 1 FROM downloaded_recipes WHERE id = ?', [id]);
+  return (result.values?.length ?? 0) > 0;
+}
+
+export async function getDownloadedRecipe<T = any>(id: string): Promise<T | null> {
+  const db = await getDb();
+  const result = await db.query('SELECT data FROM downloaded_recipes WHERE id = ?', [id]);
+  const row = result.values?.[0];
+  return row ? JSON.parse(row.data) : null;
+}
+
+export interface DownloadedRecipeSummary {
+  id: string;
+  downloadedAt: string;
+  title: string;
+  coverImageUrl: string | null;
+}
+
+/** For the Downloads management page — doesn't parse full recipe bodies
+ *  beyond the two display fields it needs, so it stays cheap even with a
+ *  large number of downloads. */
+export async function listDownloadedRecipes(): Promise<DownloadedRecipeSummary[]> {
+  const db = await getDb();
+  const result = await db.query('SELECT id, data, downloaded_at FROM downloaded_recipes ORDER BY downloaded_at DESC');
+  return (result.values ?? []).map((row: any) => {
+    const data = JSON.parse(row.data);
+    return { id: row.id, downloadedAt: row.downloaded_at, title: data.translated_title || data.title, coverImageUrl: data.coverImageUrl ?? data.cover_image_url ?? null };
+  });
 }
 
 // ── Outbox (write side) ─────────────────────────────────────────────────

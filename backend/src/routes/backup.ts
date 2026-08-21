@@ -11,12 +11,14 @@
 
 import { Router, Request, Response } from "express";
 import { buildFullSnapshot, mergeSnapshot, Snapshot } from "../services/folder-sync.service";
+import { embedSnapshotImages } from "../services/backupImages.service";
 
 export const backupRouter = Router();
 
 // GET /backup/export
 backupRouter.get("/export", async (_req: Request, res: Response) => {
   const snapshot = await buildFullSnapshot();
+  await embedSnapshotImages(snapshot);
   res.json({ data: snapshot });
 });
 

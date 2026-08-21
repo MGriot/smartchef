@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
+import SynonymsEditor from '../components/SynonymsEditor';
 import TagPicker from '../components/TagPicker';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const INGREDIENT_ICONS = [
   'FaEgg', 'FaCarrot', 'FaAppleWhole', 'FaFish', 'FaBacon',
@@ -22,6 +25,12 @@ export default function LibraryIngredients() {
   const [search, setSearch] = useState('');
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewingIng, setViewingIng] = useState<any>(null);
+  const [mergingIng, setMergingIng] = useState<any>(null);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [mergeQuery, setMergeQuery] = useState('');
+  const [merging, setMerging] = useState(false);
 
   // Modals state
   const [showModal, setShowModal] = useState(false);
@@ -30,7 +39,8 @@ export default function LibraryIngredients() {
   // Ingredient form
   const [editingIng, setEditingIng] = useState<any>(null);
   const emptyNutrition = { caloriesKcal: '', proteinG: '', carbsG: '', fatG: '', fiberG: '', sugarG: '', sodiumMg: '' };
-  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], seasonalMonths: [] as number[], nutrition: { ...emptyNutrition } });
+  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], seasonalMonths: [] as number[], synonyms: [] as string[], parentIngredientId: null as string | null, nutrition: { ...emptyNutrition } });
+  const [parentQuery, setParentQuery] = useState('');
   const [translations, setTranslations] = useState<{lang: string, text: string}[]>([]);
 
   // Category form
@@ -70,7 +80,8 @@ export default function LibraryIngredients() {
     const q = search.trim().toLowerCase();
     if (q) {
       const inName = ing.name?.toLowerCase().includes(q) || ing.translated_name?.toLowerCase().includes(q);
-      if (!inName) return false;
+      const inSynonyms = (ing.synonyms || []).some((s: string) => s.toLowerCase().includes(q));
+      if (!inName && !inSynonyms) return false;
     }
     if (activeTagFilters.length > 0) {
       const ingTagIds = (ing.tags || []).map((t: any) => t.id);
@@ -98,6 +109,8 @@ export default function LibraryIngredients() {
         imageUrls: ing.image_urls || [],
         tagIds: (ing.tags || []).map((t: any) => t.id),
         seasonalMonths: ing.seasonal_months || [],
+        synonyms: ing.synonyms || [],
+        parentIngredientId: ing.parent_ingredient_id ?? null,
         nutrition: {
           caloriesKcal: ing.calories_kcal ?? '',
           proteinG: ing.protein_g ?? '',
@@ -109,6 +122,7 @@ export default function LibraryIngredients() {
         },
       });
       setTranslations(ing.translations || []);
+      setParentQuery(ing.parent_name || '');
     } else {
       setEditingIng(null);
       setForm({
@@ -119,9 +133,12 @@ export default function LibraryIngredients() {
         imageUrls: [],
         tagIds: [],
         seasonalMonths: [],
+        synonyms: [],
+        parentIngredientId: null,
         nutrition: { ...emptyNutrition },
       });
       setTranslations([]);
+      setParentQuery('');
     }
     setShowModal(true);
   };
@@ -172,6 +189,31 @@ export default function LibraryIngredients() {
       if (res.ok) fetchData();
     } catch (err) {
       console.error('Delete failed:', err);
+    }
+  };
+
+  const handleMerge = async () => {
+    if (!mergingIng || !mergeTargetId) return;
+    setMerging(true);
+    try {
+      const res = await apiFetch(`/api/ingredients/${mergingIng.id}/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId: mergeTargetId }),
+      });
+      const result = await res.json();
+      if (res.ok) {
+        setMergingIng(null);
+        setMergeTargetId('');
+        setMergeQuery('');
+        fetchData();
+      } else {
+        alert(`Merge failed: ${JSON.stringify(result.error || result)}`);
+      }
+    } catch (err) {
+      alert('Network error while merging.');
+    } finally {
+      setMerging(false);
     }
   };
 
@@ -284,7 +326,7 @@ export default function LibraryIngredients() {
   const renderIngredientRow = (ing: any) => (
     <tr key={ing.id} className="group hover:bg-zinc-50/50 transition-colors">
       <td className="py-6 pl-4">
-        <div className="flex items-center gap-4">
+        <div className={`flex items-center gap-4 ${ing.parent_ingredient_id ? 'pl-8' : ''}`}>
           <div className="relative w-12 h-12 shrink-0">
             {ing.image_urls?.[0] ? (
               <>
@@ -310,7 +352,10 @@ export default function LibraryIngredients() {
               </div>
             )}
           </div>
-          <p className="font-extrabold text-zinc-900 leading-tight">{ing.translated_name || ing.name}</p>
+          <button type="button" onClick={() => setViewingIng(ing)} className="text-left">
+            <p className="font-extrabold text-zinc-900 leading-tight hover:text-primary transition-colors">{ing.translated_name || ing.name}</p>
+            {ing.parent_name && <p className="text-[10px] font-bold text-zinc-400">↳ variety of {ing.parent_name}</p>}
+          </button>
         </div>
       </td>
       <td className="py-6">
@@ -353,6 +398,9 @@ export default function LibraryIngredients() {
             <button onClick={() => handleOpenModal(ing)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
               <span className="material-symbols-outlined text-xl">edit</span>
             </button>
+            <button onClick={() => { setMergingIng(ing); setMergeTargetId(''); setMergeQuery(''); }} title="Merge into another ingredient" className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+              <span className="material-symbols-outlined text-xl">call_merge</span>
+            </button>
             <button onClick={() => handleDelete(ing.id)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-tertiary transition-all">
               <span className="material-symbols-outlined text-xl">delete</span>
             </button>
@@ -361,8 +409,85 @@ export default function LibraryIngredients() {
     </tr>
   );
 
+  const renderIngredientCard = (ing: any) => (
+    <div
+      key={ing.id}
+      className={`group relative bg-white rounded-3xl border border-zinc-100 hover:border-zinc-200 hover:shadow-md transition-all overflow-hidden flex flex-col ${ing.parent_ingredient_id ? 'ring-1 ring-zinc-100' : ''}`}
+    >
+      <button type="button" onClick={() => setViewingIng(ing)} className="text-left flex-1 flex flex-col">
+        <div className="relative w-full aspect-square bg-zinc-50">
+          {ing.image_urls?.[0] ? (
+            <img src={ing.image_urls[0]} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-[40px] text-white" style={{ backgroundColor: ing.category_color || '#71717a' }}>
+              <RenderFaIcon name={ing.icon || 'FaEgg'} />
+            </div>
+          )}
+          {ing.seasonal_months?.length > 0 && (
+            <span className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center text-[13px] text-primary shadow-sm" title="Has seasonality data">
+              <span className="material-symbols-outlined text-[15px]">eco</span>
+            </span>
+          )}
+        </div>
+        <div className="p-4 flex-1">
+          <p className="font-extrabold text-zinc-900 leading-tight group-hover:text-primary transition-colors">{ing.translated_name || ing.name}</p>
+          {ing.parent_name && <p className="text-[10px] font-bold text-zinc-400 mt-0.5">↳ variety of {ing.parent_name}</p>}
+          {ing.tags?.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {ing.tags.slice(0, 3).map((t: any) => (
+                <span key={t.id} className="px-2 py-0.5 text-white text-[9px] font-black uppercase rounded-full" style={{ backgroundColor: t.color || '#3f3f46' }}>
+                  {t.translated_name || t.name}
+                </span>
+              ))}
+              {ing.tags.length > 3 && <span className="px-2 py-0.5 text-zinc-400 text-[9px] font-black">+{ing.tags.length - 3}</span>}
+            </div>
+          )}
+        </div>
+      </button>
+      <div className="flex items-center justify-end gap-1 px-2 pb-2">
+        <Link to={`/?q=${encodeURIComponent(ing.name)}`} title="Used in recipes" className="w-9 h-9 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+          <span className="material-symbols-outlined text-lg">search</span>
+        </Link>
+        <button onClick={() => handleOpenModal(ing)} className="w-9 h-9 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+          <span className="material-symbols-outlined text-lg">edit</span>
+        </button>
+        <button onClick={() => { setMergingIng(ing); setMergeTargetId(''); setMergeQuery(''); }} title="Merge into another ingredient" className="w-9 h-9 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+          <span className="material-symbols-outlined text-lg">call_merge</span>
+        </button>
+        <button onClick={() => handleDelete(ing.id)} className="w-9 h-9 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-tertiary transition-all">
+          <span className="material-symbols-outlined text-lg">delete</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  // Files each variety (parent_ingredient_id set, and the parent is also in
+  // this same filtered set) directly after its base ingredient rather than
+  // wherever alphabetical order would otherwise scatter it — one level
+  // deep only (a variety-of-a-variety still just lists under whichever
+  // root it isn't itself, no recursive tree needed for what this is for).
+  const sortWithVariants = (items: any[]) => {
+    const ids = new Set(items.map(i => i.id));
+    const byParent = new Map<string, any[]>();
+    const roots: any[] = [];
+    for (const item of items) {
+      if (item.parent_ingredient_id && ids.has(item.parent_ingredient_id)) {
+        if (!byParent.has(item.parent_ingredient_id)) byParent.set(item.parent_ingredient_id, []);
+        byParent.get(item.parent_ingredient_id)!.push(item);
+      } else {
+        roots.push(item);
+      }
+    }
+    const result: any[] = [];
+    for (const root of roots) {
+      result.push(root);
+      for (const child of byParent.get(root.id) || []) result.push(child);
+    }
+    return result;
+  };
+
   const categorySection = (categoryId: string | null, catName: string, catIcon: string | undefined, catColor: string | undefined, items: any[]) => {
-    const matched = items.filter(matchesFilters);
+    const matched = sortWithVariants(items.filter(matchesFilters));
     if (isFiltering && matched.length === 0) return null;
     return (
       <details key={categoryId || 'uncategorized'} open className="group/section">
@@ -376,13 +501,19 @@ export default function LibraryIngredients() {
           </div>
           <span className="material-symbols-outlined text-zinc-400 transition-transform group-open/section:rotate-180">expand_more</span>
         </summary>
-        <div className="overflow-x-auto pb-4">
-          <table className="w-full">
-            <tbody className="divide-y divide-zinc-50">
-              {matched.map(renderIngredientRow)}
-            </tbody>
-          </table>
-        </div>
+        {viewMode === 'grid' ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-6">
+            {matched.map(renderIngredientCard)}
+          </div>
+        ) : (
+          <div className="overflow-x-auto pb-4">
+            <table className="w-full">
+              <tbody className="divide-y divide-zinc-50">
+                {matched.map(renderIngredientRow)}
+              </tbody>
+            </table>
+          </div>
+        )}
       </details>
     );
   };
@@ -414,6 +545,24 @@ export default function LibraryIngredients() {
                 placeholder="Search ingredients…"
                 className="w-full pl-11 pr-4 py-3 bg-white rounded-full border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
               />
+            </div>
+            <div className="flex items-center gap-1 bg-white rounded-full border border-zinc-200 p-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewMode('grid')}
+                title="Grid view"
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${viewMode === 'grid' ? 'bg-primary text-white' : 'text-zinc-400 hover:text-zinc-600'}`}
+              >
+                <span className="material-symbols-outlined text-lg">grid_view</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                title="List view"
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${viewMode === 'list' ? 'bg-primary text-white' : 'text-zinc-400 hover:text-zinc-600'}`}
+              >
+                <span className="material-symbols-outlined text-lg">view_list</span>
+              </button>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {allTags.map(t => (
@@ -570,6 +719,55 @@ export default function LibraryIngredients() {
                  </div>
 
                  <div>
+                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Synonyms</label>
+                    <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
+                 </div>
+
+                 <div>
+                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">
+                      Variety of… {!form.parentIngredientId && <span className="normal-case font-medium text-zinc-300">— optional, e.g. file "Red Apple" under "Apple"</span>}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={parentQuery}
+                        onChange={e => { setParentQuery(e.target.value); setForm({ ...form, parentIngredientId: null }); }}
+                        placeholder="Search for a base ingredient…"
+                        autoComplete="off"
+                        className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold"
+                      />
+                      {parentQuery.trim() && !form.parentIngredientId && (
+                        <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white rounded-2xl shadow-lg border border-zinc-100">
+                          {ingredients
+                            .filter(i => i.id !== editingIng?.id)
+                            .filter(i => (i.translated_name || i.name).toLowerCase().includes(parentQuery.trim().toLowerCase()))
+                            .slice(0, 30)
+                            .map(i => (
+                              <button
+                                key={i.id}
+                                type="button"
+                                onClick={() => { setForm({ ...form, parentIngredientId: i.id }); setParentQuery(i.translated_name || i.name); }}
+                                className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-50 first:rounded-t-2xl last:rounded-b-2xl"
+                              >
+                                {i.translated_name || i.name}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                      {form.parentIngredientId && (
+                        <button
+                          type="button"
+                          onClick={() => { setForm({ ...form, parentIngredientId: null }); setParentQuery(''); }}
+                          className="mt-2 flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-red-500"
+                        >
+                          <span className="material-symbols-outlined text-sm">close</span>
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                 </div>
+
+                 <div>
                     <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Tags</label>
                     <TagPicker by="id" value={form.tagIds} onChange={tagIds => setForm({...form, tagIds})} />
                  </div>
@@ -677,6 +875,248 @@ export default function LibraryIngredients() {
           </div>
         </div>
       )}
+
+      {/* ─── Merge Ingredient ───────────────────────────────────────────── */}
+      {mergingIng && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setMergingIng(null)} />
+          <div className="relative bg-white w-full max-w-md rounded-[32px] p-8 shadow-2xl">
+            <h2 className="text-2xl font-black text-zinc-900 mb-2">Merge Ingredient</h2>
+            <p className="text-sm text-zinc-500 mb-6">
+              Fold <strong className="text-zinc-700">{mergingIng.translated_name || mergingIng.name}</strong> into
+              another ingredient. Every recipe using it is repointed automatically — nothing is lost, and{' '}
+              <strong className="text-zinc-700">{mergingIng.translated_name || mergingIng.name}</strong> is removed
+              from the catalog. This can't be undone.
+            </p>
+            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Merge into</label>
+            <div className="relative mb-6">
+              <input
+                type="text"
+                value={mergeQuery}
+                onChange={e => { setMergeQuery(e.target.value); setMergeTargetId(''); }}
+                placeholder="Search for an ingredient…"
+                autoComplete="off"
+                className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold"
+              />
+              {mergeQuery.trim() && !mergeTargetId && (
+                <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white rounded-2xl shadow-lg border border-zinc-100">
+                  {ingredients
+                    .filter(i => i.id !== mergingIng.id)
+                    .filter(i => (i.translated_name || i.name).toLowerCase().includes(mergeQuery.trim().toLowerCase()))
+                    .slice(0, 30)
+                    .map(i => (
+                      <button
+                        key={i.id}
+                        type="button"
+                        onClick={() => { setMergeTargetId(i.id); setMergeQuery(i.translated_name || i.name); }}
+                        className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-50 first:rounded-t-2xl last:rounded-b-2xl"
+                      >
+                        {i.translated_name || i.name}
+                      </button>
+                    ))}
+                  {ingredients
+                    .filter(i => i.id !== mergingIng.id)
+                    .filter(i => (i.translated_name || i.name).toLowerCase().includes(mergeQuery.trim().toLowerCase())).length === 0 && (
+                    <p className="px-5 py-3 text-sm text-zinc-400 italic">No matching ingredients.</p>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setMergingIng(null)}
+                className="flex-1 py-3 rounded-2xl bg-zinc-100 text-zinc-600 font-bold hover:bg-zinc-200 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleMerge}
+                disabled={!mergeTargetId || merging}
+                className="flex-1 py-3 rounded-2xl bg-primary text-white font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
+              >
+                {merging ? 'Merging…' : 'Merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Ingredient Detail (read-only) ─────────────────────────────── */}
+      {viewingIng && (
+        <IngredientDetailModal
+          ing={viewingIng}
+          onClose={() => setViewingIng(null)}
+          onViewImage={(url, name) => setPreviewImage({ url, name })}
+          onEdit={() => { setViewingIng(null); handleOpenModal(viewingIng); }}
+          onMerge={() => { setViewingIng(null); setMergingIng(viewingIng); setMergeTargetId(''); setMergeQuery(''); }}
+          onDelete={() => { setViewingIng(null); handleDelete(viewingIng.id); }}
+          onOpenVariety={(id) => {
+            const target = ingredients.find(i => i.id === id);
+            if (target) setViewingIng(target);
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function IngredientDetailModal({
+  ing, onClose, onViewImage, onEdit, onMerge, onDelete, onOpenVariety,
+}: {
+  ing: any;
+  onClose: () => void;
+  onViewImage: (url: string, name: string) => void;
+  onEdit: () => void;
+  onMerge: () => void;
+  onDelete: () => void;
+  onOpenVariety: (id: string) => void;
+}) {
+  const displayName = ing.translated_name || ing.name;
+  const nutritionRows: Array<[string, unknown, string]> = [
+    ['Calories', ing.calories_kcal, 'kcal'],
+    ['Protein', ing.protein_g, 'g'],
+    ['Carbs', ing.carbs_g, 'g'],
+    ['Fat', ing.fat_g, 'g'],
+    ['Fiber', ing.fiber_g, 'g'],
+    ['Sugar', ing.sugar_g, 'g'],
+    ['Sodium', ing.sodium_mg, 'mg'],
+  ].filter(([, v]) => v !== null && v !== undefined) as Array<[string, unknown, string]>;
+
+  return (
+    <div className="fixed inset-0 z-[115] flex items-center justify-center p-6">
+      <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white w-full max-w-2xl rounded-[40px] shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
+        <div className="relative w-full aspect-[16/9] bg-zinc-100">
+          {ing.image_urls?.[0] ? (
+            <img
+              src={ing.image_urls[0]}
+              alt=""
+              onClick={() => onViewImage(ing.image_urls[0], displayName)}
+              className="w-full h-full object-cover cursor-zoom-in"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-[64px] text-white" style={{ backgroundColor: ing.category_color || '#71717a' }}>
+              <RenderFaIcon name={ing.icon || 'FaEgg'} />
+            </div>
+          )}
+          <button onClick={onClose} className="absolute top-4 right-4 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center text-zinc-600 hover:text-zinc-900">
+            <span className="material-symbols-outlined">close</span>
+          </button>
+          {ing.image_urls?.length > 1 && (
+            <div className="absolute bottom-4 right-4 flex gap-1.5">
+              {ing.image_urls.slice(1, 5).map((url: string, i: number) => (
+                <img key={i} src={url} alt="" onClick={() => onViewImage(url, displayName)} className="w-10 h-10 rounded-lg object-cover border-2 border-white shadow cursor-zoom-in" />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="p-10 space-y-6">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[11px] shrink-0" style={{ backgroundColor: ing.category_color || '#71717a' }}>
+                <RenderFaIcon name={ing.icon || 'FaEgg'} />
+              </span>
+              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{ing.translated_category_name || ing.category_name || 'Uncategorized'}</span>
+            </div>
+            <h2 className="text-3xl font-black text-zinc-900">{displayName}</h2>
+            {ing.parent_name && (
+              <button onClick={() => onOpenVariety(ing.parent_ingredient_id)} className="text-sm font-bold text-primary hover:underline mt-1">
+                ↳ variety of {ing.parent_name}
+              </button>
+            )}
+            {ing.description && <p className="text-sm text-zinc-500 mt-3 leading-relaxed">{ing.description}</p>}
+          </div>
+
+          {nutritionRows.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Nutrition (per 100g)</p>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 bg-zinc-50 p-4 rounded-2xl">
+                {nutritionRows.map(([label, value, unit]) => (
+                  <div key={label}>
+                    <p className="text-[9px] font-bold text-zinc-400 uppercase">{label}</p>
+                    <p className="text-sm font-black text-zinc-900">{String(value)}<span className="text-[10px] font-bold text-zinc-400 ml-0.5">{unit}</span></p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ing.seasonal_months?.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Seasonality</p>
+              <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+                {MONTH_LABELS.map((label, i) => {
+                  const active = ing.seasonal_months.includes(i + 1);
+                  return (
+                    <div key={label} className={`text-center py-2 rounded-lg text-[10px] font-bold ${active ? 'bg-primary text-white' : 'bg-zinc-50 text-zinc-300'}`}>
+                      {label}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {ing.synonyms?.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Synonyms</p>
+              <div className="flex flex-wrap gap-1.5">
+                {ing.synonyms.map((s: string, i: number) => (
+                  <span key={i} className="px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-100 text-zinc-600">{s}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ing.translations?.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Translations</p>
+              <div className="flex flex-wrap gap-1.5">
+                {ing.translations.map((t: any, i: number) => (
+                  <span key={i} className="px-2 py-0.5 bg-zinc-100 text-zinc-500 text-[9px] font-black uppercase rounded border border-zinc-200">{t.lang}: {t.text}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {ing.tags?.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Tags</p>
+              <div className="flex flex-wrap gap-1.5">
+                {ing.tags.map((t: any) => (
+                  <span key={t.id} className="px-3 py-1.5 text-white text-xs font-bold rounded-full" style={{ backgroundColor: t.color || '#3f3f46' }}>
+                    {t.translated_name || t.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <Link
+              to={`/?q=${encodeURIComponent(ing.name)}`}
+              className="flex-1 py-3 rounded-2xl bg-zinc-100 text-zinc-600 font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2"
+            >
+              <span className="material-symbols-outlined text-lg">search</span>
+              Recipes
+            </Link>
+            <button type="button" onClick={onMerge} className="flex-1 py-3 rounded-2xl bg-zinc-100 text-zinc-600 font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2">
+              <span className="material-symbols-outlined text-lg">call_merge</span>
+              Merge
+            </button>
+            <button type="button" onClick={onDelete} className="w-14 py-3 rounded-2xl bg-red-50 text-red-500 font-bold hover:bg-red-100 transition-all flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-lg">delete</span>
+            </button>
+            <button type="button" onClick={onEdit} className="flex-[2] py-3 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all flex items-center justify-center gap-2">
+              <span className="material-symbols-outlined text-lg">edit</span>
+              Edit
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

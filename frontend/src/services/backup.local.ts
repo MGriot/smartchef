@@ -54,7 +54,7 @@ export interface Snapshot {
     id: string; name: string; categoryId: string; description?: string | null; icon?: string | null;
     imageUrls?: string[]; tagIds?: string[]; deletedAt?: string | null;
     caloriesKcal?: number | null; proteinG?: number | null; carbsG?: number | null; fatG?: number | null;
-    fiberG?: number | null; sugarG?: number | null; sodiumMg?: number | null;
+    fiberG?: number | null; sugarG?: number | null; sodiumMg?: number | null; seasonalMonths?: number[];
     translations?: Array<{ lang: string; text: string }>;
   }>;
   tools?: Array<{
@@ -70,14 +70,16 @@ export interface Snapshot {
     prepTimeMin?: number | null; cookTimeMin?: number | null; restTimeMin?: number | null; rating?: number | null;
     tags?: string[]; coverImageUrl?: string | null; sourceUrl?: string | null; sources?: unknown[];
     isComponent?: boolean; languageCode?: string | null; deletedAt?: string | null;
+    storageInstructions?: string | null; tips?: string | null;
     ingredients?: Array<{
       sortOrder: number; ingredientId?: string; subRecipeId?: string; quantity?: number | null;
       quantityText?: string | null; unitSymbol?: string | null; notes?: string | null; isOptional?: boolean;
+      groupName?: string | null;
       translations?: Array<{ lang: string; notes?: string | null }>;
     }>;
     steps?: Array<{
       stepNumber: number; title?: string | null; description: string; durationMin?: number | null;
-      toolIds?: string[]; notes?: string | null; imageUrl?: string | null; stepIngredients?: unknown;
+      toolIds?: string[]; techniqueIds?: string[]; notes?: string | null; imageUrl?: string | null; stepIngredients?: unknown;
       translations?: Array<{ lang: string; title?: string | null; description?: string | null }>;
     }>;
     toolIds?: string[];
@@ -161,6 +163,133 @@ async function resolveUnitId(symbol?: string | null): Promise<string | undefined
   return unitIdBySymbol.get(symbol) ?? undefined;
 }
 
+/** Standalone-mode counterpart to backend/src/routes/backup.ts's GET
+ *  /backup/export — produces the same Snapshot shape importSnapshot() above
+ *  accepts (and that the server's own export/import round-trips), read
+ *  straight off the local SQLite tables. Soft-deleted rows are left out
+ *  entirely rather than exported as tombstones: importSnapshot() already
+ *  skips anything with `deletedAt` set (see its `if (X.deletedAt) continue`
+ *  checks above), so a tombstone would just be dead weight in the file —
+ *  Folder Sync, not this file, is what actually propagates deletions
+ *  between devices. */
+export async function exportSnapshot(): Promise<Snapshot> {
+  const categories: NonNullable<Snapshot['categories']> = [];
+  for (const c of await query<Record<string, unknown>>('SELECT * FROM ingredient_categories WHERE deleted_at IS NULL')) {
+    const translations = await query<{ language_code: string; name: string | null; description: string | null }>(
+      'SELECT language_code, name, description FROM ingredient_category_translations WHERE category_id=$1', [c.id]
+    );
+    categories.push({
+      id: c.id as string, name: c.name as string, description: c.description as string | null, icon: c.icon as string | null, color: c.color as string | null,
+      translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
+    });
+  }
+
+  const tags: NonNullable<Snapshot['tags']> = [];
+  for (const t of await query<Record<string, unknown>>('SELECT * FROM tags WHERE deleted_at IS NULL')) {
+    const translations = await query<{ language_code: string; name: string | null }>(
+      'SELECT language_code, name FROM tag_translations WHERE tag_id=$1', [t.id]
+    );
+    tags.push({
+      id: t.id as string, name: t.name as string, groupName: t.group_name as string, color: t.color as string | null, icon: t.icon as string | null,
+      excludeTagIds: JSON.parse((t.exclude_tag_ids as string) ?? '[]'), sortOrder: t.sort_order as number,
+      translations: translations.map(tr => ({ lang: tr.language_code, name: tr.name })),
+    });
+  }
+
+  const ingredients: NonNullable<Snapshot['ingredients']> = [];
+  for (const i of await query<Record<string, unknown>>("SELECT * FROM ingredients WHERE sync_status != 'deleted'")) {
+    const translations = await query<{ language_code: string; translated_name: string }>(
+      'SELECT language_code, translated_name FROM ingredient_translations WHERE ingredient_id=$1', [i.id]
+    );
+    const tagRows = await query<{ tag_id: string }>('SELECT tag_id FROM ingredient_tags WHERE ingredient_id=$1', [i.id]);
+    ingredients.push({
+      id: i.id as string, name: i.name as string, categoryId: i.category_id as string, description: i.description as string | null, icon: i.icon as string | null,
+      imageUrls: JSON.parse((i.image_urls as string) ?? '[]'), tagIds: tagRows.map(r => r.tag_id),
+      caloriesKcal: i.calories_kcal as number | null, proteinG: i.protein_g as number | null, carbsG: i.carbs_g as number | null, fatG: i.fat_g as number | null,
+      fiberG: i.fiber_g as number | null, sugarG: i.sugar_g as number | null, sodiumMg: i.sodium_mg as number | null,
+      seasonalMonths: JSON.parse((i.seasonal_months as string) ?? '[]'),
+      translations: translations.map(t => ({ lang: t.language_code, text: t.translated_name })),
+    });
+  }
+
+  const tools: NonNullable<Snapshot['tools']> = [];
+  for (const tool of await query<Record<string, unknown>>('SELECT * FROM tools WHERE deleted_at IS NULL')) {
+    const translations = await query<{ language_code: string; name: string | null; description: string | null }>(
+      'SELECT language_code, name, description FROM tool_translations WHERE tool_id=$1', [tool.id]
+    );
+    tools.push({
+      id: tool.id as string, name: tool.name as string, category: tool.category as string | null, description: tool.description as string | null, icon: tool.icon as string | null,
+      imageUrls: JSON.parse((tool.image_urls as string) ?? '[]'),
+      translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
+    });
+  }
+
+  const techniques: NonNullable<Snapshot['techniques']> = [];
+  for (const tech of await query<Record<string, unknown>>('SELECT * FROM techniques WHERE deleted_at IS NULL')) {
+    const translations = await query<{ language_code: string; name: string | null; description: string | null }>(
+      'SELECT language_code, name, description FROM technique_translations WHERE technique_id=$1', [tech.id]
+    );
+    techniques.push({
+      id: tech.id as string, name: tech.name as string, description: tech.description as string | null, icon: tech.icon as string | null,
+      imageUrls: JSON.parse((tech.image_urls as string) ?? '[]'),
+      translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
+    });
+  }
+
+  const recipes: NonNullable<Snapshot['recipes']> = [];
+  for (const r of await query<Record<string, unknown>>("SELECT * FROM recipes WHERE sync_status != 'deleted'")) {
+    const ingredientRows = await query<Record<string, unknown>>('SELECT * FROM recipe_ingredients WHERE recipe_id=$1 ORDER BY sort_order', [r.id]);
+    const recipeIngredients = [];
+    for (const ri of ingredientRows) {
+      const riTranslations = await query<{ language_code: string; notes: string | null }>(
+        'SELECT language_code, notes FROM recipe_ingredient_translations WHERE recipe_ingredient_id=$1', [ri.id]
+      );
+      let unitSymbol: string | null = null;
+      if (ri.unit_id) {
+        const u = await queryOne<{ symbol: string }>('SELECT symbol FROM units WHERE id=$1', [ri.unit_id]);
+        unitSymbol = u?.symbol ?? null;
+      }
+      recipeIngredients.push({
+        sortOrder: ri.sort_order as number, ingredientId: (ri.ingredient_id as string) ?? undefined, subRecipeId: (ri.sub_recipe_id as string) ?? undefined,
+        quantity: ri.quantity as number | null, quantityText: ri.quantity_text as string | null, unitSymbol,
+        notes: ri.notes as string | null, isOptional: !!ri.is_optional, groupName: ri.group_name as string | null,
+        translations: riTranslations.map(t => ({ lang: t.language_code, notes: t.notes })),
+      });
+    }
+
+    const stepRows = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number', [r.id]);
+    const steps = [];
+    for (const s of stepRows) {
+      const sTranslations = await query<{ language_code: string; title: string | null; description: string | null }>(
+        'SELECT language_code, title, description FROM recipe_step_translations WHERE step_id=$1', [s.id]
+      );
+      steps.push({
+        stepNumber: s.step_number as number, title: s.title as string | null, description: s.description as string, durationMin: s.duration_min as number | null,
+        toolIds: JSON.parse((s.tool_ids as string) ?? '[]'), techniqueIds: JSON.parse((s.technique_ids as string) ?? '[]'),
+        notes: s.notes as string | null, imageUrl: s.image_url as string | null,
+        stepIngredients: JSON.parse((s.step_ingredients as string) ?? '[]'),
+        translations: sTranslations.map(t => ({ lang: t.language_code, title: t.title, description: t.description })),
+      });
+    }
+
+    const toolRows = await query<{ tool_id: string }>('SELECT tool_id FROM recipe_tools WHERE recipe_id=$1', [r.id]);
+    const rTranslations = await query<{ language_code: string; title: string | null; description: string | null }>(
+      'SELECT language_code, title, description FROM recipe_translations WHERE recipe_id=$1', [r.id]
+    );
+    recipes.push({
+      id: r.id as string, title: r.title as string, description: r.description as string | null, difficulty: r.difficulty as string, servings: r.servings as number,
+      prepTimeMin: r.prep_time_min as number | null, cookTimeMin: r.cook_time_min as number | null, restTimeMin: r.rest_time_min as number | null, rating: r.rating as number | null,
+      tags: JSON.parse((r.tags as string) ?? '[]'), coverImageUrl: r.cover_image_url as string | null, sourceUrl: r.source_url as string | null,
+      sources: JSON.parse((r.sources as string) ?? '[]'), isComponent: !!r.is_component, languageCode: r.language_code as string | null,
+      storageInstructions: r.storage_instructions as string | null, tips: r.tips as string | null,
+      ingredients: recipeIngredients, steps, toolIds: toolRows.map(t => t.tool_id),
+      translations: rTranslations.map(t => ({ lang: t.language_code, title: t.title, description: t.description })),
+    });
+  }
+
+  return { formatVersion: 1, categories, tags, ingredients, tools, techniques, recipes };
+}
+
 export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary> {
   const summary: ImportSummary = { categories: 0, tags: 0, ingredients: 0, tools: 0, techniques: 0, recipes: 0, conflicts: [] };
 
@@ -213,7 +342,7 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
       description: ing.description, icon: ing.icon,
       imageUrls: ing.imageUrls, tagIds: ing.tagIds?.map(id => tagIdRemap.get(id) ?? id), translations: ing.translations,
       caloriesKcal: ing.caloriesKcal, proteinG: ing.proteinG, carbsG: ing.carbsG, fatG: ing.fatG,
-      fiberG: ing.fiberG, sugarG: ing.sugarG, sodiumMg: ing.sodiumMg,
+      fiberG: ing.fiberG, sugarG: ing.sugarG, sodiumMg: ing.sodiumMg, seasonalMonths: ing.seasonalMonths,
     };
     if (await existsById('ingredients', ing.id)) {
       await ingredientsLocal.updateIngredient(ing.id, input);
@@ -276,6 +405,7 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
         unitId: await resolveUnitId(ri.unitSymbol),
         notes: ri.notes ?? undefined,
         isOptional: ri.isOptional,
+        groupName: ri.groupName ?? undefined,
         translations: ri.translations,
       });
     }
@@ -286,6 +416,7 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
       description: s.description,
       durationMin: s.durationMin,
       toolIds: s.toolIds,
+      techniqueIds: s.techniqueIds,
       notes: s.notes,
       imageUrl: s.imageUrl,
       translations: s.translations,
@@ -305,6 +436,7 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
       prepTimeMin: r.prepTimeMin, cookTimeMin: r.cookTimeMin, restTimeMin: r.restTimeMin, rating: r.rating,
       tags: r.tags, coverImageUrl: r.coverImageUrl, sourceUrl: r.sourceUrl, sources: r.sources,
       isComponent: r.isComponent, languageCode: r.languageCode ?? undefined,
+      storageInstructions: r.storageInstructions ?? undefined, tips: r.tips ?? undefined,
       ingredients: ingredientInputs, steps: stepInputs, toolIds: r.toolIds, translations: r.translations,
     };
     if (alreadyExists) {

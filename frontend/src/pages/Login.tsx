@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore, Account } from '../store/app.store';
 import { apiFetch, isNative, cacheAccountOffline } from '../lib/api';
-
-const DEFAULT_AVATAR = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
+import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
 
 // A raw `TypeError: Failed to fetch` (CORS rejection, DNS failure, refused
 // connection) reads as gibberish shown verbatim — the most common real
@@ -28,7 +27,7 @@ export default function Login({ hasAccount, onAuthenticated }: LoginProps) {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -157,6 +156,20 @@ export default function Login({ hasAccount, onAuthenticated }: LoginProps) {
             </div>
             <div>
               <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t('login.avatarOptional')}</label>
+              {AVATAR_PRESETS.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {AVATAR_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAvatarUrl(preset)}
+                      className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
+                    >
+                      <img src={preset} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
               <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} placeholder={DEFAULT_AVATAR} />
             </div>
             {error && <p className="text-sm text-red-600 font-medium">{error}</p>}

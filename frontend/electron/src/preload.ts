@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('smartchefElectron', {
   // the user-chosen Sync Folder (pickSyncFolder()). Lives under Electron's
   // own app-data directory, never inside the user's visible Documents.
   getHiddenCloneDir: () => ipcRenderer.invoke('smartchef-get-hidden-clone-dir'),
+  // Standalone-mode geocode proxy (RegionPicker.tsx's free-text regions) —
+  // see the `smartchef-geocode` handler in electron/src/index.ts for why
+  // this can't just be a renderer-side fetch() call.
+  geocode: (q: string) => ipcRenderer.invoke('smartchef-geocode', q),
   fs: {
     readFile: (path: string, encoding?: string) => ipcRenderer.invoke('smartchef-fs-readFile', path, encoding),
     writeFile: (path: string, data: string | Uint8Array) => ipcRenderer.invoke('smartchef-fs-writeFile', path, data),

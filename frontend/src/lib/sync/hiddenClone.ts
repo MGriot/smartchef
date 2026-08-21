@@ -69,7 +69,7 @@ export async function ensureHiddenCloneInitialized(): Promise<HiddenCloneDirs> {
   // gitSync.ts's ALL_ENTITY_DIRS (importing it here would be circular,
   // since gitSync.ts is what imports this module) — every synced entity
   // type needs its directory pre-created here too.
-  for (const entityDir of ['recipes', 'ingredients', 'tools', 'tags', 'techniques']) {
+  for (const entityDir of ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles']) {
     await gitfs.promises.mkdir(`${dir}/${entityDir}`);
   }
   initDone = true;

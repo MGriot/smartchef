@@ -27,8 +27,14 @@ async function syncTechnique(id: string): Promise<void> {
   }
 }
 
-export async function listTechniques({ lang }: { lang?: string }) {
-  const rows = await query<Record<string, unknown>>(`SELECT * FROM techniques WHERE deleted_at IS NULL ORDER BY name`);
+export async function listTechniques({ lang, q }: { lang?: string; q?: string }) {
+  const params: unknown[] = [];
+  let where = `WHERE deleted_at IS NULL`;
+  if (q) {
+    params.push(`%${q}%`, `%${q}%`);
+    where += ` AND (name LIKE $${params.length - 1} OR synonyms LIKE $${params.length})`;
+  }
+  const rows = await query<Record<string, unknown>>(`SELECT * FROM techniques ${where} ORDER BY name`, params);
   const result = [];
   for (const row of rows) {
     const translations = await query<{ language_code: string; name: string; description: string | null }>(
@@ -39,6 +45,7 @@ export async function listTechniques({ lang }: { lang?: string }) {
     result.push({
       ...row,
       image_urls: JSON.parse((row.image_urls as string) ?? '[]'),
+      synonyms: JSON.parse((row.synonyms as string) ?? '[]'),
       translated_name: translatedName,
       translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
     });
@@ -52,6 +59,7 @@ export interface TechniqueInput {
   description?: string | null;
   icon?: string | null;
   imageUrls?: string[];
+  synonyms?: string[];
   translations?: Array<{ lang: string; name?: string | null; description?: string | null }>;
 }
 
@@ -70,8 +78,8 @@ async function upsertTechniqueTranslations(techniqueId: string, translations?: T
 export async function createTechnique(d: TechniqueInput): Promise<{ id: string }> {
   const id = d.id ?? newId();
   await query(
-    "INSERT INTO techniques (id, name, description, icon, image_urls) VALUES ($1, $2, $3, $4, $5)",
-    [id, d.name, d.description || null, d.icon || null, d.imageUrls || []]
+    "INSERT INTO techniques (id, name, description, icon, image_urls, synonyms) VALUES ($1, $2, $3, $4, $5, $6)",
+    [id, d.name, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? []]
   );
   await upsertTechniqueTranslations(id, d.translations);
   await syncTechnique(id);
@@ -80,8 +88,8 @@ export async function createTechnique(d: TechniqueInput): Promise<{ id: string }
 
 export async function updateTechnique(id: string, d: TechniqueInput): Promise<void> {
   await query(
-    "UPDATE techniques SET name=$1, description=$2, icon=$3, image_urls=$4, updated_at=now() WHERE id=$5",
-    [d.name, d.description || null, d.icon || null, d.imageUrls || [], id]
+    "UPDATE techniques SET name=$1, description=$2, icon=$3, image_urls=$4, synonyms=$5, updated_at=now() WHERE id=$6",
+    [d.name, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? [], id]
   );
   await upsertTechniqueTranslations(id, d.translations);
   await syncTechnique(id);

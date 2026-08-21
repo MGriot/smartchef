@@ -11,6 +11,16 @@ export default function OfflineBanner() {
     let cancelled = false;
 
     const check = async () => {
+      // Standalone mode has no server at all — "unreachable" is the
+      // permanent, expected state there, not something worth a persistent
+      // "Offline" warning. This banner is specifically about a *server*
+      // being unreachable, which only applies in server mode.
+      const { isStandaloneMode } = await import('../lib/standalone');
+      if (await isStandaloneMode()) {
+        if (!cancelled) { setOffline(false); setPending(0); }
+        return;
+      }
+
       const reachable = await isServerReachable();
       const { getPendingOperationCount } = await import('../lib/offlineStore');
       const count = await getPendingOperationCount().catch(() => 0);

@@ -4,13 +4,9 @@ import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
 import { apiFetch, isNative } from '../lib/api';
-
-// Adaptive to whatever's in the folder — adding/removing an SVG here
-// changes the preset grid with no code change needed.
-const avatarModules = import.meta.glob('../assets/avatars/*.svg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
-const AVATAR_PRESETS = Object.keys(avatarModules)
-  .sort()
-  .map((path) => avatarModules[path]);
+import { AVATAR_PRESETS } from '../lib/avatarPresets';
+import type { SyncResult } from '../lib/sync/gitSync';
+import type { TransferProgress } from '../lib/sync/gitObjectTransport';
 
 interface SyncPeer {
   deviceId: string;
@@ -78,6 +74,21 @@ function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
       )}
     </div>
   );
+}
+
+const ENTITY_TYPE_LABEL_PLURAL: Record<string, string> = {
+  recipe: 'recipes', ingredient: 'ingredients', tool: 'tools', tag: 'tags', technique: 'techniques', profile: 'profiles',
+};
+
+/** "3 recipes, 5 ingredients" — the "which type" half of what a sync cycle
+ *  pulled in, since a bare count doesn't say whether it was recipes,
+ *  ingredients, or something else. Empty string (not "0 changes") when
+ *  there's nothing to break down, so callers fall back to a plain count. */
+function formatAppliedByType(byType: Partial<Record<string, number>>): string {
+  return Object.entries(byType)
+    .filter(([, count]) => (count ?? 0) > 0)
+    .map(([type, count]) => `${count} ${count === 1 ? type : (ENTITY_TYPE_LABEL_PLURAL[type] ?? `${type}s`)}`)
+    .join(', ');
 }
 
 function formatRelativeTime(iso: string): string {
@@ -289,7 +300,8 @@ function FolderSyncCard() {
   const [pauseReason, setPauseReason] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [choosingFolder, setChoosingFolder] = useState(false);
-  const [result, setResult] = useState<{ applied: number; committed: boolean } | null>(null);
+  const [result, setResult] = useState<SyncResult | null>(null);
+  const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refreshDevices = async () => {
@@ -334,16 +346,18 @@ function FolderSyncCard() {
   const handleSyncNow = async () => {
     setSyncing(true);
     setError(null);
+    setProgress(null);
     try {
       const { syncNow } = await import('../lib/sync/gitSync');
-      const r = await syncNow();
-      setResult({ applied: r.applied, committed: r.committed });
+      const r = await syncNow((p) => setProgress(p));
+      setResult(r);
       setLastSyncAt(r.lastSyncAt);
       await Promise.all([refreshDevices(), refreshPauseReason()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setSyncing(false);
+      setProgress(null);
     }
   };
 
@@ -356,13 +370,15 @@ function FolderSyncCard() {
   // rows — including recovering from a sync target that got wiped/
   // corrupted (as happened testing this against Google Drive earlier).
   const resyncAllLocalData = async () => {
-    const [{ resyncAllRecipes }, { resyncAllIngredients, resyncAllTools }] = await Promise.all([
+    const [{ resyncAllRecipes }, { resyncAllIngredients, resyncAllTools }, { resyncAllProfiles }] = await Promise.all([
       import('../services/recipes.local'),
       import('../services/ingredients.local'),
+      import('../services/profiles.local'),
     ]);
     await resyncAllIngredients();
     await resyncAllTools();
     await resyncAllRecipes();
+    await resyncAllProfiles();
   };
 
   const handleChangeFolder = async () => {
@@ -474,10 +490,29 @@ function FolderSyncCard() {
         )}
 
         {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
-        {result && (
+        {syncing && progress && (
+          <div className="space-y-1">
+            <p className="text-xs text-zinc-500 font-medium">
+              {progress.phase === 'push' ? 'Uploading to the Sync Folder' : 'Downloading from the Sync Folder'} — {progress.done}/{progress.total} object{progress.total === 1 ? '' : 's'}
+            </p>
+            <div className="h-1.5 w-full bg-zinc-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${progress.phase === 'push' ? 'bg-primary' : 'bg-sky-500'}`}
+                style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {!syncing && result && (
           <p className="text-xs text-zinc-500 font-medium">
-            {result.applied > 0 ? `Pulled in ${result.applied} change${result.applied === 1 ? '' : 's'}.` : 'Nothing new from other devices.'}
+            {result.pushedObjects > 0 && `Uploaded ${result.pushedObjects} object${result.pushedObjects === 1 ? '' : 's'}. `}
+            {result.pulledObjects > 0 && `Downloaded ${result.pulledObjects} object${result.pulledObjects === 1 ? '' : 's'}. `}
+            {result.pushedObjects === 0 && result.pulledObjects === 0 && 'Nothing to upload or download — already in sync. '}
+            {result.applied > 0
+              ? `Applied ${formatAppliedByType(result.appliedByType) || `${result.applied} change${result.applied === 1 ? '' : 's'}`} from other devices.`
+              : 'Nothing new from other devices.'}
             {result.committed ? ' Your own changes were committed.' : ''}
+            {result.conflicts > 0 ? ` ${result.conflicts} field${result.conflicts === 1 ? '' : 's'} need${result.conflicts === 1 ? 's' : ''} your review.` : ''}
           </p>
         )}
 
@@ -941,8 +976,12 @@ function BackupCard() {
 }
 
 function StandaloneProfileCard() {
+  const setAccount = useStore((s) => s.setAccount);
+  const account = useStore((s) => s.account);
   const [name, setName] = useState('');
   const [savedName, setSavedName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [savedAvatarUrl, setSavedAvatarUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -951,19 +990,26 @@ function StandaloneProfileCard() {
     import('../lib/standalone').then(({ getStandaloneProfile }) => getStandaloneProfile()).then((profile) => {
       setName(profile?.name ?? '');
       setSavedName(profile?.name ?? '');
+      setAvatarUrl(profile?.avatarUrl ?? '');
+      setSavedAvatarUrl(profile?.avatarUrl ?? '');
     });
   }, []);
+
+  const dirty = name.trim() !== savedName || avatarUrl !== savedAvatarUrl;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = name.trim();
-    if (!trimmed || trimmed === savedName) return;
+    if (!trimmed || !dirty) return;
     setSaving(true);
     setError(null);
     try {
-      const { setStandaloneName } = await import('../lib/standalone');
-      await setStandaloneName(trimmed);
+      const { setStandaloneName, setStandaloneAvatar } = await import('../lib/standalone');
+      if (trimmed !== savedName) await setStandaloneName(trimmed);
+      if (avatarUrl !== savedAvatarUrl) await setStandaloneAvatar(avatarUrl);
       setSavedName(trimmed);
+      setSavedAvatarUrl(avatarUrl);
+      if (account) setAccount({ ...account, name: trimmed, avatarUrl: avatarUrl || undefined });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -976,6 +1022,18 @@ function StandaloneProfileCard() {
   const handleLogout = async () => {
     const { clearStandaloneProfile } = await import('../lib/standalone');
     await clearStandaloneProfile();
+    window.location.href = '/';
+  };
+
+  // Distinct from Log Out: this keeps standalone mode, the local library,
+  // and the Sync Folder exactly as they are — it only clears which profile
+  // *this device* is currently using, bringing back the "who's cooking?"
+  // picker (ProfilePicker.tsx) so someone else sharing this device (or
+  // this same person switching between two of their own profiles) can
+  // pick who they are without re-entering any setup.
+  const handleSwitchProfile = async () => {
+    const { clearActiveProfile } = await import('../lib/standalone');
+    await clearActiveProfile();
     window.location.href = '/';
   };
 
@@ -993,11 +1051,30 @@ function StandaloneProfileCard() {
           No password in offline mode — this device's data is already private to you. Used to label recipes you create and cooks you log.
         </p>
       </div>
+      <div>
+        <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
+        {AVATAR_PRESETS.length > 0 && (
+          <div className="flex flex-wrap gap-3 mb-4">
+            {AVATAR_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setAvatarUrl(preset)}
+                className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
+              >
+                <img src={preset} alt="" className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
+        <span className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">or use your own image</span>
+        <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
+      </div>
       {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
       <div className="flex gap-4 pt-2">
         <button
           type="submit"
-          disabled={saving || !name.trim() || name.trim() === savedName}
+          disabled={saving || !name.trim() || !dirty}
           className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
@@ -1005,7 +1082,16 @@ function StandaloneProfileCard() {
         </button>
         <button
           type="button"
+          onClick={handleSwitchProfile}
+          title="Switch to another profile on this device, without leaving offline mode"
+          className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
+        >
+          Switch Profile
+        </button>
+        <button
+          type="button"
           onClick={handleLogout}
+          title="Forget this device's offline setup entirely"
           className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
         >
           Log Out

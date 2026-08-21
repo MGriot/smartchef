@@ -42,7 +42,13 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
     <div>
       <div className="flex gap-2">
         <input
-          type="url"
+          // Not type="url" on purpose: the browser's built-in URL syntax
+          // check rejects root-relative paths like the bundled avatar
+          // presets' "/assets/chef-5-….jpeg" (no scheme), silently blocking
+          // the whole enclosing form's submit with a native "Please enter a
+          // URL" bubble — for a value this component itself just set via a
+          // preset click, not something the user typed wrong.
+          type="text"
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={placeholder}

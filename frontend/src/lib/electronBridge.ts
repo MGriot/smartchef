@@ -20,6 +20,7 @@ declare global {
       pickSyncFolder: () => Promise<string | null>;
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
+      geocode: (q: string) => Promise<{ lat: number; lng: number; displayName: string } | null>;
       fs: {
         readFile: (path: string, encoding?: string) => Promise<string | Uint8Array>;
         writeFile: (path: string, data: string | Uint8Array) => Promise<void>;
@@ -71,6 +72,16 @@ export async function getHiddenCloneDir(): Promise<string> {
     throw new Error('getHiddenCloneDir() is only available in the Electron app');
   }
   return window.smartchefElectron.getHiddenCloneDir();
+}
+
+/** Resolves a free-typed place name to lat/lng via Nominatim, proxied
+ *  through the main process (see electron/src/index.ts's `smartchef-geocode`
+ *  handler for why — Chromium's fetch can't set the User-Agent header
+ *  Nominatim's usage policy requires). Electron-only; null on no match or
+ *  any failure — callers already treat a missing pin as a non-error. */
+export async function electronGeocode(q: string): Promise<{ lat: number; lng: number; displayName: string } | null> {
+  if (!window.smartchefElectron) return null;
+  return window.smartchefElectron.geocode(q);
 }
 
 /** The IPC-backed fs primitives gitfs.ts uses on Electron — throws if

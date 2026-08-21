@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
+import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 
@@ -16,7 +17,7 @@ export default function LibraryTools() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingTool, setEditingTool] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', category: '', description: '', icon: 'FaKitchenSet', imageUrls: [] as string[] });
+  const [form, setForm] = useState({ name: '', category: '', description: '', icon: 'FaKitchenSet', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
 
@@ -43,11 +44,12 @@ export default function LibraryTools() {
         description: tool.description || '',
         icon: tool.icon || 'FaKitchenSet',
         imageUrls: tool.image_urls || [],
+        synonyms: tool.synonyms || [],
       });
       setTranslations(tool.translations || []);
     } else {
       setEditingTool(null);
-      setForm({ name: '', category: '', description: '', icon: 'FaKitchenSet', imageUrls: [] });
+      setForm({ name: '', category: '', description: '', icon: 'FaKitchenSet', imageUrls: [], synonyms: [] });
       setTranslations([]);
     }
     setShowModal(true);
@@ -55,7 +57,7 @@ export default function LibraryTools() {
 
   const handleTranslationChange = (idx: number, field: 'lang' | 'name', value: string) => {
     const newT = [...translations];
-    newT[idx][field] = value;
+    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
     setTranslations(newT);
   };
   const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);
@@ -205,6 +207,11 @@ export default function LibraryTools() {
                  <div>
                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Technical Specs / Description</label>
                    <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Maintenance requirements, serial numbers..." className="w-full h-24 px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium transition-all" />
+                 </div>
+
+                 <div>
+                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Synonyms</label>
+                    <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
                  </div>
 
                  {/* Translations Section */}

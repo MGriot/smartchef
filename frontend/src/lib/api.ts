@@ -75,9 +75,19 @@ async function tryServeFromCache(path: string): Promise<Response | null> {
     return jsonResponse({ data: { hasAccount: true, authenticated: true, id: account.id, username: account.username, name: account.name, role: account.role, avatarUrl: account.avatarUrl } });
   }
 
-  const { getCachedEntities } = await import('./offlineStore');
+  const { getCachedEntities, getDownloadedRecipe } = await import('./offlineStore');
 
   if (segments[0] === 'recipes') {
+    if (segments[1] && !segments[2]) {
+      // A specific recipe's detail page: prefer the full ingredients/steps/
+      // tools bundle from an explicit offline download (see
+      // downloadRecipeOffline()) over the whole-library snapshot cache,
+      // which only ever holds list-view summary fields for a recipe, not
+      // its full detail — falling back to that would render an empty/broken
+      // detail page for a recipe that was never individually downloaded.
+      const downloaded = await getDownloadedRecipe(segments[1]);
+      if (downloaded) return jsonResponse({ data: downloaded });
+    }
     const recipes = await getCachedEntities('recipes');
     if (segments[1]) {
       const recipe = recipes.find((r: any) => r.id === segments[1]);
@@ -154,6 +164,19 @@ const OFFLINE_CREATABLE_ENTITIES: Record<string, { entityType: import('./offline
  *  larger value for slow endpoints (e.g. LLM recipe parsing, which the
  *  backend itself allows up to 10 minutes for). */
 export async function apiFetch(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
+  if (isNative()) {
+    const { isStandaloneMode } = await import('./standalone');
+    if (await isStandaloneMode()) {
+      const { dispatchLocal } = await import('../services/localRouter');
+      const result = await dispatchLocal(path, init);
+      if (result) {
+        return jsonResponse(result.error ? { error: result.error } : { data: result.data }, result.status);
+      }
+      // Not a path this stage's local router owns (e.g. /api/tags) — falls
+      // through to the pre-existing native/offline logic below, unaffected.
+    }
+  }
+
   if (!isNative()) {
     return fetch(path, init);
   }

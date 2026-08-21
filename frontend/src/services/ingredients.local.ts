@@ -56,14 +56,20 @@ export async function listIngredients({ q, lang }: ListIngredientsParams) {
   const params: unknown[] = [];
   let where = `WHERE i.sync_status != 'deleted'`;
   if (q) {
-    params.push(`%${q}%`);
-    where += ` AND i.name LIKE $${params.length}`;
+    // Matches on the canonical name OR any synonym — synonyms is a
+    // JSON-encoded array, so this is a plain substring match against its
+    // serialized text rather than a real per-element search, same
+    // trade-off db/local.ts's other JSON-array columns already make.
+    params.push(`%${q}%`, `%${q}%`);
+    where += ` AND (i.name LIKE $${params.length - 1} OR i.synonyms LIKE $${params.length})`;
   }
 
   const rows = await query<Record<string, unknown>>(
-    `SELECT i.*, ic.name AS category_name, ic.icon AS category_icon, ic.color AS category_color
+    `SELECT i.*, ic.name AS category_name, ic.icon AS category_icon, ic.color AS category_color,
+            p.name AS parent_name
      FROM ingredients i
      LEFT JOIN ingredient_categories ic ON ic.id = i.category_id
+     LEFT JOIN ingredients p ON p.id = i.parent_ingredient_id
      ${where}
      ORDER BY COALESCE(ic.name, 'Uncategorized'), i.name
      LIMIT 200`,
@@ -104,6 +110,7 @@ export async function listIngredients({ q, lang }: ListIngredientsParams) {
       ...row,
       image_urls: JSON.parse((row.image_urls as string) ?? '[]'),
       seasonal_months: JSON.parse((row.seasonal_months as string) ?? '[]'),
+      synonyms: JSON.parse((row.synonyms as string) ?? '[]'),
       translated_category_name: translatedCategoryName,
       translated_name: translatedName,
       translations: translations.map(t => ({ lang: t.language_code, text: t.translated_name })),
@@ -133,6 +140,10 @@ export interface IngredientInput {
    *  season for — empty/undefined means "no seasonality data", not
    *  "year-round". See db/migrations/034_ingredient_seasonality.sql. */
   seasonalMonths?: number[];
+  /** Alternate names, search-only — see db/migrations/035_synonyms.sql. */
+  synonyms?: string[];
+  /** "This is a variety of" — see db/migrations/036_ingredient_parent.sql. */
+  parentIngredientId?: string | null;
 }
 
 async function upsertIngredientTags(ingredientId: string, tagIds?: string[]) {
@@ -150,11 +161,13 @@ export async function createIngredient(d: IngredientInput): Promise<{ id: string
   const id = d.id ?? newId();
   await query(
     `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
-       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months,
+       synonyms, parent_ingredient_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
     [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
-     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? []]
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
+     d.synonyms ?? [], d.parentIngredientId ?? null]
   );
 
   if (d.translations && d.translations.length > 0) {
@@ -172,14 +185,32 @@ export async function createIngredient(d: IngredientInput): Promise<{ id: string
 }
 
 export async function updateIngredient(id: string, d: IngredientInput): Promise<void> {
+  // A variant can't be its own parent, directly or by way of one of its
+  // own descendants — walk up from the proposed parent and refuse if this
+  // ingredient's own id shows up, rather than silently creating a cycle
+  // the UI would then render as an infinite chain.
+  let parentIngredientId = d.parentIngredientId ?? null;
+  if (parentIngredientId) {
+    let cursor: string | null = parentIngredientId;
+    const seen = new Set<string>();
+    while (cursor) {
+      if (cursor === id) { parentIngredientId = null; break; }
+      if (seen.has(cursor)) break;
+      seen.add(cursor);
+      const ancestorRow: { parent_ingredient_id: string | null } | null = await queryOne('SELECT parent_ingredient_id FROM ingredients WHERE id=$1', [cursor]);
+      cursor = ancestorRow?.parent_ingredient_id ?? null;
+    }
+  }
+
   await query(
     `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,
        calories_kcal=$6, protein_g=$7, carbs_g=$8, fat_g=$9, fiber_g=$10, sugar_g=$11, sodium_mg=$12,
-       seasonal_months=$13, updated_at=now()
-     WHERE id=$14`,
+       seasonal_months=$13, synonyms=$14, parent_ingredient_id=$15, updated_at=now()
+     WHERE id=$16`,
     [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
-     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [], id]
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
+     d.synonyms ?? [], parentIngredientId, id]
   );
 
   if (d.translations) {
@@ -200,6 +231,40 @@ export async function updateIngredient(id: string, d: IngredientInput): Promise<
 export async function deleteIngredient(id: string): Promise<void> {
   await query("UPDATE ingredients SET sync_status='deleted', updated_at=now() WHERE id=$1", [id]);
   await syncIngredient(id);
+}
+
+/** Folds a mistakenly-duplicated ingredient into another one — every recipe
+ *  that referenced `sourceId` is repointed to `targetId` instead (so
+ *  existing recipes aren't affected, just correctly point at one ingredient
+ *  going forward) and `sourceId` is tombstoned. `ingredient_translations`
+ *  for the source are simply discarded — the target's own translations
+ *  are what's kept, same as any other field a merge has to pick a side on. */
+export async function mergeIngredients(sourceId: string, targetId: string): Promise<{ recipesUpdated: number }> {
+  if (sourceId === targetId) throw new Error('Cannot merge an ingredient into itself');
+
+  const affectedRecipes = await query<{ recipe_id: string }>(
+    "SELECT DISTINCT recipe_id FROM recipe_ingredients WHERE ingredient_id=$1",
+    [sourceId]
+  );
+
+  await query("UPDATE recipe_ingredients SET ingredient_id=$1 WHERE ingredient_id=$2", [targetId, sourceId]);
+
+  // Union the tag sets rather than clobbering the target's — dedupe via
+  // ON CONFLICT DO NOTHING against ingredient_tags' (ingredient_id, tag_id)
+  // primary key.
+  await query(
+    "INSERT INTO ingredient_tags (ingredient_id, tag_id) SELECT $1, tag_id FROM ingredient_tags WHERE ingredient_id=$2 ON CONFLICT DO NOTHING",
+    [targetId, sourceId]
+  );
+  await query("DELETE FROM ingredient_tags WHERE ingredient_id=$1", [sourceId]);
+
+  await deleteIngredient(sourceId);
+  await syncIngredient(targetId);
+
+  const { syncRecipe } = await import('./recipes.local');
+  for (const row of affectedRecipes) await syncRecipe(row.recipe_id);
+
+  return { recipesUpdated: affectedRecipes.length };
 }
 
 // ── Categories ─────────────────────────────────────────────────────────
@@ -351,8 +416,14 @@ export async function resyncAllTools(): Promise<number> {
   return rows.length;
 }
 
-export async function listTools({ lang }: { lang?: string }) {
-  const rows = await query<Record<string, unknown>>(`SELECT * FROM tools WHERE deleted_at IS NULL ORDER BY category, name`);
+export async function listTools({ lang, q }: { lang?: string; q?: string }) {
+  const params: unknown[] = [];
+  let where = `WHERE deleted_at IS NULL`;
+  if (q) {
+    params.push(`%${q}%`, `%${q}%`);
+    where += ` AND (name LIKE $${params.length - 1} OR synonyms LIKE $${params.length})`;
+  }
+  const rows = await query<Record<string, unknown>>(`SELECT * FROM tools ${where} ORDER BY category, name`, params);
   const result = [];
   for (const row of rows) {
     const translations = await query<{ language_code: string; name: string; description: string | null }>(
@@ -363,6 +434,7 @@ export async function listTools({ lang }: { lang?: string }) {
     result.push({
       ...row,
       image_urls: JSON.parse((row.image_urls as string) ?? '[]'),
+      synonyms: JSON.parse((row.synonyms as string) ?? '[]'),
       translated_name: translatedName,
       translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
     });
@@ -377,6 +449,7 @@ export interface ToolInput {
   description?: string | null;
   icon?: string | null;
   imageUrls?: string[];
+  synonyms?: string[];
   translations?: Array<{ lang: string; name?: string | null; description?: string | null }>;
 }
 
@@ -392,8 +465,8 @@ async function upsertToolTranslations(toolId: string, translations?: ToolInput['
 export async function createTool(d: ToolInput): Promise<{ id: string }> {
   const id = d.id ?? newId();
   await query(
-    "INSERT INTO tools (id, name, category, description, icon, image_urls) VALUES ($1, $2, $3, $4, $5, $6)",
-    [id, d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || []]
+    "INSERT INTO tools (id, name, category, description, icon, image_urls, synonyms) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    [id, d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? []]
   );
   await upsertToolTranslations(id, d.translations);
   await syncTool(id);
@@ -402,8 +475,8 @@ export async function createTool(d: ToolInput): Promise<{ id: string }> {
 
 export async function updateTool(id: string, d: ToolInput): Promise<void> {
   await query(
-    "UPDATE tools SET name=$1, category=$2, description=$3, icon=$4, image_urls=$5, updated_at=now() WHERE id=$6",
-    [d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || [], id]
+    "UPDATE tools SET name=$1, category=$2, description=$3, icon=$4, image_urls=$5, synonyms=$6, updated_at=now() WHERE id=$7",
+    [d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? [], id]
   );
   await upsertToolTranslations(id, d.translations);
   await syncTool(id);

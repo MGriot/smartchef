@@ -104,6 +104,41 @@ ipcMain.handle('smartchef-get-hidden-clone-dir', async () => {
   return path.join(app.getPath('userData'), 'sync-clone');
 });
 
+// Standalone-mode geocode proxy — mirrors backend/src/routes/geocode.ts
+// exactly (same cache-by-lowercased-query, same Nominatim endpoint/User-
+// Agent/timeout), needed because standalone mode has no backend to proxy
+// through. Must run in the main process, not the renderer: Nominatim's
+// usage policy requires a real identifying User-Agent header, and browsers/
+// Chromium's fetch (unlike Node's) refuse to let script code set that
+// header at all — it's on the forbidden-headers list — regardless of CSP.
+interface GeocodeResult { lat: number; lng: number; displayName: string }
+const geocodeCache = new Map<string, GeocodeResult | null>();
+ipcMain.handle('smartchef-geocode', async (_e, q: string) => {
+  const query = String(q ?? '').trim();
+  if (!query) return null;
+  const key = query.toLowerCase();
+  if (geocodeCache.has(key)) return geocodeCache.get(key) ?? null;
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'SmartChef/1.0 (self-hosted recipe app)' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) throw new Error(`Nominatim error ${response.status}`);
+    const results = (await response.json()) as Array<{ lat: string; lon: string; display_name: string }>;
+    if (!results.length) {
+      geocodeCache.set(key, null);
+      return null;
+    }
+    const result: GeocodeResult = { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), displayName: results[0].display_name };
+    geocodeCache.set(key, result);
+    return result;
+  } catch {
+    return null;
+  }
+});
+
 // Filesystem primitives for gitfs.ts's isomorphic-git adapter (see
 // frontend/src/lib/gitfs.ts) — every call is best-effort/idempotent in the
 // same spots the mobile @capacitor/filesystem-backed adapter already is

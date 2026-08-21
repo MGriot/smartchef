@@ -56,25 +56,26 @@ interface SnapshotIngredient {
   id: string; name: string; categoryId: string; description: string | null; densityGPerMl: number | null;
   defaultUnit: string | null; icon: string | null; imageUrls: string[];
   caloriesKcal: number | null; proteinG: number | null; carbsG: number | null; fatG: number | null;
-  fiberG: number | null; sugarG: number | null; sodiumMg: number | null;
+  fiberG: number | null; sugarG: number | null; sodiumMg: number | null; seasonalMonths: number[];
   updatedAt: string; deletedAt: string | null;
   translations: Array<{ lang: string; text: string }>; tagIds: string[];
 }
 interface SnapshotRecipeIngredient {
   sortOrder: number; ingredientId?: string; subRecipeId?: string;
   quantity: number | null; quantityText: string | null; unitSymbol: string | null;
-  notes: string | null; isOptional: boolean;
+  notes: string | null; isOptional: boolean; groupName: string | null;
 }
 interface SnapshotRecipeStep {
   stepNumber: number; title: string | null; description: string; durationMin: number | null;
-  toolIds: string[]; notes: string | null; imageUrl: string | null; stepIngredients: unknown;
+  toolIds: string[]; techniqueIds: string[]; notes: string | null; imageUrl: string | null; stepIngredients: unknown;
   translations: Array<{ lang: string; title?: string | null; description?: string | null }>;
 }
 interface SnapshotRecipe {
   id: string; title: string; description: string | null; difficulty: string; servings: number;
   prepTimeMin: number | null; cookTimeMin: number | null; restTimeMin: number | null; rating: number | null; timesCooked: number; tags: string[];
   coverImageUrl: string | null; sourceUrl: string | null; sources: unknown[]; isComponent: boolean;
-  languageCode: string | null; updatedAt: string; deletedAt: string | null;
+  languageCode: string | null; storageInstructions: string | null; tips: string | null;
+  updatedAt: string; deletedAt: string | null;
   ingredients: SnapshotRecipeIngredient[]; steps: SnapshotRecipeStep[]; toolIds: string[];
   translations: Array<{ lang: string; title?: string | null; description?: string | null }>;
 }
@@ -181,6 +182,7 @@ async function loadIngredients(): Promise<SnapshotIngredient[]> {
       fiberG: r.fiber_g !== null ? Number(r.fiber_g) : null,
       sugarG: r.sugar_g !== null ? Number(r.sugar_g) : null,
       sodiumMg: r.sodium_mg !== null ? Number(r.sodium_mg) : null,
+      seasonalMonths: r.seasonal_months ?? [],
       updatedAt: r.updated_at, deletedAt: r.sync_status === "deleted" ? r.updated_at : null,
       translations, tagIds: tagRows.map((t) => t.tag_id),
     });
@@ -194,13 +196,13 @@ async function loadRecipes(): Promise<SnapshotRecipe[]> {
   for (const r of rows) {
     const ingredientRows = await query<any>(
       `SELECT ri.sort_order, ri.ingredient_id, ri.sub_recipe_id, ri.quantity, ri.quantity_text,
-              ri.notes, ri.is_optional, u.symbol AS unit_symbol
+              ri.notes, ri.is_optional, ri.group_name, u.symbol AS unit_symbol
        FROM recipe_ingredients ri LEFT JOIN units u ON u.id = ri.unit_id
        WHERE ri.recipe_id=$1 ORDER BY ri.sort_order`,
       [r.id]
     );
     const stepRows = await query<any>(
-      `SELECT id, step_number, title, description, duration_min, tool_ids, notes, image_url, step_ingredients
+      `SELECT id, step_number, title, description, duration_min, tool_ids, technique_ids, notes, image_url, step_ingredients
        FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number`,
       [r.id]
     );
@@ -211,7 +213,7 @@ async function loadRecipes(): Promise<SnapshotRecipe[]> {
       );
       steps.push({
         stepNumber: s.step_number, title: s.title, description: s.description, durationMin: s.duration_min,
-        toolIds: s.tool_ids ?? [], notes: s.notes, imageUrl: s.image_url,
+        toolIds: s.tool_ids ?? [], techniqueIds: s.technique_ids ?? [], notes: s.notes, imageUrl: s.image_url,
         stepIngredients: s.step_ingredients ?? [], translations,
       });
     }
@@ -226,11 +228,12 @@ async function loadRecipes(): Promise<SnapshotRecipe[]> {
       timesCooked: r.times_cooked,
       tags: r.tags ?? [], coverImageUrl: r.cover_image_url, sourceUrl: r.source_url,
       sources: r.sources ?? [], isComponent: r.is_component, languageCode: r.language_code,
+      storageInstructions: r.storage_instructions, tips: r.tips,
       updatedAt: r.updated_at, deletedAt: r.sync_status === "deleted" ? r.updated_at : null,
       ingredients: ingredientRows.map((i: any) => ({
         sortOrder: i.sort_order, ingredientId: i.ingredient_id ?? undefined, subRecipeId: i.sub_recipe_id ?? undefined,
         quantity: i.quantity !== null ? Number(i.quantity) : null, quantityText: i.quantity_text,
-        unitSymbol: i.unit_symbol, notes: i.notes, isOptional: i.is_optional,
+        unitSymbol: i.unit_symbol, notes: i.notes, isOptional: i.is_optional, groupName: i.group_name,
       })),
       steps, toolIds: toolRows.map((t) => t.tool_id), translations,
     });
@@ -344,14 +347,14 @@ async function upsertIngredient(client: PoolClient, i: SnapshotIngredient): Prom
 
   await client.query(
     `INSERT INTO ingredients (id, category_id, name, description, density_g_per_ml, default_unit, icon, image_urls,
-       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, sync_status, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months, sync_status, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      ON CONFLICT (id) DO UPDATE SET
        category_id=$2, name=$3, description=$4, density_g_per_ml=$5, default_unit=$6, icon=$7, image_urls=$8,
        calories_kcal=$9, protein_g=$10, carbs_g=$11, fat_g=$12, fiber_g=$13, sugar_g=$14, sodium_mg=$15,
-       sync_status=$16, updated_at=$17`,
+       seasonal_months=$16, sync_status=$17, updated_at=$18`,
     [i.id, i.categoryId, i.name, i.description, i.densityGPerMl, i.defaultUnit, i.icon, i.imageUrls,
-     i.caloriesKcal, i.proteinG, i.carbsG, i.fatG, i.fiberG, i.sugarG, i.sodiumMg,
+     i.caloriesKcal, i.proteinG, i.carbsG, i.fatG, i.fiberG, i.sugarG, i.sodiumMg, i.seasonalMonths ?? [],
      i.deletedAt ? "deleted" : "synced", i.updatedAt]
   );
   await client.query("DELETE FROM ingredient_translations WHERE ingredient_id=$1", [i.id]);
@@ -396,14 +399,15 @@ async function upsertRecipeBaseRow(client: PoolClient, r: SnapshotRecipe): Promi
   if (!remoteWins(r.updatedAt, await localUpdatedAt(client, "recipes", r.id))) return false;
   await client.query(
     `INSERT INTO recipes (id, title, description, difficulty, servings, prep_time_min, cook_time_min, rest_time_min, rating, times_cooked,
-       tags, cover_image_url, source_url, sources, is_component, language_code, sync_status, crdt_clock, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'{}',$18)
+       tags, cover_image_url, source_url, sources, is_component, language_code, storage_instructions, tips, sync_status, crdt_clock, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'{}',$20)
      ON CONFLICT (id) DO UPDATE SET
        title=$2, description=$3, difficulty=$4, servings=$5, prep_time_min=$6, cook_time_min=$7, rest_time_min=$8, rating=$9, times_cooked=$10,
        tags=$11, cover_image_url=$12, source_url=$13, sources=$14, is_component=$15, language_code=$16,
-       sync_status=$17, updated_at=$18`,
+       storage_instructions=$17, tips=$18, sync_status=$19, updated_at=$20`,
     [r.id, r.title, r.description, r.difficulty, r.servings, r.prepTimeMin, r.cookTimeMin, r.restTimeMin, r.rating, r.timesCooked,
      r.tags, r.coverImageUrl, r.sourceUrl, JSON.stringify(r.sources), r.isComponent, r.languageCode,
+     r.storageInstructions ?? null, r.tips ?? null,
      r.deletedAt ? "deleted" : "synced", r.updatedAt]
   );
   return true;
@@ -419,10 +423,10 @@ async function replaceRecipeNestedData(client: PoolClient, r: SnapshotRecipe): P
       unitId = u.rows[0]?.id ?? null;
     }
     await client.query(
-      `INSERT INTO recipe_ingredients (id, recipe_id, sort_order, ingredient_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      `INSERT INTO recipe_ingredients (id, recipe_id, sort_order, ingredient_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional, group_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [uuidv4(), r.id, ing.sortOrder, ing.ingredientId ?? null, ing.subRecipeId ?? null,
-       ing.quantity, ing.quantityText, unitId, ing.notes, ing.isOptional]
+       ing.quantity, ing.quantityText, unitId, ing.notes, ing.isOptional, ing.groupName ?? null]
     );
   }
 
@@ -430,10 +434,10 @@ async function replaceRecipeNestedData(client: PoolClient, r: SnapshotRecipe): P
   for (const step of r.steps) {
     const stepId = uuidv4();
     await client.query(
-      `INSERT INTO recipe_steps (id, recipe_id, step_number, title, description, duration_min, tool_ids, notes, image_url, step_ingredients)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      `INSERT INTO recipe_steps (id, recipe_id, step_number, title, description, duration_min, tool_ids, technique_ids, notes, image_url, step_ingredients)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [stepId, r.id, step.stepNumber, step.title, step.description, step.durationMin,
-       step.toolIds, step.notes, step.imageUrl, JSON.stringify(step.stepIngredients ?? [])]
+       step.toolIds, step.techniqueIds ?? [], step.notes, step.imageUrl, JSON.stringify(step.stepIngredients ?? [])]
     );
     for (const t of step.translations) {
       if (!t.lang || (!t.title && !t.description)) continue;

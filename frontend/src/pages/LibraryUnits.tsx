@@ -53,7 +53,7 @@ export default function LibraryUnits() {
   // Translation helpers
   const handleTranslationChange = (idx: number, field: 'lang' | 'name', value: string) => {
     const newT = [...translations];
-    newT[idx][field] = value;
+    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
     setTranslations(newT);
   };
   const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);

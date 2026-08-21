@@ -168,6 +168,11 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
     nameColumn: 'name',
     scalarFields: new Set(['name', 'description', 'icon', 'image_urls', 'deleted_at']),
   },
+  profile: {
+    table: 'profiles',
+    nameColumn: 'name',
+    scalarFields: new Set(['name', 'avatar_url', 'deleted_at']),
+  },
 };
 
 // recipes.steps/ingredients/toolIds are normalized child tables, not

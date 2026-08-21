@@ -86,6 +86,9 @@
     "editRecipe": "Modifier la recette",
     "saving": "En cours d'enregistrement…",
     "saveRecipe": "Enregistrer la recette",
+    "switchToRawText": "Texte brut",
+    "switchToForm": "Formulaire",
+    "rawTextEditHint": "Toute la recette en JSON — modifiez directement, ou copiez/collez ailleurs. Revenir au Formulaire (ou enregistrer) applique ce qui est écrit ici.",
     "recipeTitle": "Titre de la recette",
     "writtenIn": "Écrit en",
     "enterTitlePlaceholder": "Entrer le titre de la recette…",
@@ -296,5 +299,11 @@
     "inSeason": "De saison en {{month}}",
     "noneInSeason": "Rien de saison ce mois-ci.",
     "outOfSeason": "Hors saison"
+  },
+  "tagGroups": {
+    "dieta": "Régime",
+    "contiene": "Contient",
+    "portata": "Service",
+    "altro": "Autre"
   }
 }

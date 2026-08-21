@@ -168,6 +168,24 @@ export async function withTransaction<T>(fn: (client: LocalClient) => Promise<T>
 //     just the one local display-name profile — see lib/standalone.ts)
 
 const SCHEMA_SQL = `
+-- Household members sharing this standalone library — see lib/standalone.ts
+-- and services/profiles.local.ts. Synced like any other entity (writeEntityFile
+-- + mergeBridge.ts's ENTITY_DIRS) so a profile created on one device shows
+-- up as pickable on every other device sharing the same Sync Folder,
+-- unlike the old single-profile-in-Preferences design where each device's
+-- "who am I" was invisible to every other device. Which profile a given
+-- *device* is currently using is a separate, deliberately per-device
+-- Preferences pointer (smartchef.activeProfileId) — never synced, same
+-- spirit as the device id/name gitSync.ts already keeps local-only.
+CREATE TABLE IF NOT EXISTS profiles (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  avatar_url  TEXT,
+  deleted_at  TEXT,
+  created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS ingredient_categories (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
@@ -210,11 +228,29 @@ CREATE TABLE IF NOT EXISTS ingredients (
   -- See db/migrations/034_ingredient_seasonality.sql for the Postgres side.
   -- Backfilled onto pre-existing local DBs via addColumnIfMissing() below.
   seasonal_months TEXT DEFAULT '[]',
+  -- Optional alternate names ("scallion"/"green onion") — search-only, see
+  -- db/migrations/035_synonyms.sql. Backfilled via addColumnIfMissing() below.
+  synonyms       TEXT DEFAULT '[]',
+  -- Optional "this is a variety of" self-reference (e.g. Red Apple ->
+  -- Apple) — purely organizational, no inherited fields. See
+  -- db/migrations/036_ingredient_parent.sql. Backfilled via
+  -- addColumnIfMissing() below.
+  parent_ingredient_id TEXT REFERENCES ingredients(id),
   sync_status    TEXT DEFAULT 'local',
   created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at     TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ingredients_category ON ingredients(category_id);
+-- idx_ingredients_parent is NOT created here on purpose — see
+-- initLocalSchema() below. This whole script runs unconditionally on every
+-- launch, but CREATE TABLE IF NOT EXISTS is a no-op against a database
+-- that already has the table (the normal case for any real device by now),
+-- so the column addition above never actually lands on one. A CREATE
+-- INDEX in this same script isn't gated by that no-op the way the table
+-- body is — it still tries to build an index against the *current*
+-- (pre-migration) table shape, and fails outright with "no such column"
+-- on exactly the devices addColumnIfMissing() exists to support. Deferred
+-- to after that call actually runs.
 
 CREATE TABLE IF NOT EXISTS ingredient_translations (
   id              TEXT PRIMARY KEY,
@@ -250,6 +286,7 @@ CREATE TABLE IF NOT EXISTS tools (
   description TEXT,
   icon        TEXT,
   image_urls  TEXT DEFAULT '[]',
+  synonyms    TEXT DEFAULT '[]',
   deleted_at  TEXT,
   created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
@@ -272,6 +309,7 @@ CREATE TABLE IF NOT EXISTS tags (
   color           TEXT,
   icon            TEXT,
   exclude_tag_ids TEXT DEFAULT '[]',
+  synonyms        TEXT DEFAULT '[]',
   sort_order      INTEGER DEFAULT 0,
   deleted_at      TEXT,
   created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -412,6 +450,7 @@ CREATE TABLE IF NOT EXISTS techniques (
   description TEXT,
   icon        TEXT,
   image_urls  TEXT DEFAULT '[]',
+  synonyms    TEXT DEFAULT '[]',
   deleted_at  TEXT,
   created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
@@ -515,6 +554,12 @@ export async function initLocalSchema(): Promise<void> {
     await addColumnIfMissing(db, 'recipes', 'storage_instructions', 'TEXT');
     await addColumnIfMissing(db, 'recipes', 'tips', 'TEXT');
     await addColumnIfMissing(db, 'ingredients', 'seasonal_months', "TEXT DEFAULT '[]'");
+    await addColumnIfMissing(db, 'ingredients', 'synonyms', "TEXT DEFAULT '[]'");
+    await addColumnIfMissing(db, 'ingredients', 'parent_ingredient_id', 'TEXT');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_ingredients_parent ON ingredients(parent_ingredient_id)');
+    await addColumnIfMissing(db, 'tools', 'synonyms', "TEXT DEFAULT '[]'");
+    await addColumnIfMissing(db, 'tags', 'synonyms', "TEXT DEFAULT '[]'");
+    await addColumnIfMissing(db, 'techniques', 'synonyms', "TEXT DEFAULT '[]'");
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {
       await db.execute(SEED_SQL);

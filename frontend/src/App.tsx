@@ -20,14 +20,17 @@ import SyncHistory from "./pages/SyncHistory";
 import Downloads from "./pages/Downloads";
 import Login from "./pages/Login";
 import ServerConnect from "./pages/ServerConnect";
+import ProfilePicker from "./pages/ProfilePicker";
 import { useStore } from "./store/app.store";
 import { apiFetch, isNative, getServerUrl, cacheAccountOffline } from './lib/api';
-import { getStandaloneProfile } from './lib/standalone';
+import { isStandaloneMode, getActiveProfile } from './lib/standalone';
+import { initLocalSchema } from './db/local';
 import { startOfflineSyncWatcher } from './lib/offlineSync';
 
 type AuthState =
   | { status: "loading" }
   | { status: "needs-auth"; hasAccount: boolean }
+  | { status: "needs-profile" }
   | { status: "authenticated" };
 
 export default function App() {
@@ -44,15 +47,36 @@ export default function App() {
   const [standalone, setStandalone] = useState(false);
 
   const checkNativeReady = () => {
-    getStandaloneProfile().then((profile) => {
-      if (profile) {
-        setAccount({ id: "local", username: profile.name, name: profile.name, role: "user" });
-        setStandalone(true);
-        setAuth({ status: "authenticated" });
-        setServerReady(true);
+    isStandaloneMode().then((standaloneEnabled) => {
+      if (!standaloneEnabled) {
+        getServerUrl().then((url) => setServerReady(!!url));
         return;
       }
-      getServerUrl().then((url) => setServerReady(!!url));
+      // First-run (ServerConnect.tsx) / a profile pick only ever calls
+      // initLocalSchema() once, at that moment — a device that's had
+      // standalone mode enabled since before some later app version added
+      // new columns/tables would otherwise never pick up their
+      // addColumnIfMissing() backfills, and every write touching a newer
+      // field would throw "no such column" on this device forever.
+      // Re-running it here on every launch is cheap (CREATE TABLE IF NOT
+      // EXISTS + a PRAGMA table_info check per column) and keeps existing
+      // devices' schemas current.
+      initLocalSchema().then(() => {
+        setStandalone(true);
+        setServerReady(true);
+        getActiveProfile().then((profile) => {
+          if (!profile) {
+            // Standalone-enabled but nobody's picked a profile on this
+            // device yet — either freshly switched, or this device just
+            // joined an existing Sync Folder and pulled in profiles other
+            // devices already created.
+            setAuth({ status: "needs-profile" });
+            return;
+          }
+          setAccount({ id: profile.id, username: profile.name, name: profile.name, role: "user", avatarUrl: profile.avatarUrl });
+          setAuth({ status: "authenticated" });
+        });
+      });
     });
   };
 
@@ -103,6 +127,10 @@ export default function App() {
         <span className="material-symbols-outlined text-4xl text-primary animate-spin">progress_activity</span>
       </div>
     );
+  }
+
+  if (auth.status === "needs-profile") {
+    return <ProfilePicker onPicked={checkNativeReady} />;
   }
 
   if (auth.status === "needs-auth") {

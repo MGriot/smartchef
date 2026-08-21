@@ -86,6 +86,9 @@
     "editRecipe": "Modifica Ricetta",
     "saving": "Salvataggio…",
     "saveRecipe": "Salva Ricetta",
+    "switchToRawText": "Testo grezzo",
+    "switchToForm": "Modulo",
+    "rawTextEditHint": "L'intera ricetta come JSON — modifica direttamente, oppure copia/incolla altrove. Tornando a Modulo (o salvando) si applica quanto scritto qui.",
     "recipeTitle": "Titolo Ricetta",
     "writtenIn": "Scritto in",
     "enterTitlePlaceholder": "Inserisci titolo ricetta…",
@@ -296,5 +299,11 @@
     "inSeason": "Di stagione a {{month}}",
     "noneInSeason": "Nessun ingrediente di stagione questo mese.",
     "outOfSeason": "Fuori stagione"
+  },
+  "tagGroups": {
+    "dieta": "Dieta",
+    "contiene": "Contiene",
+    "portata": "Portata",
+    "altro": "Altro"
   }
 }

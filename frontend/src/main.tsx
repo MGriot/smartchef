@@ -1,3 +1,4 @@
+import { Buffer } from "buffer";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
@@ -5,6 +6,20 @@ import App from "./App";
 import "./index.css";
 import "./i18n";
 import { isNative } from "./lib/api";
+
+// isomorphic-git (standalone mode's Folder Sync, lib/sync/gitSync.ts)
+// references the Node.js `Buffer` global directly — never imports it,
+// just expects it to already be in scope, same as it would be under Node
+// or a Webpack 4-era bundle. Vite/Rollup never polyfills Node globals for
+// the browser, and this app runs in a real WebView (Capacitor) or browser
+// tab, not Node — so without this, `Buffer` is simply undefined and every
+// isomorphic-git call throws "Buffer is not defined" immediately. Must run
+// before gitSync.ts's dynamic `import('isomorphic-git')` ever resolves;
+// since that's always an async dynamic import, this synchronous top-level
+// assignment on app boot is guaranteed to land first.
+if (typeof globalThis.Buffer === "undefined") {
+  (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
+}
 
 // On native Android, keep the WebView below the status bar instead of
 // drawing under it — combined with viewport-fit=cover + env(safe-area-inset-*)

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
+import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 
@@ -15,7 +16,7 @@ export default function LibraryTechniques() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingTechnique, setEditingTechnique] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', description: '', icon: 'FaFire', imageUrls: [] as string[] });
+  const [form, setForm] = useState({ name: '', description: '', icon: 'FaFire', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
 
@@ -41,11 +42,12 @@ export default function LibraryTechniques() {
         description: technique.description || '',
         icon: technique.icon || 'FaFire',
         imageUrls: technique.image_urls || [],
+        synonyms: technique.synonyms || [],
       });
       setTranslations(technique.translations || []);
     } else {
       setEditingTechnique(null);
-      setForm({ name: '', description: '', icon: 'FaFire', imageUrls: [] });
+      setForm({ name: '', description: '', icon: 'FaFire', imageUrls: [], synonyms: [] });
       setTranslations([]);
     }
     setShowModal(true);
@@ -53,7 +55,7 @@ export default function LibraryTechniques() {
 
   const handleTranslationChange = (idx: number, field: 'lang' | 'name', value: string) => {
     const newT = [...translations];
-    newT[idx][field] = value;
+    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
     setTranslations(newT);
   };
   const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);
@@ -187,6 +189,11 @@ export default function LibraryTechniques() {
                  <div>
                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Description</label>
                    <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="What this technique means, when to use it..." className="w-full h-24 px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium transition-all" />
+                 </div>
+
+                 <div>
+                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Synonyms</label>
+                    <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
                  </div>
 
                  {/* Translations Section */}

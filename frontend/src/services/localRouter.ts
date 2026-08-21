@@ -12,8 +12,9 @@ import * as recipes from './recipes.local';
 import * as ingredients from './ingredients.local';
 import * as tags from './tags.local';
 import * as techniques from './techniques.local';
-import { importSnapshot } from './backup.local';
+import { importSnapshot, exportSnapshot } from './backup.local';
 import { getStandaloneProfile } from '../lib/standalone';
+import { electronGeocode } from '../lib/electronBridge';
 
 export interface LocalDispatchResult {
   status: number;
@@ -118,6 +119,11 @@ async function dispatchIngredients(segments: string[], method: string, sp: URLSe
     return NOT_HANDLED;
   }
 
+  if (second === 'merge' && method === 'POST') {
+    const body = parseBody(init);
+    return { status: 200, data: await ingredients.mergeIngredients(first, body.targetId) };
+  }
+
   if (method === 'PUT') { await ingredients.updateIngredient(first, parseBody(init)); return { status: 200, data: { success: true } }; }
   if (method === 'DELETE') { await ingredients.deleteIngredient(first); return { status: 200, data: { success: true } }; }
   return NOT_HANDLED;
@@ -138,7 +144,7 @@ async function dispatchUnits(segments: string[], method: string, sp: URLSearchPa
 async function dispatchTools(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const [, id] = segments;
   if (!id) {
-    if (method === 'GET') return { status: 200, data: await ingredients.listTools({ lang: sp.get('lang') ?? undefined }) };
+    if (method === 'GET') return { status: 200, data: await ingredients.listTools({ lang: sp.get('lang') ?? undefined, q: sp.get('q') ?? undefined }) };
     if (method === 'POST') return { status: 200, data: await ingredients.createTool(parseBody(init)) };
     return NOT_HANDLED;
   }
@@ -148,21 +154,44 @@ async function dispatchTools(segments: string[], method: string, sp: URLSearchPa
 }
 
 async function dispatchTags(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
-  const [, id] = segments;
+  const [, id, sub] = segments;
   if (!id) {
-    if (method === 'GET') return { status: 200, data: await tags.listTags({ lang: sp.get('lang') ?? undefined }) };
+    if (method === 'GET') return { status: 200, data: await tags.listTags({ lang: sp.get('lang') ?? undefined, q: sp.get('q') ?? undefined }) };
     if (method === 'POST') return { status: 200, data: await tags.createTag(parseBody(init)) };
     return NOT_HANDLED;
   }
+  if (id === 'custom') {
+    if (!sub && method === 'GET') return { status: 200, data: await tags.listCustomTagsInUse() };
+    if (sub === 'merge' && method === 'POST') {
+      const body = parseBody(init);
+      return { status: 200, data: await tags.mergeCustomTagIntoTag(body.name, body.targetTagId) };
+    }
+    if (sub === 'delete' && method === 'POST') {
+      const body = parseBody(init);
+      return { status: 200, data: await tags.deleteCustomTag(body.name) };
+    }
+    return NOT_HANDLED;
+  }
+  if (id === 'groups') {
+    if (sub === 'merge' && method === 'POST') {
+      const body = parseBody(init);
+      return { status: 200, data: await tags.mergeTagGroups(body.sourceGroup, body.targetGroup) };
+    }
+    return NOT_HANDLED;
+  }
+  if (sub === 'merge' && method === 'POST') {
+    const body = parseBody(init);
+    return { status: 200, data: await tags.mergeTags(id, body.targetId) };
+  }
   if (method === 'PUT') { await tags.updateTag(id, parseBody(init)); return { status: 200, data: { success: true } }; }
-  if (method === 'DELETE') { await tags.deleteTag(id); return { status: 200, data: { success: true } }; }
+  if (method === 'DELETE') { return { status: 200, data: await tags.deleteTag(id) }; }
   return NOT_HANDLED;
 }
 
 async function dispatchTechniques(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const [, id] = segments;
   if (!id) {
-    if (method === 'GET') return { status: 200, data: await techniques.listTechniques({ lang: sp.get('lang') ?? undefined }) };
+    if (method === 'GET') return { status: 200, data: await techniques.listTechniques({ lang: sp.get('lang') ?? undefined, q: sp.get('q') ?? undefined }) };
     if (method === 'POST') return { status: 200, data: await techniques.createTechnique(parseBody(init)) };
     return NOT_HANDLED;
   }
@@ -171,18 +200,34 @@ async function dispatchTechniques(segments: string[], method: string, sp: URLSea
   return NOT_HANDLED;
 }
 
-/** One-shot "bring an existing library into this fresh device" import —
- *  see backup.local.ts. Only `import` is handled locally; `export` is
- *  deliberately left unhandled here (falls through to dispatchLocal's
- *  caller, which errors clearly) since Folder Sync already covers
- *  continuous, versioned backup for standalone mode. */
+/** Whole-library backup export/import — see backup.local.ts. The Backup &
+ *  Restore card (Account.tsx) is exactly as useful standalone as it is in
+ *  server mode: a portable snapshot to save wherever you like or move to
+ *  another device, independent of whether Folder Sync is even set up. */
 async function dispatchBackup(segments: string[], method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const [, action] = segments;
+  if (action === 'export' && method === 'GET') {
+    return { status: 200, data: await exportSnapshot() };
+  }
   if (action === 'import' && method === 'POST') {
     const summary = await importSnapshot(parseBody(init));
     return { status: 200, data: summary };
   }
   return NOT_HANDLED;
+}
+
+/** Standalone-mode equivalent of backend/src/routes/geocode.ts — Android has
+ *  no way to make this call at all yet (no IPC bridge, and Nominatim's
+ *  User-Agent requirement rules out a plain renderer fetch()), so it 501s
+ *  there same as before; RegionPicker.tsx already treats that as "no pin,"
+ *  not an error. Electron routes it through the main process — see
+ *  lib/electronBridge.ts's electronGeocode(). */
+async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  const q = sp.get('q');
+  if (!q) return { status: 400, error: 'Missing q' };
+  const result = await electronGeocode(q);
+  if (!result) return { status: 404, error: 'No match found' };
+  return { status: 200, data: result };
 }
 
 /** Returns `null` when `path` isn't under a prefix this stage owns at all
@@ -197,15 +242,29 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
   const { segments, searchParams } = segmentsAndQuery(path);
   const method = (init?.method ?? 'GET').toUpperCase();
 
+  if (!['recipes', 'ingredients', 'units', 'tools', 'tags', 'techniques', 'backup', 'geocode'].includes(segments[0])) {
+    return null;
+  }
+
+  // A thrown error here (a SQL error from a stale local schema, a bad body
+  // shape, ...) would otherwise propagate out of apiFetch uncaught, past
+  // every caller's `catch` block as a bare, unhelpful "Network error" —
+  // wrong (nothing about this is a network problem) and useless for
+  // diagnosing the real cause. Surface it as a normal error response instead.
   let result: LocalDispatchResult | typeof NOT_HANDLED;
-  if (segments[0] === 'recipes') result = await dispatchRecipes(segments, method, searchParams, init);
-  else if (segments[0] === 'ingredients') result = await dispatchIngredients(segments, method, searchParams, init);
-  else if (segments[0] === 'units') result = await dispatchUnits(segments, method, searchParams, init);
-  else if (segments[0] === 'tools') result = await dispatchTools(segments, method, searchParams, init);
-  else if (segments[0] === 'tags') result = await dispatchTags(segments, method, searchParams, init);
-  else if (segments[0] === 'techniques') result = await dispatchTechniques(segments, method, searchParams, init);
-  else if (segments[0] === 'backup') result = await dispatchBackup(segments, method, init);
-  else return null;
+  try {
+    if (segments[0] === 'recipes') result = await dispatchRecipes(segments, method, searchParams, init);
+    else if (segments[0] === 'ingredients') result = await dispatchIngredients(segments, method, searchParams, init);
+    else if (segments[0] === 'units') result = await dispatchUnits(segments, method, searchParams, init);
+    else if (segments[0] === 'tools') result = await dispatchTools(segments, method, searchParams, init);
+    else if (segments[0] === 'tags') result = await dispatchTags(segments, method, searchParams, init);
+    else if (segments[0] === 'techniques') result = await dispatchTechniques(segments, method, searchParams, init);
+    else if (segments[0] === 'geocode') result = await dispatchGeocode(searchParams);
+    else result = await dispatchBackup(segments, method, init);
+  } catch (err) {
+    console.error(`Local dispatch failed for ${method} ${path}:`, err);
+    return { status: 500, error: err instanceof Error ? err.message : String(err) };
+  }
 
   if (result === NOT_HANDLED) {
     return { status: 501, error: `This action isn't available in offline mode yet.` };

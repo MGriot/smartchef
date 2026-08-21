@@ -35,13 +35,33 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
+// SQLite enforces the FK columns below (recipe_ingredients.ingredient_id/
+// sub_recipe_id/unit_id, recipes.yield_unit_id) strictly, unlike Postgres
+// server mode's more forgiving history here — a stale id (an ingredient
+// merged away, a unit that was never actually seeded on this device, ...)
+// throws a bare "FOREIGN KEY constraint failed" that aborts the whole save
+// with no indication of which field caused it. Checked defensively before
+// every insert so a single bad reference just gets dropped (silently
+// falls back to null/unset) instead of blocking the entire recipe from
+// saving.
+async function resolveExistingId(client: LocalClient, table: string, id: string | null | undefined): Promise<string | null> {
+  if (!id) return null;
+  const res = await client.query<{ id: string }>(`SELECT id FROM ${table} WHERE id=$1`, [id]);
+  return res.rows[0] ? id : null;
+}
+
 // Fire-and-forget — a sync failure (folder unreachable, permission not
 // granted yet, etc.) must never surface as a save failure. Dynamically
 // imported since gitSync.ts pulls in isomorphic-git/@capacitor/filesystem,
 // which only matter on native (this whole file only ever runs there
 // anyway, reached exclusively through localRouter.ts's standalone-mode
 // dispatch — see lib/api.ts).
-async function syncRecipe(id: string): Promise<void> {
+// Exported for ingredients.local.ts's mergeIngredients(): repointing
+// recipe_ingredients.ingredient_id via raw SQL bypasses updateRecipe()'s
+// normal path, so the affected recipes' entity files (which embed their
+// full ingredients array per ADR 0002) need an explicit re-sync afterward
+// or the merge would never propagate through Folder Sync to other devices.
+export async function syncRecipe(id: string): Promise<void> {
   try {
     const row = await queryOne<Record<string, unknown>>('SELECT * FROM recipes WHERE id=$1', [id]);
     if (!row) return;
@@ -522,12 +542,13 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
   const recipeId = d.id ?? newId();
 
   await withTransaction(async (client) => {
+    const yieldUnitId = await resolveExistingId(client, 'units', d.yieldUnitId);
     await client.query(
       `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,
          cook_time_min,rest_time_min,rating,yield_amount,yield_unit_id,tags,regions,region_coords,cover_image_url,source_url,sources,is_component,language_code,creator_name,storage_instructions,tips)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
       [recipeId, d.title, d.description ?? null, d.difficulty ?? 'medium', d.servings ?? 4, d.prepTimeMin ?? null,
-       d.cookTimeMin ?? null, d.restTimeMin ?? null, d.rating ?? null, d.yieldAmount ?? null, d.yieldUnitId ?? null,
+       d.cookTimeMin ?? null, d.restTimeMin ?? null, d.rating ?? null, d.yieldAmount ?? null, yieldUnitId,
        d.tags ?? [], d.regions ?? [], d.regionCoords ?? {}, d.coverImageUrl ?? null, d.sourceUrl ?? null,
        d.sources ?? [], d.isComponent ?? false, d.languageCode ?? null, creatorName,
        d.storageInstructions ?? null, d.tips ?? null]
@@ -535,14 +556,17 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
 
     for (const ing of d.ingredients ?? []) {
       const recipeIngredientId = newId();
+      const ingredientId = await resolveExistingId(client, 'ingredients', ing.ingredientId);
+      const subRecipeId = await resolveExistingId(client, 'recipes', ing.subRecipeId);
+      const unitId = await resolveExistingId(client, 'units', ing.unitId);
       await client.query(
         `INSERT INTO recipe_ingredients
            (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
             quantity,quantity_text,unit_id,notes,is_optional,group_name)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [recipeIngredientId, recipeId, ing.sortOrder, ing.ingredientId ?? null,
-         ing.subtypeId ?? null, ing.subRecipeId ?? null, ing.quantity ?? null,
-         ing.quantityText ?? null, ing.unitId ?? null, ing.notes ?? null, ing.isOptional ?? false,
+        [recipeIngredientId, recipeId, ing.sortOrder, ingredientId,
+         ing.subtypeId ?? null, subRecipeId, ing.quantity ?? null,
+         ing.quantityText ?? null, unitId, ing.notes ?? null, ing.isOptional ?? false,
          ing.groupName ?? null]
       );
       await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
@@ -562,6 +586,7 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
     }
 
     for (const toolId of d.toolIds ?? []) {
+      if (!(await resolveExistingId(client, 'tools', toolId))) continue;
       await client.query(
         "INSERT INTO recipe_tools (recipe_id,tool_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
         [recipeId, toolId]
@@ -583,6 +608,7 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
 
 export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: string }> {
   await withTransaction(async (client) => {
+    const yieldUnitId = await resolveExistingId(client, 'units', d.yieldUnitId);
     await client.query(
       `UPDATE recipes SET
          title=$2, description=$3, difficulty=$4, servings=$5,
@@ -591,7 +617,7 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
          language_code=$19, storage_instructions=$20, tips=$21, updated_at=now()
        WHERE id=$1`,
       [id, d.title, d.description ?? null, d.difficulty ?? 'medium', d.servings ?? 4, d.prepTimeMin ?? null,
-       d.cookTimeMin ?? null, d.restTimeMin ?? null, d.rating ?? null, d.yieldAmount ?? null, d.yieldUnitId ?? null,
+       d.cookTimeMin ?? null, d.restTimeMin ?? null, d.rating ?? null, d.yieldAmount ?? null, yieldUnitId,
        d.tags ?? [], d.regions ?? [], d.regionCoords ?? {}, d.coverImageUrl ?? null, d.sourceUrl ?? null, d.sources ?? [], d.isComponent ?? false,
        d.languageCode ?? null, d.storageInstructions ?? null, d.tips ?? null]
     );
@@ -599,14 +625,20 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
     await client.query("DELETE FROM recipe_ingredients WHERE recipe_id=$1", [id]);
     for (const ing of d.ingredients ?? []) {
       const recipeIngredientId = newId();
+      const ingredientId = await resolveExistingId(client, 'ingredients', ing.ingredientId);
+      // A sub-recipe referencing itself can't be inserted anyway (this row
+      // isn't committed yet within this same UPDATE), so treat that the
+      // same as any other dangling reference rather than a special case.
+      const subRecipeId = ing.subRecipeId === id ? null : await resolveExistingId(client, 'recipes', ing.subRecipeId);
+      const unitId = await resolveExistingId(client, 'units', ing.unitId);
       await client.query(
         `INSERT INTO recipe_ingredients
            (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
             quantity,quantity_text,unit_id,notes,is_optional,group_name)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [recipeIngredientId, id, ing.sortOrder, ing.ingredientId ?? null,
-         ing.subtypeId ?? null, ing.subRecipeId ?? null, ing.quantity ?? null,
-         ing.quantityText ?? null, ing.unitId ?? null, ing.notes ?? null, ing.isOptional ?? false,
+        [recipeIngredientId, id, ing.sortOrder, ingredientId,
+         ing.subtypeId ?? null, subRecipeId, ing.quantity ?? null,
+         ing.quantityText ?? null, unitId, ing.notes ?? null, ing.isOptional ?? false,
          ing.groupName ?? null]
       );
       await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
@@ -628,6 +660,7 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
 
     await client.query("DELETE FROM recipe_tools WHERE recipe_id=$1", [id]);
     for (const toolId of d.toolIds ?? []) {
+      if (!(await resolveExistingId(client, 'tools', toolId))) continue;
       await client.query(
         "INSERT INTO recipe_tools (recipe_id,tool_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
         [id, toolId]

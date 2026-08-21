@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { setServerUrl } from '../lib/api';
-import { initStandaloneProfile } from '../lib/standalone';
+import { initStandaloneProfile, activateStandaloneProfile, type StandaloneProfile } from '../lib/standalone';
+import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
+import ImageUrlInput from '../components/ImageUrlInput';
 
 interface ServerConnectProps {
   onConnected: () => void;
@@ -12,6 +14,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   const [mode, setMode] = useState<'choose' | 'server' | 'standalone'>('choose');
   const [url, setUrl] = useState('https://');
   const [name, setName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,13 +26,43 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   const [choosingFolder, setChoosingFolder] = useState(false);
   const [folderSkipped, setFolderSkipped] = useState(false);
 
+  // A folder someone else's device already wrote profiles into — offered
+  // as "pick who you are" instead of forcing a brand-new (likely
+  // redundant) profile onto a household library that already has people.
+  const [checkingFolder, setCheckingFolder] = useState(false);
+  const [folderProfiles, setFolderProfiles] = useState<StandaloneProfile[] | null>(null);
+  const [activatingProfileId, setActivatingProfileId] = useState<string | null>(null);
+  const [forceCreateNew, setForceCreateNew] = useState(false);
+
+  const checkForExistingProfiles = async () => {
+    setCheckingFolder(true);
+    try {
+      const { initLocalSchema } = await import('../db/local');
+      await initLocalSchema();
+      const { syncNow } = await import('../lib/sync/gitSync');
+      // Best-effort — an unreachable/slow folder shouldn't block onboarding,
+      // it just means we fall back to "create a new profile" below.
+      await syncNow().catch(() => {});
+      const { listStandaloneProfiles } = await import('../lib/standalone');
+      const profiles = await listStandaloneProfiles();
+      setFolderProfiles(profiles);
+    } catch {
+      setFolderProfiles([]);
+    } finally {
+      setCheckingFolder(false);
+    }
+  };
+
   const handleChooseSyncFolder = async () => {
     setChoosingFolder(true);
     setError(null);
     try {
       const { pickAndPersistSyncFolder } = await import('../lib/syncFolderPicker');
       const picked = await pickAndPersistSyncFolder();
-      if (picked) setSyncFolderName(picked.displayName);
+      if (picked) {
+        setSyncFolderName(picked.displayName);
+        await checkForExistingProfiles();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not choose a sync folder');
     } finally {
@@ -43,8 +76,22 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   // they'd backed out of.
   const handleRemoveSyncFolder = async () => {
     setSyncFolderName(null);
+    setFolderProfiles(null);
+    setForceCreateNew(false);
     const { clearPersistedSyncFolder } = await import('../lib/syncFolderPicker');
     await clearPersistedSyncFolder().catch(() => {});
+  };
+
+  const handlePickExistingProfile = async (id: string) => {
+    setActivatingProfileId(id);
+    setError(null);
+    try {
+      await activateStandaloneProfile(id);
+      onConnected();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not switch profile');
+      setActivatingProfileId(null);
+    }
   };
 
   const handleStartOffline = async (e: React.FormEvent) => {
@@ -53,7 +100,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
     setConnecting(true);
     setError(null);
     try {
-      await initStandaloneProfile(name);
+      await initStandaloneProfile(name, avatarUrl || null);
       onConnected();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start offline mode');
@@ -95,6 +142,11 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       Back
     </button>
   );
+
+  // Once a folder that already has profiles is chosen, show "pick who you
+  // are" instead of the name form — unless the user explicitly asked to
+  // create a brand-new one anyway (forceCreateNew).
+  const showExistingProfilesPicker = folderProfiles !== null && folderProfiles.length > 0 && !forceCreateNew;
 
   return (
     <div className="min-h-screen bg-[#fafaf5] flex items-center justify-center p-6 font-outfit">
@@ -164,63 +216,135 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
         {mode === 'standalone' && (
           <>
             <BackButton />
-            <form onSubmit={handleStartOffline} className="space-y-5">
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Your name</label>
-                <input
-                  type="text"
-                  autoFocus
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Matteo"
-                  className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
-                />
-                <p className="text-xs text-zinc-400 mt-2">
-                  Used to label recipes you create and cooks you log — no password, this device's data is already private to you.
-                </p>
-              </div>
 
-              <div className="bg-zinc-50 rounded-2xl p-5">
-                <p className="text-sm font-bold text-zinc-900">Sync across your devices</p>
-                <p className="text-xs text-zinc-400 mt-1 mb-3">
-                  Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder). You can always set this up later from Account.
-                </p>
-                {syncFolderName ? (
-                  <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2.5 border border-zinc-200">
-                    <span className="text-xs font-bold text-zinc-700 truncate">{syncFolderName}</span>
-                    <button type="button" onClick={handleRemoveSyncFolder} className="text-[11px] font-black text-zinc-400 hover:text-red-600">Remove</button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
+            <div className="bg-zinc-50 rounded-2xl p-5 mb-5">
+              <p className="text-sm font-bold text-zinc-900">Sync across your devices</p>
+              <p className="text-xs text-zinc-400 mt-1 mb-3">
+                Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder). You can always set this up later from Account.
+              </p>
+              {syncFolderName ? (
+                <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2.5 border border-zinc-200">
+                  <span className="text-xs font-bold text-zinc-700 truncate">{syncFolderName}</span>
+                  <button type="button" onClick={handleRemoveSyncFolder} className="text-[11px] font-black text-zinc-400 hover:text-red-600">Remove</button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleChooseSyncFolder}
+                    disabled={choosingFolder}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-zinc-900 text-white rounded-xl text-xs font-black hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">folder_open</span>
+                    {choosingFolder ? 'Choosing…' : 'Choose Folder'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFolderSkipped(true)}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-black transition-colors ${folderSkipped ? 'bg-zinc-200 text-zinc-500' : 'bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-100'}`}
+                  >
+                    {folderSkipped ? 'Skipped ✓' : 'Skip for now'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {checkingFolder && (
+              <p className="text-sm text-zinc-400 font-medium text-center py-4">Checking this folder for existing profiles…</p>
+            )}
+
+            {!checkingFolder && showExistingProfilesPicker && (
+              <div className="space-y-5">
+                <p className="text-sm text-zinc-500">This folder already has profiles — pick who you are, or create a new one.</p>
+                <div className="space-y-2">
+                  {folderProfiles!.map((p) => (
                     <button
+                      key={p.id}
                       type="button"
-                      onClick={handleChooseSyncFolder}
-                      disabled={choosingFolder}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-zinc-900 text-white rounded-xl text-xs font-black hover:bg-zinc-800 disabled:opacity-50"
+                      onClick={() => handlePickExistingProfile(p.id)}
+                      disabled={activatingProfileId !== null}
+                      className="w-full flex items-center gap-4 p-4 bg-zinc-50 hover:bg-zinc-100 rounded-2xl text-left transition-colors disabled:opacity-50"
                     >
-                      <span className="material-symbols-outlined text-[16px]">folder_open</span>
-                      {choosingFolder ? 'Choosing…' : 'Choose Folder'}
+                      <span className="w-12 h-12 rounded-full overflow-hidden bg-zinc-200 shrink-0 flex items-center justify-center">
+                        {p.avatarUrl ? (
+                          <img src={p.avatarUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="material-symbols-outlined text-zinc-400">person</span>
+                        )}
+                      </span>
+                      <span className="font-bold text-zinc-900">{p.name}</span>
+                      {activatingProfileId === p.id && <span className="material-symbols-outlined text-primary animate-spin ml-auto text-lg">sync</span>}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setFolderSkipped(true)}
-                      className={`px-4 py-2.5 rounded-xl text-xs font-black transition-colors ${folderSkipped ? 'bg-zinc-200 text-zinc-500' : 'bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-100'}`}
-                    >
-                      {folderSkipped ? 'Skipped ✓' : 'Skip for now'}
-                    </button>
-                  </div>
+                  ))}
+                </div>
+                {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+                <button
+                  type="button"
+                  onClick={() => setForceCreateNew(true)}
+                  className="w-full flex items-center justify-center gap-2 p-4 bg-white border border-dashed border-zinc-300 hover:bg-zinc-50 rounded-2xl text-zinc-500 font-bold text-sm transition-colors"
+                >
+                  <span className="material-symbols-outlined text-lg">add</span>
+                  New Profile
+                </button>
+              </div>
+            )}
+
+            {!checkingFolder && !showExistingProfilesPicker && (
+              <form onSubmit={handleStartOffline} className="space-y-5">
+                {forceCreateNew && (
+                  <button
+                    type="button"
+                    onClick={() => setForceCreateNew(false)}
+                    className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-600 text-xs font-bold -mt-2 mb-1 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                    Back to existing profiles
+                  </button>
                 )}
-              </div>
+                <div>
+                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Your name</label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Matteo"
+                    className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                  />
+                  <p className="text-xs text-zinc-400 mt-2">
+                    Used to label recipes you create and cooks you log — no password, this device's data is already private to you.
+                  </p>
+                </div>
 
-              {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
-              <button
-                type="submit"
-                disabled={connecting || !name.trim()}
-                className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
-              >
-                {connecting ? 'Starting…' : 'Start using SmartChef offline'}
-              </button>
-            </form>
+                <div>
+                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
+                  {AVATAR_PRESETS.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {AVATAR_PRESETS.map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setAvatarUrl(preset)}
+                          className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
+                        >
+                          <img src={preset} alt="" className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
+                </div>
+
+                {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+                <button
+                  type="submit"
+                  disabled={connecting || !name.trim()}
+                  className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  {connecting ? 'Starting…' : 'Start using SmartChef offline'}
+                </button>
+              </form>
+            )}
           </>
         )}
       </div>

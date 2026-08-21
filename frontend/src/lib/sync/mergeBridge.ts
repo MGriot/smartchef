@@ -34,6 +34,7 @@ const ENTITY_DIRS: Array<{ dirName: string; entityType: string }> = [
   { dirName: 'tools', entityType: 'tool' },
   { dirName: 'tags', entityType: 'tag' },
   { dirName: 'techniques', entityType: 'technique' },
+  { dirName: 'profiles', entityType: 'profile' },
 ];
 
 async function readEntityJson(dir: string, gitdir: string, oid: string | null, filepath: string): Promise<Record<string, unknown> | null> {

@@ -29,7 +29,7 @@ import { Preferences } from '@capacitor/preferences';
 import { gitfs } from '../gitfs';
 import { isElectron } from '../electronBridge';
 import { ensureHiddenCloneInitialized, resetHiddenCloneInitFlag } from './hiddenClone';
-import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_NAME, type RemoteTransport } from './gitObjectTransport';
+import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_NAME, type RemoteTransport, type TransferProgress } from './gitObjectTransport';
 import { createElectronRemoteTransport } from './electronRemoteTransport';
 import { createAndroidRemoteTransport } from './androidRemoteTransport';
 import { getMirrorState, setSyncPauseReason } from './androidMirror';
@@ -54,15 +54,16 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-type EntityType = 'recipes' | 'ingredients' | 'tools' | 'tags' | 'techniques';
+type EntityType = 'recipes' | 'ingredients' | 'tools' | 'tags' | 'techniques' | 'profiles';
 const ENTITY_TYPE_TO_DIR: Record<string, EntityType> = {
   recipe: 'recipes',
   ingredient: 'ingredients',
   tool: 'tools',
   tag: 'tags',
   technique: 'techniques',
+  profile: 'profiles',
 };
-const ALL_ENTITY_DIRS: EntityType[] = ['recipes', 'ingredients', 'tools', 'tags', 'techniques'];
+const ALL_ENTITY_DIRS: EntityType[] = ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles'];
 
 let deviceId: string | null = null;
 
@@ -247,8 +248,14 @@ export async function listDeviceRecords(): Promise<DeviceRecord[]> {
   return records.sort((a, b) => b.lastSyncAt.localeCompare(a.lastSyncAt));
 }
 
+/** Same singular entityType strings mergeBridge.ts's ENTITY_DIRS uses. */
+export type SyncEntityType = 'recipe' | 'ingredient' | 'tool' | 'tag' | 'technique' | 'profile';
+
 export interface SyncResult {
   applied: number;
+  /** `applied`, broken down by entity type — lets the UI say "3 recipes, 5
+   *  ingredients" instead of just a bare count. */
+  appliedByType: Partial<Record<SyncEntityType, number>>;
   committed: boolean;
   lastSyncAt: string;
   /** Newly pending Structured Merge conflicts from this sync cycle — not
@@ -256,6 +263,14 @@ export interface SyncResult {
    *  conflicts.local.ts directly), but a useful signal to surface later
    *  without another SyncResult shape change. */
   conflicts: number;
+  /** Object counts from this cycle's transfers — "uploaded" (pushed to the
+   *  Sync Folder) vs "downloaded" (pulled from it), the direction the user
+   *  actually asked about wanting visibility into. Combines both push
+   *  calls (the one before merge and the one after, covering a merge
+   *  commit) since neither on its own is what "how much did this sync
+   *  cycle move" means. */
+  pushedObjects: number;
+  pulledObjects: number;
 }
 
 /** The main entry point — call on app foreground/resume, on a periodic
@@ -271,15 +286,18 @@ export interface SyncResult {
  *  object gets skipped). A push or pull failure is caught and logged
  *  rather than thrown — local reads/writes must keep working regardless
  *  of Sync Folder connectivity, same guarantee the superseded design had. */
-async function syncNowInternal(): Promise<SyncResult> {
+async function syncNowInternal(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
   const { dir, gitdir } = await ensureHiddenCloneInitialized();
 
   const committedBeforeSync = await commitNowInternal();
 
   const transport = await getConfiguredRemoteTransport();
   let applied = 0;
+  const appliedByType: Partial<Record<SyncEntityType, number>> = {};
   let conflicts = 0;
   let mergeCommitted = false;
+  let pushedObjects = 0;
+  let pulledObjects = 0;
 
   // Android's "sync paused — folder access lost" banner (Account.tsx,
   // driven by androidMirror.ts's pause-reason state) predates this
@@ -302,17 +320,19 @@ async function syncNowInternal(): Promise<SyncResult> {
     let transportFailure: unknown;
 
     try {
-      await pushObjectsAndRefs(gitfs.promises, dir, transport);
+      const pushResult = await pushObjectsAndRefs(gitfs.promises, dir, transport, onProgress);
+      pushedObjects += pushResult.objectsUploaded;
     } catch (err) {
       console.warn('SmartChef: sync push failed:', err);
       transportFailure = err;
     }
 
-    const pullResult = await pullObjectsAndRefs(gitfs.promises, dir, transport).catch((err) => {
+    const pullResult = await pullObjectsAndRefs(gitfs.promises, dir, transport, undefined, onProgress).catch((err) => {
       console.warn('SmartChef: sync pull failed:', err);
       transportFailure = err;
       return null;
     });
+    if (pullResult) pulledObjects += pullResult.objectsFetched;
 
     await reportTransportOutcome(transportFailure === undefined, transportFailure);
 
@@ -343,6 +363,8 @@ async function syncNowInternal(): Promise<SyncResult> {
           const dirName = ENTITY_TYPE_TO_DIR[touched.entityType];
           if (!dirName) continue;
           await gitfs.promises.writeFile(`${dir}/${dirName}/${touched.entityId}.json`, JSON.stringify(touched.finalFields, null, 2));
+          const type = touched.entityType as SyncEntityType;
+          appliedByType[type] = (appliedByType[type] ?? 0) + 1;
         }
         if (mergeResult.touchedEntities.length > 0) {
           mergeCommitted = await commitNowInternal();
@@ -354,16 +376,18 @@ async function syncNowInternal(): Promise<SyncResult> {
   await writeDeviceRecord(transport).catch((err) => console.warn('SmartChef: writing device record failed:', err));
 
   if (transport) {
-    await pushObjectsAndRefs(gitfs.promises, dir, transport).catch((err) => console.warn('SmartChef: sync push failed:', err));
+    await pushObjectsAndRefs(gitfs.promises, dir, transport, onProgress)
+      .then((r) => { pushedObjects += r.objectsUploaded; })
+      .catch((err) => console.warn('SmartChef: sync push failed:', err));
   }
 
   const lastSyncAt = new Date().toISOString();
   await Preferences.set({ key: LAST_SYNC_KEY, value: lastSyncAt });
-  return { applied, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts };
+  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, pushedObjects, pulledObjects };
 }
 
-export function syncNow(): Promise<SyncResult> {
-  return serialize(syncNowInternal);
+export function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
+  return serialize(() => syncNowInternal(onProgress));
 }
 
 export async function getLastSyncAt(): Promise<string | null> {
