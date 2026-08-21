@@ -17,6 +17,7 @@
 - [API Routes](#-api-routes)
 - [Matrioska Engine](#-matrioska-engine)
 - [Multi-device sync](#-multi-device-sync)
+- [Standalone Mode (Windows & Android, No Server)](#-standalone-mode-windows--android-no-server)
 - [Mobile App (Android) & Remote Access via Tailscale](#-mobile-app-android--remote-access-via-tailscale)
 - [Running Compose commands from any folder](#-running-compose-commands-from-any-folder)
 - [Implementation status](#️-implementation-status)
@@ -247,13 +248,21 @@ smartchef/
     │   │   ├── Login.tsx / Account.tsx  # Auth + account settings (avatar presets, LLM provider), Backup & Restore, Multi-Device Sync
     │   │   ├── ManageUsers.tsx          # Admin-only: invite/list/remove instance users
     │   │   └── ServerConnect.tsx        # Native-app-only: connect to a remote SmartChef server
-    │   ├── lib/api.ts                   # apiFetch — same-origin on web, absolute+cookie'd on native, offline fallback/outbox
-    │   ├── lib/offlineStore.ts          # Native SQLite cache + write outbox
+    │   ├── lib/api.ts                   # apiFetch — same-origin on web, absolute+cookie'd on native, offline fallback/outbox, routes to standalone mode's local router when active
+    │   ├── lib/offlineStore.ts          # Native SQLite cache + write outbox (server-mode Android's offline read cache)
     │   ├── lib/countries.ts             # Country code → centroid lat/lng for the region map
+    │   ├── lib/standalone.ts            # Standalone-mode profile (display name, no password) + first-run init
+    │   ├── lib/electronBridge.ts        # Renderer-side helpers for Electron's IPC bridge (folder picker, fs primitives)
+    │   ├── lib/gitfs.ts                 # isomorphic-git fs adapter — @capacitor/filesystem on Android, IPC-to-main-process on Electron
+    │   ├── lib/sync/gitSync.ts          # Folder Sync engine: git commit/pull + LWW merge for standalone mode
+    │   ├── db/local.ts                  # Local SQLite datastore (standalone mode) — same query/queryOne/withTransaction shape as backend/src/db/pool.ts
+    │   ├── services/*.local.ts          # Standalone-mode ports of the backend routes (recipes, ingredients/units/tools, backup import) — called directly, no HTTP layer
+    │   ├── services/localRouter.ts      # Dispatches apiFetch calls to the *.local.ts services when standalone mode is active
     │   ├── components/AppLayout.tsx     # Shared header + sidebar navigation
     │   ├── components/RegionPicker.tsx / RegionsMap.tsx  # Recipe geolocation chip picker + Leaflet map
     │   └── store/app.store.ts           # Global state (Zustand)
     ├── android/                         # Capacitor Android project (native wrapper, see below)
+    ├── electron/                        # Capacitor Electron project — the Windows desktop app (standalone mode section below)
     ├── nginx.conf                       # SPA routing + API proxy
     └── vite.config.ts
 ```
@@ -272,12 +281,15 @@ Exposed tools:
 | Tool | Description |
 |------|-------------|
 | `list_recipes` | Search/filter recipes (query, tag, difficulty, components) |
-| `get_recipe` | Full detail of a recipe (ingredients, steps, tools) |
+| `get_recipe` | Full detail of a recipe (ingredients, steps, tools, techniques) |
 | `scale_recipe_portions` | Matrioska engine: recalculates quantities for N portions, resolving nested sub-recipes |
-| `create_recipe` | Creates a new recipe with ingredients, steps and tools |
+| `create_recipe` | Creates a new recipe with ingredients (incl. groups), steps (incl. tagged techniques), tools, storage instructions and tips |
+| `update_recipe` | Updates an existing recipe's fields |
+| `delete_recipe` | Deletes a recipe |
 | `list_ingredients` / `list_ingredient_categories` | Browse the pantry |
 | `list_units` | Units of measure and conversion factors |
 | `list_tools` | Kitchen tools |
+| `list_techniques` | Cooking techniques library |
 
 To connect it to an MCP client (e.g. Claude Desktop) that requires a stdio transport, use a proxy like [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) pointed at `http://localhost:3002/mcp`.
 
@@ -290,8 +302,8 @@ All routes below live under `/api` and (aside from `/api/auth/*`) require an aut
 | Base path | Covers |
 |-----------|--------|
 | `/api/auth` | First-run setup, username/password login, logout, account settings (incl. LLM provider config), admin-only user management (`/users`) |
-| `/api/recipes` | CRUD, `?q=&tag=&tags=&ingredientCategories=&regions=&difficulty=&sort=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/:id/translate/:lang` (AI translation), `/:id/collections`, `/parse` (AI import) |
-| `/api/ingredients` | Ingredients, `/categories`, nested `/api/units`, `/api/tools` |
+| `/api/recipes` | CRUD, `?q=&tag=&tags=&ingredientCategories=&regions=&difficulty=&sort=&seasonalOnly=&seasonalMonth=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/:id/translate/:lang` (AI translation), `/:id/collections`, `/parse` (AI import), `/filter-by-pantry` (reserved stub for a future pantry/inventory app — returns 501) |
+| `/api/ingredients` | Ingredients (incl. `seasonalMonths`), `/categories`, nested `/api/units`, `/api/tools` |
 | `/api/techniques` | Cooking techniques library |
 | `/api/tags` | Managed tag catalog |
 | `/api/collections` | Freeform recipe collections |
@@ -333,9 +345,64 @@ Two independent mechanisms exist — worth being precise about which one actuall
 
 **Folder-based sync (the one that works).** Each device writes a full-library snapshot (`smartchef-<deviceId>.json`) into a shared folder — a plain local folder, or one kept in sync by a desktop client like OneDrive/Google Drive. On every cycle, a device reads every *other* device's file and merges each row in by id, last-write-wins on `updated_at`. No central server, no pairing handshake. Enable it with `SYNC_ENABLED=true` + `SYNC_FOLDER_HOST_PATH` in `docker/.env`; status, peer list, and a manual "Sync Now" (with a per-entity change summary) are on the **Account** page. The same snapshot format also powers the **Backup & Restore** feature (manual export/import, independent of sync being enabled) and the native app's offline read cache.
 
+*This is the server-mode mechanism, backed by the Docker/Postgres backend.* **Standalone mode** (no server at all — see [below](#-standalone-mode--windows--android-no-server)) has its own, separate Folder Sync built on real git commit history (`frontend/src/lib/sync/gitSync.ts`, via `isomorphic-git`) instead of snapshot files — same LWW-by-`updated_at` idea, different implementation, since there's no backend process to run the sync loop.
+
 **CRDT vector-clock P2P (`/api/sync/*`, legacy).** An earlier, more ambitious design — direct device-to-device sync with field-level conflict detection via vector clocks (`services/crdt/vector-clock.ts`, `mdns.service.ts`). The endpoints exist and respond, but no mutating route in the app ever logs a local edit into the operation log, so there's nothing real for peers to exchange — it predates and was superseded by folder-based sync. Kept in the codebase but not used by the UI; retrofitting true per-operation CRDT logging into every write path would be a large separate undertaking.
 
 **Native app offline editing.** Separate again from both of the above: the Android app keeps a local SQLite cache of the whole library and a write outbox for edits made without connectivity, replayed against the real API on reconnect — see `frontend/src/lib/api.ts`, `offlineStore.ts`, `offlineSync.ts`.
+
+---
+
+## 📴 Standalone Mode (Windows & Android, No Server)
+
+Everything above assumes a running Docker/Postgres backend. SmartChef also runs **fully offline, with no server at all**: the Windows desktop app and the Android app can each keep their own local SQLite database, work indefinitely with zero connectivity, and — if you want more than one device — converge with each other through a shared folder using real git history instead of a central server.
+
+### Building the apps
+
+Both are built from the same `frontend/` React codebase via [Capacitor](https://capacitorjs.com); there's no hosted download, so build (or re-build) them yourself:
+
+**Windows** (`frontend/electron/`, an Electron wrapper):
+```bash
+cd frontend
+npm install
+npm run electron:build
+```
+Produces an NSIS installer at `frontend/electron/dist/SmartChef Setup 1.0.0.exe`.
+
+**Android**:
+```bash
+cd frontend
+npx cap sync android
+cd android
+./gradlew assembleDebug
+```
+Produces `frontend/android/app/build/outputs/apk/debug/app-debug.apk` — install via `adb install app-debug.apk`, or transfer the file to the phone and open it directly (requires allowing "install from unknown sources").
+
+### First run: standalone vs. server
+
+On first launch, both apps ask **"Connect to a server"** (the Tailscale setup described below) or **"Use offline on this device."** Choosing offline only asks for a display name — no password, since each device's local data is already private to whoever holds the device — and starts a brand-new, empty local database.
+
+### Getting your existing recipes into a fresh standalone install
+
+If you already run the server-mode Docker stack with a real library built up, you don't have to re-create it by hand on a new standalone device:
+
+1. On the **server-mode** instance (the one with your data, e.g. `http://localhost:8080`), go to **Account → Backup & Restore → Export Backup**. This downloads one JSON file containing your whole library — recipes, ingredients, tools, tags, ingredient categories, and cooking techniques, with all translations.
+2. On the **new standalone device** (Windows or Android), finish the offline first-run setup, then go to **Account → Backup & Restore → Restore from Backup** and pick that same JSON file.
+
+Restoring is additive, not destructive, and safe to run more than once: every item is matched by its original id, so anything already present locally is left untouched rather than duplicated or overwritten — importing the same backup twice, or two backups that partially overlap, is a harmless no-op for whatever's already there.
+
+Standalone mode's own **Export Backup** button is intentionally not available — Folder Sync (below) is standalone's real, continuous backup mechanism instead of a one-shot file, and it also gives you full history. Restore still works normally in standalone mode either way, specifically for pulling data in from an existing server-mode library like this.
+
+### Folder Sync — converging multiple standalone devices
+
+Standalone devices never talk to each other directly, and never require both to be online at once. Two genuinely separate things live on each device:
+
+- **Local Storage** — the live SQLite database + images every screen actually reads and writes. Defaults to a fixed, per-platform location (`Documents/SmartChef` on Windows; a private app-data folder on Android) — not something you pick.
+- **Sync Folder** — a *separate* location devices exchange changes through, chosen once during setup (or later via Account → Folder Sync → **Change Folder**). On Windows this opens a real native folder picker, so it can point at any of: a plain local folder, a mapped network drive/SMB share, or a folder already kept in sync by [Syncthing](https://syncthing.net), OneDrive, Google Drive, or Dropbox's desktop client. On Android it opens the system's folder picker (Storage Access Framework) instead, which can point at the same kinds of targets via whichever apps expose a folder handle to it — Syncthing is the most reliable option here, since the mainstream cloud-storage Android apps don't genuinely keep an arbitrary folder two-way synced the way their desktop clients do.
+
+Under the hood, the Sync Folder is a **bare-style git remote** — it only ever holds git objects and refs, never a checked-out working tree. Each device keeps its own private **Hidden Clone** (a real git repository, invisible in the UI, distinct from both Local Storage and the Sync Folder) where every local change gets committed. Syncing pushes/pulls the Hidden Clone against the Sync Folder over a hand-rolled object/ref transport (isomorphic-git's own fetch/push only speak HTTP, and a Sync Folder is just files on disk), then runs **Structured Merge** — a field-by-field three-way merge, not git's textual merge — to reconcile whatever changed on both sides since they last agreed. A field genuinely edited on both devices becomes a **Conflict**, surfaced in its own list (Account → Folder Sync) for you to resolve rather than silently auto-picked; everything else about that sync still finishes normally. Covers recipes (steps, ingredients, ingredient groups, tagged techniques included), ingredients, tools, tags, and cooking techniques — deletions propagate as tombstones the same way any other edit does.
+
+Once two devices' Sync Folders are the same physical location — however it got that way — Account → **Sync Now** pushes local changes and pulls in whatever changed elsewhere; a recipe created on one device shows up on the other the next time both sync. The full commit history is browsable on either device at Account → Folder Sync → **History**. See [`CONTEXT.md`](./CONTEXT.md) for the full glossary of these terms and [`docs/adr/`](./docs/adr/) for the architecture decisions behind them.
 
 ---
 
@@ -414,16 +481,18 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 |------|-------------|--------|
 | Docker + DB schema + Matrioska Engine | Recursive portion scaling, nested sub-recipes | ✅ Complete |
 | Gallery — search, filters, sort, density | Search across title/description/ingredients, tag + ingredient-category filters, sort (recent/newest/oldest/A-Z), adjustable 2/3/4-column grid | ✅ Complete |
-| Recipe editor | Ingredients, steps, tools, inline step↔ingredient references ("Bimby-style", live-scaled quantities), translations, ratings, cook counter, delete | ✅ Complete |
+| Recipe editor | Ingredients (with optional sub-groups), steps (taggable with techniques), tools, storage instructions & tips, inline step↔ingredient references ("Bimby-style", live-scaled quantities), translations, ratings, cook counter, delete | ✅ Complete |
+| Scaling warnings | Flags when a requested portion count scales a recipe more than 3x up or down from its original yield, since ingredient ratios/cook times stop being reliable past that range | ✅ Complete |
 | Library (Ingredients/Tools/Units/Techniques/Tags) | Full CRUD + translation editors; managed tag catalog with ingredient-driven auto-tagging | ✅ Complete |
 | Nutrition | Per-serving calculation from ingredient nutrition data, resolved through nested sub-recipes | ✅ Complete |
 | Collections & Meal Planner & Shopping List | Freeform recipe collections; weekly planner; shopping list from a saved menu or an ad-hoc cart, aggregated or grouped view, Markdown export | ✅ Complete |
-| AI recipe import | Real Ollama-backed parsing (URL/raw text) with fuzzy ingredient/tool matching, source-language detection, progress feedback; portable-file import/export for sharing between instances | ✅ Complete |
+| AI recipe import | Real Ollama-backed parsing (URL/raw text) with fuzzy ingredient/tool matching, source-language detection, progress feedback, fills every recipe field (ingredient groups, step techniques, storage instructions, tips included); portable-file import/export for sharing between instances | ✅ Complete |
 | Auth | Username/password login, admin-invited multi-user accounts (recipes stay a shared household cookbook — accounts drive attribution + private shopping list/planner/collections, not access control), session JWT cookie | ✅ Complete |
 | Cloud LLM providers | Optional Anthropic/Gemini/OpenAI for recipe-import parsing and AI translation, per-instance encrypted API keys (Account page); local Ollama stays the default | ✅ Complete |
 | AI recipe translation | One-click translate a recipe's title/description/steps/ingredient notes into another language via whichever LLM provider is configured | ✅ Complete |
 | Cook-history calendar | Month-view log of "I cooked this" events per recipe, linked from the recipe page | ✅ Complete |
-| Recipe geolocation | Chip-based region picker (country list + free-text sub-national, geocoded via a Nominatim proxy), Leaflet map (degrades gracefully offline), Gallery region filter | ✅ Complete |
+| Recipe geolocation | Chip-based region picker (country list + free-text sub-national, geocoded via a Nominatim proxy), Leaflet map (CARTO tiles, degrades gracefully offline), Gallery region filter | ✅ Complete |
+| Ingredient seasonality | Per-ingredient in-season months set from the Library, a calendar-style browse page (Library → Seasonality), and a Gallery "in season" filter — an ingredient with no seasonality data never excludes a recipe | ✅ Complete |
 | Sub-recipe-as-ingredient | Pick an existing recipe as an ingredient line from the recipe editor UI; optional recipe "yield" field lets sub-recipe amounts be specified by weight/volume instead of only by servings | ✅ Complete |
 | Avatar presets | Original cartoon-chef SVGs, adaptively discovered from `frontend/src/assets/avatars/` (drop in a new file, no code change) | ✅ Complete |
 | i18n | EN/IT/FR/ES UI + content translations (recipes, steps, categories, units, tools, tags, ingredients); ingredient names auto-translated to match a recipe's language | ✅ Complete |
@@ -431,6 +500,10 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | MCP Server | Exposes the recipe library via Model Context Protocol (port 3002) | ✅ Complete |
 | Native Android app | Capacitor wrapper, Tailscale-based remote HTTPS access, offline read cache + write outbox, native back-gesture handling | ✅ Complete |
 | Multi-device sync & backup | Folder-based whole-library snapshot sync (peer status + manual trigger on the Account page) and manual backup export/restore, both LWW-merged by `updated_at` | ✅ Complete |
+| Standalone mode (no server) | Local SQLite datastore ported from the server routes (`frontend/src/db/local.ts` + `services/*.local.ts`), first-run "use offline on this device" flow, no password | ✅ Complete |
+| Windows desktop app | Electron wrapper (`frontend/electron/`) around the same React frontend, real native SQLite via `better-sqlite3-multiple-ciphers`, native folder-picker for Folder Sync | ✅ Complete |
+| Folder Sync (standalone git sync) | Real `isomorphic-git` commit history pushed/pulled between a private per-device Hidden Clone and a bare-style Sync Folder (local/network-share/cloud-synced, native picker on Windows, SAF picker on Android); field-level Structured Merge with surfaced Conflicts on genuine double-edits; covers recipes, ingredients, tools, tags and techniques; commit history browsable per device | ✅ Complete |
+| Standalone Backup & Restore | Restore-from-backup works fully offline, letting a fresh standalone install pull in an existing server-mode library; idempotent by id | ✅ Complete |
 | Legacy CRDT vector-clock P2P sync (`/api/sync/*`) | Endpoints respond, but no write path logs local edits — nothing real for peers to exchange. Superseded by folder-based sync; no field-level conflict-resolution UI exists (or is planned) for this path | ⚠️ Legacy, inert |
 
 ---
