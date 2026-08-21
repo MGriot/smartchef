@@ -9,16 +9,20 @@ import LibraryIngredients from "./pages/LibraryIngredients";
 import LibraryUnits from "./pages/LibraryUnits";
 import LibraryTechniques from "./pages/LibraryTechniques";
 import LibraryTags from "./pages/LibraryTags";
+import LibrarySeasonality from "./pages/LibrarySeasonality";
 import CollectionDetail from "./pages/CollectionDetail";
 import Planner from "./pages/Planner";
 import CookHistory from "./pages/CookHistory";
 import ShoppingList from "./pages/ShoppingList";
 import Account from "./pages/Account";
 import ManageUsers from "./pages/ManageUsers";
+import SyncHistory from "./pages/SyncHistory";
+import Downloads from "./pages/Downloads";
 import Login from "./pages/Login";
 import ServerConnect from "./pages/ServerConnect";
 import { useStore } from "./store/app.store";
 import { apiFetch, isNative, getServerUrl, cacheAccountOffline } from './lib/api';
+import { getStandaloneProfile } from './lib/standalone';
 import { startOfflineSyncWatcher } from './lib/offlineSync';
 
 type AuthState =
@@ -29,18 +33,36 @@ type AuthState =
 export default function App() {
   const setAccount = useStore((s) => s.setAccount);
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
-  // Native only: is there a configured server to even talk to yet? On web
-  // this stays `true` immediately — same-origin nginx proxying needs no
-  // configuration, so the native-only connect screen never renders there.
+  // Native only: is there a configured server (or a standalone profile) to
+  // even talk to yet? On web this stays `true` immediately — same-origin
+  // nginx proxying needs no configuration, so the native-only connect
+  // screen never renders there.
   const [serverReady, setServerReady] = useState(!isNative());
+  // Standalone mode has no server at all — set once we know there's a
+  // local profile, so the auth-status network call below is skipped
+  // entirely rather than failing against a server that doesn't exist.
+  const [standalone, setStandalone] = useState(false);
+
+  const checkNativeReady = () => {
+    getStandaloneProfile().then((profile) => {
+      if (profile) {
+        setAccount({ id: "local", username: profile.name, name: profile.name, role: "user" });
+        setStandalone(true);
+        setAuth({ status: "authenticated" });
+        setServerReady(true);
+        return;
+      }
+      getServerUrl().then((url) => setServerReady(!!url));
+    });
+  };
 
   useEffect(() => {
     if (!isNative()) return;
-    getServerUrl().then((url) => setServerReady(!!url));
+    checkNativeReady();
   }, []);
 
   useEffect(() => {
-    if (!serverReady) return;
+    if (!serverReady || standalone) return;
     apiFetch("/api/auth/status")
       .then((res) => res.json())
       .then((json) => {
@@ -58,11 +80,21 @@ export default function App() {
   }, [setAccount, serverReady]);
 
   useEffect(() => {
-    if (auth.status === "authenticated") startOfflineSyncWatcher();
-  }, [auth.status]);
+    if (auth.status !== "authenticated") return;
+    if (standalone) {
+      // No server to sync against in standalone mode — instead, the
+      // folder-sync watcher reconciles this device's local SQLite data
+      // against its sync folder (Electron: user-chosen, kept in sync by an
+      // OS-level cloud client; Android: private storage, mirrored to a
+      // user-picked SAF tree by SafMirrorPlugin — see lib/sync/gitSync.ts).
+      import('./lib/sync/gitSync').then(({ startFolderSyncWatcher }) => startFolderSyncWatcher());
+    } else {
+      startOfflineSyncWatcher();
+    }
+  }, [auth.status, standalone]);
 
   if (!serverReady) {
-    return <ServerConnect onConnected={() => setServerReady(true)} />;
+    return <ServerConnect onConnected={checkNativeReady} />;
   }
 
   if (auth.status === "loading") {
@@ -95,11 +127,14 @@ export default function App() {
         <Route path="/library/units" element={<LibraryUnits />} />
         <Route path="/library/techniques" element={<LibraryTechniques />} />
         <Route path="/library/tags" element={<LibraryTags />} />
+        <Route path="/library/seasonality" element={<LibrarySeasonality />} />
         <Route path="/planner" element={<Planner />} />
         <Route path="/history" element={<CookHistory />} />
         <Route path="/shopping" element={<ShoppingList />} />
         <Route path="/account" element={<Account />} />
         <Route path="/manage-users" element={<ManageUsers />} />
+        <Route path="/sync-history" element={<SyncHistory />} />
+        <Route path="/downloads" element={<Downloads />} />
       </Routes>
     </BrowserRouter>
   );

@@ -9,6 +9,7 @@
     "units": "Unità",
     "techniques": "Tecniche",
     "tags": "Tag",
+    "seasonality": "Stagionalità",
     "library": "Libreria",
     "history": "Cronologia",
     "search": "Cerca",
@@ -33,6 +34,7 @@
     "kitchenEssentials": "Essenziali Cucina"
   },
   "gallery": {
+    "seasonalOnly": "Solo di stagione questo mese",
     "title": "Galleria Ricette",
     "subtitle": "Raccogli ispirazioni di alta qualità per la tua cucina digitale.",
     "tabRecipes": "Ricette",
@@ -287,5 +289,12 @@
     "fileHintSuffix": "file esportato da un'altra istanza di SmartChef — una singola ricetta, un'esportazione in blocco o un'intera collezione. Gli ingredienti e gli strumenti necessari vengono associati alla tua libreria o creati automaticamente.",
     "rawTextPlaceholder": "Lasagne della Nonna\nTempo di preparazione: 20 min, Cottura: 45 min.\nPer 6 persone.\n\nIngredienti:\n- 1 lb di carne macinata\n- 1 vasetto di salsa marinara\n- ...\n\nIstruzioni:\n1. Rosolare la carne.\n2. Alternare strati di pasta e salsa.\n...",
     "rawTextTemplate": "Titolo:\nDescrizione:\nPorzioni:\nTempo di preparazione: [es. 20 minuti]\nTempo di cottura: [es. 45 minuti]\nDifficoltà: [facile / media / difficile / esperto]\nTag: [separati da virgola, es. vegetariano, veloce, italiano]\n\nIngredienti:\n- [quantità] [unità] [nome ingrediente] ([nota opzionale, es. \"tritato finemente\"])\n- 200 g farina\n- 2 uova\n- 1 cucchiaino di sale\n\nPassaggi:\n1. [Primo passaggio]\n2. [Secondo passaggio]\n3. "
+  },
+  "seasonality": {
+    "hint": "Cosa è di stagione, mese per mese — modifica la stagionalità di un ingrediente dalla pagina Ingredienti.",
+    "noData": "Nessun ingrediente ha ancora dati di stagionalità.",
+    "inSeason": "Di stagione a {{month}}",
+    "noneInSeason": "Nessun ingrediente di stagione questo mese.",
+    "outOfSeason": "Fuori stagione"
   }
 }

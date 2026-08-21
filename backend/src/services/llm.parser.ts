@@ -36,13 +36,16 @@ Il JSON deve avere questa struttura:
   "difficulty": "easy | medium | hard | expert | null",
   "tags": ["string"],
   "tools": ["string"],
+  "storageInstructions": "string | null",
+  "tips": "string | null",
   "ingredients": [
     {
       "name": "string",
       "quantity": "number | null",
       "quantityText": "string | null",
       "unit": "string | null",
-      "notes": "string | null"
+      "notes": "string | null",
+      "groupName": "string | null"
     }
   ],
   "steps": [
@@ -50,7 +53,8 @@ Il JSON deve avere questa struttura:
       "stepNumber": "number",
       "title": "string | null",
       "description": "string",
-      "durationMin": "number | null"
+      "durationMin": "number | null",
+      "techniques": ["string"]
     }
   ],
   "confidence": "number (0-1)",
@@ -60,6 +64,9 @@ Il JSON deve avere questa struttura:
 Regole:
 - restTimeMin è il tempo di attesa/riposo (lievitazione, marinatura, raffreddamento) separato dal tempo di preparazione attiva
 - tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari (es. "forno", "planetaria", "frullatore"), nomi brevi e generici
+- storageInstructions è come conservare gli avanzi ("Come conservare"), tips sono consigli generali distinti dalla description — entrambi null se non menzionati
+- groupName (negli ingredienti) è un'intestazione breve e opzionale sotto cui questo ingrediente è raggruppato, es. "Per il condimento" — impostalo SOLO quando la ricetta originale raggruppa visivamente gli ingredienti in sezioni etichettate; altrimenti lascialo null. Non inventare raggruppamenti assenti nella fonte
+- techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step (es. "Rosolare", "Brasare"), nomi brevi, stesso criterio di "tools"
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
@@ -310,6 +317,8 @@ function parseJsonResponse(raw: string): LLMParseResult {
       : "medium",
     tags: Array.isArray(parsed.tags) ? parsed.tags : [],
     tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t: unknown) => typeof t === "string") : [],
+    storageInstructions: typeof parsed.storageInstructions === "string" ? parsed.storageInstructions : null,
+    tips: typeof parsed.tips === "string" ? parsed.tips : null,
     ingredients: Array.isArray(parsed.ingredients)
       ? parsed.ingredients.map((ing: any, i: number) => ({
           name: ing.name ?? `Ingrediente ${i + 1}`,
@@ -317,6 +326,7 @@ function parseJsonResponse(raw: string): LLMParseResult {
           quantityText: ing.quantityText ?? undefined,
           unit: ing.unit ?? undefined,
           notes: ing.notes ?? undefined,
+          groupName: typeof ing.groupName === "string" ? ing.groupName : null,
         }))
       : [],
     steps: Array.isArray(parsed.steps)
@@ -325,6 +335,7 @@ function parseJsonResponse(raw: string): LLMParseResult {
           title: step.title ?? undefined,
           description: step.description ?? "",
           durationMin: typeof step.durationMin === "number" ? step.durationMin : undefined,
+          techniques: Array.isArray(step.techniques) ? step.techniques.filter((t: unknown) => typeof t === "string") : [],
         }))
       : [],
     sourceUrl: undefined,

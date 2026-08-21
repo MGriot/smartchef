@@ -91,6 +91,9 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
   if (segments[1] === 'parse') {
     return { status: 501, error: `Smart Import needs a server-configured LLM provider — not available in offline mode yet.` };
   }
+  if (segments[1] === 'filter-by-pantry') {
+    return { status: 501, error: `Filtering recipes by pantry contents isn't implemented yet — this is a stable, reserved endpoint for a future feature, not an offline-mode gap.` };
+  }
   void sub2;
   return NOT_HANDLED;
 }

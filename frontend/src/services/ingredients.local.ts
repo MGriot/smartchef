@@ -103,6 +103,7 @@ export async function listIngredients({ q, lang }: ListIngredientsParams) {
     result.push({
       ...row,
       image_urls: JSON.parse((row.image_urls as string) ?? '[]'),
+      seasonal_months: JSON.parse((row.seasonal_months as string) ?? '[]'),
       translated_category_name: translatedCategoryName,
       translated_name: translatedName,
       translations: translations.map(t => ({ lang: t.language_code, text: t.translated_name })),
@@ -128,6 +129,10 @@ export interface IngredientInput {
   fiberG?: number | null;
   sugarG?: number | null;
   sodiumMg?: number | null;
+  /** Month numbers (1-12, Northern hemisphere) this ingredient is in
+   *  season for — empty/undefined means "no seasonality data", not
+   *  "year-round". See db/migrations/034_ingredient_seasonality.sql. */
+  seasonalMonths?: number[];
 }
 
 async function upsertIngredientTags(ingredientId: string, tagIds?: string[]) {
@@ -145,11 +150,11 @@ export async function createIngredient(d: IngredientInput): Promise<{ id: string
   const id = d.id ?? newId();
   await query(
     `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
-       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
-     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null]
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? []]
   );
 
   if (d.translations && d.translations.length > 0) {
@@ -170,11 +175,11 @@ export async function updateIngredient(id: string, d: IngredientInput): Promise<
   await query(
     `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,
        calories_kcal=$6, protein_g=$7, carbs_g=$8, fat_g=$9, fiber_g=$10, sugar_g=$11, sodium_mg=$12,
-       updated_at=now()
-     WHERE id=$13`,
+       seasonal_months=$13, updated_at=now()
+     WHERE id=$14`,
     [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
-     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, id]
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [], id]
   );
 
   if (d.translations) {

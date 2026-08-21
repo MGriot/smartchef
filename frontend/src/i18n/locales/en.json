@@ -9,6 +9,7 @@
     "units": "Units",
     "techniques": "Techniques",
     "tags": "Tags",
+    "seasonality": "Seasonality",
     "library": "Library",
     "history": "History",
     "search": "Search",
@@ -33,6 +34,7 @@
     "kitchenEssentials": "Kitchen Essentials"
   },
   "gallery": {
+    "seasonalOnly": "In season this month only",
     "title": "Recipe Gallery",
     "subtitle": "Curate your digital kitchen with professional-grade inspirations.",
     "tabRecipes": "Recipes",
@@ -290,5 +292,12 @@
     "unexpectedResponse": "Unexpected response from server",
     "connecting": "Connecting…",
     "connect": "Connect"
+  },
+  "seasonality": {
+    "hint": "What's in season, month by month — edit an ingredient's seasonality from the Ingredients page.",
+    "noData": "No ingredients have seasonality data yet.",
+    "inSeason": "In season in {{month}}",
+    "noneInSeason": "Nothing in season this month.",
+    "outOfSeason": "Out of season"
   }
 }

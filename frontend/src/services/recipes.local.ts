@@ -153,6 +153,12 @@ export interface ListRecipesParams {
   component?: string;
   lang?: string;
   sort?: string;
+  /** "true" to only keep recipes whose seasonal-tagged ingredients are all
+   *  in season for `seasonalMonth` (defaults to the current real month).
+   *  An ingredient with no seasonality data never excludes a recipe — see
+   *  db/migrations/034_ingredient_seasonality.sql. */
+  seasonalOnly?: string;
+  seasonalMonth?: string;
 }
 
 async function buildTagsDisplay(tagNames: string[], lang?: string): Promise<Array<{ name: string; translated_name: string; color: string | null }>> {
@@ -175,7 +181,7 @@ async function buildTagsDisplay(tagNames: string[], lang?: string): Promise<Arra
 }
 
 export async function listRecipes(params: ListRecipesParams) {
-  const { q, tag, tags, ingredientCategories, regions, difficulty, component, lang, sort } = params;
+  const { q, tag, tags, ingredientCategories, regions, difficulty, component, lang, sort, seasonalOnly, seasonalMonth } = params;
   const sqlParams: unknown[] = [];
   let langJoin = "";
   let translatedCols = "NULL AS translated_title, NULL AS translated_description";
@@ -254,6 +260,29 @@ export async function listRecipes(params: ListRecipesParams) {
         return regionList.some(reg => rRegions.includes(reg));
       });
     }
+  }
+  if (seasonalOnly === "true" && recipes.length > 0) {
+    const month = seasonalMonth ? Number(seasonalMonth) : new Date().getMonth() + 1;
+    const ids = recipes.map(r => r.id as string);
+    const rows = await query<{ recipe_id: string; seasonal_months: string }>(
+      `SELECT ri.recipe_id, ing.seasonal_months
+       FROM recipe_ingredients ri
+       JOIN ingredients ing ON ing.id = ri.ingredient_id
+       WHERE ri.recipe_id IN (${inPlaceholders([], ids)})`,
+      ids
+    );
+    const seasonalMonthsByRecipe = new Map<string, number[][]>();
+    for (const row of rows) {
+      const months = JSON.parse(row.seasonal_months ?? '[]') as number[];
+      if (months.length === 0) continue; // no seasonality data -- never excludes a recipe
+      const list = seasonalMonthsByRecipe.get(row.recipe_id) ?? [];
+      list.push(months);
+      seasonalMonthsByRecipe.set(row.recipe_id, list);
+    }
+    recipes = recipes.filter(r => {
+      const ingredientMonthLists = seasonalMonthsByRecipe.get(r.id as string) ?? [];
+      return ingredientMonthLists.every(months => months.includes(month));
+    });
   }
 
   const result = [];

@@ -122,6 +122,7 @@ const Home: React.FC = () => {
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [activeCategoryFilters, setActiveCategoryFilters] = useState<string[]>([]);
   const [activeRegionFilters, setActiveRegionFilters] = useState<string[]>([]);
+  const [seasonalOnly, setSeasonalOnly] = useState(false);
   const [catalogTags, setCatalogTags] = useState<CatalogTag[]>([]);
   const [ingredientCategories, setIngredientCategories] = useState<IngredientCategory[]>([]);
   const [showFilters, setShowFilters] = useState(false);
@@ -171,9 +172,10 @@ const Home: React.FC = () => {
     setActiveTagFilters([]);
     setActiveCategoryFilters([]);
     setActiveRegionFilters([]);
+    setSeasonalOnly(false);
     setSortBy('recently-edited');
   };
-  const activeFilterCount = activeTagFilters.length + activeCategoryFilters.length + activeRegionFilters.length + (sortBy !== 'recently-edited' ? 1 : 0);
+  const activeFilterCount = activeTagFilters.length + activeCategoryFilters.length + activeRegionFilters.length + (seasonalOnly ? 1 : 0) + (sortBy !== 'recently-edited' ? 1 : 0);
 
   const tagGroups = catalogTags.reduce<Record<string, CatalogTag[]>>((acc, t) => {
     (acc[t.group_name] ||= []).push(t);
@@ -288,6 +290,7 @@ const Home: React.FC = () => {
         if (activeTagFilters.length > 0) params.set('tags', activeTagFilters.join(','));
         if (activeCategoryFilters.length > 0) params.set('ingredientCategories', activeCategoryFilters.join(','));
         if (activeRegionFilters.length > 0) params.set('regions', activeRegionFilters.join(','));
+        if (seasonalOnly) params.set('seasonalOnly', 'true');
         params.set('sort', sortBy);
         const res = await apiFetch(`/api/recipes?${params.toString()}`);
         const json = await res.json();
@@ -298,7 +301,7 @@ const Home: React.FC = () => {
         setLoading(false);
       }
     })();
-  }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, sortBy]);
+  }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, seasonalOnly, sortBy]);
 
   return (
     <AppLayout>
@@ -498,6 +501,19 @@ const Home: React.FC = () => {
                     <div>
                       <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">{t('recipeDetail.regions')}</p>
                       <RegionPicker value={activeRegionFilters} onChange={setActiveRegionFilters} />
+                    </div>
+
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">{t('nav.seasonality')}</p>
+                      <button
+                        onClick={() => setSeasonalOnly(v => !v)}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-xs font-bold border transition-all ${
+                          seasonalOnly ? 'bg-primary text-white border-transparent' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'
+                        }`}
+                      >
+                        {t('gallery.seasonalOnly')}
+                        <span className="material-symbols-outlined text-lg">{seasonalOnly ? 'check_circle' : 'radio_button_unchecked'}</span>
+                      </button>
                     </div>
                   </div>
                 </>

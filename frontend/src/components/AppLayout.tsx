@@ -5,7 +5,7 @@ import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import OfflineBanner from './OfflineBanner';
 
-type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags';
+type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags' | 'seasonality';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -146,12 +146,23 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
               {t(link.labelKey)}
             </Link>
           ))}
+          {librarySection && (
+            <>
+              <p className="px-4 pt-3 pb-1 text-[10px] font-black text-zinc-400 tracking-[0.2em] uppercase">{t('library.management')}</p>
+              <LibraryLink to="/library/ingredients" icon="restaurant" label={t('nav.ingredients')} active={librarySection === 'ingredients'} />
+              <LibraryLink to="/library/tools" icon="construction" label={t('nav.tools')} active={librarySection === 'tools'} />
+              <LibraryLink to="/library/units" icon="straighten" label={t('nav.units')} active={librarySection === 'units'} />
+              <LibraryLink to="/library/techniques" icon="whatshot" label={t('nav.techniques')} active={librarySection === 'techniques'} />
+              <LibraryLink to="/library/tags" icon="sell" label={t('nav.tags')} active={librarySection === 'tags'} />
+              <LibraryLink to="/library/seasonality" icon="calendar_month" label={t('nav.seasonality')} active={librarySection === 'seasonality'} />
+            </>
+          )}
         </nav>
       )}
 
       <div className="flex min-h-[calc(100vh-65px)]">
         {librarySection && (
-          <aside className="w-[280px] bg-white border-r border-zinc-100 flex flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
+          <aside className="hidden lg:flex w-[280px] shrink-0 bg-white border-r border-zinc-100 flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
             <div className="mb-8 p-2">
               <h2 className="text-lg font-black text-primary leading-tight">{t('library.management')}</h2>
               <p className="text-[10px] font-bold text-zinc-400 tracking-[0.2em] uppercase">{t('library.kitchenEssentials')}</p>
@@ -162,11 +173,12 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
               <LibraryLink to="/library/units" icon="straighten" label={t('nav.units')} active={librarySection === 'units'} />
               <LibraryLink to="/library/techniques" icon="whatshot" label={t('nav.techniques')} active={librarySection === 'techniques'} />
               <LibraryLink to="/library/tags" icon="sell" label={t('nav.tags')} active={librarySection === 'tags'} />
+              <LibraryLink to="/library/seasonality" icon="calendar_month" label={t('nav.seasonality')} active={librarySection === 'seasonality'} />
               {sidebarExtra}
             </nav>
           </aside>
         )}
-        <main className={librarySection ? "flex-grow min-w-0 p-10 max-w-7xl mx-auto" : "flex-grow min-w-0"}>
+        <main className={librarySection ? "flex-grow min-w-0 p-4 sm:p-10 max-w-7xl mx-auto" : "flex-grow min-w-0"}>
           {children}
         </main>
       </div>

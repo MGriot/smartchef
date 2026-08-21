@@ -14,6 +14,7 @@ interface MatchedIngredient {
   quantity?: number;
   quantityText?: string;
   notes?: string;
+  groupName?: string | null;
 }
 
 interface MatchedTool {
@@ -27,6 +28,7 @@ interface ParsedStep {
   title?: string;
   description: string;
   durationMin?: number;
+  techniqueIds?: string[];
 }
 
 interface RecipeMatchResult {
@@ -40,6 +42,8 @@ interface RecipeMatchResult {
   difficulty: string;
   tags: string[];
   sourceUrl?: string;
+  storageInstructions?: string | null;
+  tips?: string | null;
   matchedIngredients: MatchedIngredient[];
   matchedTools: MatchedTool[];
   steps: ParsedStep[];
@@ -163,6 +167,8 @@ export default function RecipeImport() {
         // Italian URL, and the ingredient/tag data was already localized
         // against the detected language during matching.
         languageCode: result.language || contentLang || undefined,
+        storageInstructions: result.storageInstructions || undefined,
+        tips: result.tips || undefined,
         ingredients: result.matchedIngredients.map((ing, i) => ({
           sortOrder: i,
           ingredientId: ing.ingredientId,
@@ -171,6 +177,7 @@ export default function RecipeImport() {
           unitId: ing.unitId || undefined,
           notes: ing.notes || undefined,
           isOptional: false,
+          groupName: ing.groupName || undefined,
         })),
         steps: result.steps.map(s => ({
           stepNumber: s.stepNumber,
@@ -178,6 +185,7 @@ export default function RecipeImport() {
           description: s.description,
           durationMin: s.durationMin || undefined,
           toolIds: [],
+          techniqueIds: s.techniqueIds || [],
           stepIngredients: [],
         })),
         toolIds: result.matchedTools.map((t) => t.toolId),
@@ -228,9 +236,9 @@ export default function RecipeImport() {
 
   return (
     <AppLayout>
-      <div className="p-12 max-w-6xl mx-auto">
+      <div className="p-6 sm:p-12 max-w-6xl mx-auto">
           <div className="mb-12">
-            <h1 className="text-6xl font-black text-zinc-900 tracking-tighter mb-4">{t('import.title')}</h1>
+            <h1 className="text-4xl sm:text-6xl font-black text-zinc-900 tracking-tighter mb-4">{t('import.title')}</h1>
             <p className="text-zinc-500 text-lg max-w-xl leading-relaxed">
               {t('import.subtitle')}
             </p>

@@ -31,14 +31,14 @@ ingredientsRouter.get("/", async (req: Request, res: Response) => {
                ))
                FROM ingredient_tags igt
                JOIN tags tg ON tg.id = igt.tag_id
-               ${lang ? "LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_code = $1" : ""}
+               ${lang ? "LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND LOWER(tgt.language_code) = LOWER($1)" : ""}
                WHERE igt.ingredient_id = i.id),
               '[]'::json
             ) AS tags
      FROM ingredients i
      LEFT JOIN ingredient_categories ic ON ic.id = i.category_id
-     ${lang ? `LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND it_lang.language_code = $1` : ""}
-     ${lang ? `LEFT JOIN ingredient_category_translations ict ON ict.category_id = i.category_id AND ict.language_code = $1` : ""}
+     ${lang ? `LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND LOWER(it_lang.language_code) = LOWER($1)` : ""}
+     ${lang ? `LEFT JOIN ingredient_category_translations ict ON ict.category_id = i.category_id AND LOWER(ict.language_code) = LOWER($1)` : ""}
      WHERE i.sync_status != 'deleted'
        ${q ? `AND i.name ILIKE $${params.length}` : ""}
      ORDER BY COALESCE(ic.name, 'Uncategorized'), i.name
@@ -59,7 +59,7 @@ ingredientsRouter.get("/categories", async (req: Request, res: Response) => {
               '[]'::json
             ) AS translations
      FROM ingredient_categories c
-     ${lang ? "LEFT JOIN ingredient_category_translations ct ON ct.category_id = c.id AND ct.language_code = $1" : ""}
+     ${lang ? "LEFT JOIN ingredient_category_translations ct ON ct.category_id = c.id AND LOWER(ct.language_code) = LOWER($1)" : ""}
      WHERE c.deleted_at IS NULL
      ORDER BY c.sort_order, c.name`,
     lang ? [lang] : []
@@ -135,7 +135,7 @@ unitsRouter.get("/", async (req: Request, res: Response) => {
               '[]'::json
             ) AS translations
      FROM units u
-     ${lang ? "LEFT JOIN unit_translations ut ON ut.unit_id = u.id AND ut.language_code = $1" : ""}
+     ${lang ? "LEFT JOIN unit_translations ut ON ut.unit_id = u.id AND LOWER(ut.language_code) = LOWER($1)" : ""}
      ORDER BY u.unit_type, u.name`,
     lang ? [lang] : []
   );
@@ -153,7 +153,7 @@ toolsRouter.get("/", async (req: Request, res: Response) => {
               '[]'::json
             ) AS translations
      FROM tools t
-     ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND tt.language_code = $1" : ""}
+     ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND LOWER(tt.language_code) = LOWER($1)" : ""}
      WHERE t.deleted_at IS NULL
      ORDER BY t.category, t.name`,
     lang ? [lang] : []
@@ -188,6 +188,10 @@ const IngredientSchema = z.object({
     lang: z.string(),
     text: z.string()
   })).optional(),
+  // Month numbers (1-12, Northern hemisphere) this ingredient is in season
+  // for. Empty/omitted = no seasonality data, not "year-round" — see
+  // db/migrations/034_ingredient_seasonality.sql.
+  seasonalMonths: z.array(z.number().int().min(1).max(12)).optional(),
   ...NutritionFieldsSchema,
 });
 
@@ -210,11 +214,11 @@ ingredientsRouter.post("/", async (req: Request, res: Response) => {
   const id = d.id ?? uuidv4();
   await query(
     `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
-       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
-     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null]
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? []]
   );
 
   if (d.translations && d.translations.length > 0) {
@@ -239,11 +243,11 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
   await query(
     `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,
        calories_kcal=$6, protein_g=$7, carbs_g=$8, fat_g=$9, fiber_g=$10, sugar_g=$11, sodium_mg=$12,
-       updated_at=now()
-     WHERE id=$13`,
+       seasonal_months=$13, updated_at=now()
+     WHERE id=$14`,
     [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
-     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, id]
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [], id]
   );
 
   if (d.translations) {

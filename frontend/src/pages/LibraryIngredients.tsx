@@ -30,7 +30,7 @@ export default function LibraryIngredients() {
   // Ingredient form
   const [editingIng, setEditingIng] = useState<any>(null);
   const emptyNutrition = { caloriesKcal: '', proteinG: '', carbsG: '', fatG: '', fiberG: '', sugarG: '', sodiumMg: '' };
-  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], nutrition: { ...emptyNutrition } });
+  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], seasonalMonths: [] as number[], nutrition: { ...emptyNutrition } });
   const [translations, setTranslations] = useState<{lang: string, text: string}[]>([]);
 
   // Category form
@@ -97,6 +97,7 @@ export default function LibraryIngredients() {
         icon: ing.icon || 'egg',
         imageUrls: ing.image_urls || [],
         tagIds: (ing.tags || []).map((t: any) => t.id),
+        seasonalMonths: ing.seasonal_months || [],
         nutrition: {
           caloriesKcal: ing.calories_kcal ?? '',
           proteinG: ing.protein_g ?? '',
@@ -117,6 +118,7 @@ export default function LibraryIngredients() {
         icon: 'egg',
         imageUrls: [],
         tagIds: [],
+        seasonalMonths: [],
         nutrition: { ...emptyNutrition },
       });
       setTranslations([]);
@@ -176,7 +178,7 @@ export default function LibraryIngredients() {
   // Translation helpers
   const handleTranslationChange = (idx: number, field: 'lang'|'text', value: string) => {
     const newT = [...translations];
-    newT[idx][field] = value;
+    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
     setTranslations(newT);
   };
   const addTranslation = () => {
@@ -204,7 +206,7 @@ export default function LibraryIngredients() {
   // Category translation helpers
   const handleCatTranslationChange = (idx: number, field: 'lang' | 'name', value: string) => {
     const newT = [...catTranslations];
-    newT[idx][field] = value;
+    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
     setCatTranslations(newT);
   };
   const addCatTranslation = () => setCatTranslations([...catTranslations, { lang: '', name: '' }]);
@@ -536,6 +538,35 @@ export default function LibraryIngredients() {
                  <div>
                     <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Reference Photos</label>
                     <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({...form, imageUrls: urls})} />
+                 </div>
+
+                 <div>
+                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">
+                      Seasonality {form.seasonalMonths.length === 0 && <span className="normal-case font-medium text-zinc-300">— no data (won't affect the gallery's seasonality filter)</span>}
+                    </label>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 bg-zinc-50 p-4 rounded-2xl">
+                      {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((label, i) => {
+                        const month = i + 1;
+                        const active = form.seasonalMonths.includes(month);
+                        return (
+                          <button
+                            key={month}
+                            type="button"
+                            onClick={() => setForm({
+                              ...form,
+                              seasonalMonths: active
+                                ? form.seasonalMonths.filter(m => m !== month)
+                                : [...form.seasonalMonths, month].sort((a, b) => a - b),
+                            })}
+                            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                              active ? 'bg-primary text-white shadow-md shadow-primary/30' : 'bg-white border border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:border-zinc-300'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
                  </div>
 
                  <div>

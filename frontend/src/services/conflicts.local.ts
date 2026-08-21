@@ -143,6 +143,10 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
     scalarFields: new Set([
       'name', 'description', 'icon', 'calories_kcal', 'protein_g', 'carbs_g',
       'fat_g', 'fiber_g', 'sugar_g', 'sodium_mg', 'category_id',
+      // image_urls was missing here too — same "field just never made it
+      // onto the sync allowlist" class of gap this session already found
+      // and fixed for recipes/tools/techniques.
+      'image_urls', 'seasonal_months',
     ]),
   },
   tool: {

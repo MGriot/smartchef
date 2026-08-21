@@ -11,6 +11,7 @@ import type { LLMParseResult, UUID } from "@shared/types/index";
 interface DBIngredient { id: UUID; name: string; category_id: UUID; }
 interface DBUnit       { id: UUID; symbol: string; name: string; }
 interface DBTool       { id: UUID; name: string; }
+interface DBTechnique  { id: UUID; name: string; }
 
 // ── Fuzzy String Match ─────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ export interface MatchedIngredient {
   quantity?: number;
   quantityText?: string;
   notes?: string;
+  groupName?: string | null;
 }
 
 /** Trova l'ingrediente più simile nel DB (soglia 0.7) */
@@ -224,7 +226,70 @@ export async function matchTools(toolNames: string[]): Promise<MatchedTool[]> {
   return matched;
 }
 
+// ── Technique Matching ─────────────────────────────────────────────────
+
+export interface MatchedTechnique {
+  techniqueId: UUID;
+  techniqueName: string;
+  isNew: boolean;
+}
+
+/** Trova la tecnica più simile nel DB (soglia 0.7) */
+async function findBestTechniqueMatch(
+  name: string,
+  allTechniques: DBTechnique[]
+): Promise<{ technique: DBTechnique; score: number } | null> {
+  let best: { technique: DBTechnique; score: number } | null = null;
+
+  for (const technique of allTechniques) {
+    const score = similarity(name, technique.name);
+    if (score > 0.7 && (!best || score > best.score)) {
+      best = { technique, score };
+    }
+  }
+
+  return best;
+}
+
+/** Crea una nuova tecnica nel DB (senza categoria) */
+async function createTechnique(name: string): Promise<UUID> {
+  const id = uuidv4();
+  await query(
+    `INSERT INTO techniques (id, name) VALUES ($1, $2)
+     ON CONFLICT (name) WHERE deleted_at IS NULL DO NOTHING`,
+    [id, name]
+  );
+
+  const existing = await queryOne<{ id: UUID }>(
+    "SELECT id FROM techniques WHERE LOWER(name)=LOWER($1) AND deleted_at IS NULL LIMIT 1",
+    [name]
+  );
+  return existing?.id ?? id;
+}
+
+/** Mappa nomi tecniche estratte dall'LLM a tecniche nel DB, creando quelle mancanti */
+export async function matchTechniques(techniqueNames: string[]): Promise<MatchedTechnique[]> {
+  if (!techniqueNames.length) return [];
+
+  const allTechniques = await query<DBTechnique>("SELECT id, name FROM techniques WHERE deleted_at IS NULL");
+  const matched: MatchedTechnique[] = [];
+
+  for (const name of techniqueNames) {
+    const bestMatch = await findBestTechniqueMatch(name, allTechniques);
+    if (bestMatch) {
+      matched.push({ techniqueId: bestMatch.technique.id, techniqueName: bestMatch.technique.name, isNew: false });
+    } else {
+      const newId = await createTechnique(name);
+      matched.push({ techniqueId: newId, techniqueName: name, isNew: true });
+    }
+  }
+
+  return matched;
+}
+
 // ── Main Entry Point ───────────────────────────────────────────────────
+
+export type MatchedStep = LLMParseResult["steps"][number] & { techniqueIds: UUID[] };
 
 export interface RecipeMatchResult {
   title: string;
@@ -237,9 +302,11 @@ export interface RecipeMatchResult {
   difficulty: string;
   tags: string[];
   sourceUrl?: string;
+  storageInstructions?: string | null;
+  tips?: string | null;
   matchedIngredients: MatchedIngredient[];
   matchedTools: MatchedTool[];
-  steps: LLMParseResult["steps"];
+  steps: MatchedStep[];
   overallConfidence: number;
   warnings: string[];
 }
@@ -308,6 +375,7 @@ export async function matchLLMResultToDB(
         quantity: ing.quantity,
         quantityText: ing.quantityText,
         notes: ing.notes,
+        groupName: ing.groupName ?? null,
       });
 
       if (bestMatch.score < 0.9) {
@@ -333,6 +401,7 @@ export async function matchLLMResultToDB(
         quantity: ing.quantity,
         quantityText: ing.quantityText,
         notes: ing.notes,
+        groupName: ing.groupName ?? null,
       });
       warnings.push(`🆕 Nuovo ingrediente creato: "${ing.name}"`);
     }
@@ -342,6 +411,22 @@ export async function matchLLMResultToDB(
   for (const t of matchedTools) {
     if (t.isNew) warnings.push(`🆕 Nuovo strumento creato: "${t.toolName}"`);
   }
+
+  // Le tecniche sono per-step, ma vengono risolte in un'unica passata come
+  // tools sopra: dedup dei nomi su tutta la ricetta, un'unica query/batch di
+  // creazione, poi rimappate per nome su ciascuno step.
+  const allTechniqueNames = [...new Set(llmResult.steps.flatMap((s) => s.techniques ?? []))];
+  const matchedTechniques = await matchTechniques(allTechniqueNames);
+  for (const t of matchedTechniques) {
+    if (t.isNew) warnings.push(`🆕 Nuova tecnica creata: "${t.techniqueName}"`);
+  }
+  const techniqueIdByName = new Map(matchedTechniques.map((t, i) => [allTechniqueNames[i], t.techniqueId]));
+  const steps: MatchedStep[] = llmResult.steps.map((s) => ({
+    ...s,
+    techniqueIds: (s.techniques ?? [])
+      .map((name) => techniqueIdByName.get(name))
+      .filter((id): id is UUID => !!id),
+  }));
 
   const avgConfidence =
     matchedIngredients.reduce((s, i) => s + i.confidence, 0) /
@@ -358,9 +443,11 @@ export async function matchLLMResultToDB(
     difficulty: llmResult.difficulty ?? "medium",
     tags: llmResult.tags,
     sourceUrl: llmResult.sourceUrl,
+    storageInstructions: llmResult.storageInstructions ?? null,
+    tips: llmResult.tips ?? null,
     matchedIngredients,
     matchedTools,
-    steps: llmResult.steps,
+    steps,
     overallConfidence: llmResult.confidence * avgConfidence,
     warnings,
   };

@@ -204,6 +204,12 @@ CREATE TABLE IF NOT EXISTS ingredients (
   fiber_g        REAL,
   sugar_g        REAL,
   sodium_mg      REAL,
+  -- JSON-encoded array of month numbers (1-12) this ingredient is in season
+  -- for (Northern hemisphere) — same TEXT-array-as-JSON convention as
+  -- recipes.tags/regions. '[]'/NULL = no seasonality data, not "year-round".
+  -- See db/migrations/034_ingredient_seasonality.sql for the Postgres side.
+  -- Backfilled onto pre-existing local DBs via addColumnIfMissing() below.
+  seasonal_months TEXT DEFAULT '[]',
   sync_status    TEXT DEFAULT 'local',
   created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at     TEXT DEFAULT CURRENT_TIMESTAMP
@@ -508,6 +514,7 @@ export async function initLocalSchema(): Promise<void> {
     await addColumnIfMissing(db, 'recipe_steps', 'technique_ids', "TEXT DEFAULT '[]'");
     await addColumnIfMissing(db, 'recipes', 'storage_instructions', 'TEXT');
     await addColumnIfMissing(db, 'recipes', 'tips', 'TEXT');
+    await addColumnIfMissing(db, 'ingredients', 'seasonal_months', "TEXT DEFAULT '[]'");
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {
       await db.execute(SEED_SQL);

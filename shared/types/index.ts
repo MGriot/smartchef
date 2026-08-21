@@ -256,18 +256,27 @@ export interface LLMParseResult {
   difficulty?: DifficultyLevel;
   tags: string[];
   tools: string[];
+  storageInstructions?: string | null;
+  tips?: string | null;
   ingredients: Array<{
     name: string;
     quantity?: number;
     quantityText?: string;
     unit?: string;
     notes?: string;
+    // Optional short header this ingredient belongs under, e.g. "For the
+    // sauce" — see llm.parser.ts SYSTEM_PROMPT for extraction rules.
+    groupName?: string | null;
   }>;
   steps: Array<{
     stepNumber: number;
     title?: string;
     description: string;
     durationMin?: number;
+    // Cooking technique NAMEs the LLM recognized in this step (e.g.
+    // "Sautéing"), not UUIDs — resolved against the DB in
+    // ingredient.matcher.ts the same way `tools` names are, see matchTools.
+    techniques?: string[];
   }>;
   sourceUrl?: string;
   confidence: number; // 0-1

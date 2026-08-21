@@ -9,6 +9,7 @@
     "units": "Unités",
     "techniques": "Techniques",
     "tags": "Étiquettes",
+    "seasonality": "Saisonnalité",
     "library": "Bibliothèque",
     "history": "Historique",
     "search": "Rechercher",
@@ -33,6 +34,7 @@
     "kitchenEssentials": "Essentiels de cuisine"
   },
   "gallery": {
+    "seasonalOnly": "De saison ce mois-ci seulement",
     "title": "Galerie de recettes",
     "subtitle": "Créez votre galerie de recettes avec des inspirations professionnelles.",
     "tabRecipes": "Recettes",
@@ -287,5 +289,12 @@
     "enterPasswordToContinue": "Entrez votre mot de passe pour continuer",
     "setUpInstance": "Configurer cette instance SmartChef",
     "password": "Mot de passe"
+  },
+  "seasonality": {
+    "hint": "Ce qui est de saison, mois par mois — modifiez la saisonnalité d'un ingrédient depuis la page Ingrédients.",
+    "noData": "Aucun ingrédient n'a encore de données de saisonnalité.",
+    "inSeason": "De saison en {{month}}",
+    "noneInSeason": "Rien de saison ce mois-ci.",
+    "outOfSeason": "Hors saison"
   }
 }
