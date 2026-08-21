@@ -62,9 +62,18 @@ export default function RegionsMap({ regions, coords = {} }: RegionsMapProps) {
   return (
     <div className="rounded-2xl overflow-hidden h-56 relative z-0">
       <MapContainer center={center} zoom={points.length === 1 ? 5 : 2} scrollWheelZoom={false} className="w-full h-full">
+        {/* tile.openstreetmap.org's own usage policy blocks embedded-app
+            traffic like ours outright (operations.osmfoundation.org/policies/tiles) —
+            confirmed via its response headers (`x-blocked: Access denied`),
+            which is why the map rendered as blank gray tiles. CARTO's
+            basemaps are OSM data under the same license, served from
+            infrastructure meant for exactly this kind of embedding, no API
+            key required. */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          subdomains="abcd"
+          maxZoom={19}
         />
         {points.map((p) => (
           <Marker key={p.key} position={[p.lat, p.lng]} icon={p.isCountry ? countryIcon : placeIcon}>

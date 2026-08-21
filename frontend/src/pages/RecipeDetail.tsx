@@ -1890,6 +1890,11 @@ const RecipeDetail: React.FC = () => {
               </div>
             )}
             <h1 className="text-4xl md:text-6xl font-headline font-extrabold text-white leading-none">{recipe.translated_title || recipe.title}</h1>
+            {(recipe.translated_description || recipe.description) && (
+              <p className="mt-3 text-white/80 text-sm font-medium max-w-2xl leading-relaxed">
+                {recipe.translated_description || recipe.description}
+              </p>
+            )}
             {recipe.creator_name && (
               <div className="flex items-center gap-2 mt-3">
                 <img
