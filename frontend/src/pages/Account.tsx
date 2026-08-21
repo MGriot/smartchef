@@ -356,11 +356,12 @@ function FolderSyncCard() {
   // rows — including recovering from a sync target that got wiped/
   // corrupted (as happened testing this against Google Drive earlier).
   const resyncAllLocalData = async () => {
-    const [{ resyncAllRecipes }, { resyncAllIngredients }] = await Promise.all([
+    const [{ resyncAllRecipes }, { resyncAllIngredients, resyncAllTools }] = await Promise.all([
       import('../services/recipes.local'),
       import('../services/ingredients.local'),
     ]);
     await resyncAllIngredients();
+    await resyncAllTools();
     await resyncAllRecipes();
   };
 

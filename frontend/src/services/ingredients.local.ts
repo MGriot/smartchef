@@ -334,6 +334,18 @@ async function syncTool(id: string): Promise<void> {
   }
 }
 
+/** Re-writes every local tool's entity file regardless of whether anything
+ *  actually changed — see resyncAllIngredients() above for why this exists
+ *  and where it's called from. Deliberately includes soft-deleted tools too
+ *  (unlike resyncAllIngredients()'s sync_status filter): a tool deleted via
+ *  a direct write that bypassed deleteTool()'s own syncTool() call would
+ *  otherwise never push its deleted_at tombstone at all. */
+export async function resyncAllTools(): Promise<number> {
+  const rows = await query<{ id: string }>("SELECT id FROM tools");
+  for (const row of rows) await syncTool(row.id);
+  return rows.length;
+}
+
 export async function listTools({ lang }: { lang?: string }) {
   const rows = await query<Record<string, unknown>>(`SELECT * FROM tools WHERE deleted_at IS NULL ORDER BY category, name`);
   const result = [];
