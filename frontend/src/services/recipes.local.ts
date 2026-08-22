@@ -184,23 +184,53 @@ export interface ListRecipesParams {
   seasonalMonth?: string;
 }
 
-async function buildTagsDisplay(tagNames: string[], lang?: string): Promise<Array<{ name: string; translated_name: string; color: string | null }>> {
-  const result = [];
-  for (const name of tagNames) {
-    const tag = await queryOne<{ name: string; color: string | null; id: string }>(
-      `SELECT id, name, color FROM tags WHERE lower(name) = lower($1)`,
-      [name]
+/** Looks up every distinct tag name at once (2 queries total, however many
+ *  names are passed) instead of one query pair per name — the gallery list
+ *  used to call this once per recipe with that recipe's own tagNames,
+ *  which meant recipes × tags sequential round-trips through
+ *  @capacitor-community/sqlite's plugin bridge. Each of those round-trips
+ *  crosses into native code on Android with real per-call latency, so a
+ *  library of even a few dozen tagged recipes made the gallery visibly
+ *  slow. Callers now do ONE batch lookup across every tag name in the
+ *  result set (see listRecipes below) and slice per recipe from the
+ *  returned map. */
+async function buildTagsDisplayBatch(allTagNames: string[], lang?: string): Promise<Map<string, { translated_name: string; color: string | null }>> {
+  const uniqueLower = [...new Set(allTagNames.map(n => n.toLowerCase()))];
+  const map = new Map<string, { translated_name: string; color: string | null }>();
+  if (uniqueLower.length === 0) return map;
+
+  const tagParams: unknown[] = [];
+  const tags = await query<{ id: string; name: string; color: string | null }>(
+    `SELECT id, name, color FROM tags WHERE lower(name) IN (${inPlaceholders(tagParams, uniqueLower)})`,
+    tagParams
+  );
+  const tagIdByLowerName = new Map(tags.map(t => [t.name.toLowerCase(), t] as const));
+
+  let translationByTagId = new Map<string, string>();
+  if (lang && tags.length > 0) {
+    const trParams: unknown[] = [];
+    const idPlaceholders = inPlaceholders(trParams, tags.map(t => t.id));
+    trParams.push(lang);
+    const translations = await query<{ tag_id: string; name: string }>(
+      `SELECT tag_id, name FROM tag_translations WHERE tag_id IN (${idPlaceholders}) AND LOWER(language_code) = LOWER($${trParams.length})`,
+      trParams
     );
-    let translatedName: string | null = null;
-    if (lang && tag) {
-      translatedName = (await queryOne<{ name: string }>(
-        `SELECT name FROM tag_translations WHERE tag_id = $1 AND LOWER(language_code) = LOWER($2)`,
-        [tag.id, lang]
-      ))?.name ?? null;
-    }
-    result.push({ name, translated_name: translatedName ?? tag?.name ?? name, color: tag?.color ?? null });
+    translationByTagId = new Map(translations.map(t => [t.tag_id, t.name] as const));
   }
-  return result;
+
+  for (const lowerName of uniqueLower) {
+    const tag = tagIdByLowerName.get(lowerName);
+    const translatedName = tag ? translationByTagId.get(tag.id) ?? null : null;
+    map.set(lowerName, { translated_name: translatedName ?? tag?.name ?? lowerName, color: tag?.color ?? null });
+  }
+  return map;
+}
+
+function tagsDisplayFromBatch(tagNames: string[], batch: Map<string, { translated_name: string; color: string | null }>): Array<{ name: string; translated_name: string; color: string | null }> {
+  return tagNames.map(name => {
+    const entry = batch.get(name.toLowerCase());
+    return { name, translated_name: entry?.translated_name ?? name, color: entry?.color ?? null };
+  });
 }
 
 export async function listRecipes(params: ListRecipesParams) {
@@ -308,18 +338,20 @@ export async function listRecipes(params: ListRecipesParams) {
     });
   }
 
-  const result = [];
-  for (const r of recipes) {
-    const tagNames = JSON.parse((r.tags as string) ?? '[]') as string[];
-    result.push({
+  const perRecipeTagNames = recipes.map(r => JSON.parse((r.tags as string) ?? '[]') as string[]);
+  const tagsBatch = await buildTagsDisplayBatch(perRecipeTagNames.flat(), lang);
+
+  const result = recipes.map((r, i) => {
+    const tagNames = perRecipeTagNames[i];
+    return {
       ...r,
       tags: tagNames,
-      tags_display: await buildTagsDisplay(tagNames, lang),
+      tags_display: tagsDisplayFromBatch(tagNames, tagsBatch),
       regions: JSON.parse((r.regions as string) ?? '[]'),
       region_coords: JSON.parse((r.region_coords as string) ?? '{}'),
       sources: JSON.parse((r.sources as string) ?? '[]'),
-    });
-  }
+    };
+  });
   return { data: result, total: result.length };
 }
 
@@ -349,7 +381,7 @@ export async function getRecipe(id: string, lang?: string) {
   if (!recipe) return null;
 
   const tagNames = JSON.parse((recipe.tags as string) ?? '[]') as string[];
-  const tagsDisplay = await buildTagsDisplay(tagNames, lang);
+  const tagsDisplay = tagsDisplayFromBatch(tagNames, await buildTagsDisplayBatch(tagNames, lang));
 
   const translations = await query<{ language_code: string; title: string | null; description: string | null }>(
     `SELECT language_code, title, description FROM recipe_translations WHERE recipe_id = $1`,
