@@ -54,6 +54,39 @@ export interface LocalFs {
   stat(path: string): Promise<unknown>;
 }
 
+/** LocalFs is deliberately narrow (just what raw byte copying needs — see
+ *  its own docstring above). isomorphic-git's real plumbing (packObjects/
+ *  indexPack/resolveRef/readObject) needs the fuller PromiseFsClient
+ *  surface — this is that surface, satisfied by the same gitfs.promises
+ *  production callers already pass as LocalFs elsewhere (gitfs.ts exports
+ *  unlink/mkdir/rmdir/lstat/rename too, LocalFs just doesn't declare them)
+ *  and by FakeLocalFs.promises/real Node fs in tests. Shared here (rather
+ *  than each caller declaring its own copy) so gitBundleTransport.ts and
+ *  gitPacking.ts agree on exactly one shape. */
+export interface GitPlumbingFs extends LocalFs {
+  unlink(path: string): Promise<void>;
+  mkdir(path: string): Promise<void>;
+  rmdir(path: string): Promise<void>;
+  lstat(path: string): Promise<unknown>;
+  rename(oldPath: string, newPath: string): Promise<void>;
+}
+
+/** `.git/objects/<xx>/<rest>` <-> the bare 40-hex oid it encodes — the two
+ *  places (gitBundleTransport.ts, gitPacking.ts) that need to hand
+ *  isomorphic-git's plumbing (packObjects, readObject, ...) a plain oid
+ *  instead of a loose-file path share these instead of each re-deriving
+ *  their own copy. */
+export function oidFromObjectPath(path: string): string {
+  const m = path.match(/^\.git\/objects\/([0-9a-f]{2})\/([0-9a-f]+)$/);
+  if (!m) throw new Error(`gitObjectTransport: not a loose object path: ${path}`);
+  return m[1] + m[2];
+}
+
+export async function sha1Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-1', bytes as BufferSource);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** The canonical ref name both sides agree on — read from this path in the
  *  local Hidden Clone on push, written to this same path on the remote. */
 const REF_PATH = '.git/refs/heads/main';
@@ -100,8 +133,11 @@ export const DEFAULT_REMOTE_TRACKING_REF_NAME = 'refs/remotes/sync-folder/main';
 // correct, but on a transport where a single exists()/readFile()/writeFile()
 // round-trip has real per-call overhead (Android's Storage Access Framework
 // especially; Electron's IPC-to-main-process less so but still nonzero),
-// a sync cycle touching hundreds of loose objects (this design never packs
-// or garbage-collects — see listLocalObjectPaths()'s docstring) meant
+// a sync cycle touching hundreds of loose objects (every object this
+// module transfers is loose — see listLocalObjectPaths()'s docstring;
+// gitPacking.ts packs+prunes loose objects locally after a successful
+// push, but only ever AFTER this transfer already confirmed them on the
+// remote, so this loop's own per-object work is unaffected) meant
 // hundreds of round-trips in series. Running a bounded number of them
 // concurrently instead is the actual fix for "sync takes a long time."
 //
@@ -183,11 +219,16 @@ async function readRemoteManifest(remote: RemoteTransport): Promise<number | nul
 
 /** .git/objects/<prefix>/<rest> — the two-level structure isomorphic-git
  *  itself uses for loose objects. Filtering to 2-hex-char prefix names
- *  skips "info"/"pack" (packed/alternates bookkeeping git also creates
- *  directly under objects/) — standalone mode's commit/add only ever
- *  produces loose objects, so there's nothing to pack here anyway.
- *  Exported so androidMirror.ts's own (otherwise identical) copy could be
- *  replaced by this one rather than the two drifting independently. */
+ *  skips "info"/"pack" (packed/alternates bookkeeping, and — since
+ *  gitPacking.ts started packing loose objects locally after a
+ *  successful push — genuine local packfiles too) and ".gc-quarantine"
+ *  (gitPacking.ts's own transient staging directory), so this always
+ *  returns exactly the objects that still need offering to a remote:
+ *  gitPacking.ts only ever prunes a loose file once push has already
+ *  confirmed it's durably on the remote, so a packed-and-pruned object
+ *  never needing to appear here again is correct, not a gap. Exported so
+ *  androidMirror.ts's own (otherwise identical) copy could be replaced by
+ *  this one rather than the two drifting independently. */
 export async function listLocalObjectPaths(fs: LocalFs, dir: string): Promise<string[]> {
   let prefixes: string[];
   try {

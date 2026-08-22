@@ -31,6 +31,7 @@ import { isElectron } from '../electronBridge';
 import { ensureHiddenCloneInitialized, resetHiddenCloneInitFlag } from './hiddenClone';
 import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_NAME, type RemoteTransport, type TransferProgress } from './gitObjectTransport';
 import { writeBundleIfStale, tryCatchUpFromBundle } from './gitBundleTransport';
+import { packLooseObjectsAfterPush } from './gitPacking';
 import { fetchGitRemote, pushGitRemote } from './gitRemoteTransport';
 import { getSyncMode, getGitRemoteConfig, getSyncIntervalMinutes, type GitRemoteConfig } from './syncSettings';
 import { createElectronRemoteTransport } from './electronRemoteTransport';
@@ -481,6 +482,15 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
         await writeBundleIfStale(gitfs.promises, dir, gitdir, transport).catch((err) =>
           console.warn('SmartChef: writing sync bundle failed:', err)
         );
+        // Every loose object this device had is now confirmed on the
+        // remote (pushObjectsAndRefs() either found it already there or
+        // just uploaded it, unconditionally, before the ref write above
+        // — see gitPacking.ts's own docstring for why that makes this
+        // the safe moment to prune). Best-effort and non-fatal, same as
+        // the bundle write just above.
+        await packLooseObjectsAfterPush(gitfs.promises, dir, gitdir).catch((err) =>
+          console.warn('SmartChef: packing local objects failed:', err)
+        );
         break;
       }
 
@@ -540,7 +550,18 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
         transportFailure = err;
         break;
       }
-      if (pushResult.pushed || !pushResult.conflict) break; // pushed, or nothing to push yet
+      if (pushResult.pushed) {
+        // A successful git.push() means the remote now has every object
+        // reachable from the pushed ref — same "safe to prune" moment as
+        // folder mode's, just reached through the real git protocol
+        // instead of pushObjectsAndRefs()'s own per-object check. See
+        // gitPacking.ts's docstring for the full safety argument.
+        await packLooseObjectsAfterPush(gitfs.promises, dir, gitdir).catch((err) =>
+          console.warn('SmartChef: packing local objects failed:', err)
+        );
+        break;
+      }
+      if (!pushResult.conflict) break; // nothing to push yet
 
       if (attempt === MAX_PUSH_ATTEMPTS - 1) {
         console.warn('SmartChef: git-remote push rejected after retries — will retry next cycle');

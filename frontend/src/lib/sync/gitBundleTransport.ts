@@ -27,22 +27,8 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import * as git from 'isomorphic-git';
-import type { RemoteTransport, LocalFs } from './gitObjectTransport';
-import { listLocalObjectPaths } from './gitObjectTransport';
-
-/** gitObjectTransport.ts's LocalFs is deliberately narrow (just what raw
- *  byte copying needs — see its own docstring). isomorphic-git's real
- *  plumbing (packObjects/indexPack/resolveRef) needs the fuller
- *  PromiseFsClient surface — this is that surface, satisfied by the same
- *  gitfs.promises production callers already pass as LocalFs elsewhere
- *  (gitfs.ts exports unlink/mkdir/rmdir/lstat too, LocalFs just doesn't
- *  declare them) and by FakeLocalFs.promises in tests. */
-interface GitPlumbingFs extends LocalFs {
-  unlink(path: string): Promise<void>;
-  mkdir(path: string): Promise<void>;
-  rmdir(path: string): Promise<void>;
-  lstat(path: string): Promise<unknown>;
-}
+import type { RemoteTransport, LocalFs, GitPlumbingFs } from './gitObjectTransport';
+import { listLocalObjectPaths, oidFromObjectPath, sha1Hex } from './gitObjectTransport';
 
 const BUNDLE_PATH = '.git/sync.bundle';
 const BUNDLE_META_PATH = '.git/sync.bundle.meta.json';
@@ -56,17 +42,6 @@ const BUNDLE_HEADER_SIGNATURE = '# v2 git bundle';
 // with a tiny history doesn't wait forever for a 20%-sized delta to show up.
 const REWRITE_GROWTH_RATIO = 1.2;
 const REWRITE_MIN_NEW_OBJECTS = 100;
-
-function oidFromObjectPath(path: string): string {
-  const m = path.match(/^\.git\/objects\/([0-9a-f]{2})\/([0-9a-f]+)$/);
-  if (!m) throw new Error(`gitBundleTransport: not a loose object path: ${path}`);
-  return m[1] + m[2];
-}
-
-async function sha1Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-1', bytes as BufferSource);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 async function existsLocally(fs: LocalFs, dir: string, relativePath: string): Promise<boolean> {
   try {
@@ -123,16 +98,25 @@ export function parseBundle(bytes: Uint8Array): { refOid: string; refName: strin
 }
 
 /** Writes a full git-bundle-v2 snapshot of every object this device's
- *  Hidden Clone currently has loose (see listLocalObjectPaths()'s own
- *  docstring: packed-only objects — i.e. ones this device itself only
- *  ever received via a prior bundle catch-up, never as loose files — are
- *  NOT re-included here, matching this design's existing "never packs
- *  what's already packed" stance; a device that has only ever caught up
- *  via bundles won't re-bundle beyond its own loose objects). No-ops when
- *  there's nothing committed yet, or when the existing remote bundle (if
- *  any) already covers a comparable object count — see REWRITE_GROWTH_RATIO
- *  above for why. Best-effort: every caller wraps this in a catch, since a
- *  failure here must never fail the sync cycle that triggered it. */
+ *  Hidden Clone currently has LOOSE — already an existing, accepted gap
+ *  before gitPacking.ts existed (packed-only objects this device itself
+ *  only ever received via a prior bundle catch-up, never as loose files,
+ *  were never re-included here either; a device that has only ever
+ *  caught up via bundles won't re-bundle beyond its own loose objects).
+ *  gitPacking.ts's local packing after a successful push widens that same
+ *  gap slightly further — objects it prunes also drop out of any bundle
+ *  THIS device later writes — but doesn't change its shape: both are
+ *  "this device's bundle only ever covers what it currently has loose,"
+ *  not a new failure mode. Genuinely low-stakes: this bundle only matters
+ *  as a fallback for another device's incomplete directory listing (see
+ *  gitSync.ts's pullAndMergeOnce()), and gitPacking.ts only ever prunes
+ *  what a push already confirmed is durably on the remote's own loose
+ *  storage — which any normal, non-bundle pull reaches directly. No-ops
+ *  when there's nothing committed yet, or when the existing remote bundle
+ *  (if any) already covers a comparable object count — see
+ *  REWRITE_GROWTH_RATIO above for why. Best-effort: every caller wraps
+ *  this in a catch, since a failure here must never fail the sync cycle
+ *  that triggered it. */
 export async function writeBundleIfStale(fs: GitPlumbingFs, dir: string, gitdir: string, remote: RemoteTransport): Promise<void> {
   const localObjectPaths = await listLocalObjectPaths(fs, dir);
   if (localObjectPaths.length === 0) return;
@@ -178,9 +162,11 @@ export async function writeBundleIfStale(fs: GitPlumbingFs, dir: string, gitdir:
  *  own bytes, so re-applying an already-seen bundle is a cheap exists()
  *  check and nothing else — no bookkeeping of "have I done this before"
  *  needed, and a fresh device with no memory of prior syncs still gets
- *  the skip for free. Once indexed, packed objects are never deleted —
- *  same "never packs or garbage-collects" stance as the rest of this
- *  design (see gitObjectTransport.ts's listLocalObjectPaths() docstring). */
+ *  the skip for free. Once indexed, this bundle's packed objects are
+ *  never deleted — unlike gitPacking.ts's own local packs, which DO prune
+ *  their loose originals once verified, a bundle-derived pack has no
+ *  loose original to begin with, so there's nothing to reclaim either
+ *  way. */
 export async function tryCatchUpFromBundle(fs: GitPlumbingFs, dir: string, gitdir: string, remote: RemoteTransport): Promise<boolean> {
   if (!(await remote.exists(BUNDLE_PATH))) return false;
 
