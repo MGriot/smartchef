@@ -39,9 +39,12 @@ async function syncIngredient(id: string): Promise<void> {
  *  by hand. Called when pointing Folder Sync at a folder — see
  *  Account.tsx's handleChangeFolder() — so a freshly chosen target starts
  *  populated instead of empty until each row happens to be edited again. */
-export async function resyncAllIngredients(): Promise<number> {
+export async function resyncAllIngredients(onProgress?: (done: number, total: number) => void): Promise<number> {
   const rows = await query<{ id: string }>("SELECT id FROM ingredients WHERE sync_status != 'deleted'");
-  for (const row of rows) await syncIngredient(row.id);
+  for (let i = 0; i < rows.length; i++) {
+    await syncIngredient(rows[i].id);
+    onProgress?.(i + 1, rows.length);
+  }
   return rows.length;
 }
 
@@ -410,9 +413,12 @@ async function syncTool(id: string): Promise<void> {
  *  (unlike resyncAllIngredients()'s sync_status filter): a tool deleted via
  *  a direct write that bypassed deleteTool()'s own syncTool() call would
  *  otherwise never push its deleted_at tombstone at all. */
-export async function resyncAllTools(): Promise<number> {
+export async function resyncAllTools(onProgress?: (done: number, total: number) => void): Promise<number> {
   const rows = await query<{ id: string }>("SELECT id FROM tools");
-  for (const row of rows) await syncTool(row.id);
+  for (let i = 0; i < rows.length; i++) {
+    await syncTool(rows[i].id);
+    onProgress?.(i + 1, rows.length);
+  }
   return rows.length;
 }
 

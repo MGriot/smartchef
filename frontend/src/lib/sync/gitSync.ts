@@ -30,6 +30,9 @@ import { gitfs } from '../gitfs';
 import { isElectron } from '../electronBridge';
 import { ensureHiddenCloneInitialized, resetHiddenCloneInitFlag } from './hiddenClone';
 import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_NAME, type RemoteTransport, type TransferProgress } from './gitObjectTransport';
+import { writeBundleIfStale, tryCatchUpFromBundle } from './gitBundleTransport';
+import { fetchGitRemote, pushGitRemote } from './gitRemoteTransport';
+import { getSyncMode, getGitRemoteConfig, getSyncIntervalMinutes, type GitRemoteConfig } from './syncSettings';
 import { createElectronRemoteTransport } from './electronRemoteTransport';
 import { createAndroidRemoteTransport } from './androidRemoteTransport';
 import { getMirrorState, setSyncPauseReason } from './androidMirror';
@@ -271,33 +274,55 @@ export interface SyncResult {
    *  cycle move" means. */
   pushedObjects: number;
   pulledObjects: number;
+  /** Entities a remote change existed for but couldn't be written into
+   *  Local Storage this cycle (mergeBridge.ts isolates each entity's write
+   *  so one bad one doesn't abort the rest — see its own MergeBridgeResult.
+   *  failedEntities). Should be empty in normal operation; surfaced here
+   *  so a real failure shows up in the UI instead of only a console log
+   *  nobody but a developer would ever open. */
+  failedEntities: Array<{ entityType: string; entityId: string; error: string }>;
 }
 
 /** The main entry point — call on app foreground/resume, on a periodic
  *  timer, and from a manual "Sync Now" button.
  *
  *  Order: commit this device's own pending edits first (so local HEAD
- *  reflects everything it's done before comparing against remote) : push
- *  : pull into the remote-tracking ref : if that ref now differs from
- *  local HEAD, run Structured Merge (mergeBridge.ts), re-serialize
- *  whatever it touched back into the Hidden Clone, commit again : write
- *  this device's own device record : push once more (covers the merge
- *  commit, if any — pushing when there's nothing new is cheap, every
- *  object gets skipped). A push or pull failure is caught and logged
- *  rather than thrown — local reads/writes must keep working regardless
- *  of Sync Folder connectivity, same guarantee the superseded design had. */
+ *  reflects everything it's done before comparing against remote) : pull
+ *  into the remote-tracking ref : if that ref now differs from local HEAD,
+ *  run Structured Merge (mergeBridge.ts), re-serialize whatever it touched
+ *  back into the Hidden Clone, commit again : push, guarded by a compare-
+ *  and-swap against exactly the remote ref bytes this cycle just observed
+ *  : write this device's own device record. A push or pull failure is
+ *  caught and logged rather than thrown — local reads/writes must keep
+ *  working regardless of Sync Folder connectivity, same guarantee the
+ *  superseded design had.
+ *
+ *  Pull-before-push is load-bearing, not stylistic: pushing first (the
+ *  original order) writes this device's ref straight over the Sync
+ *  Folder's shared ref before this device has looked at what's there,
+ *  discarding any commit another device pushed since this device's last
+ *  sync — the object stays on disk but nothing points at it anymore, no
+ *  error raised anywhere. A file-sync tool watching the Sync Folder from
+ *  outside observes that as two near-simultaneous edits to the same ref
+ *  file (Syncthing renames one into a `.sync-conflict-*` copy instead of
+ *  merging it — there is no textual merge for a git ref) or, on a
+ *  provider with weaker conflict handling (Google Drive), silent data
+ *  loss. Pulling first — and then guarding the push with a compare-and-
+ *  swap against the exact ref bytes just pulled, retried through another
+ *  pull+merge if a concurrent writer beat this device to it — closes that
+ *  window instead of racing through it. */
 async function syncNowInternal(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
   const { dir, gitdir } = await ensureHiddenCloneInitialized();
 
   const committedBeforeSync = await commitNowInternal();
 
-  const transport = await getConfiguredRemoteTransport();
   let applied = 0;
   const appliedByType: Partial<Record<SyncEntityType, number>> = {};
   let conflicts = 0;
   let mergeCommitted = false;
   let pushedObjects = 0;
   let pulledObjects = 0;
+  const failedEntities: Array<{ entityType: string; entityId: string; error: string }> = [];
 
   // Android's "sync paused — folder access lost" banner (Account.tsx,
   // driven by androidMirror.ts's pause-reason state) predates this
@@ -316,74 +341,234 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
     await setSyncPauseReason(ok ? null : err instanceof Error ? err.message : 'Sync transport failed');
   }
 
-  if (transport) {
-    let transportFailure: unknown;
-
+  // Shared between both sync modes: diffs local HEAD against whatever this
+  // cycle's fetch/pull just wrote to DEFAULT_REMOTE_TRACKING_REF_NAME, runs
+  // Structured Merge if they've diverged, and commits the result. Neither
+  // mode's own fetch/pull step needs to know this exists — they just both
+  // agree on writing to that one tracking ref location first.
+  async function applyMergeIfNeeded(): Promise<void> {
+    let localOid: string | null = null;
     try {
-      const pushResult = await pushObjectsAndRefs(gitfs.promises, dir, transport, onProgress);
-      pushedObjects += pushResult.objectsUploaded;
-    } catch (err) {
-      console.warn('SmartChef: sync push failed:', err);
-      transportFailure = err;
+      localOid = await git.resolveRef({ fs: gitfs, dir, gitdir, ref: 'HEAD' });
+    } catch {
+      // No local commits yet — this device's very first sync. mergeBridge.ts
+      // treats a null localOid as "empty local tree", same code path.
     }
 
-    const pullResult = await pullObjectsAndRefs(gitfs.promises, dir, transport, undefined, onProgress).catch((err) => {
-      console.warn('SmartChef: sync pull failed:', err);
-      transportFailure = err;
-      return null;
-    });
-    if (pullResult) pulledObjects += pullResult.objectsFetched;
+    let remoteOid: string | null = null;
+    try {
+      remoteOid = await git.resolveRef({ fs: gitfs, dir, gitdir, ref: DEFAULT_REMOTE_TRACKING_REF_NAME });
+    } catch {
+      // A successful fetch/pull is supposed to guarantee this resolves —
+      // tolerated anyway rather than throwing, matching this function's
+      // overall stance that a sync hiccup should degrade, not crash.
+    }
 
-    await reportTransportOutcome(transportFailure === undefined, transportFailure);
+    if (!remoteOid || remoteOid === localOid) return;
 
-    if (pullResult?.pulled) {
-      let localOid: string | null = null;
-      try {
-        localOid = await git.resolveRef({ fs: gitfs, dir, gitdir, ref: 'HEAD' });
-      } catch {
-        // No local commits yet — this device's very first sync. mergeBridge.ts
-        // treats a null localOid as "empty local tree", same code path.
-      }
+    let mergeResult;
+    try {
+      mergeResult = await mergeRemoteIntoLocal(dir, gitdir, localOid, remoteOid);
+    } catch (err) {
+      // mergeRemoteIntoLocal() calls git.listFiles() to enumerate each
+      // commit's tree — unlike readEntityJson()'s per-blob reads inside
+      // it, that call isn't defensively wrapped, so a still-missing tree
+      // object throws isomorphic-git's own raw NotFoundError straight
+      // through. Can happen even after a bundle catch-up (folder mode;
+      // the bundle can itself be stale, or the gap can predate this
+      // device ever running the pull-before-push fix) — a real git-remote
+      // fetch shouldn't be able to leave a gap like this at all (the
+      // server only ever hands over objects it actually has), but the
+      // same defensive conversion costs nothing to keep here either way.
+      console.warn('SmartChef: merge failed with a missing object even after catch-up:', err);
+      throw new Error(
+        "Couldn't finish merging — some data this device needs is still missing even after catching up. Try Sync Now " +
+        'again once another device has synced recently.'
+      );
+    }
+    applied += mergeResult.entitiesCreated + mergeResult.entitiesUpdated;
+    conflicts += mergeResult.conflictsRecorded;
+    failedEntities.push(...mergeResult.failedEntities);
 
-      let remoteOid: string | null = null;
-      try {
-        remoteOid = await git.resolveRef({ fs: gitfs, dir, gitdir, ref: DEFAULT_REMOTE_TRACKING_REF_NAME });
-      } catch {
-        // pulled:true is supposed to guarantee this resolves — tolerated
-        // anyway rather than throwing, matching this function's overall
-        // stance that a sync hiccup should degrade, not crash.
-      }
-
-      if (remoteOid && remoteOid !== localOid) {
-        const mergeResult = await mergeRemoteIntoLocal(dir, gitdir, localOid, remoteOid);
-        applied = mergeResult.entitiesCreated + mergeResult.entitiesUpdated;
-        conflicts = mergeResult.conflictsRecorded;
-
-        for (const touched of mergeResult.touchedEntities) {
-          const dirName = ENTITY_TYPE_TO_DIR[touched.entityType];
-          if (!dirName) continue;
-          await gitfs.promises.writeFile(`${dir}/${dirName}/${touched.entityId}.json`, JSON.stringify(touched.finalFields, null, 2));
-          const type = touched.entityType as SyncEntityType;
-          appliedByType[type] = (appliedByType[type] ?? 0) + 1;
-        }
-        if (mergeResult.touchedEntities.length > 0) {
-          mergeCommitted = await commitNowInternal();
-        }
-      }
+    for (const touched of mergeResult.touchedEntities) {
+      const dirName = ENTITY_TYPE_TO_DIR[touched.entityType];
+      if (!dirName) continue;
+      await gitfs.promises.writeFile(`${dir}/${dirName}/${touched.entityId}.json`, JSON.stringify(touched.finalFields, null, 2));
+      const type = touched.entityType as SyncEntityType;
+      appliedByType[type] = (appliedByType[type] ?? 0) + 1;
+    }
+    if (mergeResult.touchedEntities.length > 0) {
+      mergeCommitted = (await commitNowInternal()) || mergeCommitted;
     }
   }
 
-  await writeDeviceRecord(transport).catch((err) => console.warn('SmartChef: writing device record failed:', err));
+  // ── Folder mode (gitObjectTransport.ts) — a plain folder mirrored by an
+  // external tool, reached via hand-rolled object/ref byte-copying. ──────
 
-  if (transport) {
-    await pushObjectsAndRefs(gitfs.promises, dir, transport, onProgress)
-      .then((r) => { pushedObjects += r.objectsUploaded; })
-      .catch((err) => console.warn('SmartChef: sync push failed:', err));
+  // Pulls, and merges in the result if the remote actually moved. Returns
+  // the freshly-observed remote ref bytes (null if the Sync Folder has no
+  // history yet) so the caller can hand them straight to the next push's
+  // compare-and-swap. Applied/conflict/appliedByType/mergeCommitted are
+  // accumulated onto the enclosing function's own trackers rather than
+  // returned, since a retried pull+merge (see the push loop below) needs
+  // to add to the same totals, not replace them.
+  async function pullAndMergeOnce(transport: RemoteTransport): Promise<Uint8Array | null> {
+    const pullResult = await pullObjectsAndRefs(gitfs.promises, dir, transport, undefined, onProgress);
+    pulledObjects += pullResult.objectsFetched;
+    if (!pullResult.pulled) return null;
+
+    // A directory listing that silently returned fewer objects than the
+    // Sync Folder's manifest promises (see gitObjectTransport.ts's header —
+    // Google Drive's Android SAF provider is the known offender) means
+    // Structured Merge below would be working from a partial object set.
+    // mergeBridge.ts's readEntityJson() can't tell "this field never
+    // changed" apart from "the object holding its new value never arrived"
+    // — both fail the same way, silently — so a merge against an
+    // incomplete pull doesn't error, it just quietly drops changes. Before
+    // giving up, try the one-file bundle catch-up (gitBundleTransport.ts)
+    // — it sidesteps the exact enumeration this device's listing just
+    // failed at, since applying it is one file transfer, not thousands of
+    // existence checks. Only actually refuse to merge if there's no
+    // bundle to fall back on either.
+    if (!pullResult.complete) {
+      const caughtUp = await tryCatchUpFromBundle(gitfs.promises, dir, gitdir, transport);
+      if (!caughtUp) {
+        throw new Error(
+          "Sync Folder listing looks incomplete on this device — some files may not be visible through this platform's " +
+          'folder access (Google Drive on Android is a known case). Switch the Sync Folder to Syncthing, which reliably ' +
+          'replicates the whole folder, or try syncing again from a device with direct filesystem access first.'
+        );
+      }
+    }
+
+    await applyMergeIfNeeded();
+    return pullResult.remoteRefBytes;
+  }
+
+  async function syncFolderMode(transport: RemoteTransport): Promise<void> {
+    let transportFailure: unknown;
+    let expectedRemoteRefBytes: Uint8Array | null = null;
+
+    try {
+      expectedRemoteRefBytes = await pullAndMergeOnce(transport);
+    } catch (err) {
+      console.warn('SmartChef: sync pull failed:', err);
+      transportFailure = err;
+    }
+
+    // Bounded retry: a conflict here means another device's push landed on
+    // the remote between this device's pull and this push — the expected
+    // shape of real concurrent use, not a failure. Re-pull, merge again,
+    // try again. Gives up (silently, until next cycle) rather than
+    // spinning forever if two devices are pushing in a tight loop against
+    // each other.
+    const MAX_PUSH_ATTEMPTS = 3;
+    for (let attempt = 0; transportFailure === undefined && attempt < MAX_PUSH_ATTEMPTS; attempt++) {
+      let pushResult;
+      try {
+        pushResult = await pushObjectsAndRefs(gitfs.promises, dir, transport, onProgress, expectedRemoteRefBytes);
+      } catch (err) {
+        console.warn('SmartChef: sync push failed:', err);
+        transportFailure = err;
+        break;
+      }
+      pushedObjects += pushResult.objectsUploaded;
+      if (!pushResult.conflict) {
+        // Best-effort: keeps the Sync Folder's one-file catch-up fresh for
+        // whichever device next hits an incomplete listing. Never allowed
+        // to fail the sync itself — see gitBundleTransport.ts's own
+        // docstring for why every caller wraps it like this.
+        await writeBundleIfStale(gitfs.promises, dir, gitdir, transport).catch((err) =>
+          console.warn('SmartChef: writing sync bundle failed:', err)
+        );
+        break;
+      }
+
+      if (attempt === MAX_PUSH_ATTEMPTS - 1) {
+        console.warn('SmartChef: sync push conflict persisted after retries — will retry next cycle');
+        break;
+      }
+      try {
+        expectedRemoteRefBytes = await pullAndMergeOnce(transport);
+      } catch (err) {
+        console.warn('SmartChef: sync pull failed:', err);
+        transportFailure = err;
+      }
+    }
+
+    await reportTransportOutcome(transportFailure === undefined, transportFailure);
+    await writeDeviceRecord(transport).catch((err) => console.warn('SmartChef: writing device record failed:', err));
+  }
+
+  // ── Git-remote mode (gitRemoteTransport.ts) — a real git server (GitHub,
+  // GitLab, or self-hosted), reached over git's actual smart-HTTP push/
+  // fetch protocol. No external file-sync tool in the loop, so none of
+  // folder mode's known failure modes (ref races, incomplete listings)
+  // apply here — the server itself owns atomic ref updates and always
+  // knows its own true object set. Device records (folder mode's "Known
+  // Devices" list) aren't tracked in this mode yet — there's no
+  // equivalent of "just drop a file next to the git dir" for a real git
+  // remote, only commit+push, and committing purely to refresh a
+  // timestamp on every sync cycle would spam the history for no real
+  // benefit. ───────────────────────────────────────────────────────────
+
+  async function fetchAndMergeOnceGitRemote(config: GitRemoteConfig): Promise<void> {
+    const fetchResult = await fetchGitRemote(dir, gitdir, config, (loaded, total) => {
+      onProgress?.({ phase: 'pull', done: loaded, total });
+    });
+    if (!fetchResult.fetched) return;
+    await applyMergeIfNeeded();
+  }
+
+  async function syncGitRemoteMode(config: GitRemoteConfig): Promise<void> {
+    let transportFailure: unknown;
+
+    try {
+      await fetchAndMergeOnceGitRemote(config);
+    } catch (err) {
+      console.warn('SmartChef: git-remote fetch failed:', err);
+      transportFailure = err;
+    }
+
+    const MAX_PUSH_ATTEMPTS = 3;
+    for (let attempt = 0; transportFailure === undefined && attempt < MAX_PUSH_ATTEMPTS; attempt++) {
+      let pushResult;
+      try {
+        pushResult = await pushGitRemote(dir, gitdir, config);
+      } catch (err) {
+        console.warn('SmartChef: git-remote push failed:', err);
+        transportFailure = err;
+        break;
+      }
+      if (pushResult.pushed || !pushResult.conflict) break; // pushed, or nothing to push yet
+
+      if (attempt === MAX_PUSH_ATTEMPTS - 1) {
+        console.warn('SmartChef: git-remote push rejected after retries — will retry next cycle');
+        break;
+      }
+      try {
+        await fetchAndMergeOnceGitRemote(config);
+      } catch (err) {
+        console.warn('SmartChef: git-remote fetch failed:', err);
+        transportFailure = err;
+      }
+    }
+
+    await reportTransportOutcome(transportFailure === undefined, transportFailure);
+  }
+
+  const syncMode = await getSyncMode();
+  if (syncMode === 'git-remote') {
+    const gitRemoteConfig = await getGitRemoteConfig();
+    if (gitRemoteConfig) await syncGitRemoteMode(gitRemoteConfig);
+  } else {
+    const transport = await getConfiguredRemoteTransport();
+    if (transport) await syncFolderMode(transport);
   }
 
   const lastSyncAt = new Date().toISOString();
   await Preferences.set({ key: LAST_SYNC_KEY, value: lastSyncAt });
-  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, pushedObjects, pulledObjects };
+  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, pushedObjects, pulledObjects, failedEntities };
 }
 
 export function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
@@ -424,24 +609,45 @@ export async function getSyncHistory(limit = 50): Promise<SyncCommit[]> {
 
 // ── Watcher — sync on app resume, plus a periodic fallback. No
 // connectivity listener — a shared folder being "reachable" is a
-// filesystem question, not a network one; whatever OS-level client keeps
-// it synced does its own thing on its own schedule, so a fixed timer is
-// all there is to trigger a re-check with. ──────────────────────────────
+// filesystem question, not a network one, and a git-remote server being
+// reachable is checked by just trying; whatever keeps the Sync Folder
+// current (an OS-level cloud client, or nothing at all for a git remote)
+// does its own thing on its own schedule, so a fixed timer is all there
+// is to trigger a re-check with. Mode-agnostic — syncNow() itself branches
+// on the configured sync mode, so this watcher drives both the same way.
+// Named for its original folder-only design; kept for the one existing
+// call site in App.tsx rather than a purely cosmetic rename. ────────────
 
 let watcherStarted = false;
+let watcherIntervalId: ReturnType<typeof setInterval> | null = null;
 
-export function startFolderSyncWatcher(intervalMs = 5 * 60_000): void {
+function runWatcherTick(): void {
+  syncNow().catch((err) => console.error('SmartChef periodic sync failed:', err));
+}
+
+export async function startFolderSyncWatcher(): Promise<void> {
   if (watcherStarted) return;
   watcherStarted = true;
 
-  syncNow().catch((err) => console.error('SmartChef initial folder sync failed:', err));
-  setInterval(() => {
-    syncNow().catch((err) => console.error('SmartChef periodic folder sync failed:', err));
-  }, intervalMs);
+  syncNow().catch((err) => console.error('SmartChef initial sync failed:', err));
+
+  const minutes = await getSyncIntervalMinutes();
+  watcherIntervalId = setInterval(runWatcherTick, minutes * 60_000);
 
   import('@capacitor/app').then(({ App }) => {
     App.addListener('resume', () => {
-      syncNow().catch((err) => console.error('SmartChef resume folder sync failed:', err));
+      syncNow().catch((err) => console.error('SmartChef resume sync failed:', err));
     });
   }).catch(() => {});
+}
+
+/** Applies a newly-chosen interval immediately, without needing an app
+ *  restart — called from the settings UI right after setSyncIntervalMinutes().
+ *  No-op if the watcher hasn't started yet (still mid-onboarding); the
+ *  new value is picked up on next launch regardless, since
+ *  startFolderSyncWatcher() always reads the persisted setting itself. */
+export function applySyncIntervalChange(minutes: number): void {
+  if (!watcherStarted) return;
+  if (watcherIntervalId) clearInterval(watcherIntervalId);
+  watcherIntervalId = setInterval(runWatcherTick, minutes * 60_000);
 }

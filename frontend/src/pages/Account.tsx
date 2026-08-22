@@ -7,6 +7,7 @@ import { apiFetch, isNative } from '../lib/api';
 import { AVATAR_PRESETS } from '../lib/avatarPresets';
 import type { SyncResult } from '../lib/sync/gitSync';
 import type { TransferProgress } from '../lib/sync/gitObjectTransport';
+import type { SyncInterval, SyncIntervalUnit } from '../lib/sync/syncSettings';
 
 interface SyncPeer {
   deviceId: string;
@@ -286,11 +287,41 @@ function ConflictsCard() {
   );
 }
 
+const SYNC_INTERVAL_PRESETS: SyncInterval[] = [
+  { value: 5, unit: 'minutes' },
+  { value: 30, unit: 'minutes' },
+  { value: 1, unit: 'hours' },
+  { value: 1, unit: 'days' },
+  { value: 1, unit: 'weeks' },
+];
+
+const SYNC_INTERVAL_UNIT_ABBREV: Record<SyncIntervalUnit, string> = {
+  minutes: 'm', hours: 'h', days: 'd', weeks: 'w', months: 'mo',
+};
+
+function formatSyncInterval(interval: SyncInterval): string {
+  return `${interval.value}${SYNC_INTERVAL_UNIT_ABBREV[interval.unit]}`;
+}
+
 function FolderSyncCard() {
   const navigate = useNavigate();
   const [standalone, setStandalone] = useState(false);
   const [electron, setElectron] = useState(false);
+  const [syncMode, setSyncModeState] = useState<'folder' | 'git-remote'>('folder');
   const [folderPath, setFolderPath] = useState<string | null>(null);
+  const [gitRemoteUrl, setGitRemoteUrl] = useState('');
+  const [gitRemoteUsername, setGitRemoteUsername] = useState('');
+  const [gitRemoteToken, setGitRemoteToken] = useState('');
+  const [gitRemoteTokenConfigured, setGitRemoteTokenConfigured] = useState(false);
+  const [gitRemoteTokenTouched, setGitRemoteTokenTouched] = useState(false);
+  const [gitRemoteCorsProxy, setGitRemoteCorsProxy] = useState('');
+  const [showCorsProxy, setShowCorsProxy] = useState(false);
+  const [savingGitRemote, setSavingGitRemote] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<'ok' | string | null>(null);
+  const [intervalValue, setIntervalValueState] = useState(5);
+  const [intervalUnit, setIntervalUnitState] = useState<SyncIntervalUnit>('minutes');
+  const [savingInterval, setSavingInterval] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [deviceName, setDeviceNameState] = useState('');
@@ -299,6 +330,8 @@ function FolderSyncCard() {
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [pauseReason, setPauseReason] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [resyncingAll, setResyncingAll] = useState(false);
+  const [resyncProgress, setResyncProgress] = useState<{ phase: string; done: number; total: number } | null>(null);
   const [choosingFolder, setChoosingFolder] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
@@ -324,20 +357,38 @@ function FolderSyncCard() {
       setElectron(isElectronApp);
       if (!isStandalone) return;
       const { getLastSyncAt, getDeviceId, getDeviceName } = await import('../lib/sync/gitSync');
+      const { getSyncMode, getGitRemoteConfig, getSyncInterval } = await import('../lib/sync/syncSettings');
       setLastSyncAt(await getLastSyncAt());
       setDeviceId(await getDeviceId());
       const name = await getDeviceName();
       setDeviceNameState(name);
       setSavedDeviceName(name);
-      await refreshDevices();
-      if (isElectronApp) {
-        const { getElectronFolder } = await import('../lib/gitfs');
-        setFolderPath(await getElectronFolder().catch(() => null));
-      } else {
-        const { getMirrorState, getSyncPauseReason } = await import('../lib/sync/androidMirror');
-        const state = await getMirrorState();
-        setFolderPath(state?.treeDisplayName ?? null);
-        setPauseReason(await getSyncPauseReason());
+      const interval = await getSyncInterval();
+      setIntervalValueState(interval.value);
+      setIntervalUnitState(interval.unit);
+
+      const mode = await getSyncMode();
+      setSyncModeState(mode);
+      const gitRemoteConfig = await getGitRemoteConfig();
+      if (gitRemoteConfig) {
+        setGitRemoteUrl(gitRemoteConfig.url);
+        setGitRemoteUsername(gitRemoteConfig.username ?? '');
+        setGitRemoteCorsProxy(gitRemoteConfig.corsProxy ?? '');
+        setShowCorsProxy(!!gitRemoteConfig.corsProxy);
+        setGitRemoteTokenConfigured(!!gitRemoteConfig.token);
+      }
+
+      if (mode === 'folder') {
+        await refreshDevices();
+        if (isElectronApp) {
+          const { getElectronFolder } = await import('../lib/gitfs');
+          setFolderPath(await getElectronFolder().catch(() => null));
+        } else {
+          const { getMirrorState, getSyncPauseReason } = await import('../lib/sync/androidMirror');
+          const state = await getMirrorState();
+          setFolderPath(state?.treeDisplayName ?? null);
+          setPauseReason(await getSyncPauseReason());
+        }
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -352,7 +403,8 @@ function FolderSyncCard() {
       const r = await syncNow((p) => setProgress(p));
       setResult(r);
       setLastSyncAt(r.lastSyncAt);
-      await Promise.all([refreshDevices(), refreshPauseReason()]);
+      if (syncMode === 'folder') await Promise.all([refreshDevices(), refreshPauseReason()]);
+      else await refreshPauseReason();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
@@ -369,16 +421,50 @@ function FolderSyncCard() {
   // folder always leaves it correctly populated, not just newly-edited
   // rows — including recovering from a sync target that got wiped/
   // corrupted (as happened testing this against Google Drive earlier).
-  const resyncAllLocalData = async () => {
-    const [{ resyncAllRecipes }, { resyncAllIngredients, resyncAllTools }, { resyncAllProfiles }] = await Promise.all([
+  // Reused for a git-remote mode switch/reconfigure too — a device newly
+  // pointed at a different backend has exactly the same "does this target
+  // already reflect everything I have" problem a new folder does.
+  // onProgress fires after every single row across all six entity types —
+  // a device with a large, never-before-pushed library (recipes especially,
+  // each needing its own extra ingredients/steps/tools queries) can take a
+  // real while here, with nothing else in the UI otherwise showing it's
+  // doing anything until the push phase starts afterward.
+  const resyncAllLocalData = async (onProgress?: (phase: string, done: number, total: number) => void) => {
+    const [{ resyncAllRecipes }, { resyncAllIngredients, resyncAllTools }, { resyncAllProfiles }, { resyncAllTags }, { resyncAllTechniques }] = await Promise.all([
       import('../services/recipes.local'),
       import('../services/ingredients.local'),
       import('../services/profiles.local'),
+      import('../services/tags.local'),
+      import('../services/techniques.local'),
     ]);
-    await resyncAllIngredients();
-    await resyncAllTools();
-    await resyncAllRecipes();
-    await resyncAllProfiles();
+    await resyncAllIngredients((done, total) => onProgress?.('ingredients', done, total));
+    await resyncAllTools((done, total) => onProgress?.('tools', done, total));
+    await resyncAllTags((done, total) => onProgress?.('tags', done, total));
+    await resyncAllTechniques((done, total) => onProgress?.('techniques', done, total));
+    await resyncAllRecipes((done, total) => onProgress?.('recipes', done, total));
+    await resyncAllProfiles((done, total) => onProgress?.('profiles', done, total));
+  };
+
+  // Exposed as its own button (not just triggered implicitly by Change
+  // Folder/Save & Sync) so a device that's already configured can force a
+  // full re-serialize+push on demand — e.g. right after updating to a
+  // build that fixed a resync gap (tags/techniques were missing entirely
+  // until this same release), without needing to re-enter its Sync Folder
+  // or Git Remote settings just to trigger one.
+  const handleResyncAll = async () => {
+    setResyncingAll(true);
+    setError(null);
+    setResyncProgress(null);
+    try {
+      await resyncAllLocalData((phase, done, total) => setResyncProgress({ phase, done, total }));
+      setResyncProgress(null);
+      await handleSyncNow();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not resync all data');
+    } finally {
+      setResyncingAll(false);
+      setResyncProgress(null);
+    }
   };
 
   const handleChangeFolder = async () => {
@@ -419,6 +505,75 @@ function FolderSyncCard() {
     }
   };
 
+  const handleSelectMode = async (mode: 'folder' | 'git-remote') => {
+    setSyncModeState(mode);
+    setError(null);
+    setConnectionTestResult(null);
+    const { setSyncMode } = await import('../lib/sync/syncSettings');
+    await setSyncMode(mode);
+    if (mode === 'folder' && folderPath) await handleSyncNow();
+  };
+
+  const handleTestConnection = async () => {
+    setTestingConnection(true);
+    setConnectionTestResult(null);
+    try {
+      const { testGitRemoteConnection } = await import('../lib/sync/gitRemoteTransport');
+      const err = await testGitRemoteConnection({
+        url: gitRemoteUrl.trim(),
+        username: gitRemoteUsername.trim() || null,
+        token: gitRemoteTokenTouched ? (gitRemoteToken.trim() || null) : null,
+        corsProxy: gitRemoteCorsProxy.trim() || null,
+      });
+      setConnectionTestResult(err ?? 'ok');
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleSaveGitRemote = async () => {
+    setSavingGitRemote(true);
+    setError(null);
+    try {
+      const { setGitRemoteConfig } = await import('../lib/sync/syncSettings');
+      await setGitRemoteConfig({
+        url: gitRemoteUrl.trim(),
+        username: gitRemoteUsername.trim() || null,
+        // undefined (untouched) leaves whatever token is already saved
+        // alone — same leave-blank-to-keep pattern as the AI Provider
+        // card's API keys.
+        token: gitRemoteTokenTouched ? (gitRemoteToken.trim() || null) : undefined,
+        corsProxy: gitRemoteCorsProxy.trim() || null,
+      });
+      if (gitRemoteTokenTouched) {
+        setGitRemoteTokenConfigured(!!gitRemoteToken.trim());
+        setGitRemoteToken('');
+        setGitRemoteTokenTouched(false);
+      }
+      await resyncAllLocalData();
+      await handleSyncNow();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save git remote settings');
+    } finally {
+      setSavingGitRemote(false);
+    }
+  };
+
+  const handleSaveInterval = async (value: number, unit: SyncIntervalUnit) => {
+    setSavingInterval(true);
+    try {
+      const { setSyncInterval, syncIntervalToMinutes } = await import('../lib/sync/syncSettings');
+      const interval: SyncInterval = { value, unit };
+      await setSyncInterval(interval);
+      const { applySyncIntervalChange } = await import('../lib/sync/gitSync');
+      applySyncIntervalChange(syncIntervalToMinutes(interval));
+      setIntervalValueState(value);
+      setIntervalUnitState(unit);
+    } finally {
+      setSavingInterval(false);
+    }
+  };
+
   if (!standalone) return null;
 
   return (
@@ -427,9 +582,7 @@ function FolderSyncCard() {
         <div>
           <h2 className="text-lg font-black text-zinc-900">Folder Sync</h2>
           <p className="text-sm text-zinc-400 font-medium mt-1">
-            {electron
-              ? "Point this at a folder your other devices can also reach - e.g. one already inside your OneDrive/Drive desktop folder, or a Syncthing-managed folder."
-              : "Pick a Drive/OneDrive (or any SAF-registered) folder your other devices can also reach."}
+            Choose how this device exchanges changes with your others — a plain synced folder, or a real git server.
           </p>
         </div>
       </div>
@@ -438,9 +591,185 @@ function FolderSyncCard() {
         {pauseReason && (
           <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
-            Sync paused — folder access lost ({pauseReason}). Use "Change Folder" below to reconnect.
+            Sync paused — {pauseReason}
           </p>
         )}
+
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Sync Mode</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleSelectMode('folder')}
+              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'folder' ? 'border-primary bg-primary/5' : 'border-zinc-200 bg-zinc-50 hover:bg-zinc-100'}`}
+            >
+              <p className="text-sm font-black text-zinc-900">Folder</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                {electron
+                  ? 'A folder inside OneDrive/Drive/Syncthing.'
+                  : 'A Drive/OneDrive/Syncthing SAF folder.'}
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectMode('git-remote')}
+              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'git-remote' ? 'border-primary bg-primary/5' : 'border-zinc-200 bg-zinc-50 hover:bg-zinc-100'}`}
+            >
+              <p className="text-sm font-black text-zinc-900">Git Remote</p>
+              <p className="text-xs text-zinc-500 mt-0.5">GitHub, GitLab, or a self-hosted git server.</p>
+            </button>
+          </div>
+        </div>
+
+        {syncMode === 'folder' ? (
+          <div className="flex gap-8 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Sync Folder</p>
+              <p className="text-sm font-bold text-zinc-900 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? 'None chosen yet'}</p>
+            </div>
+            <div className="self-end">
+              <button
+                type="button"
+                onClick={handleChangeFolder}
+                disabled={choosingFolder}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 text-zinc-600 rounded-xl font-black text-xs hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-base">folder_open</span>
+                {choosingFolder ? 'Choosing…' : folderPath ? 'Change Folder' : 'Choose Folder'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 bg-zinc-50 rounded-2xl p-5">
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Repository URL</label>
+              <input
+                type="text"
+                value={gitRemoteUrl}
+                onChange={(e) => setGitRemoteUrl(e.target.value)}
+                placeholder="https://github.com/you/smartchef-sync.git"
+                className="w-full bg-white rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium px-4 py-2.5 text-sm"
+              />
+              <p className="text-xs text-zinc-400 mt-1.5">
+                An empty private repo works fine — GitHub, GitLab, or any self-hosted git-http server your other devices can also reach.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Username</label>
+                <input
+                  type="text"
+                  value={gitRemoteUsername}
+                  onChange={(e) => setGitRemoteUsername(e.target.value)}
+                  placeholder="Usually optional with a token"
+                  className="w-full bg-white rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium px-4 py-2.5 text-sm"
+                />
+              </div>
+              <ProviderKeyInput
+                label="Access Token"
+                placeholder="Personal access token / password"
+                value={gitRemoteToken}
+                hasKey={gitRemoteTokenConfigured}
+                touched={gitRemoteTokenTouched}
+                onChange={(v, t) => { setGitRemoteToken(v); setGitRemoteTokenTouched(t); }}
+              />
+            </div>
+            {showCorsProxy ? (
+              <div>
+                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">CORS Proxy (rarely needed)</label>
+                <input
+                  type="text"
+                  value={gitRemoteCorsProxy}
+                  onChange={(e) => setGitRemoteCorsProxy(e.target.value)}
+                  placeholder="Leave blank unless you have a specific reason to set one"
+                  className="w-full bg-white rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium px-4 py-2.5 text-sm"
+                />
+                <p className="text-xs text-zinc-400 mt-1.5">
+                  This app reaches GitHub/GitLab/self-hosted servers directly through native code on both Windows and
+                  Android, not the browser — so unlike most git-in-the-browser tools, no CORS proxy is needed here at all,
+                  including for GitHub/GitLab. Leave this blank.
+                </p>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setShowCorsProxy(true)} className="text-xs font-bold text-zinc-400 hover:text-zinc-600">
+                + Advanced: CORS proxy (not needed for GitHub/GitLab — this app connects directly)
+              </button>
+            )}
+            {connectionTestResult && (
+              <p className={`text-xs font-medium flex items-start gap-2 ${connectionTestResult === 'ok' ? 'text-emerald-700' : 'text-red-600'}`}>
+                <span className="material-symbols-outlined text-[16px] shrink-0">{connectionTestResult === 'ok' ? 'check_circle' : 'error'}</span>
+                {connectionTestResult === 'ok' ? 'Reachable — credentials accepted.' : connectionTestResult}
+              </p>
+            )}
+            <div className="flex gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={testingConnection || !gitRemoteUrl.trim()}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-zinc-200 text-zinc-600 rounded-xl font-black text-xs hover:bg-zinc-100 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-base ${testingConnection ? 'animate-spin' : ''}`}>wifi_tethering</span>
+                {testingConnection ? 'Testing…' : 'Test Connection'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveGitRemote}
+                disabled={savingGitRemote || !gitRemoteUrl.trim()}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-black text-xs hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-base">{savingGitRemote ? 'sync' : 'save'}</span>
+                {savingGitRemote ? 'Saving…' : 'Save & Sync'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Automatic Sync</label>
+          <div className="flex items-center gap-2 flex-wrap">
+            {SYNC_INTERVAL_PRESETS.map((preset) => {
+              const active = intervalValue === preset.value && intervalUnit === preset.unit;
+              return (
+                <button
+                  key={`${preset.value}-${preset.unit}`}
+                  type="button"
+                  onClick={() => handleSaveInterval(preset.value, preset.unit)}
+                  disabled={savingInterval}
+                  className={`px-3 py-1.5 rounded-full text-xs font-black transition-colors disabled:opacity-50 ${active ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
+                >
+                  {formatSyncInterval(preset)}
+                </button>
+              );
+            })}
+            <div className="flex items-center gap-1.5 ml-1">
+              <input
+                type="number"
+                min={1}
+                value={intervalValue}
+                onChange={(e) => setIntervalValueState(Math.max(1, Number(e.target.value) || 1))}
+                onBlur={() => handleSaveInterval(intervalValue, intervalUnit)}
+                className="w-16 bg-zinc-50 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold px-2 py-1.5 text-xs text-center"
+              />
+              <select
+                value={intervalUnit}
+                onChange={(e) => {
+                  const unit = e.target.value as SyncIntervalUnit;
+                  setIntervalUnitState(unit);
+                  handleSaveInterval(intervalValue, unit);
+                }}
+                disabled={savingInterval}
+                className="bg-zinc-50 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold px-2 py-1.5 text-xs disabled:opacity-50"
+              >
+                <option value="minutes">minutes</option>
+                <option value="hours">hours</option>
+                <option value="days">days</option>
+                <option value="weeks">weeks</option>
+                <option value="months">months</option>
+              </select>
+            </div>
+          </div>
+          <p className="text-xs text-zinc-400 mt-1.5">How often SmartChef checks for changes automatically, besides on app resume and "Sync Now".</p>
+        </div>
 
         <div>
           <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Device Name</label>
@@ -466,13 +795,9 @@ function FolderSyncCard() {
             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Last Sync</p>
             <p className="text-sm font-bold text-zinc-900">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}</p>
           </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Sync Folder</p>
-            <p className="text-sm font-bold text-zinc-900 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? 'None chosen yet'}</p>
-          </div>
         </div>
 
-        {devices.length > 0 && (
+        {syncMode === 'folder' && devices.length > 0 && (
           <div>
             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Known Devices</p>
             <div className="space-y-1.5">
@@ -488,8 +813,29 @@ function FolderSyncCard() {
             </div>
           </div>
         )}
+        {syncMode === 'git-remote' && (
+          <p className="text-xs text-zinc-400">
+            Known-devices tracking isn't available in Git Remote mode yet — check "History" below for recent activity instead.
+          </p>
+        )}
 
         {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+        {resyncingAll && resyncProgress && (
+          <div className="space-y-1">
+            <p className="text-xs text-zinc-500 font-medium">
+              Resyncing {resyncProgress.phase} — {resyncProgress.done}/{resyncProgress.total}
+            </p>
+            <div className="h-1.5 w-full bg-zinc-100 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all bg-amber-500"
+                style={{ width: `${resyncProgress.total ? Math.round((resyncProgress.done / resyncProgress.total) * 100) : 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {resyncingAll && !resyncProgress && !syncing && (
+          <p className="text-xs text-zinc-500 font-medium">Preparing to resync…</p>
+        )}
         {syncing && progress && (
           <div className="space-y-1">
             <p className="text-xs text-zinc-500 font-medium">
@@ -515,6 +861,13 @@ function FolderSyncCard() {
             {result.conflicts > 0 ? ` ${result.conflicts} field${result.conflicts === 1 ? '' : 's'} need${result.conflicts === 1 ? 's' : ''} your review.` : ''}
           </p>
         )}
+        {!syncing && result && result.failedEntities.length > 0 && (
+          <p className="text-xs text-red-600 font-medium">
+            {result.failedEntities.length} item{result.failedEntities.length === 1 ? '' : 's'} from other devices couldn't be
+            saved here ({result.failedEntities.map((f) => f.entityType).join(', ')}) — try Sync Now again; if it keeps
+            happening, that data may need attention on the device that created it.
+          </p>
+        )}
 
         <div className="flex gap-3 flex-wrap">
           <button
@@ -528,12 +881,13 @@ function FolderSyncCard() {
           </button>
           <button
             type="button"
-            onClick={handleChangeFolder}
-            disabled={choosingFolder}
+            onClick={handleResyncAll}
+            disabled={resyncingAll || syncing}
+            title="Re-serializes every recipe, ingredient, tool, tag, technique, and profile this device has and pushes them all — use after updating if something looks missing on the other end, not needed for routine syncing"
             className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
           >
-            <span className="material-symbols-outlined text-lg">folder_open</span>
-            {choosingFolder ? 'Choosing…' : 'Change Folder'}
+            <span className={`material-symbols-outlined text-lg ${resyncingAll ? 'animate-spin' : ''}`}>refresh</span>
+            {resyncingAll ? 'Resyncing…' : 'Resync All'}
           </button>
           <button
             type="button"
@@ -677,6 +1031,7 @@ interface LlmConfig {
   hasAnthropicKey: boolean;
   hasGeminiKey: boolean;
   hasOpenaiKey: boolean;
+  ollamaUrl: string | null;
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -684,6 +1039,18 @@ const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   gemini: 'Google Gemini',
   openai: 'OpenAI',
+};
+
+// One config field per provider — an API key for the three cloud
+// providers, or a base URL for local Ollama (host/port, e.g. when it's
+// running on another machine on the LAN rather than this one). Keeping
+// this in one place is what makes the card below "one relevant field,
+// however the provider needs it configured" instead of every provider's
+// key sitting on screen regardless of which one is actually selected.
+const PROVIDER_KEY_META: Record<string, { label: string; placeholder: string }> = {
+  anthropic: { label: 'Claude (Anthropic) API Key', placeholder: 'sk-ant-...' },
+  gemini: { label: 'Google Gemini API Key', placeholder: 'AIza...' },
+  openai: { label: 'OpenAI API Key', placeholder: 'sk-...' },
 };
 
 function ProviderKeyInput({
@@ -717,17 +1084,16 @@ function ProviderKeyInput({
   );
 }
 
+const PROVIDER_KEY_STATE_KEYS = ['anthropic', 'gemini', 'openai'] as const;
+type CloudProvider = (typeof PROVIDER_KEY_STATE_KEYS)[number];
+
 function LlmProviderCard() {
   const [provider, setProvider] = useState('ollama');
-  const [hasAnthropicKey, setHasAnthropicKey] = useState(false);
-  const [hasGeminiKey, setHasGeminiKey] = useState(false);
-  const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
-  const [anthropicKey, setAnthropicKey] = useState('');
-  const [geminiKey, setGeminiKey] = useState('');
-  const [openaiKey, setOpenaiKey] = useState('');
-  const [anthropicTouched, setAnthropicTouched] = useState(false);
-  const [geminiTouched, setGeminiTouched] = useState(false);
-  const [openaiTouched, setOpenaiTouched] = useState(false);
+  const [hasKey, setHasKey] = useState<Record<CloudProvider, boolean>>({ anthropic: false, gemini: false, openai: false });
+  const [keyValue, setKeyValue] = useState<Record<CloudProvider, string>>({ anthropic: '', gemini: '', openai: '' });
+  const [keyTouched, setKeyTouched] = useState<Record<CloudProvider, boolean>>({ anthropic: false, gemini: false, openai: false });
+  const [ollamaUrl, setOllamaUrl] = useState('');
+  const [savedOllamaUrl, setSavedOllamaUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -739,9 +1105,9 @@ function LlmProviderCard() {
       .then((json: { data?: LlmConfig }) => {
         if (json.data) {
           setProvider(json.data.provider);
-          setHasAnthropicKey(json.data.hasAnthropicKey);
-          setHasGeminiKey(json.data.hasGeminiKey);
-          setHasOpenaiKey(json.data.hasOpenaiKey);
+          setHasKey({ anthropic: json.data.hasAnthropicKey, gemini: json.data.hasGeminiKey, openai: json.data.hasOpenaiKey });
+          setOllamaUrl(json.data.ollamaUrl ?? '');
+          setSavedOllamaUrl(json.data.ollamaUrl ?? '');
         }
       })
       .catch(() => {})
@@ -754,9 +1120,10 @@ function LlmProviderCard() {
     setSaved(false);
     try {
       const body: Record<string, unknown> = { llmProvider: provider };
-      if (anthropicTouched) body.anthropicApiKey = anthropicKey;
-      if (geminiTouched) body.geminiApiKey = geminiKey;
-      if (openaiTouched) body.openaiApiKey = openaiKey;
+      for (const p of PROVIDER_KEY_STATE_KEYS) {
+        if (keyTouched[p]) body[`${p}ApiKey`] = keyValue[p];
+      }
+      if (ollamaUrl !== savedOllamaUrl) body.ollamaUrl = ollamaUrl;
       const res = await apiFetch('/api/auth/account', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -764,9 +1131,18 @@ function LlmProviderCard() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Failed to save');
-      if (anthropicTouched) { setHasAnthropicKey(!!anthropicKey); setAnthropicKey(''); setAnthropicTouched(false); }
-      if (geminiTouched) { setHasGeminiKey(!!geminiKey); setGeminiKey(''); setGeminiTouched(false); }
-      if (openaiTouched) { setHasOpenaiKey(!!openaiKey); setOpenaiKey(''); setOpenaiTouched(false); }
+      setHasKey((prev) => {
+        const next = { ...prev };
+        for (const p of PROVIDER_KEY_STATE_KEYS) if (keyTouched[p]) next[p] = !!keyValue[p];
+        return next;
+      });
+      setKeyValue((prev) => {
+        const next = { ...prev };
+        for (const p of PROVIDER_KEY_STATE_KEYS) if (keyTouched[p]) next[p] = '';
+        return next;
+      });
+      setKeyTouched({ anthropic: false, gemini: false, openai: false });
+      setSavedOllamaUrl(ollamaUrl);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -777,6 +1153,8 @@ function LlmProviderCard() {
   };
 
   if (!loaded) return null;
+
+  const cloudProvider = provider !== 'ollama' ? (provider as CloudProvider) : null;
 
   return (
     <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
@@ -803,7 +1181,7 @@ function LlmProviderCard() {
           </select>
         </div>
 
-        {provider !== 'ollama' && (
+        {cloudProvider && (
           <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] shrink-0">info</span>
             Recipe text/URLs you import will be sent to {PROVIDER_LABELS[provider]}'s servers for processing.
@@ -811,30 +1189,36 @@ function LlmProviderCard() {
           </p>
         )}
 
-        <ProviderKeyInput
-          label="Anthropic API Key"
-          placeholder="sk-ant-..."
-          value={anthropicKey}
-          hasKey={hasAnthropicKey}
-          touched={anthropicTouched}
-          onChange={(v, t) => { setAnthropicKey(v); setAnthropicTouched(t); }}
-        />
-        <ProviderKeyInput
-          label="Google Gemini API Key"
-          placeholder="AIza..."
-          value={geminiKey}
-          hasKey={hasGeminiKey}
-          touched={geminiTouched}
-          onChange={(v, t) => { setGeminiKey(v); setGeminiTouched(t); }}
-        />
-        <ProviderKeyInput
-          label="OpenAI API Key"
-          placeholder="sk-..."
-          value={openaiKey}
-          hasKey={hasOpenaiKey}
-          touched={openaiTouched}
-          onChange={(v, t) => { setOpenaiKey(v); setOpenaiTouched(t); }}
-        />
+        {/* Exactly one config field, matching whichever provider is selected above —
+            an API key for a cloud provider, a base URL for local Ollama — rather than
+            showing all four regardless of what's actually in use. */}
+        {cloudProvider ? (
+          <ProviderKeyInput
+            label={PROVIDER_KEY_META[cloudProvider].label}
+            placeholder={PROVIDER_KEY_META[cloudProvider].placeholder}
+            value={keyValue[cloudProvider]}
+            hasKey={hasKey[cloudProvider]}
+            touched={keyTouched[cloudProvider]}
+            onChange={(v, t) => {
+              setKeyValue((prev) => ({ ...prev, [cloudProvider]: v }));
+              setKeyTouched((prev) => ({ ...prev, [cloudProvider]: t }));
+            }}
+          />
+        ) : (
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Ollama URL</label>
+            <input
+              type="text"
+              value={ollamaUrl}
+              onChange={(e) => setOllamaUrl(e.target.value)}
+              placeholder="http://localhost:11434 (default — leave blank unless Ollama runs elsewhere)"
+              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+            />
+            <p className="text-xs text-zinc-400 mt-2">
+              Only needed if Ollama runs on a different host or port — e.g. another machine on your network.
+            </p>
+          </div>
+        )}
 
         {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
         <button

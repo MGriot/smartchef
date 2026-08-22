@@ -34,10 +34,19 @@ vi.mock('isomorphic-git', () => ({
 // conflicts.local.test.ts already covers thoroughly.
 const dbEntities: Record<string, Map<string, Record<string, unknown>>> = { recipe: new Map(), ingredient: new Map(), tool: new Map() };
 const dbConflicts: Array<{ entityType: string; entityId: string; fieldName: string }> = [];
+// Settable per-test to simulate one specific entity's write throwing (a
+// malformed field shape, a constraint violation) without needing a real
+// SQLite error — see the "one bad entity doesn't abort the rest" test.
+let createEntityShouldThrowFor: string | null = null;
+// Records the order createEntity() actually ran in — what the ordering
+// tests (entity types, matrioska/sub-recipe dependency) assert against.
+const creationOrder: Array<{ entityType: string; entityId: string }> = [];
 
 vi.mock('../../services/conflicts.local', () => ({
   entityExists: async (entityType: string, entityId: string) => dbEntities[entityType]?.has(entityId) ?? false,
   createEntity: async (entityType: string, entityId: string, fields: Record<string, unknown>) => {
+    if (entityId === createEntityShouldThrowFor) throw new Error(`simulated write failure for ${entityId}`);
+    creationOrder.push({ entityType, entityId });
     dbEntities[entityType].set(entityId, { id: entityId, ...fields });
   },
   applyEntityMergeResult: async (entityType: string, entityId: string, result: { applied: Record<string, unknown>; conflicts: Array<{ fieldName: string }> }) => {
@@ -62,6 +71,8 @@ beforeEach(async () => {
   dbEntities.ingredient.clear();
   dbEntities.tool.clear();
   dbConflicts.length = 0;
+  createEntityShouldThrowFor = null;
+  creationOrder.length = 0;
   vi.resetModules();
   ({ mergeRemoteIntoLocal } = await import('./mergeBridge'));
 });
@@ -75,7 +86,7 @@ function baseKey(localOid: string, remoteOid: string): string {
 describe('mergeRemoteIntoLocal', () => {
   it('does nothing when local and remote are the same commit', async () => {
     const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'same-oid', 'same-oid');
-    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [] });
+    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [] });
   });
 
   it('creates a brand-new entity that only exists on the remote side', async () => {
@@ -88,6 +99,23 @@ describe('mergeRemoteIntoLocal', () => {
     expect(result.entitiesCreated).toBe(1);
     expect(dbEntities.recipe.get('r1')).toEqual({ id: 'r1', title: 'Lasagna', servings: 4 });
     expect(result.touchedEntities).toEqual([{ entityType: 'recipe', entityId: 'r1', finalFields: { title: 'Lasagna', servings: 4 } }]);
+  });
+
+  it('one entity failing to write does not abort the rest of the batch — each entity is isolated', async () => {
+    createEntityShouldThrowFor = 'bad-recipe';
+    trees['local'] = {};
+    trees['remote'] = {
+      'recipes/bad-recipe.json': { title: 'Malformed', servings: 4 },
+      'recipes/good-recipe.json': { title: 'Fine', servings: 2 },
+    };
+    trees[baseKey('local', 'remote')] = {};
+
+    const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'local', 'remote');
+
+    expect(result.entitiesCreated).toBe(1);
+    expect(dbEntities.recipe.get('good-recipe')).toEqual({ id: 'good-recipe', title: 'Fine', servings: 2 });
+    expect(dbEntities.recipe.has('bad-recipe')).toBe(false);
+    expect(result.failedEntities).toEqual([{ entityType: 'recipe', entityId: 'bad-recipe', error: 'simulated write failure for bad-recipe' }]);
   });
 
   it('fast-forwards a field that only changed on the remote for an entity that already exists locally', async () => {
@@ -127,7 +155,7 @@ describe('mergeRemoteIntoLocal', () => {
 
     const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'local', 'remote');
 
-    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [] });
+    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [] });
   });
 
   it('treats every remote entity as new when this device has no local commits yet (first sync)', async () => {
@@ -152,6 +180,57 @@ describe('mergeRemoteIntoLocal', () => {
     expect(result.entitiesCreated).toBe(2);
     expect(dbEntities.recipe.has('r1')).toBe(true);
     expect(dbEntities.ingredient.has('i1')).toBe(true);
+  });
+
+  it('creates ingredients (and other leaf types) before recipes, so a recipe never gets written ahead of what it references', async () => {
+    trees['local'] = {};
+    trees['remote'] = {
+      // Deliberately listed recipe-first in the source tree — proves the
+      // ordering comes from ENTITY_DIRS processing recipes last, not from
+      // this test happening to already list things in a lucky order.
+      'recipes/r1.json': { title: 'Lasagna' },
+      'ingredients/i1.json': { name: 'Tomato' },
+      'tools/t1.json': { name: 'Whisk' },
+    };
+
+    await mergeRemoteIntoLocal('/dir', '/dir/.git', null, 'remote');
+
+    const recipeIndex = creationOrder.findIndex((c) => c.entityType === 'recipe');
+    const ingredientIndex = creationOrder.findIndex((c) => c.entityType === 'ingredient');
+    const toolIndex = creationOrder.findIndex((c) => c.entityType === 'tool');
+    expect(ingredientIndex).toBeLessThan(recipeIndex);
+    expect(toolIndex).toBeLessThan(recipeIndex);
+  });
+
+  it('orders a "matrioska" recipe (one that uses another recipe as a sub-recipe ingredient) after the recipe it depends on', async () => {
+    trees['local'] = {};
+    trees['remote'] = {
+      // Listed in dependency-violating order on purpose: the recipe that
+      // NEEDS the other one comes first in the source tree, so this only
+      // passes if orderRecipeIdsByDependency() actually reorders it.
+      'recipes/mother-sauce-lasagna.json': { title: 'Lasagna', ingredients: [{ sub_recipe_id: 'bechamel' }] },
+      'recipes/bechamel.json': { title: 'Bechamel Sauce', ingredients: [] },
+    };
+
+    await mergeRemoteIntoLocal('/dir', '/dir/.git', null, 'remote');
+
+    const bechamelIndex = creationOrder.findIndex((c) => c.entityId === 'bechamel');
+    const lasagnaIndex = creationOrder.findIndex((c) => c.entityId === 'mother-sauce-lasagna');
+    expect(bechamelIndex).toBeLessThan(lasagnaIndex);
+  });
+
+  it('does not hang on a genuine sub-recipe cycle — falls back to processing what remains rather than looping forever', async () => {
+    trees['local'] = {};
+    trees['remote'] = {
+      'recipes/a.json': { title: 'A', ingredients: [{ sub_recipe_id: 'b' }] },
+      'recipes/b.json': { title: 'B', ingredients: [{ sub_recipe_id: 'a' }] },
+    };
+
+    const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', null, 'remote');
+
+    expect(result.entitiesCreated).toBe(2);
+    expect(dbEntities.recipe.has('a')).toBe(true);
+    expect(dbEntities.recipe.has('b')).toBe(true);
   });
 
   it('also covers non-recipe/ingredient entity types wired into ENTITY_DIRS (e.g. tools)', async () => {

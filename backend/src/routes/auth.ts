@@ -159,6 +159,10 @@ const AccountUpdateSchema = z.object({
   anthropicApiKey: z.string().optional(),
   geminiApiKey: z.string().optional(),
   openaiApiKey: z.string().optional(),
+  // "" clears the override (falls back to the server's OLLAMA_URL env var),
+  // undefined/omitted leaves it untouched. Not a secret — stored plaintext,
+  // unlike the cloud provider keys above.
+  ollamaUrl: z.string().optional(),
 });
 
 // PUT /auth/account — requires auth (mounted after requireAuth in index.ts
@@ -206,6 +210,10 @@ authRouter.put("/account", async (req: Request, res: Response) => {
     updates.push(`openai_api_key_encrypted=$${i++}`);
     params.push(d.openaiApiKey ? encrypt(d.openaiApiKey) : null);
   }
+  if (d.ollamaUrl !== undefined) {
+    updates.push(`ollama_url=$${i++}`);
+    params.push(d.ollamaUrl.trim() || null);
+  }
   if (!updates.length) return res.json({ success: true });
 
   params.push(accountId);
@@ -231,8 +239,9 @@ authRouter.get("/llm-config", async (req: Request, res: Response) => {
     anthropic_api_key_encrypted: string | null;
     gemini_api_key_encrypted: string | null;
     openai_api_key_encrypted: string | null;
+    ollama_url: string | null;
   }>(
-    "SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted FROM account WHERE id = $1",
+    "SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted, ollama_url FROM account WHERE id = $1",
     [accountId]
   );
   if (!account) return res.status(404).json({ error: "Account not found" });
@@ -243,6 +252,9 @@ authRouter.get("/llm-config", async (req: Request, res: Response) => {
       hasAnthropicKey: !!account.anthropic_api_key_encrypted,
       hasGeminiKey: !!account.gemini_api_key_encrypted,
       hasOpenaiKey: !!account.openai_api_key_encrypted,
+      // Not a secret (unlike the cloud keys above) — sent as-is so the
+      // settings form can show/edit the actual value, not just "configured".
+      ollamaUrl: account.ollama_url,
     },
   });
 });

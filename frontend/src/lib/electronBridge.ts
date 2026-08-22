@@ -21,6 +21,13 @@ declare global {
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
       geocode: (q: string) => Promise<{ lat: number; lng: number; displayName: string } | null>;
+      httpRequest: (req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array }) => Promise<{
+        url: string;
+        statusCode: number;
+        statusMessage: string;
+        headers: Record<string, string>;
+        body: Uint8Array;
+      }>;
       fs: {
         readFile: (path: string, encoding?: string) => Promise<string | Uint8Array>;
         writeFile: (path: string, data: string | Uint8Array) => Promise<void>;
@@ -82,6 +89,25 @@ export async function getHiddenCloneDir(): Promise<string> {
 export async function electronGeocode(q: string): Promise<{ lat: number; lng: number; displayName: string } | null> {
   if (!window.smartchefElectron) return null;
   return window.smartchefElectron.geocode(q);
+}
+
+/** Makes a single HTTP request from the main process (Node's fetch, not
+ *  the renderer's) — see electron/src/index.ts's `smartchef-http-request`
+ *  handler for why: Node's fetch isn't subject to CORS at all, so a git
+ *  server's HTTP endpoint is reachable directly, no CORS proxy needed.
+ *  gitRemoteTransport.ts's HttpClient adapter uses this on Electron; its
+ *  Android counterpart is gitHttpBridge.ts's GitHttp plugin. Electron-only,
+ *  same guard as pickSyncFolder(). */
+export async function electronHttpRequest(req: {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body?: Uint8Array;
+}): Promise<{ url: string; statusCode: number; statusMessage: string; headers: Record<string, string>; body: Uint8Array }> {
+  if (!window.smartchefElectron) {
+    throw new Error('electronHttpRequest() is only available in the Electron app');
+  }
+  return window.smartchefElectron.httpRequest(req);
 }
 
 /** The IPC-backed fs primitives gitfs.ts uses on Electron — throws if

@@ -35,6 +35,24 @@ async function syncTag(id: string): Promise<void> {
   }
 }
 
+/** Re-serializes every tag into the Hidden Clone — same "picking a new
+ *  Sync Folder/Git Remote can't know about rows that predate it" reason
+ *  ingredients.local.ts's resyncAllTools() exists for, and was missing
+ *  entirely here: a tag never individually edited since sync was first
+ *  configured had never once been written to the Hidden Clone, so it
+ *  silently never synced to any other device. Includes soft-deleted tags
+ *  too (unlike resyncAllRecipes()'s sync_status filter, matching
+ *  resyncAllTools()) so a deletion made before sync existed still
+ *  propagates its tombstone. */
+export async function resyncAllTags(onProgress?: (done: number, total: number) => void): Promise<number> {
+  const rows = await query<{ id: string }>('SELECT id FROM tags');
+  for (let i = 0; i < rows.length; i++) {
+    await syncTag(rows[i].id);
+    onProgress?.(i + 1, rows.length);
+  }
+  return rows.length;
+}
+
 // ── Tag catalog CRUD ─────────────────────────────────────────────────────
 
 export async function listTags({ lang, q }: { lang?: string; q?: string }) {

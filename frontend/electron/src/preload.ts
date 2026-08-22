@@ -31,6 +31,12 @@ contextBridge.exposeInMainWorld('smartchefElectron', {
   // see the `smartchef-geocode` handler in electron/src/index.ts for why
   // this can't just be a renderer-side fetch() call.
   geocode: (q: string) => ipcRenderer.invoke('smartchef-geocode', q),
+  // Git Remote sync mode's HTTP transport — see the `smartchef-http-request`
+  // handler in electron/src/index.ts for why this can't just be a
+  // renderer-side fetch() call (same no-CORS-in-main-process reasoning as
+  // geocode above).
+  httpRequest: (req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array }) =>
+    ipcRenderer.invoke('smartchef-http-request', req),
   fs: {
     readFile: (path: string, encoding?: string) => ipcRenderer.invoke('smartchef-fs-readFile', path, encoding),
     writeFile: (path: string, data: string | Uint8Array) => ipcRenderer.invoke('smartchef-fs-writeFile', path, data),

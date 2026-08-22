@@ -9,8 +9,12 @@ The live database and image files a standalone-mode app instance reads and write
 _Avoid_: local database, app data, working copy
 
 **Sync Folder**:
-A separate, user-chosen folder holding a bare-style git remote, physically replicated between devices by an external tool (e.g. Syncthing). The app only ever reads and writes it through git operations — never a live database file.
+A separate, user-chosen folder holding a bare-style git remote, physically replicated between devices by an external tool (e.g. Syncthing). The app only ever reads and writes it through git operations — never a live database file. Applies only to **Folder mode** (see Sync Mode) — a **Git Remote** doesn't have a "folder" at all, just a URL.
 _Avoid_: sync directory, shared folder, mirror folder
+
+**Sync Mode**:
+Which transport a device's Sync Engine uses to reach other devices — **Folder mode** (a Sync Folder, replicated by an external tool) or **Git Remote mode** (a real git server — GitHub, GitLab, or self-hosted — reached over git's own push/fetch protocol, no external tool involved). Chosen per device, independent of what mode any other device sharing the same history uses.
+_Avoid_: sync backend, sync target, transport type (when the context already makes "of what" obvious — use "Sync Mode" for the setting itself)
 
 **Sync Engine**:
 The component on each device that turns Local Storage changes into commits, pushes them to the Sync Folder, and pulls/merges other devices' commits back in.

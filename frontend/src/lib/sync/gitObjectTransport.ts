@@ -59,6 +59,24 @@ export interface LocalFs {
 const REF_PATH = '.git/refs/heads/main';
 const HEAD_PATH = '.git/HEAD';
 
+// A directory listing that silently returns fewer entries than the remote
+// actually holds is indistinguishable, from inside listLocalObjectPaths()/
+// remote.listDir(), from "that's really all there is" — there is no local
+// signal for it. Some SAF-backed DocumentsProvider implementations
+// (Google Drive's on Android, notably — see androidRemoteTransport.ts's
+// header) are known not to reliably enumerate large folders, so a device
+// on one of those can quietly pull a fraction of the real object set and
+// have Structured Merge treat every entity it never received as "no value
+// at that commit" — the same shape as a legitimate absence — rather than
+// erroring. MANIFEST_PATH exists purely to give pullObjectsAndRefs()
+// something external to check its own listing against: pushObjectsAndRefs()
+// records a monotonic high-water mark of the largest object count any
+// device has ever pushed, so a device with a genuinely complete view
+// (Electron's direct filesystem access, immune to this class of bug)
+// permanently raises the floor, and any later pull — on any platform —
+// that sees fewer objects than that floor is provably incomplete.
+const MANIFEST_PATH = '.git/objects.manifest';
+
 /** Where pullObjectsAndRefs() writes the Sync Folder's ref locally, by
  *  default — a remote-tracking ref, NOT refs/heads/main. Overwriting the
  *  local branch directly (what the superseded androidMirror.ts did, and
@@ -141,6 +159,28 @@ async function readLocalBytes(fs: LocalFs, dir: string, relativePath: string): P
   }
 }
 
+function bytesEqual(a: Uint8Array | null, b: Uint8Array | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** null when there's no manifest yet (an older Sync Folder, or one only
+ *  ever written by a pre-manifest app build) or it's unreadable/corrupt —
+ *  tolerated the same way every other "no info available" case in this
+ *  module is, not treated as an error. */
+async function readRemoteManifest(remote: RemoteTransport): Promise<number | null> {
+  try {
+    if (!(await remote.exists(MANIFEST_PATH))) return null;
+    const bytes = await remote.readFile(MANIFEST_PATH);
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as { objectCount?: unknown };
+    return typeof parsed.objectCount === 'number' ? parsed.objectCount : null;
+  } catch {
+    return null;
+  }
+}
+
 /** .git/objects/<prefix>/<rest> — the two-level structure isomorphic-git
  *  itself uses for loose objects. Filtering to 2-hex-char prefix names
  *  skips "info"/"pack" (packed/alternates bookkeeping git also creates
@@ -175,6 +215,13 @@ export interface PushResult {
   pushed: boolean;
   objectsUploaded: number;
   uploadedObjectPaths: string[];
+  /** true when expectedRemoteRefBytes was given and didn't match the
+   *  remote's actual current ref at write time — the ref write was skipped
+   *  (objects were still uploaded; they're immutable and harmless to leave
+   *  behind). Means another device pushed since this device last observed
+   *  the remote: the caller should pull/merge again and retry, not treat
+   *  this as a hard failure. */
+  conflict?: boolean;
 }
 
 /** Uploads this device's Hidden Clone up to the Sync Folder — objects
@@ -184,12 +231,25 @@ export interface PushResult {
  *  "nothing to upload") is deliberately NOT caught here — it must
  *  propagate so refs never get written after a partial object upload,
  *  leaving the remote exactly as consistent as before this call for a
- *  puller to see. */
+ *  puller to see.
+ *
+ *  expectedRemoteRefBytes, when passed (even as null, meaning "expect no
+ *  ref yet"), makes the ref write a compare-and-swap: the remote's actual
+ *  current ref is read immediately before writing, and the write is
+ *  skipped — reported as `conflict: true` rather than performed — if it no
+ *  longer matches. Without this the ref write is unconditional last-write-
+ *  wins, which is exactly the bug this guards against: two devices syncing
+ *  around the same time can otherwise have one's push silently overwrite
+ *  the other's, orphaning its commit (still present as a git object, but
+ *  no longer reachable from any ref) with no error raised anywhere. Omit
+ *  the argument (leave it `undefined`) to keep the old unconditional
+ *  behavior — existing callers/tests that don't pass it are unaffected. */
 export async function pushObjectsAndRefs(
   fs: LocalFs,
   localDir: string,
   remote: RemoteTransport,
-  onProgress?: (progress: TransferProgress) => void
+  onProgress?: (progress: TransferProgress) => void,
+  expectedRemoteRefBytes?: Uint8Array | null
 ): Promise<PushResult> {
   const localObjectPaths = await listLocalObjectPaths(fs, localDir);
   let done = 0;
@@ -213,9 +273,25 @@ export async function pushObjectsAndRefs(
   if (!refBytes) {
     return { pushed: false, objectsUploaded: uploadedObjectPaths.length, uploadedObjectPaths };
   }
+
+  if (expectedRemoteRefBytes !== undefined) {
+    const actualRemoteRefBytes = (await remote.exists(REF_PATH)) ? await remote.readFile(REF_PATH) : null;
+    if (!bytesEqual(actualRemoteRefBytes, expectedRemoteRefBytes)) {
+      return { pushed: false, objectsUploaded: uploadedObjectPaths.length, uploadedObjectPaths, conflict: true };
+    }
+  }
+
   await remote.writeFile(REF_PATH, refBytes);
   const headBytes = await readLocalBytes(fs, localDir, HEAD_PATH);
   if (headBytes) await remote.writeFile(HEAD_PATH, headBytes);
+
+  // Monotonic: never record a count lower than what's already there, so a
+  // device with an incomplete local view (itself the victim of the listing
+  // bug this manifest exists to catch) can't accidentally lower a floor a
+  // more complete device already raised.
+  const previousManifestCount = await readRemoteManifest(remote);
+  const manifestCount = Math.max(previousManifestCount ?? 0, localObjectPaths.length);
+  await remote.writeFile(MANIFEST_PATH, new TextEncoder().encode(JSON.stringify({ objectCount: manifestCount })));
 
   return { pushed: true, objectsUploaded: uploadedObjectPaths.length, uploadedObjectPaths };
 }
@@ -225,6 +301,20 @@ export interface PullResult {
   pulled: boolean;
   objectsFetched: number;
   fetchedObjectPaths: string[];
+  /** The remote's ref bytes exactly as read this call — null when `pulled`
+   *  is false. Callers pass this straight to a subsequent
+   *  pushObjectsAndRefs()'s expectedRemoteRefBytes so the push's
+   *  compare-and-swap is checked against precisely what was last observed,
+   *  not re-derived from a local tracking ref that could itself be stale. */
+  remoteRefBytes: Uint8Array | null;
+  /** false when this device's own directory listing returned fewer objects
+   *  than MANIFEST_PATH's recorded high-water mark — see this file's
+   *  header comment. true when there's nothing to compare against (no
+   *  manifest yet) as well as the genuinely-complete case; a caller that
+   *  wants to guard against a silently-wrong merge should treat `false`
+   *  as a failure, not attempt Structured Merge against a known-partial
+   *  object set. */
+  complete: boolean;
 }
 
 /** Fetches objects and the ref from the Sync Folder into this device's
@@ -250,7 +340,7 @@ export async function pullObjectsAndRefs(
   onProgress?: (progress: TransferProgress) => void
 ): Promise<PullResult> {
   if (!(await remote.exists(REF_PATH))) {
-    return { pulled: false, objectsFetched: 0, fetchedObjectPaths: [] };
+    return { pulled: false, objectsFetched: 0, fetchedObjectPaths: [], remoteRefBytes: null, complete: true };
   }
 
   const prefixes = (await remote.listDir('.git/objects')).filter((p) => /^[0-9a-f]{2}$/.test(p));
@@ -277,5 +367,8 @@ export async function pullObjectsAndRefs(
   const refBytes = await remote.readFile(REF_PATH);
   await fs.writeFile(`${localDir}/${trackingRefPath}`, refBytes);
 
-  return { pulled: true, objectsFetched: fetchedObjectPaths.length, fetchedObjectPaths };
+  const expectedObjectCount = await readRemoteManifest(remote);
+  const complete = expectedObjectCount === null || candidatePaths.length >= expectedObjectCount;
+
+  return { pulled: true, objectsFetched: fetchedObjectPaths.length, fetchedObjectPaths, remoteRefBytes: refBytes, complete };
 }

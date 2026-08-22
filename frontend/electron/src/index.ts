@@ -139,6 +139,32 @@ ipcMain.handle('smartchef-geocode', async (_e, q: string) => {
   }
 });
 
+// Git Remote sync mode's HTTP transport (see gitRemoteTransport.ts and
+// electronBridge.ts's electronHttpRequest()) — routes isomorphic-git's
+// git-server requests through here instead of the renderer's fetch(),
+// since Node's fetch (unlike a browser's) isn't subject to CORS at all —
+// CORS is a policy browsers enforce on same-origin web content, not a
+// network-layer restriction — so this reaches GitHub/GitLab/self-hosted
+// servers directly with no CORS proxy needed. Whole-request/whole-response,
+// not streamed; Electron's IPC structured-clones Uint8Array directly (no
+// base64 needed, unlike the Capacitor plugin bridge's JSON-only channel
+// Android's equivalent, GitHttpPlugin.java, has to use).
+ipcMain.handle('smartchef-http-request', async (_e, req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array }) => {
+  const init: RequestInit & { duplex?: 'half' } = {
+    method: req.method,
+    headers: req.headers,
+  };
+  if (req.body) {
+    init.body = Buffer.from(req.body);
+    init.duplex = 'half'; // required by Node's fetch whenever a body is present, even a non-streamed one
+  }
+  const response = await fetch(req.url, init);
+  const headers: Record<string, string> = {};
+  response.headers.forEach((value, key) => { headers[key] = value; });
+  const body = new Uint8Array(await response.arrayBuffer());
+  return { url: response.url, statusCode: response.status, statusMessage: response.statusText, headers, body };
+});
+
 // Filesystem primitives for gitfs.ts's isomorphic-git adapter (see
 // frontend/src/lib/gitfs.ts) — every call is best-effort/idempotent in the
 // same spots the mobile @capacitor/filesystem-backed adapter already is

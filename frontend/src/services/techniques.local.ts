@@ -27,6 +27,19 @@ async function syncTechnique(id: string): Promise<void> {
   }
 }
 
+/** Re-serializes every technique into the Hidden Clone — see
+ *  tags.local.ts's resyncAllTags() for why this was missing and what it's
+ *  for. Includes soft-deleted techniques too, matching
+ *  ingredients.local.ts's resyncAllTools(). */
+export async function resyncAllTechniques(onProgress?: (done: number, total: number) => void): Promise<number> {
+  const rows = await query<{ id: string }>('SELECT id FROM techniques');
+  for (let i = 0; i < rows.length; i++) {
+    await syncTechnique(rows[i].id);
+    onProgress?.(i + 1, rows.length);
+  }
+  return rows.length;
+}
+
 export async function listTechniques({ lang, q }: { lang?: string; q?: string }) {
   const params: unknown[] = [];
   let where = `WHERE deleted_at IS NULL`;

@@ -58,8 +58,11 @@ export async function updateProfile(id: string, name: string, avatarUrl?: string
  *  anything actually changed — see ingredients.local.ts's
  *  resyncAllIngredients() for why this exists and where it's called from
  *  (Account.tsx's "Change Folder" flow). */
-export async function resyncAllProfiles(): Promise<number> {
+export async function resyncAllProfiles(onProgress?: (done: number, total: number) => void): Promise<number> {
   const rows = await query<{ id: string }>("SELECT id FROM profiles");
-  for (const row of rows) await syncProfile(row.id);
+  for (let i = 0; i < rows.length; i++) {
+    await syncProfile(rows[i].id);
+    onProgress?.(i + 1, rows.length);
+  }
   return rows.length;
 }

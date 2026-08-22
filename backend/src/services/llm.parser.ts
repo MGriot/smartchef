@@ -20,6 +20,14 @@ setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3";
 
+/** account.ollama_url overrides the server-wide default above when set —
+ *  lets a user point at an Ollama instance on a different host/port (e.g.
+ *  a beefier machine on the LAN) from Account settings, no server restart
+ *  needed. Falls back to the env-var default when null/blank. */
+function resolveOllamaUrl(accountOverride?: string | null): string {
+  return accountOverride?.trim() || OLLAMA_URL;
+}
+
 const SYSTEM_PROMPT = `Sei un assistente specializzato nell'analisi di ricette culinarie.
 Il tuo compito è estrarre informazioni strutturate da testi o pagine web di ricette.
 Rispondi ESCLUSIVAMENTE con un oggetto JSON valido, senza testo aggiuntivo.
@@ -152,8 +160,8 @@ async function fetchUrlContent(url: string): Promise<string> {
  * Chiama Ollama con un system prompt arbitrario — usato sia per il parsing
  * ricette (SYSTEM_PROMPT) sia per la traduzione contenuti ricetta.
  */
-async function callOllama(content: string, systemPrompt: string): Promise<string> {
-  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+async function callOllama(content: string, systemPrompt: string, ollamaUrl: string = OLLAMA_URL): Promise<string> {
+  const response = await fetch(`${ollamaUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -190,6 +198,7 @@ interface LLMAccountConfig {
   anthropic_api_key_encrypted: string | null;
   gemini_api_key_encrypted: string | null;
   openai_api_key_encrypted: string | null;
+  ollama_url: string | null;
 }
 
 /**
@@ -203,7 +212,7 @@ interface LLMAccountConfig {
  */
 export async function callConfiguredProvider(content: string, systemPrompt: string): Promise<string> {
   const account = await queryOne<LLMAccountConfig>(
-    `SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted FROM account LIMIT 1`
+    `SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted, ollama_url FROM account LIMIT 1`
   );
   const provider = account?.llm_provider ?? "ollama";
 
@@ -225,7 +234,7 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
     }
     return callOpenAI(content, decrypt(account.openai_api_key_encrypted), systemPrompt);
   }
-  return callOllama(content, systemPrompt);
+  return callOllama(content, systemPrompt, resolveOllamaUrl(account?.ollama_url));
 }
 
 /**
@@ -569,9 +578,9 @@ export async function translateRecipeContent(
 /**
  * Verifica che Ollama sia raggiungibile
  */
-export async function checkOllamaHealth(): Promise<{ ok: boolean; models: string[] }> {
+export async function checkOllamaHealth(ollamaUrl: string = OLLAMA_URL): Promise<{ ok: boolean; models: string[] }> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`, {
+    const res = await fetch(`${ollamaUrl}/api/tags`, {
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) return { ok: false, models: [] };

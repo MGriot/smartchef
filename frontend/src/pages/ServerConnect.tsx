@@ -220,7 +220,9 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
             <div className="bg-zinc-50 rounded-2xl p-5 mb-5">
               <p className="text-sm font-bold text-zinc-900">Sync across your devices</p>
               <p className="text-xs text-zinc-400 mt-1 mb-3">
-                Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder). You can always set this up later from Account.
+                Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder). Prefer a
+                real git server (GitHub, GitLab, self-hosted) instead? Skip this for now — that's set up from Account → Folder
+                Sync once you're in. You can always change either later.
               </p>
               {syncFolderName ? (
                 <div className="flex items-center justify-between bg-white rounded-xl px-3 py-2.5 border border-zinc-200">

@@ -78,9 +78,12 @@ export async function syncRecipe(id: string): Promise<void> {
 /** Re-writes every local recipe's entity file regardless of whether
  *  anything actually changed — see ingredients.local.ts's
  *  resyncAllIngredients() for why this exists and where it's called from. */
-export async function resyncAllRecipes(): Promise<number> {
+export async function resyncAllRecipes(onProgress?: (done: number, total: number) => void): Promise<number> {
   const rows = await query<{ id: string }>("SELECT id FROM recipes WHERE sync_status != 'deleted'");
-  for (const row of rows) await syncRecipe(row.id);
+  for (let i = 0; i < rows.length; i++) {
+    await syncRecipe(rows[i].id);
+    onProgress?.(i + 1, rows.length);
+  }
   return rows.length;
 }
 
