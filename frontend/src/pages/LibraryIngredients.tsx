@@ -632,7 +632,17 @@ export default function LibraryIngredients() {
                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Category</label>
-                      <select required value={form.categoryId} onChange={e => setForm({...form, categoryId: e.target.value})} className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all appearance-none cursor-pointer">
+                      {/* Not `required` — a stored categoryId that no longer matches any
+                          currently-loaded category (a deleted/merged category, or this
+                          modal opening before categories finish loading) makes a required
+                          <select> fail the browser's OWN native validation, which blocks
+                          the submit event before handleSave ever runs — silently, no
+                          error, the button just appears to do nothing. handleSave already
+                          has a fallback for a missing categoryId (defaults to the first
+                          loaded category, or alerts clearly); that fallback can only run
+                          if the browser lets the submit through in the first place. */}
+                      <select value={form.categoryId} onChange={e => setForm({...form, categoryId: e.target.value})} className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all appearance-none cursor-pointer">
+                        {!categories.some(c => c.id === form.categoryId) && <option value={form.categoryId}>Loading…</option>}
                         {categories.map(c => <option key={c.id} value={c.id}>{c.translated_name || c.name}</option>)}
                       </select>
                     </div>
