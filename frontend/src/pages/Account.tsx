@@ -117,18 +117,49 @@ function conflictValuePreview(value: unknown): string {
   return String(value);
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
 function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict; onResolve: (chosen: 'local' | 'remote') => void }) {
   const [ops, setOps] = useState<{ type: 'same' | 'removed' | 'added'; text: string }[] | null>(null);
   const isArrayField = Array.isArray(conflict.localValue) || Array.isArray(conflict.remoteValue);
+  // steps/ingredients/toolIds (ARRAY_FIELDS in conflicts.local.ts) are
+  // whole-array fields of ROW OBJECTS, not strings — ADR 0002 already
+  // ruled out per-row diffing for them (no stable per-row identity), so
+  // the line-diff below only ever applies to genuine string-array fields
+  // (tags, regions, synonyms, ...). Running diffLines() on an object
+  // array used to push raw row objects into DiffOp.text and render them
+  // directly as JSX children — React error #31 (Objects are not valid as
+  // a React child), uncaught, blanking the whole app the moment any
+  // recipe had a steps/ingredients/toolIds conflict pending.
+  const isDiffableStringArray = isStringArray(conflict.localValue) && isStringArray(conflict.remoteValue);
 
   useEffect(() => {
-    if (!isArrayField) return;
+    if (!isDiffableStringArray) return;
     import('../lib/lineDiff').then(({ diffLines }) => {
       setOps(diffLines(conflict.localValue as string[], conflict.remoteValue as string[]));
     });
-  }, [conflict, isArrayField]);
+  }, [conflict, isDiffableStringArray]);
 
-  if (isArrayField) {
+  if (isArrayField && !isDiffableStringArray) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3 bg-white rounded-xl p-3 border border-zinc-200">
+          <div className="text-xs text-zinc-600 font-medium">
+            <span className="font-black text-zinc-800">mine:</span> {conflictValuePreview(conflict.localValue)}
+            <span className="mx-2 text-zinc-300">|</span>
+            <span className="font-black text-zinc-800">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
+          </div>
+        </div>
+        <p className="text-[11px] text-zinc-400">
+          No per-row identity for this field, so only a count can be shown here (not a line-by-line diff). Resolving it isn't available yet — it needs the full sync engine.
+        </p>
+      </div>
+    );
+  }
+
+  if (isDiffableStringArray) {
     return (
       <div className="space-y-2">
         <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">

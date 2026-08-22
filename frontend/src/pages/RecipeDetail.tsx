@@ -336,16 +336,27 @@ const RecipeDetail: React.FC = () => {
     }
   };
 
+  // In view mode, library suggestion names (ingredients/tools/techniques)
+  // should track the app's UI language (contentLang) — that's the language
+  // the reader is browsing in. In edit mode they should instead track the
+  // language the recipe ITSELF is being written in (draft.language_code,
+  // falling back to the loaded recipe's own language, then contentLang) —
+  // otherwise editing a recipe written in Italian while the app's own UI
+  // language is English left every ingredient/tool/technique suggestion
+  // showing its English translated_name, since these fetches used to key
+  // off contentLang unconditionally regardless of mode.
+  const libraryLang = mode === 'edit' ? (draft.language_code || recipe?.language_code || contentLang) : contentLang;
+
   /* ── Fetch techniques (needed in every mode to resolve {{tech:id}} refs in step text) ── */
   useEffect(() => {
     (async () => {
       try {
-        const res = await apiFetch(`/api/techniques${contentLang ? `?lang=${contentLang}` : ''}`);
+        const res = await apiFetch(`/api/techniques${libraryLang ? `?lang=${libraryLang}` : ''}`);
         const json = await res.json();
         setAllTechniques(json.data || []);
       } catch (err) { console.error('Techniques fetch failed:', err); }
     })();
-  }, [contentLang]);
+  }, [libraryLang]);
 
   /* ── Fetch library data (for edit mode) ────────────────────────── */
   useEffect(() => {
@@ -353,10 +364,10 @@ const RecipeDetail: React.FC = () => {
       (async () => {
         try {
           const [tRes, uRes, iRes, rRes] = await Promise.all([
-            apiFetch(`/api/tools${contentLang ? `?lang=${contentLang}` : ''}`),
-            apiFetch(`/api/units${contentLang ? `?lang=${contentLang}` : ''}`),
-            apiFetch(`/api/ingredients${contentLang ? `?lang=${contentLang}` : ''}`),
-            apiFetch(`/api/recipes${contentLang ? `?lang=${contentLang}` : ''}`),
+            apiFetch(`/api/tools${libraryLang ? `?lang=${libraryLang}` : ''}`),
+            apiFetch(`/api/units${libraryLang ? `?lang=${libraryLang}` : ''}`),
+            apiFetch(`/api/ingredients${libraryLang ? `?lang=${libraryLang}` : ''}`),
+            apiFetch(`/api/recipes${libraryLang ? `?lang=${libraryLang}` : ''}`),
           ]);
           const [tJson, uJson, iJson, rJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), rRes.json()]);
           setAllTools(tJson.data || []);
@@ -366,7 +377,7 @@ const RecipeDetail: React.FC = () => {
         } catch (err) { console.error('Library fetch failed:', err); }
       })();
     }
-  }, [mode, contentLang]);
+  }, [mode, libraryLang]);
 
 
   /* ── Fetch recipe ───────────────────────────────────────────────── */

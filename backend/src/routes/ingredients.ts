@@ -188,7 +188,13 @@ const IngredientSchema = z.object({
   categoryId: z.string().uuid(),
   description: z.string().optional().nullable(),
   icon: z.string().optional().nullable(),
-  imageUrls: z.array(z.string().url()).optional(),
+  // Not .url() — POST /api/uploads intentionally returns a same-origin
+  // relative path (/uploads/<file>.webp, see uploads.ts), which a strict
+  // WHATWG URL parse rejects (no scheme). recipes.ts's own image fields
+  // (coverImageUrl, step imageUrl) never had this restriction, which is
+  // why an uploaded recipe cover works but an uploaded ingredient photo
+  // used to fail validation and silently never save.
+  imageUrls: z.array(z.string()).optional(),
   tagIds: z.array(z.string().uuid()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
@@ -346,7 +352,7 @@ const ToolSchema = z.object({
   category: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
   icon: z.string().optional().nullable(),
-  imageUrls: z.array(z.string().url()).optional(),
+  imageUrls: z.array(z.string()).optional(), // not .url() — see IngredientSchema's imageUrls comment above
   synonyms: z.array(z.string()).optional(),
   translations: z.array(z.object({
     lang: z.string(),

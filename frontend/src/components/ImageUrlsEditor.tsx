@@ -15,6 +15,7 @@ interface ImageUrlsEditorProps {
 export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps) {
   const [draft, setDraft] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addUrl = (url?: string) => {
@@ -28,6 +29,7 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
 
   const handleFile = async (file: File) => {
     setUploading(true);
+    setUploadError(null);
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -37,6 +39,15 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
       addUrl(json.data.url);
     } catch (err) {
       console.error('Image upload failed:', err);
+      // Standalone mode (no server configured) has no local upload path
+      // yet — apiFetch() throws "No server configured" for /api/uploads
+      // there, same as it would for any other server-only endpoint. That
+      // used to be swallowed into a console.error only, so clicking
+      // Upload looked like it silently did nothing. Surfaced here instead
+      // of building local image storage, which is its own separate,
+      // not-yet-designed feature (standalone mode still has no on-device
+      // image storage for any entity, recipes included).
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -78,6 +89,9 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
           {uploading ? 'Uploading…' : 'Upload'}
         </button>
       </div>
+      {uploadError && (
+        <p className="text-xs text-red-600 font-medium mb-3">{uploadError}</p>
+      )}
       {urls.length > 0 && (
         <div className="flex flex-wrap gap-3">
           {urls.map(url => (

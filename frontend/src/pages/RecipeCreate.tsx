@@ -107,7 +107,6 @@ const RecipeCreate: React.FC = () => {
 
   // Library data
   const contentLang = useStore((s) => s.contentLang);
-  const langQuery = contentLang ? `?lang=${contentLang}` : '';
   const [allTools, setAllTools] = useState<Tool[]>([]);
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
@@ -143,6 +142,14 @@ const RecipeCreate: React.FC = () => {
     tools: [],
   });
 
+  // The language the ingredient/tool/technique suggestion lists should be
+  // shown in: the recipe's own language (the dropdown at the top of this
+  // form, changeable independently of the app's own UI language), not
+  // contentLang — otherwise writing a recipe in Italian while the app's UI
+  // language is English left every suggestion showing its English name.
+  const libraryLang = draft.language_code || contentLang;
+  const langQuery = libraryLang ? `?lang=${libraryLang}` : '';
+
   /* ── Fetch library data ────────────────────────── */
   useEffect(() => {
     (async () => {
@@ -164,7 +171,7 @@ const RecipeCreate: React.FC = () => {
         console.error('RecipeCreate: Library fetch failed:', err);
       }
     })();
-  }, [contentLang]);
+  }, [libraryLang]);
 
   /* ── Helpers ───────────────────────────────────── */
   const updateDraft = (field: string, value: unknown) =>
