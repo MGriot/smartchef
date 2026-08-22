@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import RegionPicker from '../components/RegionPicker';
+import CoverImage from '../components/CoverImage';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 
@@ -86,29 +87,6 @@ interface Collection {
   description: string | null;
   item_count: string | number;
   cover_images: (string | null)[];
-}
-
-// Recipe photos (uploaded or the old Unsplash-URL fallback) are plain
-// remote URLs, never cached locally — unreachable offline. Falls back to
-// a local icon (no network) instead of the browser's broken-image glyph,
-// both when there's no cover at all and when a real URL fails to load.
-function CoverImage({ src, alt, iconSize = 40 }: { src?: string | null; alt: string; iconSize?: number }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-zinc-100 text-zinc-300">
-        <span className="material-symbols-outlined" style={{ fontSize: iconSize }}>restaurant</span>
-      </div>
-    );
-  }
-  return (
-    <img
-      alt={alt}
-      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-      src={src}
-      onError={() => setFailed(true)}
-    />
-  );
 }
 
 /* ═══════════════════════════════════════════════════════════ */
@@ -367,7 +345,12 @@ const Home: React.FC = () => {
                         <div className="aspect-[4/3] grid grid-cols-2 gap-0.5 bg-zinc-100">
                           {Array.from({ length: 4 }).map((_, i) => (
                             <div key={i} className="overflow-hidden bg-zinc-100">
-                              <CoverImage src={covers[i]} alt="" iconSize={24} />
+                              <CoverImage
+                                src={covers[i]}
+                                alt=""
+                                iconSize={24}
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                              />
                             </div>
                           ))}
                         </div>
@@ -627,7 +610,11 @@ const Home: React.FC = () => {
                     )}
                     {/* Image */}
                     <div className="aspect-[4/3] overflow-hidden relative">
-                      <CoverImage src={recipe.cover_image_url} alt={recipe.title} />
+                      <CoverImage
+                        src={recipe.cover_image_url}
+                        alt={recipe.title}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
                       {/* Shimmer overlay on hover */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 

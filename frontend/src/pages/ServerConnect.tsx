@@ -4,6 +4,7 @@ import { setServerUrl } from '../lib/api';
 import { initStandaloneProfile, activateStandaloneProfile, type StandaloneProfile } from '../lib/standalone';
 import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
 import ImageUrlInput from '../components/ImageUrlInput';
+import { ResolvedImage } from '../components/CoverImage';
 
 interface ServerConnectProps {
   onConnected: () => void;
@@ -269,7 +270,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                     >
                       <span className="w-12 h-12 rounded-full overflow-hidden bg-zinc-200 shrink-0 flex items-center justify-center">
                         {p.avatarUrl ? (
-                          <img src={p.avatarUrl} alt="" className="w-full h-full object-cover" />
+                          <ResolvedImage src={p.avatarUrl} className="w-full h-full object-cover" />
                         ) : (
                           <span className="material-symbols-outlined text-zinc-400">person</span>
                         )}

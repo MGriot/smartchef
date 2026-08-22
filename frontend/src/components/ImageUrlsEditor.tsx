@@ -1,16 +1,42 @@
 import React, { useRef, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import { isStandaloneMode } from '../lib/standalone';
+import { storeImage } from '../lib/localImages';
+import { useResolvedImageSrc } from '../hooks/useResolvedImageSrc';
 
 interface ImageUrlsEditorProps {
   urls: string[];
   onChange: (urls: string[]) => void;
 }
 
+// Each stored value may need its own async resolve (see
+// useResolvedImageSrc()) — one hook instance per thumbnail, so this can't
+// just be inlined in the .map() below.
+function ImageThumbnail({ url, onRemove }: { url: string; onRemove: () => void }) {
+  const src = useResolvedImageSrc(url);
+  if (!src) return null; // still resolving a local path — nothing to show yet
+  return (
+    <div className="relative group w-16 h-16 rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50">
+      <img src={src} alt="" className="w-full h-full object-cover" onError={e => (e.currentTarget.style.opacity = '0.2')} />
+      <button
+        type="button"
+        onClick={onRemove}
+        className="absolute inset-0 bg-zinc-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+      >
+        <span className="material-symbols-outlined text-white text-lg">delete</span>
+      </button>
+    </div>
+  );
+}
+
 /**
  * Add/remove one or more reference photo URLs, with live thumbnail previews.
- * Photos can either be linked (pasted URL) or uploaded — an upload is sent
- * to POST /api/uploads (resized/recompressed server-side to WebP) and the
- * returned same-origin URL is appended just like a pasted one.
+ * Photos can either be linked (pasted URL) or uploaded — in standalone mode
+ * (no server), an upload is stored locally via lib/localImages.ts's
+ * storeImage() and referenced by its content-addressed relative path;
+ * otherwise it's sent to POST /api/uploads (resized/recompressed
+ * server-side to WebP) and the returned same-origin URL is appended just
+ * like a pasted one.
  */
 export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps) {
   const [draft, setDraft] = useState('');
@@ -31,6 +57,18 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
     setUploading(true);
     setUploadError(null);
     try {
+      // Standalone mode has no server to POST to — store the image locally
+      // instead (content-addressed, see lib/localImages.ts). The resulting
+      // relative path resolves to a displayable URL via ImageThumbnail's
+      // useResolvedImageSrc() above, same as it does for every other
+      // caller of this component.
+      if (await isStandaloneMode()) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const extHint = file.name.split('.').pop() || file.type.split('/')[1] || '';
+        const relPath = await storeImage(bytes, extHint);
+        addUrl(relPath);
+        return;
+      }
       const formData = new FormData();
       formData.append('file', file);
       const res = await apiFetch('/api/uploads', { method: 'POST', body: formData });
@@ -39,14 +77,6 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
       addUrl(json.data.url);
     } catch (err) {
       console.error('Image upload failed:', err);
-      // Standalone mode (no server configured) has no local upload path
-      // yet — apiFetch() throws "No server configured" for /api/uploads
-      // there, same as it would for any other server-only endpoint. That
-      // used to be swallowed into a console.error only, so clicking
-      // Upload looked like it silently did nothing. Surfaced here instead
-      // of building local image storage, which is its own separate,
-      // not-yet-designed feature (standalone mode still has no on-device
-      // image storage for any entity, recipes included).
       setUploadError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
@@ -95,16 +125,7 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
       {urls.length > 0 && (
         <div className="flex flex-wrap gap-3">
           {urls.map(url => (
-            <div key={url} className="relative group w-16 h-16 rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50">
-              <img src={url} alt="" className="w-full h-full object-cover" onError={e => (e.currentTarget.style.opacity = '0.2')} />
-              <button
-                type="button"
-                onClick={() => removeUrl(url)}
-                className="absolute inset-0 bg-zinc-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-              >
-                <span className="material-symbols-outlined text-white text-lg">delete</span>
-              </button>
-            </div>
+            <ImageThumbnail key={url} url={url} onRemove={() => removeUrl(url)} />
           ))}
         </div>
       )}

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
+import { ResolvedImage } from '../components/CoverImage';
 import SynonymsEditor from '../components/SynonymsEditor';
 import TagPicker from '../components/TagPicker';
 import { useStore } from '../store/app.store';
@@ -330,9 +331,8 @@ export default function LibraryIngredients() {
           <div className="relative w-12 h-12 shrink-0">
             {ing.image_urls?.[0] ? (
               <>
-                <img
+                <ResolvedImage
                   src={ing.image_urls[0]}
-                  alt=""
                   onClick={() => setPreviewImage({ url: ing.image_urls[0], name: ing.translated_name || ing.name })}
                   className="w-12 h-12 rounded-2xl object-cover bg-zinc-100 cursor-zoom-in"
                 />
@@ -417,7 +417,7 @@ export default function LibraryIngredients() {
       <button type="button" onClick={() => setViewingIng(ing)} className="text-left flex-1 flex flex-col">
         <div className="relative w-full aspect-square bg-zinc-50">
           {ing.image_urls?.[0] ? (
-            <img src={ing.image_urls[0]} alt="" className="w-full h-full object-cover" />
+            <ResolvedImage src={ing.image_urls[0]} className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-[40px] text-white" style={{ backgroundColor: ing.category_color || '#71717a' }}>
               <RenderFaIcon name={ing.icon || 'FaEgg'} />
@@ -864,7 +864,7 @@ export default function LibraryIngredients() {
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-6" onClick={() => setPreviewImage(null)}>
           <div className="absolute inset-0 bg-zinc-900/80 backdrop-blur-sm" />
           <div className="relative max-w-2xl w-full">
-            <img src={previewImage.url} alt={previewImage.name} className="w-full max-h-[80vh] object-contain rounded-3xl shadow-2xl" />
+            <ResolvedImage src={previewImage.url} alt={previewImage.name} className="w-full max-h-[80vh] object-contain rounded-3xl shadow-2xl" />
             <p className="text-center text-white font-bold mt-4">{previewImage.name}</p>
             <button
               onClick={() => setPreviewImage(null)}
@@ -990,9 +990,8 @@ function IngredientDetailModal({
       <div className="relative bg-white w-full max-w-2xl rounded-[40px] shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
         <div className="relative w-full aspect-[16/9] bg-zinc-100">
           {ing.image_urls?.[0] ? (
-            <img
+            <ResolvedImage
               src={ing.image_urls[0]}
-              alt=""
               onClick={() => onViewImage(ing.image_urls[0], displayName)}
               className="w-full h-full object-cover cursor-zoom-in"
             />
@@ -1007,7 +1006,7 @@ function IngredientDetailModal({
           {ing.image_urls?.length > 1 && (
             <div className="absolute bottom-4 right-4 flex gap-1.5">
               {ing.image_urls.slice(1, 5).map((url: string, i: number) => (
-                <img key={i} src={url} alt="" onClick={() => onViewImage(url, displayName)} className="w-10 h-10 rounded-lg object-cover border-2 border-white shadow cursor-zoom-in" />
+                <ResolvedImage key={i} src={url} onClick={() => onViewImage(url, displayName)} className="w-10 h-10 rounded-lg object-cover border-2 border-white shadow cursor-zoom-in" />
               ))}
             </div>
           )}

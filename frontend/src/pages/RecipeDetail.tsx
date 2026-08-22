@@ -15,6 +15,7 @@ import RegionsMap from '../components/RegionsMap';
 import RenderStepText from '../components/RenderStepText';
 import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
+import CoverImage, { ResolvedImage } from '../components/CoverImage';
 import { apiFetch, isNative } from '../lib/api';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
@@ -775,9 +776,7 @@ const RecipeDetail: React.FC = () => {
                       <h3 className={`font-headline font-bold text-xl mb-3 ${done ? 'text-primary line-through' : 'text-white'}`}>
                         {step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
                       </h3>
-                      {step.imageUrl && (
-                        <img src={step.imageUrl} alt="" className="w-full max-h-64 object-cover rounded-2xl mb-4" />
-                      )}
+                      <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
                       <p className="text-zinc-300 leading-relaxed text-[15px] mb-4">
                         <RenderStepText text={step.description} ingredients={sectionIngredients} tools={sectionTools} techniques={stepTextTechniques} />
                       </p>
@@ -905,9 +904,7 @@ const RecipeDetail: React.FC = () => {
                     <h3 className={`font-headline font-bold text-xl mb-3 ${done ? 'text-primary line-through' : 'text-white'}`}>
                       {step.translatedTitle || step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
                     </h3>
-                    {step.imageUrl && (
-                      <img src={step.imageUrl} alt="" className="w-full max-h-64 object-cover rounded-2xl mb-4" />
-                    )}
+                    <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
                     <p className="text-zinc-300 leading-relaxed text-[15px] mb-4">
                       <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredients} tools={stepTextTools} techniques={stepTextTechniques} />
                     </p>
@@ -1954,7 +1951,12 @@ const RecipeDetail: React.FC = () => {
       {/* ── Hero Image ─────────────────────────────────────────── */}
       <div className="max-w-6xl mx-auto px-6 pt-8">
         <div className="relative h-[360px] md:h-[440px] rounded-3xl overflow-hidden">
-          <img className="w-full h-full object-cover" src={recipe.cover_image_url || 'https://images.unsplash.com/photo-1495521821757-a1efb6729352?q=80&w=2000'} alt={recipe.translated_title || recipe.title} />
+          <CoverImage
+            className="w-full h-full object-cover"
+            src={recipe.cover_image_url}
+            alt={recipe.translated_title || recipe.title}
+            fallbackSrc="https://images.unsplash.com/photo-1495521821757-a1efb6729352?q=80&w=2000"
+          />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
           <div className="absolute bottom-8 left-8 right-8">
             {((recipe.tags_display && recipe.tags_display.length > 0) || recipe.tags?.[0]) && (
@@ -2296,9 +2298,7 @@ const RecipeDetail: React.FC = () => {
                       {step.translatedTitle || step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
                     </h4>
                     <div className="bg-white p-6 rounded-2xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 group-hover:border-primary/15 transition-colors">
-                      {step.imageUrl && (
-                        <img src={step.imageUrl} alt="" className="w-full max-h-64 object-cover rounded-xl mb-4" />
-                      )}
+                      <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-xl mb-4" />
                       <p className="text-[15px] leading-relaxed text-zinc-600 mb-4">
                         <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredients} tools={stepTextTools} techniques={stepTextTechniques} />
                       </p>

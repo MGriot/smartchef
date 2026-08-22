@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
+import { ResolvedImage } from '../components/CoverImage';
 import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
@@ -128,7 +129,7 @@ export default function LibraryTechniques() {
                       <td className="py-6 pl-4">
                         <div className="flex items-center gap-4">
                           {technique.image_urls?.[0] ? (
-                            <img src={technique.image_urls[0]} alt="" className="w-12 h-12 rounded-2xl object-cover bg-zinc-100" />
+                            <ResolvedImage src={technique.image_urls[0]} className="w-12 h-12 rounded-2xl object-cover bg-zinc-100" />
                           ) : (
                             <div className="w-12 h-12 bg-zinc-100 rounded-2xl flex items-center justify-center text-xl text-zinc-400">
                               <RenderFaIcon name={technique.icon || 'FaFire'} className="text-[20px]" />

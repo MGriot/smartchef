@@ -44,6 +44,17 @@ function sanitizeExtension(hint: string): string {
   return match ? match[0].toLowerCase() : 'bin';
 }
 
+/** True for a value storeImage() itself produced (`images/<hash>.<ext>`) —
+ *  the only shape that needs resolveImageSrc() before it's loadable in an
+ *  `<img src>`. Everything else an image field can legitimately hold
+ *  (an absolute http(s) URL from server-mode uploads or a pasted link, a
+ *  root-relative bundled asset path like a preset avatar) is already
+ *  directly loadable as-is — used by useResolvedImageSrc() to decide
+ *  whether a value needs resolving at all. */
+export function isLocalImagePath(value: string | null | undefined): boolean {
+  return !!value && /^images\//.test(value);
+}
+
 /** Writes `bytes` under a content-addressed filename, skipping the actual
  *  write if that exact file already exists (dedup — identical images share
  *  one file). Returns the relative path to store in an entity's image

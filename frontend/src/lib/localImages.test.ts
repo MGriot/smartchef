@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { storeImage, readImage, hashBytes, type ImageFs } from './localImages';
+import { storeImage, readImage, hashBytes, isLocalImagePath, type ImageFs } from './localImages';
 
 function createFakeImageFs(): ImageFs & { files: Map<string, Uint8Array> } {
   const files = new Map<string, Uint8Array>();
@@ -86,5 +86,26 @@ describe('readImage', () => {
     const fs = createFakeImageFs();
     const relPath = await storeImage(bytesA, 'png', fs);
     expect(await readImage(relPath, fs)).toEqual(bytesA);
+  });
+});
+
+describe('isLocalImagePath', () => {
+  it('is true for a storeImage()-shaped relative path', () => {
+    expect(isLocalImagePath('images/abcdef1234.jpg')).toBe(true);
+  });
+
+  it('is false for an absolute http(s) URL', () => {
+    expect(isLocalImagePath('https://example.com/photo.jpg')).toBe(false);
+    expect(isLocalImagePath('http://example.com/photo.jpg')).toBe(false);
+  });
+
+  it('is false for a root-relative bundled asset path', () => {
+    expect(isLocalImagePath('/assets/chef-5-abc123.jpeg')).toBe(false);
+  });
+
+  it('is false for null, undefined, or empty string', () => {
+    expect(isLocalImagePath(null)).toBe(false);
+    expect(isLocalImagePath(undefined)).toBe(false);
+    expect(isLocalImagePath('')).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
+import CoverImage from '../components/CoverImage';
 import { apiFetch } from '../lib/api';
 
 interface CookLogEntry {
@@ -134,11 +135,12 @@ export default function CookHistory() {
                 <span className={`text-xs font-bold mb-1 ${isToday ? 'text-primary' : 'text-zinc-500'}`}>{day.getDate()}</span>
                 <div className="flex flex-wrap gap-1">
                   {dayEntries.slice(0, MAX_THUMBS_PER_DAY).map((e) => (
-                    <img
+                    <CoverImage
                       key={e.id}
-                      src={e.coverImageUrl || 'https://images.unsplash.com/photo-1495195129352-aec325a55b65?q=80&w=200'}
+                      src={e.coverImageUrl}
                       alt=""
                       className="w-6 h-6 rounded-lg object-cover"
+                      fallbackSrc="https://images.unsplash.com/photo-1495195129352-aec325a55b65?q=80&w=200"
                     />
                   ))}
                   {dayEntries.length > MAX_THUMBS_PER_DAY && (
@@ -180,10 +182,11 @@ export default function CookHistory() {
                   to={`/recipe/${e.recipeId}`}
                   className="flex items-center gap-3 px-3 py-2 bg-zinc-50 rounded-xl hover:bg-zinc-100 transition-colors"
                 >
-                  <img
-                    src={e.coverImageUrl || 'https://images.unsplash.com/photo-1495195129352-aec325a55b65?q=80&w=200'}
+                  <CoverImage
+                    src={e.coverImageUrl}
                     alt=""
                     className="w-10 h-10 rounded-lg object-cover shrink-0"
+                    fallbackSrc="https://images.unsplash.com/photo-1495195129352-aec325a55b65?q=80&w=200"
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-zinc-900 truncate">{e.recipeTitle}</p>

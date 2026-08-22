@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import OfflineBanner from './OfflineBanner';
+import CoverImage from './CoverImage';
 
 type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags' | 'seasonality';
 
@@ -127,7 +128,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             title={account?.name ?? t('common.account')}
             className="w-8 h-8 rounded-full bg-zinc-200 border-2 border-white shadow-sm overflow-hidden shrink-0 hover:ring-2 hover:ring-primary/30 transition-all"
           >
-            <img src={account?.avatarUrl || DEFAULT_AVATAR} alt={account?.name ?? t('common.account')} className="w-full h-full object-cover" />
+            <CoverImage src={account?.avatarUrl} alt={account?.name ?? t('common.account')} className="w-full h-full object-cover" fallbackSrc={DEFAULT_AVATAR} />
           </Link>
         </div>
       </header>

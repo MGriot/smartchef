@@ -1,5 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import { isStandaloneMode } from '../lib/standalone';
+import { storeImage } from '../lib/localImages';
+import { useResolvedImageSrc } from '../hooks/useResolvedImageSrc';
 
 interface ImageUrlInputProps {
   value: string;
@@ -24,6 +27,17 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
     setUploading(true);
     setError(null);
     try {
+      // Standalone mode has no server to POST to — store the image locally
+      // instead (content-addressed, see lib/localImages.ts), same idea as
+      // the server-mode path below but resolved to a displayable URL by
+      // useResolvedImageSrc() rather than being a directly-fetchable URL.
+      if (await isStandaloneMode()) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const extHint = file.name.split('.').pop() || file.type.split('/')[1] || '';
+        const relPath = await storeImage(bytes, extHint);
+        onChange(relPath);
+        return;
+      }
       const formData = new FormData();
       formData.append('file', file);
       const res = await apiFetch('/api/uploads', { method: 'POST', body: formData });
@@ -37,6 +51,8 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
       setUploading(false);
     }
   };
+
+  const previewSrc = useResolvedImageSrc(value);
 
   return (
     <div>
@@ -72,9 +88,9 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
         </button>
       </div>
       {error && <p className="text-xs text-red-500 font-medium mt-1">{error}</p>}
-      {value && (
+      {value && previewSrc && (
         <div className="mt-3 w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50">
-          <img src={value} alt="" className="w-full h-full object-cover" onError={e => (e.currentTarget.style.opacity = '0.2')} />
+          <img src={previewSrc} alt="" className="w-full h-full object-cover" onError={e => (e.currentTarget.style.opacity = '0.2')} />
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import Autocomplete from '../components/Autocomplete';
+import CoverImage from '../components/CoverImage';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 
@@ -227,10 +228,11 @@ export default function CollectionDetail() {
                   </button>
                   <Link to={`/recipe/${recipe.id}`} className="block">
                     <div className="aspect-[4/3] overflow-hidden">
-                      <img
+                      <CoverImage
+                        src={recipe.cover_image_url}
                         alt={recipe.title}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        src={recipe.cover_image_url || 'https://images.unsplash.com/photo-1495195129352-aec325a55b65?q=80&w=800'}
+                        fallbackSrc="https://images.unsplash.com/photo-1495195129352-aec325a55b65?q=80&w=800"
                       />
                     </div>
                     <div className="p-6">
