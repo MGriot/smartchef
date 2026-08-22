@@ -151,9 +151,13 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
             <span className="mx-2 text-zinc-300">|</span>
             <span className="font-black text-zinc-800">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
           </div>
+          <div className="flex gap-2 shrink-0">
+            <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 rounded-lg text-[11px] font-black text-zinc-700 hover:bg-zinc-200">Mine</button>
+            <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Theirs</button>
+          </div>
         </div>
         <p className="text-[11px] text-zinc-400">
-          No per-row identity for this field, so only a count can be shown here (not a line-by-line diff). Resolving it isn't available yet — it needs the full sync engine.
+          No per-row identity for this field, so only a count can be shown here — not a line-by-line diff. Picking one side replaces the whole list with it.
         </p>
       </div>
     );
@@ -181,8 +185,12 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
             ))}
           </div>
         </div>
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 rounded-lg text-[11px] font-black text-zinc-700 hover:bg-zinc-200">Keep mine</button>
+          <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Keep theirs</button>
+        </div>
         <p className="text-[11px] text-zinc-400">
-          Resolving this field isn't available yet — it needs the full sync engine, not just this preview.
+          Picking one side replaces the whole list with it — this diff is just to help you decide, not a per-line merge.
         </p>
       </div>
     );
@@ -240,10 +248,10 @@ function ConflictEntityGroup({
 
 /** wayfinder ticket 06 (standalone-storage-sync map) — entity-grouped
  *  Conflicts list (the prototyped Variant C), folded into production and
- *  wired to conflicts.local.ts's real data instead of mock data. Renders
- *  nothing when there are no pending conflicts — currently that's always,
- *  since nothing creates a sync_conflicts row until the Sync Engine
- *  (ticket 02/03's remainder) exists; this UI is ready ahead of it. */
+ *  wired to conflicts.local.ts's real data. mergeBridge.ts creates a
+ *  sync_conflicts row whenever a real sync cycle finds a field genuinely
+ *  diverged on both sides (see applyEntityMergeResult()); this card
+ *  renders nothing only when there's nothing actually pending. */
 function ConflictsCard() {
   const [conflicts, setConflicts] = useState<DisplayConflict[] | null>(null);
   const [openField, setOpenField] = useState<Record<string, string>>({});

@@ -23,8 +23,11 @@ function newId(): string {
 }
 
 // See recipes.local.ts's syncRecipe() for the same fire-and-forget +
-// dynamic-import rationale.
-async function syncTag(id: string): Promise<void> {
+// dynamic-import rationale — also exported for conflicts.local.ts's
+// applyResolvedConflict(), which needs to re-commit a resolved field into
+// the Hidden Clone (a plain Local Storage row update alone never reaches
+// the Sync Folder or any other device).
+export async function syncTag(id: string): Promise<void> {
   try {
     const row = await queryOne<Record<string, unknown>>('SELECT * FROM tags WHERE id=$1', [id]);
     if (!row) return;

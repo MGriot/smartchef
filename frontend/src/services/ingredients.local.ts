@@ -19,8 +19,12 @@ function newId(): string {
 }
 
 // See recipes.local.ts's syncRecipe() for the same fire-and-forget +
-// dynamic-import rationale.
-async function syncIngredient(id: string): Promise<void> {
+// dynamic-import rationale. Exported so conflicts.local.ts's
+// applyResolvedConflict() can re-commit a resolved field into the Hidden
+// Clone — resolving a conflict only updates Local Storage's own row on its
+// own; without this, the resolution would never reach the Sync Folder or
+// any other device.
+export async function syncIngredient(id: string): Promise<void> {
   try {
     const row = await queryOne<Record<string, unknown>>('SELECT * FROM ingredients WHERE id=$1', [id]);
     if (!row) return;
@@ -395,8 +399,8 @@ export async function deleteUnit(id: string): Promise<void> {
 // ── Tools ──────────────────────────────────────────────────────────────
 
 // See syncIngredient() above for the same fire-and-forget + dynamic-import
-// rationale.
-async function syncTool(id: string): Promise<void> {
+// rationale — also exported for conflicts.local.ts, same reason.
+export async function syncTool(id: string): Promise<void> {
   try {
     const row = await queryOne<Record<string, unknown>>('SELECT * FROM tools WHERE id=$1', [id]);
     if (!row) return;

@@ -262,11 +262,20 @@ describe('applyResolvedConflict', () => {
     ).rejects.toThrow();
   });
 
-  it('rejects the whole-array recipe fields — not a plain column, needs the future Sync Engine write-back path', async () => {
+  it('writes a resolved whole-array field (steps) as a delete+reinsert of recipe_steps, same as an automatic fast-forward', async () => {
     entityTables.recipes.set('r1', { id: 'r1' });
-    await expect(
-      applyResolvedConflict({ entityType: 'recipe', entityId: 'r1', fieldName: 'steps', chosenValue: ['a'] })
-    ).rejects.toThrow(/whole-array/);
+    childTables.recipe_steps.push({ id: 'stale', recipe_id: 'r1', step_number: 1, description: 'Old step' });
+
+    await applyResolvedConflict({
+      entityType: 'recipe',
+      entityId: 'r1',
+      fieldName: 'steps',
+      chosenValue: [{ id: 's1', step_number: 1, description: 'Boil water', tool_ids: '[]', step_ingredients: '[]' }],
+    });
+
+    expect(childTables.recipe_steps).toEqual([
+      { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', technique_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
+    ]);
   });
 });
 

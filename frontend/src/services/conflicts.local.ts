@@ -2,10 +2,13 @@
 // SmartChef — Structured Merge conflict records (standalone mode)
 // wayfinder ticket 04 (standalone-storage-sync map, ADR 0001/0002): one row
 // per pending conflict on a single (entity, field) pair, surfaced to the
-// user instead of auto-resolved. Data-model layer only — writing a chosen
-// value back onto the entity's own row, and creating conflicts during an
-// actual sync cycle, are the future Sync Engine's job (not built yet); this
-// module just owns the conflict record's own lifecycle.
+// user instead of auto-resolved. Conflicts are created during a real sync
+// cycle by mergeBridge.ts (via applyEntityMergeResult() below); resolved
+// by the user picking mine/theirs in Account.tsx's Conflicts card (via
+// resolveConflict() + applyResolvedConflict() below), which both writes
+// the chosen value onto the entity's own row/child tables AND re-commits
+// it into the Hidden Clone so the resolution actually reaches the Sync
+// Folder on the next cycle, not just this device.
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne } from "../db/local";
@@ -178,9 +181,10 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
 // recipes.steps/ingredients/toolIds are normalized child tables, not
 // columns on recipes — merged as whole-array fields per ADR 0002. Writing a
 // resolved value back means the same delete+insert path recipes.local.ts's
-// own create/update logic already uses for its nested rows, which isn't
-// reachable as a standalone "write just this one field" operation yet.
-// Field name is `toolIds`, matching the actual key gitSync.ts's
+// own create/update logic already uses for its nested rows — see
+// writeArrayField() below, called from both applyEntityMergeResult() (an
+// automatic fast-forward) and applyResolvedConflict() (a user's explicit
+// mine/theirs pick). Field name is `toolIds`, matching the actual key gitSync.ts's
 // writeEntityFile()/recipes.local.ts already serialize recipe tool
 // associations under — NOT `tools` (ticket 02's Answer uses "tools" as
 // shorthand for the concept; the real entity JSON's key is toolIds).
@@ -315,13 +319,59 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
   }
 }
 
-/** Writes a resolved conflict's chosen value onto the entity's own row. */
+/** Re-commits one entity into the Hidden Clone after a local write —
+ *  applyResolvedConflict() needs this because writeScalarField()/
+ *  writeArrayField() only update Local Storage's own row; without an
+ *  explicit re-sync, a resolved conflict would never reach the Sync
+ *  Folder or any other device (the exact gap mergeBridge.ts's own
+ *  writeEntityFile() call after a merge — see gitSync.ts's
+ *  applyMergeIfNeeded() — doesn't have, since that path already commits).
+ *  Each syncX() function is itself fire-and-forget (catches and logs its
+ *  own errors, per its own docstring), so this never throws. */
+async function resyncEntityToGit(entityType: string, entityId: string): Promise<void> {
+  switch (entityType) {
+    case 'recipe': {
+      const { syncRecipe } = await import('./recipes.local');
+      return syncRecipe(entityId);
+    }
+    case 'ingredient': {
+      const { syncIngredient } = await import('./ingredients.local');
+      return syncIngredient(entityId);
+    }
+    case 'tool': {
+      const { syncTool } = await import('./ingredients.local');
+      return syncTool(entityId);
+    }
+    case 'tag': {
+      const { syncTag } = await import('./tags.local');
+      return syncTag(entityId);
+    }
+    case 'technique': {
+      const { syncTechnique } = await import('./techniques.local');
+      return syncTechnique(entityId);
+    }
+    case 'profile': {
+      const { syncProfile } = await import('./profiles.local');
+      return syncProfile(entityId);
+    }
+  }
+}
+
+/** Writes a resolved conflict's chosen value onto the entity's own row,
+ *  then re-commits that entity into the Hidden Clone so the resolution
+ *  actually propagates on the next sync — writing the row alone (what
+ *  this function used to do) left the fix stranded on this device only. */
 export async function applyResolvedConflict(resolved: ResolvedConflict): Promise<void> {
   const config = ENTITY_CONFIG[resolved.entityType];
   if (!config) {
     throw new Error(`applyResolvedConflict: unknown entity type '${resolved.entityType}'`);
   }
-  await writeScalarField(config, resolved.entityType, resolved.entityId, resolved.fieldName, resolved.chosenValue);
+  if (ARRAY_FIELDS.has(resolved.fieldName)) {
+    await writeArrayField(resolved.entityType, resolved.entityId, resolved.fieldName, resolved.chosenValue);
+  } else {
+    await writeScalarField(config, resolved.entityType, resolved.entityId, resolved.fieldName, resolved.chosenValue);
+  }
+  await resyncEntityToGit(resolved.entityType, resolved.entityId);
 }
 
 export interface ApplyMergeOutcome {
