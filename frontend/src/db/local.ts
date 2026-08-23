@@ -92,13 +92,44 @@ async function exec<T = Record<string, unknown>>(
 
 // ── Public API — matches backend/src/db/pool.ts's exported shape ─────────
 
-export async function query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]> {
-  const db = await getDb();
-  return exec<T>(db, text, params ?? []);
+// SQLite is single-writer — one shared connection, no real connection pool
+// — so ANY two calls against it must be serialized to keep one caller's
+// statement(s) from interleaving with another's. This is a local
+// single-user app (not a server fielding concurrent requests), so a simple
+// promise-chain mutex is enough — but it has to wrap every entry point
+// that touches `db`, not just withTransaction()'s multi-statement
+// sequences. It used to only wrap withTransaction(); plain query()/
+// queryOne() (everything services/conflicts.local.ts uses — entityExists(),
+// createEntity(), applyEntityMergeResult()) had none at all. That was
+// invisible for as long as every caller happened to run sequentially, but
+// mergeBridge.ts's per-entity concurrency (added the same day this was
+// found — see gitSync.ts's mergeRemoteIntoLocal() callers) fires up to 8
+// of these at once during a pull, which can genuinely interleave against
+// Android's single native SQLite connection: real symptom hit in
+// production — ingredients/tools/tags/etc. (the newly-concurrent path)
+// silently failed to import on a fresh Android pull while recipes
+// (deliberately kept sequential, for the unrelated matrioska-ordering
+// reason) synced fine every time.
+let sqliteQueue: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(fn: () => Promise<T>): Promise<T> {
+  const next = sqliteQueue.then(fn, fn);
+  // Swallow rejection on the shared chain itself (each caller still gets
+  // the real error via `next`) so one failed call doesn't wedge every
+  // caller queued after it.
+  sqliteQueue = next.catch(() => {});
+  return next;
+}
+
+export function query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]> {
+  return serialize(async () => {
+    const db = await getDb();
+    return exec<T>(db, text, params ?? []);
+  });
 }
 
 export async function queryOne<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T | null> {
-  const rows = await query<T>(text, params);
+  const rows = await query<T>(text, params); // already serialized inside query()
   return rows[0] ?? null;
 }
 
@@ -110,12 +141,6 @@ export interface LocalClient {
   query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: T[] }>;
 }
 
-// SQLite is single-writer — one shared connection, no real connection pool
-// — so concurrent withTransaction() calls must be serialized to keep one
-// caller's sequence of statements from interleaving with another's. This is
-// a local single-user app (not a server fielding concurrent requests), so a
-// simple promise-chain mutex is enough.
-//
 // Deliberately NOT wrapped in a real SQL transaction (no BEGIN/COMMIT/
 // ROLLBACK) despite the name — @capacitor-community/sqlite's run()/execute()
 // each default to wrapping themselves in their own transaction per call
@@ -131,23 +156,14 @@ export interface LocalClient {
 // actually needs; a multi-statement caller failing partway through just
 // leaves whatever ran before the failure in place, same as it would with a
 // real transaction that never got asked to roll back.
-let transactionQueue: Promise<unknown> = Promise.resolve();
-
-export async function withTransaction<T>(fn: (client: LocalClient) => Promise<T>): Promise<T> {
-  const run = async (): Promise<T> => {
+export function withTransaction<T>(fn: (client: LocalClient) => Promise<T>): Promise<T> {
+  return serialize(async () => {
     const db = await getDb();
     const client: LocalClient = {
       query: async (text, params) => ({ rows: await exec(db, text, params ?? []) }),
     };
     return fn(client);
-  };
-
-  const next = transactionQueue.then(run, run);
-  // Swallow rejection on the shared chain itself (each caller still gets
-  // the real error via `next`) so one failed sequence doesn't wedge every
-  // caller queued after it.
-  transactionQueue = next.catch(() => {});
-  return next;
+  });
 }
 
 // ── Schema ─────────────────────────────────────────────────────────────
