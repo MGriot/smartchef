@@ -56,13 +56,23 @@ vi.mock('../db/local', () => ({
       return [];
     }
 
-    const childInsertMatch = normalized.match(/^INSERT INTO (recipe_ingredients|recipe_steps) \(([^)]+)\) VALUES \(([^)]+)\)$/);
+    // Trailing ON CONFLICT(id) DO UPDATE SET ... is optional in the match so
+    // this fake also accepts the pre-upsert-fix SQL shape — only the id-
+    // collision test below actually depends on the upsert clause being
+    // present and honored.
+    const childInsertMatch = normalized.match(/^INSERT INTO (recipe_ingredients|recipe_steps) \(([^)]+)\) VALUES \(([^)]+)\)(?: ON CONFLICT\(id\) DO UPDATE SET .+)?$/);
     if (childInsertMatch) {
       const [, table, columnsRaw] = childInsertMatch;
       const columns = columnsRaw.split(',').map((c) => c.trim());
       const row: Record<string, unknown> = {};
       columns.forEach((col, i) => { row[col] = params[i]; });
-      childTables[table].push(row);
+      // Real SQLite upsert semantics: a row with this id already existing
+      // ANYWHERE (not just under the same recipe_id — id is the table's
+      // global primary key, see writeArrayField()'s own doc comment) gets
+      // fully replaced in place rather than causing a duplicate-key error.
+      const existingIdx = childTables[table].findIndex((r) => r.id === row.id);
+      if (existingIdx !== -1) childTables[table][existingIdx] = row;
+      else childTables[table].push(row);
       return [];
     }
 
@@ -275,6 +285,34 @@ describe('applyResolvedConflict', () => {
 
     expect(childTables.recipe_steps).toEqual([
       { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', technique_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
+    ]);
+  });
+
+  it('does not throw when a resolved step id already exists under a DIFFERENT recipe — upserts in place instead', async () => {
+    // recipe_steps.id/recipe_ingredients.id are GLOBAL primary keys (only
+    // UNIQUE(recipe_id, step_number) is recipe-scoped), so two devices can
+    // each generate a row sharing an id across unrelated recipes. Resolving
+    // a conflict whose chosen value includes such an id used to throw
+    // "UNIQUE constraint failed: recipe_steps.id" — a real crash a user
+    // hit — because writeArrayField()'s DELETE only clears rows for the
+    // recipe being written, not whichever recipe already owns that id.
+    entityTables.recipes.set('r1', { id: 'r1' });
+    entityTables.recipes.set('other-recipe', { id: 'other-recipe' });
+    childTables.recipe_steps.push({ id: 'shared-id', recipe_id: 'other-recipe', step_number: 1, description: "Someone else's step" });
+
+    await expect(
+      applyResolvedConflict({
+        entityType: 'recipe',
+        entityId: 'r1',
+        fieldName: 'steps',
+        chosenValue: [{ id: 'shared-id', step_number: 1, description: 'My step', tool_ids: '[]', step_ingredients: '[]' }],
+      })
+    ).resolves.not.toThrow();
+
+    // The row now belongs to r1 with r1's data — not duplicated, not left
+    // owned by the other recipe.
+    expect(childTables.recipe_steps).toEqual([
+      { id: 'shared-id', recipe_id: 'r1', step_number: 1, title: null, description: 'My step', duration_min: null, tool_ids: '[]', technique_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
     ]);
   });
 });

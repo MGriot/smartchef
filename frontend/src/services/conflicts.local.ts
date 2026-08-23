@@ -272,7 +272,21 @@ interface RawRecipeStepRow {
  *  is one opaque value, not row-level deltas). Ids from the incoming rows
  *  are preserved rather than regenerated, so re-syncing the same
  *  unchanged value is idempotent instead of accumulating new row ids each
- *  cycle. */
+ *  cycle.
+ *
+ *  Uses ON CONFLICT(id) DO UPDATE, not a plain INSERT: recipe_ingredients.id/
+ *  recipe_steps.id are GLOBAL primary keys (only `UNIQUE(recipe_id,
+ *  step_number)` is recipe-scoped — see db/migrations/001_initial_schema.sql),
+ *  so the DELETE just above (scoped to `WHERE recipe_id = $1`) does nothing
+ *  to protect against an incoming row's id already existing under a
+ *  DIFFERENT recipe — a real case, not hypothetical: two independently-
+ *  synced devices can each have generated a row with the same id for
+ *  unrelated recipes, surfacing as `UNIQUE constraint failed` the moment
+ *  this write path first tries to insert one. Upserting instead of
+ *  inserting makes the write idempotent no matter which recipe that id
+ *  previously belonged to — it ends up owned by (and matching) exactly
+ *  this call's `entityId`/values, which is what "this is now the complete,
+ *  authoritative array for this recipe" is supposed to mean regardless. */
 async function writeArrayField(entityType: string, entityId: string, fieldName: string, value: unknown): Promise<void> {
   if (entityType !== 'recipe' || !ARRAY_FIELDS.has(fieldName)) {
     throw new Error(`writeArrayField: '${fieldName}' is not a whole-array field on '${entityType}'`);
@@ -284,7 +298,12 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
       await query(
         `INSERT INTO recipe_ingredients
            (id, recipe_id, sort_order, ingredient_id, subtype_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional, group_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT(id) DO UPDATE SET
+           recipe_id = excluded.recipe_id, sort_order = excluded.sort_order, ingredient_id = excluded.ingredient_id,
+           subtype_id = excluded.subtype_id, sub_recipe_id = excluded.sub_recipe_id, quantity = excluded.quantity,
+           quantity_text = excluded.quantity_text, unit_id = excluded.unit_id, notes = excluded.notes,
+           is_optional = excluded.is_optional, group_name = excluded.group_name`,
         [
           row.id ?? newId(), entityId, row.sort_order ?? 0, row.ingredient_id ?? null, row.subtype_id ?? null,
           row.sub_recipe_id ?? null, row.quantity ?? null, row.quantity_text ?? null, row.unit_id ?? null,
@@ -301,7 +320,12 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
       await query(
         `INSERT INTO recipe_steps
            (id, recipe_id, step_number, title, description, duration_min, tool_ids, technique_ids, notes, image_url, step_ingredients)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT(id) DO UPDATE SET
+           recipe_id = excluded.recipe_id, step_number = excluded.step_number, title = excluded.title,
+           description = excluded.description, duration_min = excluded.duration_min, tool_ids = excluded.tool_ids,
+           technique_ids = excluded.technique_ids, notes = excluded.notes, image_url = excluded.image_url,
+           step_ingredients = excluded.step_ingredients`,
         [
           row.id ?? newId(), entityId, row.step_number ?? 0, row.title ?? null, row.description ?? '',
           row.duration_min ?? null, row.tool_ids ?? '[]', row.technique_ids ?? '[]', row.notes ?? null,
