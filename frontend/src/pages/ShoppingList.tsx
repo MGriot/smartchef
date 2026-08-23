@@ -231,23 +231,23 @@ export default function ShoppingList() {
         {!activeList ? (
           <>
             <div className="mb-10">
-              <h1 className="text-5xl font-black text-zinc-900 tracking-tight leading-none mb-2">Shopping List</h1>
-              <p className="text-zinc-500 max-w-xl">Generate an aggregated shopping list from a saved menu, or build a quick one from any recipes you pick.</p>
+              <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">Shopping List</h1>
+              <p className="text-zinc-500 dark:text-zinc-400 max-w-xl">Generate an aggregated shopping list from a saved menu, or build a quick one from any recipes you pick.</p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
               {/* From a menu */}
-              <div className="bg-white rounded-3xl p-8 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
                 <h3 className="font-headline font-bold text-xl mb-1">From a Menu</h3>
-                <p className="text-zinc-400 text-sm mb-5">Aggregate every recipe already planned in a saved menu.</p>
+                <p className="text-zinc-400 dark:text-zinc-500 text-sm mb-5">Aggregate every recipe already planned in a saved menu.</p>
                 {menus.length === 0 ? (
-                  <p className="text-sm text-zinc-400 italic">No menus yet — create one in Planner first.</p>
+                  <p className="text-sm text-zinc-400 dark:text-zinc-500 italic">No menus yet — create one in Planner first.</p>
                 ) : (
                   <>
                     <select
                       value={selectedMenuId}
                       onChange={e => setSelectedMenuId(e.target.value)}
-                      className="w-full px-5 py-3 bg-zinc-50 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold mb-4"
+                      className="w-full px-5 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold mb-4"
                     >
                       <option value="">Select a menu…</option>
                       {menus.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -265,9 +265,9 @@ export default function ShoppingList() {
               </div>
 
               {/* From cart */}
-              <div className="bg-white rounded-3xl p-8 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
                 <h3 className="font-headline font-bold text-xl mb-1">From Recipes</h3>
-                <p className="text-zinc-400 text-sm mb-5">Add recipes here (or via "Add to Shopping List" on any recipe page).</p>
+                <p className="text-zinc-400 dark:text-zinc-500 text-sm mb-5">Add recipes here (or via "Add to Shopping List" on any recipe page).</p>
 
                 <div className="flex gap-2 mb-4">
                   <div className="flex-1">
@@ -277,13 +277,13 @@ export default function ShoppingList() {
                       onSelect={(id) => setPickerRecipeId(id)}
                       onClear={() => setPickerRecipeId('')}
                       placeholder="Search recipes…"
-                      className="w-full px-4 py-3 bg-zinc-50 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
+                      className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
                     />
                   </div>
                   <input
                     type="number" min={1} value={pickerServings}
                     onChange={e => setPickerServings(parseInt(e.target.value) || 1)}
-                    className="w-16 px-2 py-3 bg-zinc-50 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold text-center"
+                    className="w-16 px-2 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold text-center"
                   />
                   <button
                     onClick={handleAddToCart}
@@ -295,19 +295,19 @@ export default function ShoppingList() {
                 </div>
 
                 {cart.length === 0 ? (
-                  <p className="text-sm text-zinc-300 italic text-center py-4">No recipes added yet</p>
+                  <p className="text-sm text-zinc-300 dark:text-zinc-600 italic text-center py-4">No recipes added yet</p>
                 ) : (
                   <div className="space-y-2 mb-4">
                     {cart.map(c => (
-                      <div key={c.recipeId} className="flex items-center justify-between gap-2 bg-zinc-50 rounded-xl px-4 py-2.5">
-                        <span className="text-sm font-bold text-zinc-800 truncate">{c.title}</span>
+                      <div key={c.recipeId} className="flex items-center justify-between gap-2 bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-2.5">
+                        <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 truncate">{c.title}</span>
                         <div className="flex items-center gap-2 shrink-0">
                           <input
                             type="number" min={1} value={c.servings}
                             onChange={e => updateCartServings(c.recipeId, parseInt(e.target.value) || 1)}
-                            className="w-14 px-2 py-1 bg-white rounded-lg border border-zinc-200 text-xs font-bold text-center"
+                            className="w-14 px-2 py-1 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 text-xs font-bold text-center"
                           />
-                          <button onClick={() => removeFromCart(c.recipeId)} className="text-zinc-400 hover:text-red-500">
+                          <button onClick={() => removeFromCart(c.recipeId)} className="text-zinc-400 dark:text-zinc-500 hover:text-red-500">
                             <span className="material-symbols-outlined text-lg">close</span>
                           </button>
                         </div>
@@ -336,10 +336,10 @@ export default function ShoppingList() {
                     <button
                       key={l.id}
                       onClick={() => openList(l.id)}
-                      className="text-left bg-white rounded-2xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 hover:border-primary/30 transition-all"
+                      className="text-left bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 hover:border-primary/30 transition-all"
                     >
-                      <p className="font-bold text-zinc-800 truncate mb-1">{l.name}</p>
-                      <p className="text-xs text-zinc-400 font-medium">{l.item_count} items · {new Date(l.created_at).toLocaleDateString()}</p>
+                      <p className="font-bold text-zinc-800 dark:text-zinc-200 truncate mb-1">{l.name}</p>
+                      <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">{l.item_count} items · {new Date(l.created_at).toLocaleDateString()}</p>
                     </button>
                   ))}
                 </div>
@@ -349,14 +349,14 @@ export default function ShoppingList() {
         ) : (
           <div>
             <div className="flex items-center justify-between mb-2">
-              <button onClick={() => setActiveList(null)} className="flex items-center gap-1.5 text-zinc-500 hover:text-primary transition-colors text-sm font-bold">
+              <button onClick={() => setActiveList(null)} className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors text-sm font-bold">
                 <span className="material-symbols-outlined text-lg">arrow_back</span>
                 Back
               </button>
               <div className="flex items-center gap-3">
                 <a
                   href={`/api/shopping/${activeList.id}/export`}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-zinc-100 text-zinc-600 rounded-full text-xs font-bold hover:bg-zinc-200 transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-full text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                 >
                   <span className="material-symbols-outlined text-sm">download</span>
                   Export
@@ -368,69 +368,69 @@ export default function ShoppingList() {
               </div>
             </div>
 
-            <h1 className="text-4xl font-black text-zinc-900 tracking-tight mb-4">{activeList.name}</h1>
+            <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight mb-4">{activeList.name}</h1>
 
             <div className="flex items-center gap-4 mb-8">
-              <div className="flex-1 h-2 bg-zinc-100 rounded-full overflow-hidden">
+              <div className="flex-1 h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-primary transition-all duration-300"
                   style={{ width: progress.total ? `${(progress.checked / progress.total) * 100}%` : '0%' }}
                 />
               </div>
-              <span className="text-sm font-bold text-zinc-500 whitespace-nowrap">{progress.checked} / {progress.total} checked</span>
+              <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400 whitespace-nowrap">{progress.checked} / {progress.total} checked</span>
             </div>
 
-            <div className="flex gap-2 mb-6 bg-zinc-100 p-1 rounded-xl w-max">
+            <div className="flex gap-2 mb-6 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl w-max">
               <button
                 onClick={() => setViewMode('ingredient')}
-                className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'ingredient' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500'}`}
+                className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'ingredient' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}
               >
                 By Ingredient
               </button>
               <button
                 onClick={() => setViewMode('recipe')}
-                className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'recipe' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500'}`}
+                className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'recipe' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}
               >
                 By Recipe
               </button>
             </div>
 
             {viewMode === 'ingredient' ? (
-              <div className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 divide-y divide-zinc-50">
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-50 dark:divide-zinc-800">
                 {activeList.items.map(item => (
                   <label key={item.id} className={`flex items-center gap-4 py-3.5 px-2 cursor-pointer transition-opacity ${item.isChecked ? 'opacity-40' : ''}`}>
                     <input
                       type="checkbox" checked={item.isChecked}
                       onChange={e => handleToggleCheck(item.id, e.target.checked)}
-                      className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary/30 shrink-0"
+                      className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-bold text-zinc-800 ${item.isChecked ? 'line-through' : ''}`}>{item.ingredientName || 'Ingredient'}</p>
+                      <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{item.ingredientName || 'Ingredient'}</p>
                       {item.sourceDetails.length > 0 && (
-                        <p className="text-[11px] text-zinc-400 font-medium truncate">
+                        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium truncate">
                           Used in: {item.sourceDetails.map(s => s.recipeTitle).join(', ')}
                         </p>
                       )}
                     </div>
-                    <span className="text-sm text-zinc-500 font-semibold tabular-nums shrink-0">{formatQty(item)}</span>
+                    <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums shrink-0">{formatQty(item)}</span>
                   </label>
                 ))}
               </div>
             ) : (
               <div className="space-y-5">
                 {byRecipe.map(group => (
-                  <div key={group.recipeId} className="bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+                  <div key={group.recipeId} className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
                     <h3 className="font-headline font-bold text-lg mb-3">{group.recipeTitle}</h3>
-                    <div className="divide-y divide-zinc-50">
+                    <div className="divide-y divide-zinc-50 dark:divide-zinc-800">
                       {group.items.map(item => (
                         <label key={item.id} className={`flex items-center gap-4 py-3 cursor-pointer transition-opacity ${item.isChecked ? 'opacity-40' : ''}`}>
                           <input
                             type="checkbox" checked={item.isChecked}
                             onChange={e => handleToggleCheck(item.id, e.target.checked)}
-                            className="w-5 h-5 rounded border-zinc-300 text-primary focus:ring-primary/30 shrink-0"
+                            className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
                           />
-                          <span className={`flex-1 text-sm font-bold text-zinc-800 ${item.isChecked ? 'line-through' : ''}`}>{item.ingredientName || 'Ingredient'}</span>
-                          <span className="text-sm text-zinc-500 font-semibold tabular-nums">{item.forQuantity}</span>
+                          <span className={`flex-1 text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{item.ingredientName || 'Ingredient'}</span>
+                          <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">{item.forQuantity}</span>
                         </label>
                       ))}
                     </div>

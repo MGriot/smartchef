@@ -37,7 +37,7 @@ export default function CoverImage({ src, alt, className = 'w-full h-full object
       return <img alt={alt} className={className} src={fallbackSrc} />;
     }
     return (
-      <div className={`flex items-center justify-center bg-zinc-100 text-zinc-300 ${className}`}>
+      <div className={`flex items-center justify-center bg-zinc-100 dark:bg-zinc-800 text-zinc-300 dark:text-zinc-600 ${className}`}>
         <span className="material-symbols-outlined" style={{ fontSize: iconSize }}>restaurant</span>
       </div>
     );

@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
+import type { ThemeMode } from '../store/app.store';
 import { apiFetch, isNative } from '../lib/api';
 import { AVATAR_PRESETS } from '../lib/avatarPresets';
 import type { SyncResult } from '../lib/sync/gitSync';
@@ -47,15 +48,15 @@ function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
     .filter((c) => c.count > 0);
 
   return (
-    <div className="mt-4 p-4 bg-zinc-50 rounded-2xl space-y-2">
+    <div className="mt-4 p-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl space-y-2">
       {changes.length === 0 && (summary.conflicts ?? []).length === 0 ? (
-        <p className="text-xs text-zinc-400 font-medium">Nothing changed — already up to date.</p>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">Nothing changed — already up to date.</p>
       ) : (
         <>
           {changes.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {changes.map((c) => (
-                <span key={c.key} className="px-2.5 py-1 bg-white border border-zinc-200 rounded-lg text-[11px] font-bold text-zinc-600">
+                <span key={c.key} className="px-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-[11px] font-bold text-zinc-600 dark:text-zinc-400">
                   {c.count} {c.label}
                 </span>
               ))}
@@ -145,18 +146,18 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
   if (isArrayField && !isDiffableStringArray) {
     return (
       <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3 bg-white rounded-xl p-3 border border-zinc-200">
-          <div className="text-xs text-zinc-600 font-medium">
-            <span className="font-black text-zinc-800">mine:</span> {conflictValuePreview(conflict.localValue)}
-            <span className="mx-2 text-zinc-300">|</span>
-            <span className="font-black text-zinc-800">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
+        <div className="flex items-center justify-between gap-3 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-zinc-200 dark:border-zinc-700">
+          <div className="text-xs text-zinc-600 dark:text-zinc-400 font-medium">
+            <span className="font-black text-zinc-800 dark:text-zinc-200">mine:</span> {conflictValuePreview(conflict.localValue)}
+            <span className="mx-2 text-zinc-300 dark:text-zinc-600">|</span>
+            <span className="font-black text-zinc-800 dark:text-zinc-200">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
           </div>
           <div className="flex gap-2 shrink-0">
-            <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 rounded-lg text-[11px] font-black text-zinc-700 hover:bg-zinc-200">Mine</button>
+            <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">Mine</button>
             <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Theirs</button>
           </div>
         </div>
-        <p className="text-[11px] text-zinc-400">
+        <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
           No per-row identity for this field, so only a count can be shown here — not a line-by-line diff. Picking one side replaces the whole list with it.
         </p>
       </div>
@@ -166,17 +167,17 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
   if (isDiffableStringArray) {
     return (
       <div className="space-y-2">
-        <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden">
-          <div className="px-3 py-1.5 bg-zinc-50 border-b border-zinc-200 flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
+        <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+          <div className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
             <span className="flex items-center gap-1 text-red-600"><span className="w-2 h-2 rounded-sm bg-red-200 inline-block" />only in mine</span>
             <span className="flex items-center gap-1 text-emerald-600"><span className="w-2 h-2 rounded-sm bg-emerald-200 inline-block" />only in theirs</span>
           </div>
-          <div className="divide-y divide-zinc-100">
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {(ops ?? []).map((op, i) => (
               <div
                 key={i}
                 className={`px-3 py-1.5 text-xs font-medium flex gap-2 ${
-                  op.type === 'removed' ? 'bg-red-50 text-red-800' : op.type === 'added' ? 'bg-emerald-50 text-emerald-800' : 'text-zinc-600'
+                  op.type === 'removed' ? 'bg-red-50 text-red-800' : op.type === 'added' ? 'bg-emerald-50 text-emerald-800' : 'text-zinc-600 dark:text-zinc-400'
                 }`}
               >
                 <span className="font-black w-3 shrink-0">{op.type === 'removed' ? '−' : op.type === 'added' ? '+' : ''}</span>
@@ -186,10 +187,10 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
           </div>
         </div>
         <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 rounded-lg text-[11px] font-black text-zinc-700 hover:bg-zinc-200">Keep mine</button>
+          <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">Keep mine</button>
           <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Keep theirs</button>
         </div>
-        <p className="text-[11px] text-zinc-400">
+        <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
           Picking one side replaces the whole list with it — this diff is just to help you decide, not a per-line merge.
         </p>
       </div>
@@ -197,14 +198,14 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 bg-white rounded-xl p-3 border border-zinc-200">
-      <div className="text-xs text-zinc-600 font-medium">
-        <span className="font-black text-zinc-800">mine:</span> {conflictValuePreview(conflict.localValue)}
-        <span className="mx-2 text-zinc-300">|</span>
-        <span className="font-black text-zinc-800">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
+    <div className="flex items-center justify-between gap-3 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-zinc-200 dark:border-zinc-700">
+      <div className="text-xs text-zinc-600 dark:text-zinc-400 font-medium">
+        <span className="font-black text-zinc-800 dark:text-zinc-200">mine:</span> {conflictValuePreview(conflict.localValue)}
+        <span className="mx-2 text-zinc-300 dark:text-zinc-600">|</span>
+        <span className="font-black text-zinc-800 dark:text-zinc-200">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
       </div>
       <div className="flex gap-2 shrink-0">
-        <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 rounded-lg text-[11px] font-black text-zinc-700 hover:bg-zinc-200">Mine</button>
+        <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">Mine</button>
         <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Theirs</button>
       </div>
     </div>
@@ -220,10 +221,10 @@ function ConflictEntityGroup({
   onResolve: (id: string, chosen: 'local' | 'remote') => void;
 }) {
   return (
-    <div className="bg-zinc-50 rounded-2xl p-4">
+    <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-sm font-black text-zinc-800">{entityConflicts[0].entityName}</p>
-        <span className="px-2.5 py-0.5 bg-white border border-zinc-200 rounded-full text-[10px] font-black text-zinc-500 capitalize">
+        <p className="text-sm font-black text-zinc-800 dark:text-zinc-200">{entityConflicts[0].entityName}</p>
+        <span className="px-2.5 py-0.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-full text-[10px] font-black text-zinc-500 dark:text-zinc-400 capitalize">
           {entityConflicts[0].entityType} · {entityConflicts.length} conflict{entityConflicts.length === 1 ? '' : 's'}
         </span>
       </div>
@@ -233,7 +234,7 @@ function ConflictEntityGroup({
             key={c.fieldName}
             type="button"
             onClick={() => onOpenField(c.fieldName)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${openField === c.fieldName ? 'bg-zinc-900 text-white' : 'bg-white border border-zinc-200 text-zinc-600'}`}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${openField === c.fieldName ? 'bg-zinc-900 text-white' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}
           >
             {c.fieldName}
           </button>
@@ -305,9 +306,9 @@ function ConflictsCard() {
   }
 
   return (
-    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
-      <h2 className="text-lg font-black text-zinc-900 mb-1">Needs Your Attention</h2>
-      <p className="text-sm text-zinc-400 font-medium mb-4">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
+      <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-1">Needs Your Attention</h2>
+      <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mb-4">
         {groups.size} item{groups.size === 1 ? '' : 's'} changed differently on two devices.
       </p>
       {error && <p className="text-sm text-red-600 font-medium mb-3">{error}</p>}
@@ -649,11 +650,11 @@ function FolderSyncCard() {
   if (!standalone) return null;
 
   return (
-    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-black text-zinc-900">Folder Sync</h2>
-          <p className="text-sm text-zinc-400 font-medium mt-1">
+          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Folder Sync</h2>
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
             Choose how this device exchanges changes with your others — a plain synced folder, or a real git server.
           </p>
         </div>
@@ -668,15 +669,15 @@ function FolderSyncCard() {
         )}
 
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Sync Mode</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Sync Mode</label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => handleSelectMode('folder')}
-              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'folder' ? 'border-primary bg-primary/5' : 'border-zinc-200 bg-zinc-50 hover:bg-zinc-100'}`}
+              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'folder' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
             >
-              <p className="text-sm font-black text-zinc-900">Folder</p>
-              <p className="text-xs text-zinc-500 mt-0.5">
+              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">Folder</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
                 {electron
                   ? 'A folder inside OneDrive/Drive/Syncthing.'
                   : 'A Drive/OneDrive/Syncthing SAF folder.'}
@@ -685,10 +686,10 @@ function FolderSyncCard() {
             <button
               type="button"
               onClick={() => handleSelectMode('git-remote')}
-              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'git-remote' ? 'border-primary bg-primary/5' : 'border-zinc-200 bg-zinc-50 hover:bg-zinc-100'}`}
+              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'git-remote' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
             >
-              <p className="text-sm font-black text-zinc-900">Git Remote</p>
-              <p className="text-xs text-zinc-500 mt-0.5">GitHub, GitLab, or a self-hosted git server.</p>
+              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">Git Remote</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">GitHub, GitLab, or a self-hosted git server.</p>
             </button>
           </div>
         </div>
@@ -696,15 +697,15 @@ function FolderSyncCard() {
         {syncMode === 'folder' ? (
           <div className="flex gap-8 flex-wrap">
             <div className="min-w-0">
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Sync Folder</p>
-              <p className="text-sm font-bold text-zinc-900 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? 'None chosen yet'}</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Sync Folder</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? 'None chosen yet'}</p>
             </div>
             <div className="self-end">
               <button
                 type="button"
                 onClick={handleChangeFolder}
                 disabled={choosingFolder}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 text-zinc-600 rounded-xl font-black text-xs hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-base">folder_open</span>
                 {choosingFolder ? 'Choosing…' : folderPath ? 'Change Folder' : 'Choose Folder'}
@@ -712,29 +713,29 @@ function FolderSyncCard() {
             </div>
           </div>
         ) : (
-          <div className="space-y-4 bg-zinc-50 rounded-2xl p-5">
+          <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-5">
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Repository URL</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Repository URL</label>
               <input
                 type="text"
                 value={gitRemoteUrl}
                 onChange={(e) => setGitRemoteUrl(e.target.value)}
                 placeholder="https://github.com/you/smartchef-sync.git"
-                className="w-full bg-white rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium px-4 py-2.5 text-sm"
+                className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
               />
-              <p className="text-xs text-zinc-400 mt-1.5">
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
                 An empty private repo works fine — GitHub, GitLab, or any self-hosted git-http server your other devices can also reach.
               </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Username</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Username</label>
                 <input
                   type="text"
                   value={gitRemoteUsername}
                   onChange={(e) => setGitRemoteUsername(e.target.value)}
                   placeholder="Usually optional with a token"
-                  className="w-full bg-white rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium px-4 py-2.5 text-sm"
+                  className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                 />
               </div>
               <ProviderKeyInput
@@ -748,22 +749,22 @@ function FolderSyncCard() {
             </div>
             {showCorsProxy ? (
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">CORS Proxy (rarely needed)</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">CORS Proxy (rarely needed)</label>
                 <input
                   type="text"
                   value={gitRemoteCorsProxy}
                   onChange={(e) => setGitRemoteCorsProxy(e.target.value)}
                   placeholder="Leave blank unless you have a specific reason to set one"
-                  className="w-full bg-white rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium px-4 py-2.5 text-sm"
+                  className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                 />
-                <p className="text-xs text-zinc-400 mt-1.5">
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
                   This app reaches GitHub/GitLab/self-hosted servers directly through native code on both Windows and
                   Android, not the browser — so unlike most git-in-the-browser tools, no CORS proxy is needed here at all,
                   including for GitHub/GitLab. Leave this blank.
                 </p>
               </div>
             ) : (
-              <button type="button" onClick={() => setShowCorsProxy(true)} className="text-xs font-bold text-zinc-400 hover:text-zinc-600">
+              <button type="button" onClick={() => setShowCorsProxy(true)} className="text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400">
                 + Advanced: CORS proxy (not needed for GitHub/GitLab — this app connects directly)
               </button>
             )}
@@ -778,7 +779,7 @@ function FolderSyncCard() {
                 type="button"
                 onClick={handleTestConnection}
                 disabled={testingConnection || !gitRemoteUrl.trim()}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-zinc-200 text-zinc-600 rounded-xl font-black text-xs hover:bg-zinc-100 transition-all active:scale-[0.98] disabled:opacity-50"
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 <span className={`material-symbols-outlined text-base ${testingConnection ? 'animate-spin' : ''}`}>wifi_tethering</span>
                 {testingConnection ? 'Testing…' : 'Test Connection'}
@@ -797,7 +798,7 @@ function FolderSyncCard() {
         )}
 
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Automatic Sync</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Automatic Sync</label>
           <div className="flex items-center gap-2 flex-wrap">
             {SYNC_INTERVAL_PRESETS.map((preset) => {
               const active = intervalValue === preset.value && intervalUnit === preset.unit;
@@ -807,7 +808,7 @@ function FolderSyncCard() {
                   type="button"
                   onClick={() => handleSaveInterval(preset.value, preset.unit)}
                   disabled={savingInterval}
-                  className={`px-3 py-1.5 rounded-full text-xs font-black transition-colors disabled:opacity-50 ${active ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'}`}
+                  className={`px-3 py-1.5 rounded-full text-xs font-black transition-colors disabled:opacity-50 ${active ? 'bg-zinc-900 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
                 >
                   {formatSyncInterval(preset)}
                 </button>
@@ -820,7 +821,7 @@ function FolderSyncCard() {
                 value={intervalValue}
                 onChange={(e) => setIntervalValueState(Math.max(1, Number(e.target.value) || 1))}
                 onBlur={() => handleSaveInterval(intervalValue, intervalUnit)}
-                className="w-16 bg-zinc-50 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold px-2 py-1.5 text-xs text-center"
+                className="w-16 bg-zinc-50 dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold px-2 py-1.5 text-xs text-center"
               />
               <select
                 value={intervalUnit}
@@ -830,7 +831,7 @@ function FolderSyncCard() {
                   handleSaveInterval(intervalValue, unit);
                 }}
                 disabled={savingInterval}
-                className="bg-zinc-50 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold px-2 py-1.5 text-xs disabled:opacity-50"
+                className="bg-zinc-50 dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold px-2 py-1.5 text-xs disabled:opacity-50"
               >
                 <option value="minutes">minutes</option>
                 <option value="hours">hours</option>
@@ -840,11 +841,11 @@ function FolderSyncCard() {
               </select>
             </div>
           </div>
-          <p className="text-xs text-zinc-400 mt-1.5">How often SmartChef checks for changes automatically, besides on app resume and "Sync Now".</p>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">How often SmartChef checks for changes automatically, besides on app resume and "Sync Now".</p>
         </div>
 
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Device Name</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Device Name</label>
           <div className="flex gap-2 max-w-sm">
             <input
               type="text"
@@ -852,41 +853,41 @@ function FolderSyncCard() {
               onChange={(e) => setDeviceNameState(e.target.value)}
               onBlur={handleSaveDeviceName}
               placeholder={deviceId ?? ''}
-              className="flex-1 bg-zinc-50 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium px-4 py-2.5 text-sm"
+              className="flex-1 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
             />
-            {savingName && <span className="material-symbols-outlined text-lg text-zinc-400 animate-spin self-center">sync</span>}
+            {savingName && <span className="material-symbols-outlined text-lg text-zinc-400 dark:text-zinc-500 animate-spin self-center">sync</span>}
           </div>
         </div>
 
         <div className="flex gap-8 flex-wrap">
           <div>
-            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">This Device</p>
-            <p className="text-sm font-bold text-zinc-900">{deviceId ?? '—'}</p>
+            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">This Device</p>
+            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{deviceId ?? '—'}</p>
           </div>
           <div>
-            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Last Sync</p>
-            <p className="text-sm font-bold text-zinc-900">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}</p>
+            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Last Sync</p>
+            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}</p>
           </div>
         </div>
 
         {syncMode === 'folder' && devices.length > 0 && (
           <div>
-            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Known Devices</p>
+            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Known Devices</p>
             <div className="space-y-1.5">
               {devices.map((d) => (
-                <div key={d.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 rounded-xl">
-                  <span className="text-sm font-bold text-zinc-700">
+                <div key={d.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
+                  <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">
                     {d.deviceName}
-                    {d.deviceId === deviceId && <span className="text-zinc-400 font-medium"> (this device)</span>}
+                    {d.deviceId === deviceId && <span className="text-zinc-400 dark:text-zinc-500 font-medium"> (this device)</span>}
                   </span>
-                  <span className="text-xs text-zinc-400">{formatRelativeTime(d.lastSyncAt)}</span>
+                  <span className="text-xs text-zinc-400 dark:text-zinc-500">{formatRelativeTime(d.lastSyncAt)}</span>
                 </div>
               ))}
             </div>
           </div>
         )}
         {syncMode === 'git-remote' && (
-          <p className="text-xs text-zinc-400">
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">
             Known-devices tracking isn't available in Git Remote mode yet — check "History" below for recent activity instead.
           </p>
         )}
@@ -894,10 +895,10 @@ function FolderSyncCard() {
         {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
         {resyncingAll && resyncProgress && (
           <div className="space-y-1">
-            <p className="text-xs text-zinc-500 font-medium">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
               Resyncing {resyncProgress.phase} — {resyncProgress.done}/{resyncProgress.total}
             </p>
-            <div className="h-1.5 w-full bg-zinc-100 rounded-full overflow-hidden">
+            <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full transition-all bg-amber-500"
                 style={{ width: `${resyncProgress.total ? Math.round((resyncProgress.done / resyncProgress.total) * 100) : 100}%` }}
@@ -906,14 +907,14 @@ function FolderSyncCard() {
           </div>
         )}
         {resyncingAll && !resyncProgress && !syncing && (
-          <p className="text-xs text-zinc-500 font-medium">Preparing to resync…</p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Preparing to resync…</p>
         )}
         {syncing && progress && (
           <div className="space-y-1">
-            <p className="text-xs text-zinc-500 font-medium">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
               {progress.phase === 'push' ? 'Uploading to the Sync Folder' : 'Downloading from the Sync Folder'} — {progress.done}/{progress.total} object{progress.total === 1 ? '' : 's'}
             </p>
-            <div className="h-1.5 w-full bg-zinc-100 rounded-full overflow-hidden">
+            <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${progress.phase === 'push' ? 'bg-primary' : 'bg-sky-500'}`}
                 style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 100}%` }}
@@ -922,7 +923,7 @@ function FolderSyncCard() {
           </div>
         )}
         {!syncing && result && (
-          <p className="text-xs text-zinc-500 font-medium">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
             {result.pushedObjects > 0 && `Uploaded ${result.pushedObjects} object${result.pushedObjects === 1 ? '' : 's'}. `}
             {result.pulledObjects > 0 && `Downloaded ${result.pulledObjects} object${result.pulledObjects === 1 ? '' : 's'}. `}
             {result.pushedObjects === 0 && result.pulledObjects === 0 && 'Nothing to upload or download — already in sync. '}
@@ -939,7 +940,7 @@ function FolderSyncCard() {
             saved here ({result.failedEntities.map((f) => f.entityType).join(', ')}) — try Repair Local Data below.
           </p>
         )}
-        {!repairing && repairMessage && <p className="text-xs text-zinc-500 font-medium">{repairMessage}</p>}
+        {!repairing && repairMessage && <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{repairMessage}</p>}
 
         <div className="flex gap-3 flex-wrap">
           <button
@@ -956,7 +957,7 @@ function FolderSyncCard() {
             onClick={handleResyncAll}
             disabled={resyncingAll || syncing}
             title="Re-serializes every recipe, ingredient, tool, tag, technique, and profile this device has and pushes them all — use after updating if something looks missing on the other end, not needed for routine syncing"
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
           >
             <span className={`material-symbols-outlined text-lg ${resyncingAll ? 'animate-spin' : ''}`}>refresh</span>
             {resyncingAll ? 'Resyncing…' : 'Resync All'}
@@ -966,7 +967,7 @@ function FolderSyncCard() {
             onClick={handleRepairLocalStorage}
             disabled={repairing || syncing || resyncingAll}
             title="Re-applies this device's own sync history onto its local data — fixes an item whose ingredients/steps/tools went missing after syncing, without needing anything from another device"
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
           >
             <span className={`material-symbols-outlined text-lg ${repairing ? 'animate-spin' : ''}`}>build</span>
             {repairing ? 'Repairing…' : 'Repair Local Data'}
@@ -974,7 +975,7 @@ function FolderSyncCard() {
           <button
             type="button"
             onClick={() => navigate('/sync-history')}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98]"
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
           >
             <span className="material-symbols-outlined text-lg">history</span>
             History
@@ -997,15 +998,15 @@ function OfflineDownloadsCard() {
     <button
       type="button"
       onClick={() => navigate('/downloads')}
-      className="w-full flex items-center justify-between gap-4 bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8 text-left hover:border-zinc-200 transition-colors"
+      className="w-full flex items-center justify-between gap-4 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8 text-left hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
     >
       <div>
-        <h2 className="text-lg font-black text-zinc-900">Offline Downloads</h2>
-        <p className="text-sm text-zinc-400 font-medium mt-1">
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Offline Downloads</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
           {count === null ? 'Loading…' : count === 0 ? 'No recipes downloaded for offline viewing yet.' : `${count} recipe${count === 1 ? '' : 's'} downloaded for offline viewing.`}
         </p>
       </div>
-      <span className="material-symbols-outlined text-zinc-400">chevron_right</span>
+      <span className="material-symbols-outlined text-zinc-400 dark:text-zinc-500">chevron_right</span>
     </button>
   );
 }
@@ -1047,17 +1048,17 @@ function SyncCard() {
   if (!status) return null;
 
   return (
-    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-black text-zinc-900">Multi-Device Sync</h2>
-          <p className="text-sm text-zinc-400 font-medium mt-1">
+          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Multi-Device Sync</h2>
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
             {status.enabled
               ? 'Backs up and merges your library through a shared folder.'
               : 'Disabled — enable via SYNC_ENABLED in this instance\'s .env, then restart.'}
           </p>
         </div>
-        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${status.enabled ? 'bg-primary/10 text-primary' : 'bg-zinc-100 text-zinc-400'}`}>
+        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${status.enabled ? 'bg-primary/10 text-primary' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}`}>
           {status.enabled ? 'Enabled' : 'Disabled'}
         </span>
       </div>
@@ -1066,25 +1067,25 @@ function SyncCard() {
         <div className="space-y-5">
           <div className="flex gap-8">
             <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">This Device</p>
-              <p className="text-sm font-bold text-zinc-900">{status.deviceName}</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">This Device</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{status.deviceName}</p>
             </div>
             <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Last Sync</p>
-              <p className="text-sm font-bold text-zinc-900">{status.lastSyncAt ? formatRelativeTime(status.lastSyncAt) : 'Never'}</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Last Sync</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{status.lastSyncAt ? formatRelativeTime(status.lastSyncAt) : 'Never'}</p>
             </div>
           </div>
 
           <div>
-            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Known Devices</p>
+            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Known Devices</p>
             {!status.peers || status.peers.length === 0 ? (
-              <p className="text-sm text-zinc-400">No other devices seen yet.</p>
+              <p className="text-sm text-zinc-400 dark:text-zinc-500">No other devices seen yet.</p>
             ) : (
               <div className="space-y-1.5">
                 {status.peers.map((p) => (
-                  <div key={p.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 rounded-xl">
-                    <span className="text-sm font-bold text-zinc-700">{p.deviceName}</span>
-                    <span className="text-xs text-zinc-400">{formatRelativeTime(p.lastSeenAt)}</span>
+                  <div key={p.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
+                    <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">{p.deviceName}</span>
+                    <span className="text-xs text-zinc-400 dark:text-zinc-500">{formatRelativeTime(p.lastSeenAt)}</span>
                   </div>
                 ))}
               </div>
@@ -1143,20 +1144,20 @@ function ProviderKeyInput({
 }) {
   return (
     <div>
-      <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{label}</label>
+      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{label}</label>
       <div className="relative">
         <input
           type="password"
           value={value}
           onChange={(e) => onChange(e.target.value, true)}
           placeholder={hasKey && !touched ? '•••••••• (configured — leave blank to keep)' : placeholder}
-          className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4 pr-24"
+          className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4 pr-24"
         />
         {hasKey && !touched && (
           <button
             type="button"
             onClick={() => onChange('', true)}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-400 hover:text-red-600 transition-colors"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-red-600 transition-colors"
           >
             Remove
           </button>
@@ -1239,10 +1240,10 @@ function LlmProviderCard() {
   const cloudProvider = provider !== 'ollama' ? (provider as CloudProvider) : null;
 
   return (
-    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
       <div className="mb-6">
-        <h2 className="text-lg font-black text-zinc-900">AI Provider</h2>
-        <p className="text-sm text-zinc-400 font-medium mt-1">
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">AI Provider</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
           Choose what powers Smart Import's recipe parsing — local Ollama (free, private, slower
           on CPU-only hardware) or a cloud provider (faster/higher quality, billed by them directly).
         </p>
@@ -1250,11 +1251,11 @@ function LlmProviderCard() {
 
       <div className="space-y-5">
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Provider</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Provider</label>
           <select
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
-            className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4 appearance-none cursor-pointer"
+            className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4 appearance-none cursor-pointer"
           >
             <option value="ollama">Local (Ollama) — default, private</option>
             <option value="anthropic">Anthropic (Claude)</option>
@@ -1288,15 +1289,15 @@ function LlmProviderCard() {
           />
         ) : (
           <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Ollama URL</label>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Ollama URL</label>
             <input
               type="text"
               value={ollamaUrl}
               onChange={(e) => setOllamaUrl(e.target.value)}
               placeholder="http://localhost:11434 (default — leave blank unless Ollama runs elsewhere)"
-              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+              className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
             />
-            <p className="text-xs text-zinc-400 mt-2">
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">
               Only needed if Ollama runs on a different host or port — e.g. another machine on your network.
             </p>
           </div>
@@ -1321,13 +1322,13 @@ function ManageUsersCard() {
   return (
     <Link
       to="/manage-users"
-      className="flex items-center justify-between bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8 hover:border-zinc-200 transition-colors"
+      className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8 hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
     >
       <div>
-        <h2 className="text-lg font-black text-zinc-900">Manage Users</h2>
-        <p className="text-sm text-zinc-400 font-medium mt-1">Add or review who can log into this instance.</p>
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Manage Users</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Add or review who can log into this instance.</p>
       </div>
-      <span className="material-symbols-outlined text-zinc-300">chevron_right</span>
+      <span className="material-symbols-outlined text-zinc-300 dark:text-zinc-600">chevron_right</span>
     </Link>
   );
 }
@@ -1392,10 +1393,10 @@ function BackupCard() {
   };
 
   return (
-    <div className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 mt-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
       <div className="mb-6">
-        <h2 className="text-lg font-black text-zinc-900">Backup &amp; Restore</h2>
-        <p className="text-sm text-zinc-400 font-medium mt-1">
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Backup &amp; Restore</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
           Download your whole library as a single file — save it wherever you like, including a
           cloud-synced folder. Restoring merges it back in (newest wins per item), it won't wipe
           anything.
@@ -1419,7 +1420,7 @@ function BackupCard() {
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={restoring}
-          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-700 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
         >
           <span className={`material-symbols-outlined text-lg ${restoring ? 'animate-spin' : ''}`}>
             {restoring ? 'sync' : 'upload_file'}
@@ -1504,21 +1505,21 @@ function StandaloneProfileCard() {
   };
 
   return (
-    <form onSubmit={handleSave} className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 space-y-6">
+    <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
       <div>
-        <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Name</label>
+        <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Name</label>
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+          className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
         />
-        <p className="text-xs text-zinc-400 mt-2">
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">
           No password in offline mode — this device's data is already private to you. Used to label recipes you create and cooks you log.
         </p>
       </div>
       <div>
-        <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
+        <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Avatar</label>
         {AVATAR_PRESETS.length > 0 && (
           <div className="flex flex-wrap gap-3 mb-4">
             {AVATAR_PRESETS.map((preset) => (
@@ -1526,14 +1527,14 @@ function StandaloneProfileCard() {
                 key={preset}
                 type="button"
                 onClick={() => setAvatarUrl(preset)}
-                className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
+                className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200 dark:hover:ring-zinc-700'}`}
               >
                 <img src={preset} alt="" className="w-full h-full object-cover" />
               </button>
             ))}
           </div>
         )}
-        <span className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">or use your own image</span>
+        <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">or use your own image</span>
         <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
       </div>
       {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
@@ -1550,7 +1551,7 @@ function StandaloneProfileCard() {
           type="button"
           onClick={handleSwitchProfile}
           title="Switch to another profile on this device, without leaving offline mode"
-          className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
+          className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
         >
           Switch Profile
         </button>
@@ -1558,12 +1559,49 @@ function StandaloneProfileCard() {
           type="button"
           onClick={handleLogout}
           title="Forget this device's offline setup entirely"
-          className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
+          className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
         >
           Log Out
         </button>
       </div>
     </form>
+  );
+}
+
+const THEME_OPTIONS: { mode: ThemeMode; label: string; icon: string }[] = [
+  { mode: 'light', label: 'Light', icon: 'light_mode' },
+  { mode: 'dark', label: 'Dark', icon: 'dark_mode' },
+  { mode: 'system', label: 'System', icon: 'contrast' },
+];
+
+function AppearanceCard() {
+  const themeMode = useStore((s) => s.themeMode);
+  const setThemeMode = useStore((s) => s.setThemeMode);
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
+      <div className="mb-6">
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Appearance</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Choose how SmartChef looks on this device.</p>
+      </div>
+      <div className="flex gap-2 bg-zinc-50 dark:bg-zinc-950 rounded-2xl p-1.5">
+        {THEME_OPTIONS.map((opt) => (
+          <button
+            key={opt.mode}
+            type="button"
+            onClick={() => setThemeMode(opt.mode)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-xs transition-all ${
+              themeMode === opt.mode
+                ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">{opt.icon}</span>
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1624,62 +1662,62 @@ export default function Account() {
         <div className="mb-10">
           <button
             onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-600 text-sm font-bold mb-6 transition-colors"
+            className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-sm font-bold mb-6 transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             Back
           </button>
-          <h1 className="text-4xl font-black text-zinc-900 tracking-tighter">Account</h1>
+          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">Account</h1>
         </div>
 
         {standalone === null ? null : standalone ? (
           <StandaloneProfileCard />
         ) : (
-          <form onSubmit={handleSave} className="bg-white rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 space-y-6">
+          <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Name</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Name</label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Username</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Username</label>
               <input
                 type="text"
                 autoCapitalize="none"
                 value={username}
                 onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Avatar</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Avatar</label>
               <div className="flex flex-wrap gap-3 mb-4">
                 {AVATAR_PRESETS.map((preset) => (
                   <button
                     key={preset}
                     type="button"
                     onClick={() => setAvatarUrl(preset)}
-                    className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
+                    className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200 dark:hover:ring-zinc-700'}`}
                   >
                     <img src={preset} alt="" className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>
-              <span className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">or use your own image</span>
+              <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">or use your own image</span>
               <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">New Password (leave blank to keep current)</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">New Password (leave blank to keep current)</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
               />
             </div>
             {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
@@ -1695,7 +1733,7 @@ export default function Account() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="px-6 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all active:scale-[0.98]"
+                className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
               >
                 Log Out
               </button>
@@ -1703,6 +1741,7 @@ export default function Account() {
           </form>
         )}
 
+        <AppearanceCard />
         {!standalone && account?.role === 'admin' && <ManageUsersCard />}
         <LlmProviderCard />
         <BackupCard />

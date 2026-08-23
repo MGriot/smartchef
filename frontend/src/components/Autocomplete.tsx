@@ -89,7 +89,7 @@ export default function Autocomplete({ options, value, onSelect, onClear, placeh
         className={className}
       />
       {open && matches.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white rounded-xl shadow-lg border border-zinc-100 py-1">
+        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-100 dark:border-zinc-800 py-1">
           {matches.map((opt, i) => (
             <button
               type="button"
@@ -97,11 +97,11 @@ export default function Autocomplete({ options, value, onSelect, onClear, placeh
               onMouseDown={e => e.preventDefault()}
               onClick={() => handleSelect(opt)}
               className={`w-full text-left px-4 py-2 text-sm transition-colors ${
-                i === highlight ? 'bg-primary/10 text-primary' : 'text-zinc-700 hover:bg-zinc-50'
+                i === highlight ? 'bg-primary/10 text-primary' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900'
               }`}
             >
               {opt.label}
-              {opt.sublabel && <span className="text-zinc-400 text-xs ml-2">{opt.sublabel}</span>}
+              {opt.sublabel && <span className="text-zinc-400 dark:text-zinc-500 text-xs ml-2">{opt.sublabel}</span>}
             </button>
           ))}
         </div>

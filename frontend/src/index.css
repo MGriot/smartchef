@@ -31,6 +31,10 @@
     color-scheme: light;
   }
 
+  :root.dark {
+    color-scheme: dark;
+  }
+
   html, body {
     font-family: 'Inter', system-ui, sans-serif;
     background-color: #fafaf5;
@@ -42,6 +46,11 @@
        whose child ignores its container's width) silently pushing the
        whole page into horizontal scroll on narrow/native screens. */
     overflow-x: hidden;
+  }
+
+  .dark html, .dark body {
+    background-color: #0b0c0a;
+    color: #e3e3de;
   }
 
   /* Keeps scrollable content clear of the gesture-nav bar / notch cutouts on

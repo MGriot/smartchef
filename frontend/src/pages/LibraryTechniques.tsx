@@ -101,7 +101,7 @@ export default function LibraryTechniques() {
           <div className="flex justify-between items-end mb-10">
             <div>
               <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">The Atelier Management</p>
-              <h1 className="text-6xl font-black text-zinc-900 tracking-tight leading-none">Techniques</h1>
+              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">Techniques</h1>
             </div>
             <button
               onClick={() => handleOpenModal()}
@@ -112,41 +112,41 @@ export default function LibraryTechniques() {
             </button>
           </div>
 
-          <section className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100">
+          <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-zinc-100">
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest pl-4">Technique</th>
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right pr-4">Actions</th>
+                  <tr className="border-b border-zinc-100 dark:border-zinc-800">
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-4">Technique</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest text-right pr-4">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-50">
+                <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">
                   {loading ? (
-                    <tr><td colSpan={2} className="py-20 text-center text-zinc-400 font-medium">Loading items...</td></tr>
+                    <tr><td colSpan={2} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</td></tr>
                   ) : techniques.map((technique) => (
-                    <tr key={technique.id} className="group hover:bg-zinc-50/50 transition-colors">
+                    <tr key={technique.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
                       <td className="py-6 pl-4">
                         <div className="flex items-center gap-4">
                           {technique.image_urls?.[0] ? (
-                            <ResolvedImage src={technique.image_urls[0]} className="w-12 h-12 rounded-2xl object-cover bg-zinc-100" />
+                            <ResolvedImage src={technique.image_urls[0]} className="w-12 h-12 rounded-2xl object-cover bg-zinc-100 dark:bg-zinc-800" />
                           ) : (
-                            <div className="w-12 h-12 bg-zinc-100 rounded-2xl flex items-center justify-center text-xl text-zinc-400">
+                            <div className="w-12 h-12 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-xl text-zinc-400 dark:text-zinc-500">
                               <RenderFaIcon name={technique.icon || 'FaFire'} className="text-[20px]" />
                             </div>
                           )}
                           <div>
-                            <p className="font-extrabold text-zinc-900 leading-tight">{technique.translated_name || technique.name}</p>
-                            <p className="text-zinc-400 text-[11px] font-medium tracking-tighter mt-1">{technique.description}</p>
+                            <p className="font-extrabold text-zinc-900 dark:text-zinc-100 leading-tight">{technique.translated_name || technique.name}</p>
+                            <p className="text-zinc-400 dark:text-zinc-500 text-[11px] font-medium tracking-tighter mt-1">{technique.description}</p>
                           </div>
                         </div>
                       </td>
                       <td className="py-6 text-right pr-4">
                          <div className="flex justify-end gap-2">
-                            <button onClick={() => handleOpenModal(technique)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+                            <button onClick={() => handleOpenModal(technique)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                               <span className="material-symbols-outlined text-xl">edit</span>
                             </button>
-                            <button onClick={() => handleDelete(technique.id)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-tertiary transition-all">
+                            <button onClick={() => handleDelete(technique.id)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
                               <span className="material-symbols-outlined text-xl">delete</span>
                             </button>
                          </div>
@@ -163,24 +163,24 @@ export default function LibraryTechniques() {
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
            <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
-           <div className="relative bg-white w-full max-w-xl rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
-              <h2 className="text-3xl font-black text-zinc-900 mb-8">{editingTechnique ? 'Edit Technique' : 'New Technique'}</h2>
+           <div className="relative bg-white dark:bg-zinc-900 w-full max-w-xl rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
+              <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{editingTechnique ? 'Edit Technique' : 'New Technique'}</h2>
               <form onSubmit={handleSave} className="space-y-6">
                  <div>
-                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Technique Name</label>
-                   <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Blanch" className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all" />
+                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Technique Name</label>
+                   <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Blanch" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
                  </div>
 
                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Reference Photos</label>
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Reference Photos</label>
                     <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({...form, imageUrls: urls})} />
                  </div>
 
                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-4 px-1">Choose Icon</label>
-                    <div className="grid grid-cols-6 gap-3 bg-zinc-50 p-4 rounded-3xl">
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-4 px-1">Choose Icon</label>
+                    <div className="grid grid-cols-6 gap-3 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-3xl">
                        {TECHNIQUE_ICONS.map(ic => (
-                          <button key={ic} type="button" onClick={() => setForm({...form, icon: ic})} className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${form.icon === ic ? 'bg-primary text-white shadow-lg scale-110' : 'bg-white text-zinc-400 hover:text-primary'}`}>
+                          <button key={ic} type="button" onClick={() => setForm({...form, icon: ic})} className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${form.icon === ic ? 'bg-primary text-white shadow-lg scale-110' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 hover:text-primary'}`}>
                              <RenderFaIcon name={ic} className="text-lg" />
                           </button>
                        ))}
@@ -188,19 +188,19 @@ export default function LibraryTechniques() {
                  </div>
 
                  <div>
-                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Description</label>
-                   <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="What this technique means, when to use it..." className="w-full h-24 px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium transition-all" />
+                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Description</label>
+                   <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="What this technique means, when to use it..." className="w-full h-24 px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium transition-all" />
                  </div>
 
                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Synonyms</label>
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Synonyms</label>
                     <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
                  </div>
 
                  {/* Translations Section */}
-                 <div className="bg-zinc-50/50 p-6 rounded-3xl border border-zinc-100">
+                 <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
                     <div className="flex justify-between items-center mb-4">
-                       <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Translations</label>
+                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">Translations</label>
                        <button type="button" onClick={addTranslation} className="text-[10px] font-black text-primary uppercase flex items-center gap-1 hover:underline">
                           <span className="material-symbols-outlined text-[14px]">add</span> Add Lang
                        </button>
@@ -208,21 +208,21 @@ export default function LibraryTechniques() {
                     <div className="space-y-3">
                        {translations.map((t, i) => (
                           <div key={i} className="flex gap-2 items-center">
-                             <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold text-center uppercase" />
-                             <input type="text" placeholder="Translated name" value={t.name} onChange={(e) => handleTranslationChange(i, 'name', e.target.value)} className="flex-1 px-4 py-2 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium" />
-                             <button type="button" onClick={() => removeTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-red-500 transition-colors">
+                             <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold text-center uppercase" />
+                             <input type="text" placeholder="Translated name" value={t.name} onChange={(e) => handleTranslationChange(i, 'name', e.target.value)} className="flex-1 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium" />
+                             <button type="button" onClick={() => removeTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-colors">
                                 <span className="material-symbols-outlined">close</span>
                              </button>
                           </div>
                        ))}
                        {translations.length === 0 && (
-                          <p className="text-center text-xs text-zinc-400 py-2">No translations added.</p>
+                          <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-2">No translations added.</p>
                        )}
                     </div>
                  </div>
 
-                 <div className="flex gap-4 pt-4 sticky bottom-0 bg-white pb-2">
-                    <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">Cancel</button>
+                 <div className="flex gap-4 pt-4 sticky bottom-0 bg-white dark:bg-zinc-900 pb-2">
+                    <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
                     <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">
                       {editingTechnique ? 'Update Technique' : 'Add Technique'}
                     </button>

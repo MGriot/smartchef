@@ -43,13 +43,13 @@ export default function TranslationsEditor({
   return (
     <div className="space-y-2">
       {translations.map((tr, idx) => (
-        <div key={idx} className={`flex gap-2 items-start ${compact ? 'bg-white rounded-lg p-2 border border-zinc-100' : 'bg-zinc-50 rounded-xl p-3'}`}>
+        <div key={idx} className={`flex gap-2 items-start ${compact ? 'bg-white dark:bg-zinc-900 rounded-lg p-2 border border-zinc-100 dark:border-zinc-800' : 'bg-zinc-50 dark:bg-zinc-900 rounded-xl p-3'}`}>
           <input
             type="text" value={tr.lang}
             onChange={e => update(idx, 'lang', e.target.value)}
             placeholder="lang"
             title={t('common.languageCodeHint')}
-            className={`w-16 shrink-0 border-none bg-zinc-50 rounded-lg px-2 font-bold focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs' : 'py-2 text-sm'}`}
+            className={`w-16 shrink-0 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 font-bold focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs' : 'py-2 text-sm'}`}
           />
           <div className="flex-1 space-y-1.5">
             {showTitleDescription && (
@@ -58,13 +58,13 @@ export default function TranslationsEditor({
                   type="text" value={tr.title || ''}
                   onChange={e => update(idx, 'title', e.target.value)}
                   placeholder={resolvedTitleLabel}
-                  className={`w-full border-none bg-zinc-50 rounded-lg px-2 focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs' : 'py-2 text-sm'}`}
+                  className={`w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs' : 'py-2 text-sm'}`}
                 />
                 <textarea
                   value={tr.description || ''}
                   onChange={e => update(idx, 'description', e.target.value)}
                   placeholder={resolvedDescriptionLabel}
-                  className={`w-full border-none bg-zinc-50 rounded-lg px-2 resize-none focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs min-h-[32px]' : 'py-2 text-sm min-h-[50px]'}`}
+                  className={`w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 resize-none focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs min-h-[32px]' : 'py-2 text-sm min-h-[50px]'}`}
                 />
               </>
             )}
@@ -73,7 +73,7 @@ export default function TranslationsEditor({
                 value={tr.notes || ''}
                 onChange={e => update(idx, 'notes', e.target.value)}
                 placeholder={notesLabel}
-                className={`w-full border-none bg-zinc-50 rounded-lg px-2 resize-none focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs min-h-[32px]' : 'py-2 text-sm min-h-[50px]'}`}
+                className={`w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 resize-none focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs min-h-[32px]' : 'py-2 text-sm min-h-[50px]'}`}
               />
             )}
           </div>
@@ -87,7 +87,7 @@ export default function TranslationsEditor({
       ))}
       <button
         type="button" onClick={add}
-        className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 text-zinc-600 rounded-lg text-xs font-bold hover:bg-zinc-200 transition-colors"
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-lg text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
       >
         <span className="material-symbols-outlined text-sm">add</span> {t('common.addTranslation')}
       </button>

@@ -244,8 +244,8 @@ export default function Planner() {
       <div className="px-8 lg:px-12 py-10 max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div>
-            <h1 className="text-5xl font-black text-zinc-900 tracking-tight leading-none mb-2">Meal Planner</h1>
-            <p className="text-zinc-500 max-w-md">Organize your recipes into a weekly culinary schedule.</p>
+            <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">Meal Planner</h1>
+            <p className="text-zinc-500 dark:text-zinc-400 max-w-md">Organize your recipes into a weekly culinary schedule.</p>
           </div>
           <div className="flex items-center gap-3">
             {menus.length > 0 && (
@@ -253,7 +253,7 @@ export default function Planner() {
                 <select
                   value={selectedMenuId || ''}
                   onChange={e => setSelectedMenuId(e.target.value)}
-                  className="px-4 py-3 bg-white rounded-xl border border-zinc-200 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                  className="px-4 py-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 text-sm font-bold focus:ring-2 focus:ring-primary/20"
                 >
                   {menus.map(m => (
                     <option key={m.id} value={m.id}>{m.name} ({new Date(m.week_start).toLocaleDateString()})</option>
@@ -262,7 +262,7 @@ export default function Planner() {
                 {menu && (
                   <button
                     onClick={handleDeleteMenu}
-                    className="w-11 h-11 rounded-xl bg-white border border-zinc-200 text-zinc-400 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
+                    className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
                     aria-label="Delete menu"
                   >
                     <span className="material-symbols-outlined text-lg">delete</span>
@@ -289,8 +289,8 @@ export default function Planner() {
             <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mb-6">
               <span className="material-symbols-outlined text-4xl text-primary">calendar_month</span>
             </div>
-            <h2 className="text-2xl font-bold text-zinc-800 mb-2">No menu yet</h2>
-            <p className="text-zinc-500 max-w-md mx-auto mb-8">
+            <h2 className="text-2xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">No menu yet</h2>
+            <p className="text-zinc-500 dark:text-zinc-400 max-w-md mx-auto mb-8">
               Create a weekly menu, then assign recipes to each day — prep times and portions come straight from the recipe.
             </p>
             <button
@@ -304,9 +304,9 @@ export default function Planner() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
             {DAYS.map(day => (
-              <div key={day.idx} className="bg-white rounded-3xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 flex flex-col">
+              <div key={day.idx} className="bg-white dark:bg-zinc-900 rounded-3xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 flex flex-col">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-headline font-bold text-zinc-800">{day.label}</h3>
+                  <h3 className="font-headline font-bold text-zinc-800 dark:text-zinc-200">{day.label}</h3>
                   <button
                     onClick={() => openAddModal(day.idx)}
                     className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center hover:bg-primary/20 transition-colors"
@@ -317,18 +317,18 @@ export default function Planner() {
                 </div>
                 <div className="space-y-2 flex-1">
                   {itemsForDay(day.idx).length === 0 && (
-                    <p className="text-xs text-zinc-300 italic py-4 text-center">No meals planned</p>
+                    <p className="text-xs text-zinc-300 dark:text-zinc-600 italic py-4 text-center">No meals planned</p>
                   )}
                   {itemsForDay(day.idx).map(item => (
-                    <div key={item.id} className="group bg-zinc-50 rounded-xl p-3 relative">
+                    <div key={item.id} className="group bg-zinc-50 dark:bg-zinc-900 rounded-xl p-3 relative">
                       <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase mb-1 ${MEAL_TYPE_STYLE[item.mealType]}`}>
                         {item.mealType}
                       </span>
-                      <p className="text-sm font-bold text-zinc-800 leading-tight pr-6">{item.recipe_title}</p>
-                      <p className="text-[11px] text-zinc-400 font-medium mt-0.5">{item.servings} servings</p>
+                      <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 leading-tight pr-6">{item.recipe_title}</p>
+                      <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium mt-0.5">{item.servings} servings</p>
                       <button
                         onClick={() => handleRemoveItem(item.id)}
-                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                       >
                         <span className="material-symbols-outlined text-sm">close</span>
                       </button>
@@ -342,7 +342,7 @@ export default function Planner() {
 
         {/* Weekly nutrition summary */}
         {menu && menuNutrition && menuNutrition.weekly.caloriesKcal > 0 && (
-          <div className="mt-8 bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+          <div className="mt-8 bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
             <h3 className="font-headline font-bold text-lg mb-4">Weekly Nutrition</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-4">
               {[
@@ -354,15 +354,15 @@ export default function Planner() {
                 { key: 'sugarG', label: 'Sugar', unit: 'g' },
                 { key: 'sodiumMg', label: 'Sodium', unit: 'mg' },
               ].map(f => (
-                <div key={f.key} className="text-center py-3 rounded-2xl bg-zinc-50">
-                  <p className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold mb-1">{f.label}</p>
-                  <p className="text-sm font-bold text-zinc-800 tabular-nums">
+                <div key={f.key} className="text-center py-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900">
+                  <p className="text-[9px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-1">{f.label}</p>
+                  <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 tabular-nums">
                     {Math.round((menuNutrition.weekly as any)[f.key])} {f.unit}
                   </p>
                 </div>
               ))}
             </div>
-            <p className="text-[11px] text-zinc-400">
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
               Daily average: ≈{Math.round(menuNutrition.weekly.caloriesKcal / 7)} kcal/day
             </p>
             {menuNutrition.unresolved.length > 0 && (
@@ -378,28 +378,28 @@ export default function Planner() {
       {showCreateModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowCreateModal(false)} />
-          <div className="relative bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-3xl font-black text-zinc-900 mb-8">New Menu</h2>
+          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">New Menu</h2>
             <form onSubmit={handleCreateMenu} className="space-y-6">
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Menu Name</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Menu Name</label>
                 <input
                   type="text" required autoFocus value={newMenuName}
                   onChange={e => setNewMenuName(e.target.value)}
                   placeholder="e.g. Week of Aug 10"
-                  className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all"
+                  className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Week Starting (Monday)</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Week Starting (Monday)</label>
                 <input
                   type="date" required value={newMenuWeekStart}
                   onChange={e => setNewMenuWeekStart(e.target.value)}
-                  className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all"
+                  className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all"
                 />
               </div>
               <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">Cancel</button>
+                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
                 <button type="submit" disabled={creating} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50">
                   {creating ? 'Creating…' : 'Create Menu'}
                 </button>
@@ -413,43 +413,43 @@ export default function Planner() {
       {addingForDay !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setAddingForDay(null)} />
-          <div className="relative bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-3xl font-black text-zinc-900 mb-1">Add Recipe</h2>
-            <p className="text-sm text-zinc-400 font-medium mb-8">{DAYS.find(d => d.idx === addingForDay)?.label}</p>
+          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-1">Add Recipe</h2>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mb-8">{DAYS.find(d => d.idx === addingForDay)?.label}</p>
             <form onSubmit={handleAddItem} className="space-y-6">
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Recipe</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Recipe</label>
                 <Autocomplete
                   value={addRecipeId}
                   options={allRecipes.map(r => ({ id: r.id, label: r.translated_title || r.title }))}
                   onSelect={(id) => setAddRecipeId(id)}
                   onClear={() => setAddRecipeId('')}
                   placeholder="Type to search recipes…"
-                  className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all"
+                  className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Meal</label>
+                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Meal</label>
                   <select
                     value={addMealType}
                     onChange={e => setAddMealType(e.target.value as MenuItem['mealType'])}
-                    className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all appearance-none"
+                    className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all appearance-none"
                   >
                     {MEAL_TYPES.map(mt => <option key={mt} value={mt}>{mt[0].toUpperCase() + mt.slice(1)}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Servings</label>
+                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Servings</label>
                   <input
                     type="number" min={1} required value={addServings}
                     onChange={e => setAddServings(parseInt(e.target.value) || 1)}
-                    className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all"
+                    className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all"
                   />
                 </div>
               </div>
               <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setAddingForDay(null)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">Cancel</button>
+                <button type="button" onClick={() => setAddingForDay(null)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
                 <button type="submit" disabled={savingItem || !addRecipeId} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50">
                   {savingItem ? 'Adding…' : 'Add to Plan'}
                 </button>

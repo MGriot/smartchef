@@ -296,13 +296,13 @@ const Home: React.FC = () => {
           </div>
 
           {/* Recipes / Collections tab switcher */}
-          <div className="flex gap-2 mb-8 bg-zinc-100/70 p-1.5 rounded-full w-max">
+          <div className="flex gap-2 mb-8 bg-zinc-100/70 dark:bg-zinc-800/70 p-1.5 rounded-full w-max">
             {(['recipes', 'collections'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`px-6 py-2 rounded-full font-bold text-sm capitalize transition-all ${
-                  activeTab === tab ? 'bg-white text-primary shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
+                  activeTab === tab ? 'bg-white dark:bg-zinc-900 text-primary shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300'
                 }`}
               >
                 {tab === 'recipes' ? t('gallery.tabRecipes') : t('gallery.tabCollections')}
@@ -328,9 +328,9 @@ const Home: React.FC = () => {
                 </div>
               ) : collections.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-80 text-center animate-fade-in">
-                  <span className="material-symbols-outlined text-6xl text-zinc-300 mb-4 scale-110">collections_bookmark</span>
-                  <h3 className="text-2xl font-bold font-headline text-zinc-800 mb-2">{t('collections.noCollectionsYet')}</h3>
-                  <p className="text-zinc-500 text-sm max-w-xs mb-8">{t('collections.noCollectionsDescription')}</p>
+                  <span className="material-symbols-outlined text-6xl text-zinc-300 dark:text-zinc-600 mb-4 scale-110">collections_bookmark</span>
+                  <h3 className="text-2xl font-bold font-headline text-zinc-800 dark:text-zinc-200 mb-2">{t('collections.noCollectionsYet')}</h3>
+                  <p className="text-zinc-500 dark:text-zinc-400 text-sm max-w-xs mb-8">{t('collections.noCollectionsDescription')}</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7 animate-fade-in-up">
@@ -340,11 +340,11 @@ const Home: React.FC = () => {
                       <Link
                         key={col.id}
                         to={`/collection/${col.id}`}
-                        className="group relative bg-white rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px]"
+                        className="group relative bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px]"
                       >
-                        <div className="aspect-[4/3] grid grid-cols-2 gap-0.5 bg-zinc-100">
+                        <div className="aspect-[4/3] grid grid-cols-2 gap-0.5 bg-zinc-100 dark:bg-zinc-800">
                           {Array.from({ length: 4 }).map((_, i) => (
-                            <div key={i} className="overflow-hidden bg-zinc-100">
+                            <div key={i} className="overflow-hidden bg-zinc-100 dark:bg-zinc-800">
                               <CoverImage
                                 src={covers[i]}
                                 alt=""
@@ -355,10 +355,10 @@ const Home: React.FC = () => {
                           ))}
                         </div>
                         <div className="p-6">
-                          <h3 className="text-xl font-bold font-headline text-zinc-900 mb-1 group-hover:text-primary transition-colors duration-200">
+                          <h3 className="text-xl font-bold font-headline text-zinc-900 dark:text-zinc-100 mb-1 group-hover:text-primary transition-colors duration-200">
                             {col.name}
                           </h3>
-                          <p className="text-zinc-500 text-[13px] font-medium">{t('collections.recipeCount', { count: Number(col.item_count) })}</p>
+                          <p className="text-zinc-500 dark:text-zinc-400 text-[13px] font-medium">{t('collections.recipeCount', { count: Number(col.item_count) })}</p>
                         </div>
                       </Link>
                     );
@@ -372,14 +372,14 @@ const Home: React.FC = () => {
           <div className="flex flex-wrap gap-3 items-center mb-6">
             {/* Search — searches title, description, and ingredients */}
             <div className="relative flex-1 max-w-xl">
-              <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 text-[20px]">
+              <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-[20px]">
                 search
               </span>
               <input
                 ref={searchInputRef}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 py-3.5 bg-zinc-100/80 rounded-full border-none text-sm font-body placeholder:text-zinc-400 focus:bg-white focus:ring-2 focus:ring-primary/25 focus:shadow-lg transition-all duration-200"
+                className="w-full pl-12 pr-4 py-3.5 bg-zinc-100/80 dark:bg-zinc-800/80 rounded-full border-none text-sm font-body placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:bg-white dark:focus:bg-zinc-900 focus:ring-2 focus:ring-primary/25 focus:shadow-lg transition-all duration-200"
                 placeholder={t('gallery.searchPlaceholder')}
                 type="text"
               />
@@ -390,13 +390,13 @@ const Home: React.FC = () => {
               <button
                 onClick={() => setShowFilters(f => !f)}
                 className={`flex items-center gap-2 px-5 py-3.5 rounded-full font-bold text-sm transition-all duration-200 ${
-                  activeFilterCount > 0 ? 'bg-primary text-white shadow-sm' : 'bg-zinc-100/80 text-zinc-600 hover:bg-zinc-200/60'
+                  activeFilterCount > 0 ? 'bg-primary text-white shadow-sm' : 'bg-zinc-100/80 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60'
                 }`}
               >
                 <span className="material-symbols-outlined text-[20px]">tune</span>
                 {t('gallery.filters')}
                 {activeFilterCount > 0 && (
-                  <span className="w-5 h-5 rounded-full bg-white/25 text-white text-[11px] font-black flex items-center justify-center">
+                  <span className="w-5 h-5 rounded-full bg-white/25 dark:bg-zinc-900/25 text-white text-[11px] font-black flex items-center justify-center">
                     {activeFilterCount}
                   </span>
                 )}
@@ -405,9 +405,9 @@ const Home: React.FC = () => {
               {showFilters && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
-                  <div className="absolute right-0 top-14 z-50 w-[380px] max-h-[70vh] overflow-y-auto bg-white rounded-3xl shadow-2xl border border-zinc-100 p-6 space-y-5">
+                  <div className="absolute right-0 top-14 z-50 w-[380px] max-h-[70vh] overflow-y-auto bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-100 dark:border-zinc-800 p-6 space-y-5">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-black text-zinc-900">{t('gallery.filters')}</p>
+                      <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('gallery.filters')}</p>
                       {activeFilterCount > 0 && (
                         <button onClick={clearAllFilters} className="text-[11px] font-bold text-primary uppercase hover:underline">
                           {t('gallery.clearAll')}
@@ -416,7 +416,7 @@ const Home: React.FC = () => {
                     </div>
 
                     <div>
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">{t('gallery.sortBy')}</p>
+                      <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('gallery.sortBy')}</p>
                       <div className="flex flex-wrap gap-1.5">
                         {([
                           { value: 'recently-edited', label: t('gallery.sortRecentlyEdited') },
@@ -428,7 +428,7 @@ const Home: React.FC = () => {
                             key={opt.value}
                             onClick={() => setSortBy(opt.value)}
                             className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                              sortBy === opt.value ? 'bg-zinc-900 text-white border-transparent' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'
+                              sortBy === opt.value ? 'bg-zinc-900 text-white border-transparent' : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'
                             }`}
                           >
                             {opt.label}
@@ -439,7 +439,7 @@ const Home: React.FC = () => {
 
                     {Object.entries(tagGroups).map(([group, tags]) => (
                       <div key={group}>
-                        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">{group}</p>
+                        <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{group}</p>
                         <div className="flex flex-wrap gap-1.5">
                           {tags.map(t => {
                             const active = activeTagFilters.includes(t.name);
@@ -448,7 +448,7 @@ const Home: React.FC = () => {
                                 key={t.id}
                                 onClick={() => toggleTagFilter(t.name)}
                                 className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                                  active ? 'text-white border-transparent' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'
+                                  active ? 'text-white border-transparent' : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'
                                 }`}
                                 style={active ? { backgroundColor: t.color || '#3f3f46' } : undefined}
                               >
@@ -461,7 +461,7 @@ const Home: React.FC = () => {
                     ))}
 
                     <div>
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">{t('gallery.ingredientCategory')}</p>
+                      <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('gallery.ingredientCategory')}</p>
                       <div className="flex flex-wrap gap-1.5">
                         {ingredientCategories.map(c => {
                           const active = activeCategoryFilters.includes(c.id);
@@ -470,7 +470,7 @@ const Home: React.FC = () => {
                               key={c.id}
                               onClick={() => toggleCategoryFilter(c.id)}
                               className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                                active ? 'text-white border-transparent' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'
+                                active ? 'text-white border-transparent' : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'
                               }`}
                               style={active ? { backgroundColor: c.color || '#3f3f46' } : undefined}
                             >
@@ -482,16 +482,16 @@ const Home: React.FC = () => {
                     </div>
 
                     <div>
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">{t('recipeDetail.regions')}</p>
+                      <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('recipeDetail.regions')}</p>
                       <RegionPicker value={activeRegionFilters} onChange={setActiveRegionFilters} />
                     </div>
 
                     <div>
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">{t('nav.seasonality')}</p>
+                      <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('nav.seasonality')}</p>
                       <button
                         onClick={() => setSeasonalOnly(v => !v)}
                         className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-xs font-bold border transition-all ${
-                          seasonalOnly ? 'bg-primary text-white border-transparent' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'
+                          seasonalOnly ? 'bg-primary text-white border-transparent' : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'
                         }`}
                       >
                         {t('gallery.seasonalOnly')}
@@ -507,7 +507,7 @@ const Home: React.FC = () => {
             <button
               onClick={toggleSelectMode}
               className={`flex items-center gap-2 px-5 py-3.5 rounded-full font-bold text-sm transition-all duration-200 shrink-0 ${
-                selectMode ? 'bg-primary text-white shadow-sm' : 'bg-zinc-100/80 text-zinc-600 hover:bg-zinc-200/60'
+                selectMode ? 'bg-primary text-white shadow-sm' : 'bg-zinc-100/80 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60'
               }`}
             >
               <span className="material-symbols-outlined text-[20px]">checklist</span>
@@ -515,14 +515,14 @@ const Home: React.FC = () => {
             </button>
 
             {/* Grid density */}
-            <div className="flex items-center gap-0.5 bg-zinc-100/80 rounded-full p-1 shrink-0">
+            <div className="flex items-center gap-0.5 bg-zinc-100/80 dark:bg-zinc-800/80 rounded-full p-1 shrink-0">
               {([2, 3, 4] as const).map((n) => (
                 <button
                   key={n}
                   onClick={() => setGridCols(n)}
                   title={`${n} columns`}
                   className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-xs transition-all duration-200 ${
-                    gridCols === n ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400 hover:text-zinc-600'
+                    gridCols === n ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
                   }`}
                 >
                   {n}
@@ -538,7 +538,7 @@ const Home: React.FC = () => {
                 <button
                   onClick={handleExportSelected}
                   disabled={selectedIds.size === 0 || exporting}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-white text-zinc-900 rounded-full font-bold text-xs disabled:opacity-40 transition-all"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 rounded-full font-bold text-xs disabled:opacity-40 transition-all"
                 >
                   <span className="material-symbols-outlined text-[16px]">{exporting ? 'sync' : 'ios_share'}</span>
                   {exporting ? t('gallery.exporting') : t('gallery.exportSelected')}
@@ -555,18 +555,18 @@ const Home: React.FC = () => {
             <div className="flex justify-center items-center h-80">
               <div className="flex flex-col items-center gap-4">
                 <div className="animate-spin rounded-full h-10 w-10 border-[3px] border-primary/20 border-t-primary"></div>
-                <p className="text-sm text-zinc-400 font-medium">{t('gallery.loadingRecipes')}</p>
+                <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('gallery.loadingRecipes')}</p>
               </div>
             </div>
           ) : recipes.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-80 text-center animate-fade-in">
-              <span className="material-symbols-outlined text-6xl text-zinc-300 mb-4 scale-110">
+              <span className="material-symbols-outlined text-6xl text-zinc-300 dark:text-zinc-600 mb-4 scale-110">
                 {debouncedQuery || activeFilterCount > 0 ? 'search_off' : 'menu_book'}
               </span>
-              <h3 className="text-2xl font-bold font-headline text-zinc-800 mb-2">
+              <h3 className="text-2xl font-bold font-headline text-zinc-800 dark:text-zinc-200 mb-2">
                 {debouncedQuery || activeFilterCount > 0 ? t('gallery.noMatchingRecipes') : t('gallery.noRecipesYet')}
               </h3>
-              <p className="text-zinc-500 text-sm max-w-xs mb-8">
+              <p className="text-zinc-500 dark:text-zinc-400 text-sm max-w-xs mb-8">
                 {debouncedQuery || activeFilterCount > 0
                   ? t('gallery.tryDifferentSearch')
                   : t('gallery.startJourney')}
@@ -600,12 +600,12 @@ const Home: React.FC = () => {
                         toggleSelected(recipe.id);
                       }
                     }}
-                    className={`group relative bg-white rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px] ${selected ? 'ring-4 ring-primary' : ''}`}
+                    className={`group relative bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px] ${selected ? 'ring-4 ring-primary' : ''}`}
                   >
                     {selectMode && (
-                      <div className="absolute top-4 right-4 z-10 w-7 h-7 rounded-full bg-white shadow-md flex items-center justify-center">
+                      <div className="absolute top-4 right-4 z-10 w-7 h-7 rounded-full bg-white dark:bg-zinc-900 shadow-md flex items-center justify-center">
                         {selected && <span className="material-symbols-outlined text-primary text-[20px]">check_circle</span>}
-                        {!selected && <span className="w-4 h-4 rounded-full border-2 border-zinc-300"></span>}
+                        {!selected && <span className="w-4 h-4 rounded-full border-2 border-zinc-300 dark:border-zinc-600"></span>}
                       </div>
                     )}
                     {/* Image */}
@@ -636,18 +636,18 @@ const Home: React.FC = () => {
 
                     {/* Content */}
                     <div className="p-6">
-                      <h3 className="text-xl font-bold font-headline text-zinc-900 mb-1 group-hover:text-primary transition-colors duration-200">
+                      <h3 className="text-xl font-bold font-headline text-zinc-900 dark:text-zinc-100 mb-1 group-hover:text-primary transition-colors duration-200">
                         {recipe.translated_title || recipe.title}
                       </h3>
                       {(recipe.translated_description || recipe.description) && (
-                        <p className="text-zinc-500 text-sm mb-2 line-clamp-2">
+                        <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-2 line-clamp-2">
                           {recipe.translated_description || recipe.description}
                         </p>
                       )}
                       {recipe.creator_name && (
-                        <p className="text-xs text-zinc-400 font-medium mb-3">by {recipe.creator_name}</p>
+                        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mb-3">by {recipe.creator_name}</p>
                       )}
-                      <div className="flex items-center gap-5 text-zinc-500 text-[13px] font-medium">
+                      <div className="flex items-center gap-5 text-zinc-500 dark:text-zinc-400 text-[13px] font-medium">
                         <div className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
                             schedule
@@ -695,19 +695,19 @@ const Home: React.FC = () => {
       {showCreateCollection && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowCreateCollection(false)} />
-          <div className="relative bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-3xl font-black text-zinc-900 mb-8">{t('collections.newCollection')}</h2>
+          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{t('collections.newCollection')}</h2>
             <form onSubmit={handleCreateCollection} className="space-y-6">
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">{t('collections.name')}</label>
-                <input type="text" required value={newCollectionName} onChange={e => setNewCollectionName(e.target.value)} placeholder={t('collections.namePlaceholder')} className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all" />
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('collections.name')}</label>
+                <input type="text" required value={newCollectionName} onChange={e => setNewCollectionName(e.target.value)} placeholder={t('collections.namePlaceholder')} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">{t('collections.description')}</label>
-                <textarea value={newCollectionDescription} onChange={e => setNewCollectionDescription(e.target.value)} className="w-full h-24 px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium transition-all" />
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('collections.description')}</label>
+                <textarea value={newCollectionDescription} onChange={e => setNewCollectionDescription(e.target.value)} className="w-full h-24 px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium transition-all" />
               </div>
               <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setShowCreateCollection(false)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">{t('common.cancel')}</button>
+                <button type="button" onClick={() => setShowCreateCollection(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">{t('common.cancel')}</button>
                 <button type="submit" disabled={creatingCollection} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50">
                   {creatingCollection ? t('collections.creating') : t('collections.create')}
                 </button>
@@ -718,14 +718,14 @@ const Home: React.FC = () => {
       )}
 
       {/* ─── Mobile Bottom Nav ──────────────────────────────── */}
-      <footer className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#fafaf5]/90 backdrop-blur-xl rounded-t-3xl border-t border-outline-variant/15 shadow-[0_-4px_20px_rgba(0,0,0,0.04)]">
+      <footer className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#fafaf5]/90 dark:bg-zinc-950/90 backdrop-blur-xl rounded-t-3xl border-t border-outline-variant/15 shadow-[0_-4px_20px_rgba(0,0,0,0.04)]">
         <Link className="flex flex-col items-center justify-center text-primary" to="/">
           <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
           <span className="text-[11px] font-bold mt-0.5">{t('bottomNav.home')}</span>
         </Link>
         <button
           type="button"
-          className="flex flex-col items-center justify-center text-zinc-400 hover:text-primary transition-colors"
+          className="flex flex-col items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-colors"
           onClick={() => {
             setActiveTab('recipes');
             setTimeout(() => {
@@ -737,7 +737,7 @@ const Home: React.FC = () => {
           <span className="material-symbols-outlined">search</span>
           <span className="text-[11px] font-bold mt-0.5">{t('bottomNav.search')}</span>
         </button>
-        <Link className="flex flex-col items-center justify-center text-zinc-400 hover:text-primary transition-colors" to="/planner">
+        <Link className="flex flex-col items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-colors" to="/planner">
           <span className="material-symbols-outlined">calendar_month</span>
           <span className="text-[11px] font-bold mt-0.5">{t('bottomNav.planner')}</span>
         </Link>

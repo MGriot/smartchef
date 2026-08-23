@@ -299,13 +299,13 @@ export default function LibraryIngredients() {
   const categorySidebar = (
     <>
       <div className="pt-8 mb-2">
-         <p className="text-[10px] font-bold text-zinc-400 tracking-[0.2em] uppercase px-4">Categories</p>
+         <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 tracking-[0.2em] uppercase px-4">Categories</p>
       </div>
       {categories.map((c) => (
           <button
              key={c.id}
              onClick={() => handleOpenCatModal(c)}
-             className="w-full flex items-center justify-between gap-3 px-4 py-2 text-zinc-500 hover:bg-zinc-50 rounded-xl font-medium text-xs transition-all group"
+             className="w-full flex items-center justify-between gap-3 px-4 py-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl font-medium text-xs transition-all group"
           >
              <div className="flex items-center gap-2 truncate">
                 <RenderFaIcon name={c.icon || 'FaTag'} className="text-[16px]" color={c.color} />
@@ -316,7 +316,7 @@ export default function LibraryIngredients() {
       ))}
       <button
          onClick={() => handleOpenCatModal()}
-         className="w-full mt-2 flex justify-center items-center gap-2 px-4 py-2 bg-zinc-100/50 hover:bg-zinc-100 text-zinc-500 rounded-xl font-bold text-xs transition-all border border-zinc-200 border-dashed"
+         className="w-full mt-2 flex justify-center items-center gap-2 px-4 py-2 bg-zinc-100/50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 rounded-xl font-bold text-xs transition-all border border-zinc-200 dark:border-zinc-700 border-dashed"
       >
          <span className="material-symbols-outlined text-[16px]">add</span>
          New Category
@@ -325,7 +325,7 @@ export default function LibraryIngredients() {
   );
 
   const renderIngredientRow = (ing: any) => (
-    <tr key={ing.id} className="group hover:bg-zinc-50/50 transition-colors">
+    <tr key={ing.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
       <td className="py-6 pl-4">
         <div className={`flex items-center gap-4 ${ing.parent_ingredient_id ? 'pl-8' : ''}`}>
           <div className="relative w-12 h-12 shrink-0">
@@ -334,7 +334,7 @@ export default function LibraryIngredients() {
                 <ResolvedImage
                   src={ing.image_urls[0]}
                   onClick={() => setPreviewImage({ url: ing.image_urls[0], name: ing.translated_name || ing.name })}
-                  className="w-12 h-12 rounded-2xl object-cover bg-zinc-100 cursor-zoom-in"
+                  className="w-12 h-12 rounded-2xl object-cover bg-zinc-100 dark:bg-zinc-800 cursor-zoom-in"
                 />
                 <span
                   className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-[11px] text-white ring-2 ring-white"
@@ -353,20 +353,20 @@ export default function LibraryIngredients() {
             )}
           </div>
           <button type="button" onClick={() => setViewingIng(ing)} className="text-left">
-            <p className="font-extrabold text-zinc-900 leading-tight hover:text-primary transition-colors">{ing.translated_name || ing.name}</p>
-            {ing.parent_name && <p className="text-[10px] font-bold text-zinc-400">↳ variety of {ing.parent_name}</p>}
+            <p className="font-extrabold text-zinc-900 dark:text-zinc-100 leading-tight hover:text-primary transition-colors">{ing.translated_name || ing.name}</p>
+            {ing.parent_name && <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">↳ variety of {ing.parent_name}</p>}
           </button>
         </div>
       </td>
       <td className="py-6">
          <div className="flex flex-wrap gap-1 max-w-[200px]">
             {ing.translations?.map((t: any, idx: number) => (
-               <span key={idx} className="px-2 py-0.5 bg-zinc-100 text-zinc-500 text-[9px] font-black uppercase rounded border border-zinc-200">
+               <span key={idx} className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[9px] font-black uppercase rounded border border-zinc-200 dark:border-zinc-700">
                   {t.lang}: {t.text}
                </span>
             ))}
             {(!ing.translations || ing.translations.length === 0) && (
-               <span className="text-zinc-300 text-[10px] italic">None</span>
+               <span className="text-zinc-300 dark:text-zinc-600 text-[10px] italic">None</span>
             )}
          </div>
       </td>
@@ -382,7 +382,7 @@ export default function LibraryIngredients() {
                </span>
             ))}
             {(!ing.tags || ing.tags.length === 0) && (
-               <span className="text-zinc-300 text-[10px] italic">None</span>
+               <span className="text-zinc-300 dark:text-zinc-600 text-[10px] italic">None</span>
             )}
          </div>
       </td>
@@ -391,17 +391,17 @@ export default function LibraryIngredients() {
             <Link
               to={`/?q=${encodeURIComponent(ing.name)}`}
               title="Used in recipes"
-              className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all"
+              className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all"
             >
               <span className="material-symbols-outlined text-xl">search</span>
             </Link>
-            <button onClick={() => handleOpenModal(ing)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+            <button onClick={() => handleOpenModal(ing)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
               <span className="material-symbols-outlined text-xl">edit</span>
             </button>
-            <button onClick={() => { setMergingIng(ing); setMergeTargetId(''); setMergeQuery(''); }} title="Merge into another ingredient" className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+            <button onClick={() => { setMergingIng(ing); setMergeTargetId(''); setMergeQuery(''); }} title="Merge into another ingredient" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
               <span className="material-symbols-outlined text-xl">call_merge</span>
             </button>
-            <button onClick={() => handleDelete(ing.id)} className="w-10 h-10 rounded-full hover:bg-white hover:shadow-sm flex items-center justify-center text-zinc-400 hover:text-tertiary transition-all">
+            <button onClick={() => handleDelete(ing.id)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
               <span className="material-symbols-outlined text-xl">delete</span>
             </button>
          </div>
@@ -412,10 +412,10 @@ export default function LibraryIngredients() {
   const renderIngredientCard = (ing: any) => (
     <div
       key={ing.id}
-      className={`group relative bg-white rounded-3xl border border-zinc-100 hover:border-zinc-200 hover:shadow-md transition-all overflow-hidden flex flex-col ${ing.parent_ingredient_id ? 'ring-1 ring-zinc-100' : ''}`}
+      className={`group relative bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 hover:shadow-md transition-all overflow-hidden flex flex-col ${ing.parent_ingredient_id ? 'ring-1 ring-zinc-100 dark:ring-zinc-800' : ''}`}
     >
       <button type="button" onClick={() => setViewingIng(ing)} className="text-left flex-1 flex flex-col">
-        <div className="relative w-full aspect-square bg-zinc-50">
+        <div className="relative w-full aspect-square bg-zinc-50 dark:bg-zinc-900">
           {ing.image_urls?.[0] ? (
             <ResolvedImage src={ing.image_urls[0]} className="w-full h-full object-cover" />
           ) : (
@@ -424,14 +424,14 @@ export default function LibraryIngredients() {
             </div>
           )}
           {ing.seasonal_months?.length > 0 && (
-            <span className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center text-[13px] text-primary shadow-sm" title="Has seasonality data">
+            <span className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm flex items-center justify-center text-[13px] text-primary shadow-sm" title="Has seasonality data">
               <span className="material-symbols-outlined text-[15px]">eco</span>
             </span>
           )}
         </div>
         <div className="p-4 flex-1">
-          <p className="font-extrabold text-zinc-900 leading-tight group-hover:text-primary transition-colors">{ing.translated_name || ing.name}</p>
-          {ing.parent_name && <p className="text-[10px] font-bold text-zinc-400 mt-0.5">↳ variety of {ing.parent_name}</p>}
+          <p className="font-extrabold text-zinc-900 dark:text-zinc-100 leading-tight group-hover:text-primary transition-colors">{ing.translated_name || ing.name}</p>
+          {ing.parent_name && <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 mt-0.5">↳ variety of {ing.parent_name}</p>}
           {ing.tags?.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">
               {ing.tags.slice(0, 3).map((t: any) => (
@@ -439,22 +439,22 @@ export default function LibraryIngredients() {
                   {t.translated_name || t.name}
                 </span>
               ))}
-              {ing.tags.length > 3 && <span className="px-2 py-0.5 text-zinc-400 text-[9px] font-black">+{ing.tags.length - 3}</span>}
+              {ing.tags.length > 3 && <span className="px-2 py-0.5 text-zinc-400 dark:text-zinc-500 text-[9px] font-black">+{ing.tags.length - 3}</span>}
             </div>
           )}
         </div>
       </button>
       <div className="flex items-center justify-end gap-1 px-2 pb-2">
-        <Link to={`/?q=${encodeURIComponent(ing.name)}`} title="Used in recipes" className="w-9 h-9 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+        <Link to={`/?q=${encodeURIComponent(ing.name)}`} title="Used in recipes" className="w-9 h-9 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
           <span className="material-symbols-outlined text-lg">search</span>
         </Link>
-        <button onClick={() => handleOpenModal(ing)} className="w-9 h-9 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+        <button onClick={() => handleOpenModal(ing)} className="w-9 h-9 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
           <span className="material-symbols-outlined text-lg">edit</span>
         </button>
-        <button onClick={() => { setMergingIng(ing); setMergeTargetId(''); setMergeQuery(''); }} title="Merge into another ingredient" className="w-9 h-9 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-primary transition-all">
+        <button onClick={() => { setMergingIng(ing); setMergeTargetId(''); setMergeQuery(''); }} title="Merge into another ingredient" className="w-9 h-9 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
           <span className="material-symbols-outlined text-lg">call_merge</span>
         </button>
-        <button onClick={() => handleDelete(ing.id)} className="w-9 h-9 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-tertiary transition-all">
+        <button onClick={() => handleDelete(ing.id)} className="w-9 h-9 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
           <span className="material-symbols-outlined text-lg">delete</span>
         </button>
       </div>
@@ -496,10 +496,10 @@ export default function LibraryIngredients() {
             <span className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-[16px]" style={{ backgroundColor: catColor || '#71717a' }}>
               <RenderFaIcon name={catIcon || 'FaTag'} />
             </span>
-            <span className="font-black text-zinc-900 text-lg">{catName}</span>
-            <span className="px-2 py-0.5 bg-zinc-100 text-zinc-400 text-[10px] font-bold rounded-full">{matched.length}</span>
+            <span className="font-black text-zinc-900 dark:text-zinc-100 text-lg">{catName}</span>
+            <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 text-[10px] font-bold rounded-full">{matched.length}</span>
           </div>
-          <span className="material-symbols-outlined text-zinc-400 transition-transform group-open/section:rotate-180">expand_more</span>
+          <span className="material-symbols-outlined text-zinc-400 dark:text-zinc-500 transition-transform group-open/section:rotate-180">expand_more</span>
         </summary>
         {viewMode === 'grid' ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-6">
@@ -508,7 +508,7 @@ export default function LibraryIngredients() {
         ) : (
           <div className="overflow-x-auto pb-4">
             <table className="w-full">
-              <tbody className="divide-y divide-zinc-50">
+              <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">
                 {matched.map(renderIngredientRow)}
               </tbody>
             </table>
@@ -524,7 +524,7 @@ export default function LibraryIngredients() {
           <div className="flex justify-between items-end mb-10">
             <div>
               <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">The Atelier Management</p>
-              <h1 className="text-6xl font-black text-zinc-900 tracking-tight leading-none">Ingredients</h1>
+              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">Ingredients</h1>
             </div>
             <button
               onClick={() => handleOpenModal()}
@@ -537,21 +537,21 @@ export default function LibraryIngredients() {
 
           <div className="flex flex-wrap items-center gap-4 mb-6">
             <div className="relative flex-1 min-w-[220px] max-w-sm">
-              <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 text-[18px]">search</span>
+              <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-[18px]">search</span>
               <input
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search ingredients…"
-                className="w-full pl-11 pr-4 py-3 bg-white rounded-full border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
+                className="w-full pl-11 pr-4 py-3 bg-white dark:bg-zinc-900 rounded-full border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
               />
             </div>
-            <div className="flex items-center gap-1 bg-white rounded-full border border-zinc-200 p-1 shrink-0">
+            <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 rounded-full border border-zinc-200 dark:border-zinc-700 p-1 shrink-0">
               <button
                 type="button"
                 onClick={() => setViewMode('grid')}
                 title="Grid view"
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${viewMode === 'grid' ? 'bg-primary text-white' : 'text-zinc-400 hover:text-zinc-600'}`}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${viewMode === 'grid' ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
               >
                 <span className="material-symbols-outlined text-lg">grid_view</span>
               </button>
@@ -559,7 +559,7 @@ export default function LibraryIngredients() {
                 type="button"
                 onClick={() => setViewMode('list')}
                 title="List view"
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${viewMode === 'list' ? 'bg-primary text-white' : 'text-zinc-400 hover:text-zinc-600'}`}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${viewMode === 'list' ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
               >
                 <span className="material-symbols-outlined text-lg">view_list</span>
               </button>
@@ -570,7 +570,7 @@ export default function LibraryIngredients() {
                   key={t.id}
                   onClick={() => toggleTagFilter(t.id)}
                   className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                    activeTagFilters.includes(t.id) ? 'text-white border-transparent' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'
+                    activeTagFilters.includes(t.id) ? 'text-white border-transparent' : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'
                   }`}
                   style={activeTagFilters.includes(t.id) ? { backgroundColor: t.color || '#3f3f46' } : undefined}
                 >
@@ -580,9 +580,9 @@ export default function LibraryIngredients() {
             </div>
           </div>
 
-          <section className="bg-white rounded-[40px] px-10 py-4 shadow-sm border border-zinc-100 divide-y divide-zinc-100">
+          <section className="bg-white dark:bg-zinc-900 rounded-[40px] px-10 py-4 shadow-sm border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
             {loading ? (
-              <p className="py-20 text-center text-zinc-400 font-medium">Scanning pantry...</p>
+              <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Scanning pantry...</p>
             ) : (
               <>
                 {categories.map(c => categorySection(c.id, c.translated_name || c.name, c.icon, c.color, ingredients.filter(i => i.category_id === c.id)))}
@@ -596,18 +596,18 @@ export default function LibraryIngredients() {
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
            <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
-           <div className="relative bg-white w-full max-w-2xl rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
-              <h2 className="text-3xl font-black text-zinc-900 mb-8">{editingIng ? 'Edit Ingredient' : 'New Ingredient SKU'}</h2>
+           <div className="relative bg-white dark:bg-zinc-900 w-full max-w-2xl rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
+              <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{editingIng ? 'Edit Ingredient' : 'New Ingredient SKU'}</h2>
               <form onSubmit={handleSave} className="space-y-6">
                  <div>
-                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Name (Native)</label>
-                   <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Maldon Sea Salt" className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all" />
+                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Name (Native)</label>
+                   <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Maldon Sea Salt" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
                  </div>
 
                  {/* Translations Section */}
-                 <div className="bg-zinc-50/50 p-6 rounded-3xl border border-zinc-100">
+                 <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
                     <div className="flex justify-between items-center mb-4">
-                       <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Global Translations</label>
+                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">Global Translations</label>
                        <button type="button" onClick={addTranslation} className="text-[10px] font-black text-primary uppercase flex items-center gap-1 hover:underline">
                           <span className="material-symbols-outlined text-[14px]">add</span> Add Lang
                        </button>
@@ -616,22 +616,22 @@ export default function LibraryIngredients() {
                     <div className="space-y-3">
                        {translations.map((t, i) => (
                           <div key={i} className="flex gap-2 items-center">
-                             <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold text-center uppercase" />
-                             <input type="text" placeholder="Translated name" value={t.text} onChange={(e) => handleTranslationChange(i, 'text', e.target.value)} className="flex-1 px-4 py-2 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium" />
-                             <button type="button" onClick={() => removeTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-red-500 transition-colors">
+                             <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold text-center uppercase" />
+                             <input type="text" placeholder="Translated name" value={t.text} onChange={(e) => handleTranslationChange(i, 'text', e.target.value)} className="flex-1 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium" />
+                             <button type="button" onClick={() => removeTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-colors">
                                 <span className="material-symbols-outlined">close</span>
                              </button>
                           </div>
                        ))}
                        {translations.length === 0 && (
-                          <p className="text-center text-xs text-zinc-400 py-2">No translations added. Provide multiple languages to standardize your database.</p>
+                          <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-2">No translations added. Provide multiple languages to standardize your database.</p>
                        )}
                     </div>
                  </div>
 
                  <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Category</label>
+                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Category</label>
                       {/* Not `required` — a stored categoryId that no longer matches any
                           currently-loaded category (a deleted/merged category, or this
                           modal opening before categories finish loading) makes a required
@@ -641,21 +641,21 @@ export default function LibraryIngredients() {
                           has a fallback for a missing categoryId (defaults to the first
                           loaded category, or alerts clearly); that fallback can only run
                           if the browser lets the submit through in the first place. */}
-                      <select value={form.categoryId} onChange={e => setForm({...form, categoryId: e.target.value})} className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all appearance-none cursor-pointer">
+                      <select value={form.categoryId} onChange={e => setForm({...form, categoryId: e.target.value})} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all appearance-none cursor-pointer">
                         {!categories.some(c => c.id === form.categoryId) && <option value={form.categoryId}>Loading…</option>}
                         {categories.map(c => <option key={c.id} value={c.id}>{c.translated_name || c.name}</option>)}
                       </select>
                     </div>
                     <div className="col-span-2">
-                       <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Select Icon</label>
-                       <div className="grid grid-cols-8 gap-2 bg-zinc-50 p-4 rounded-2xl">
+                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Select Icon</label>
+                       <div className="grid grid-cols-8 gap-2 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
                           {INGREDIENT_ICONS.map(ic => (
                             <button
                               key={ic}
                               type="button"
                               title={ic}
                               onClick={() => setForm({...form, icon: ic})}
-                              className={`w-full aspect-square rounded-xl flex items-center justify-center transition-all ${form.icon === ic ? 'bg-primary text-white shadow-md shadow-primary/30 scale-105' : 'bg-white border border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:border-zinc-300'}`}
+                              className={`w-full aspect-square rounded-xl flex items-center justify-center transition-all ${form.icon === ic ? 'bg-primary text-white shadow-md shadow-primary/30 scale-105' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'}`}
                             >
                               <RenderFaIcon name={ic} className="text-[20px]" />
                             </button>
@@ -665,13 +665,13 @@ export default function LibraryIngredients() {
                  </div>
 
                  <div>
-                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Nutrition / Notes</label>
-                   <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="High protein, locally sourced..." className="w-full h-24 px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium transition-all" />
+                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Nutrition / Notes</label>
+                   <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="High protein, locally sourced..." className="w-full h-24 px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium transition-all" />
                  </div>
 
                  <div>
-                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Nutrition (per 100g)</label>
-                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 bg-zinc-50 p-4 rounded-2xl">
+                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Nutrition (per 100g)</label>
+                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
                      {[
                        { key: 'caloriesKcal', label: 'Kcal' },
                        { key: 'proteinG', label: 'Protein (g)' },
@@ -682,12 +682,12 @@ export default function LibraryIngredients() {
                        { key: 'sodiumMg', label: 'Sodium (mg)' },
                      ].map(f => (
                        <label key={f.key}>
-                         <span className="block text-[9px] font-bold text-zinc-400 uppercase mb-1">{f.label}</span>
+                         <span className="block text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase mb-1">{f.label}</span>
                          <input
                            type="number" step="any" min="0"
                            value={(form.nutrition as any)[f.key]}
                            onChange={e => setForm({ ...form, nutrition: { ...form.nutrition, [f.key]: e.target.value } })}
-                           className="w-full px-3 py-2 bg-white rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
+                           className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
                          />
                        </label>
                      ))}
@@ -695,15 +695,15 @@ export default function LibraryIngredients() {
                  </div>
 
                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Reference Photos</label>
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Reference Photos</label>
                     <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({...form, imageUrls: urls})} />
                  </div>
 
                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">
-                      Seasonality {form.seasonalMonths.length === 0 && <span className="normal-case font-medium text-zinc-300">— no data (won't affect the gallery's seasonality filter)</span>}
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">
+                      Seasonality {form.seasonalMonths.length === 0 && <span className="normal-case font-medium text-zinc-300 dark:text-zinc-600">— no data (won't affect the gallery's seasonality filter)</span>}
                     </label>
-                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 bg-zinc-50 p-4 rounded-2xl">
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
                       {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((label, i) => {
                         const month = i + 1;
                         const active = form.seasonalMonths.includes(month);
@@ -718,7 +718,7 @@ export default function LibraryIngredients() {
                                 : [...form.seasonalMonths, month].sort((a, b) => a - b),
                             })}
                             className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                              active ? 'bg-primary text-white shadow-md shadow-primary/30' : 'bg-white border border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:border-zinc-300'
+                              active ? 'bg-primary text-white shadow-md shadow-primary/30' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
                             }`}
                           >
                             {label}
@@ -729,13 +729,13 @@ export default function LibraryIngredients() {
                  </div>
 
                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Synonyms</label>
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Synonyms</label>
                     <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
                  </div>
 
                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">
-                      Variety of… {!form.parentIngredientId && <span className="normal-case font-medium text-zinc-300">— optional, e.g. file "Red Apple" under "Apple"</span>}
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">
+                      Variety of… {!form.parentIngredientId && <span className="normal-case font-medium text-zinc-300 dark:text-zinc-600">— optional, e.g. file "Red Apple" under "Apple"</span>}
                     </label>
                     <div className="relative">
                       <input
@@ -744,10 +744,10 @@ export default function LibraryIngredients() {
                         onChange={e => { setParentQuery(e.target.value); setForm({ ...form, parentIngredientId: null }); }}
                         placeholder="Search for a base ingredient…"
                         autoComplete="off"
-                        className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold"
+                        className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold"
                       />
                       {parentQuery.trim() && !form.parentIngredientId && (
-                        <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white rounded-2xl shadow-lg border border-zinc-100">
+                        <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white dark:bg-zinc-900 rounded-2xl shadow-lg border border-zinc-100 dark:border-zinc-800">
                           {ingredients
                             .filter(i => i.id !== editingIng?.id)
                             .filter(i => (i.translated_name || i.name).toLowerCase().includes(parentQuery.trim().toLowerCase()))
@@ -757,7 +757,7 @@ export default function LibraryIngredients() {
                                 key={i.id}
                                 type="button"
                                 onClick={() => { setForm({ ...form, parentIngredientId: i.id }); setParentQuery(i.translated_name || i.name); }}
-                                className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-50 first:rounded-t-2xl last:rounded-b-2xl"
+                                className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900 first:rounded-t-2xl last:rounded-b-2xl"
                               >
                                 {i.translated_name || i.name}
                               </button>
@@ -768,7 +768,7 @@ export default function LibraryIngredients() {
                         <button
                           type="button"
                           onClick={() => { setForm({ ...form, parentIngredientId: null }); setParentQuery(''); }}
-                          className="mt-2 flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-red-500"
+                          className="mt-2 flex items-center gap-1 text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-red-500"
                         >
                           <span className="material-symbols-outlined text-sm">close</span>
                           Clear
@@ -778,12 +778,12 @@ export default function LibraryIngredients() {
                  </div>
 
                  <div>
-                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Tags</label>
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Tags</label>
                     <TagPicker by="id" value={form.tagIds} onChange={tagIds => setForm({...form, tagIds})} />
                  </div>
 
-                 <div className="flex gap-4 pt-4 sticky bottom-0 bg-white pb-2">
-                    <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">Cancel</button>
+                 <div className="flex gap-4 pt-4 sticky bottom-0 bg-white dark:bg-zinc-900 pb-2">
+                    <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
                     <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">
                       {editingIng ? 'Update Catalog' : 'Add to Catalog'}
                     </button>
@@ -797,30 +797,30 @@ export default function LibraryIngredients() {
       {showCategoryModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
            <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowCategoryModal(false)} />
-           <div className="relative bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-              <h2 className="text-3xl font-black text-zinc-900 mb-8">{editingCat ? 'Edit Category' : 'New Category'}</h2>
+           <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
+              <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{editingCat ? 'Edit Category' : 'New Category'}</h2>
               <form onSubmit={handleSaveCat} className="space-y-6">
                  <div>
-                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Category Name</label>
-                   <input type="text" required value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} placeholder="e.g. Dairy / Formaggi" className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all" />
+                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Category Name</label>
+                   <input type="text" required value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} placeholder="e.g. Dairy / Formaggi" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
                  </div>
                  <div>
-                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Color</label>
+                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Color</label>
                    <div className="flex items-center gap-3">
-                     <input type="color" value={catForm.color} onChange={e => setCatForm({...catForm, color: e.target.value})} className="w-14 h-14 rounded-2xl border-none cursor-pointer bg-zinc-50" />
-                     <span className="text-sm font-mono text-zinc-500">{catForm.color}</span>
+                     <input type="color" value={catForm.color} onChange={e => setCatForm({...catForm, color: e.target.value})} className="w-14 h-14 rounded-2xl border-none cursor-pointer bg-zinc-50 dark:bg-zinc-900" />
+                     <span className="text-sm font-mono text-zinc-500 dark:text-zinc-400">{catForm.color}</span>
                    </div>
                  </div>
                  <div>
-                   <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Visual Icon</label>
-                   <div className="grid grid-cols-8 gap-2 bg-zinc-50 p-4 rounded-2xl">
+                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Visual Icon</label>
+                   <div className="grid grid-cols-8 gap-2 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
                       {INGREDIENT_ICONS.map(ic => (
                         <button
                           key={ic}
                           type="button"
                           title={ic}
                           onClick={() => setCatForm({...catForm, icon: ic})}
-                          className={`w-full aspect-square rounded-xl flex items-center justify-center transition-all ${catForm.icon === ic ? 'text-white shadow-md scale-105' : 'bg-white border border-zinc-200 text-zinc-500 hover:bg-zinc-100 hover:border-zinc-300'}`}
+                          className={`w-full aspect-square rounded-xl flex items-center justify-center transition-all ${catForm.icon === ic ? 'text-white shadow-md scale-105' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'}`}
                           style={catForm.icon === ic ? { backgroundColor: catForm.color } : undefined}
                         >
                           <RenderFaIcon name={ic} className="text-[20px]" />
@@ -830,9 +830,9 @@ export default function LibraryIngredients() {
                  </div>
 
                  {/* Translations Section */}
-                 <div className="bg-zinc-50/50 p-6 rounded-3xl border border-zinc-100">
+                 <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
                     <div className="flex justify-between items-center mb-4">
-                       <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Translations</label>
+                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">Translations</label>
                        <button type="button" onClick={addCatTranslation} className="text-[10px] font-black text-primary uppercase flex items-center gap-1 hover:underline">
                           <span className="material-symbols-outlined text-[14px]">add</span> Add Lang
                        </button>
@@ -840,15 +840,15 @@ export default function LibraryIngredients() {
                     <div className="space-y-3">
                        {catTranslations.map((t, i) => (
                           <div key={i} className="flex gap-2 items-center">
-                             <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleCatTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold text-center uppercase" />
-                             <input type="text" placeholder="Translated name" value={t.name} onChange={(e) => handleCatTranslationChange(i, 'name', e.target.value)} className="flex-1 px-4 py-2 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium" />
-                             <button type="button" onClick={() => removeCatTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 hover:text-red-500 transition-colors">
+                             <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleCatTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold text-center uppercase" />
+                             <input type="text" placeholder="Translated name" value={t.name} onChange={(e) => handleCatTranslationChange(i, 'name', e.target.value)} className="flex-1 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium" />
+                             <button type="button" onClick={() => removeCatTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-colors">
                                 <span className="material-symbols-outlined">close</span>
                              </button>
                           </div>
                        ))}
                        {catTranslations.length === 0 && (
-                          <p className="text-center text-xs text-zinc-400 py-2">No translations added.</p>
+                          <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-2">No translations added.</p>
                        )}
                     </div>
                  </div>
@@ -859,7 +859,7 @@ export default function LibraryIngredients() {
                            <span className="material-symbols-outlined text-[24px]">delete</span>
                         </button>
                     )}
-                    <button type="button" onClick={() => setShowCategoryModal(false)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">Cancel</button>
+                    <button type="button" onClick={() => setShowCategoryModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
                     <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">
                       {editingCat ? 'Update' : 'Create'}
                     </button>
@@ -878,7 +878,7 @@ export default function LibraryIngredients() {
             <p className="text-center text-white font-bold mt-4">{previewImage.name}</p>
             <button
               onClick={() => setPreviewImage(null)}
-              className="absolute -top-4 -right-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center text-zinc-600 hover:text-zinc-900"
+              className="absolute -top-4 -right-4 w-10 h-10 bg-white dark:bg-zinc-900 rounded-full shadow-lg flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
             >
               <span className="material-symbols-outlined">close</span>
             </button>
@@ -890,15 +890,15 @@ export default function LibraryIngredients() {
       {mergingIng && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setMergingIng(null)} />
-          <div className="relative bg-white w-full max-w-md rounded-[32px] p-8 shadow-2xl">
-            <h2 className="text-2xl font-black text-zinc-900 mb-2">Merge Ingredient</h2>
-            <p className="text-sm text-zinc-500 mb-6">
-              Fold <strong className="text-zinc-700">{mergingIng.translated_name || mergingIng.name}</strong> into
+          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[32px] p-8 shadow-2xl">
+            <h2 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 mb-2">Merge Ingredient</h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">
+              Fold <strong className="text-zinc-700 dark:text-zinc-300">{mergingIng.translated_name || mergingIng.name}</strong> into
               another ingredient. Every recipe using it is repointed automatically — nothing is lost, and{' '}
-              <strong className="text-zinc-700">{mergingIng.translated_name || mergingIng.name}</strong> is removed
+              <strong className="text-zinc-700 dark:text-zinc-300">{mergingIng.translated_name || mergingIng.name}</strong> is removed
               from the catalog. This can't be undone.
             </p>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Merge into</label>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Merge into</label>
             <div className="relative mb-6">
               <input
                 type="text"
@@ -906,10 +906,10 @@ export default function LibraryIngredients() {
                 onChange={e => { setMergeQuery(e.target.value); setMergeTargetId(''); }}
                 placeholder="Search for an ingredient…"
                 autoComplete="off"
-                className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold"
+                className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold"
               />
               {mergeQuery.trim() && !mergeTargetId && (
-                <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white rounded-2xl shadow-lg border border-zinc-100">
+                <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white dark:bg-zinc-900 rounded-2xl shadow-lg border border-zinc-100 dark:border-zinc-800">
                   {ingredients
                     .filter(i => i.id !== mergingIng.id)
                     .filter(i => (i.translated_name || i.name).toLowerCase().includes(mergeQuery.trim().toLowerCase()))
@@ -919,7 +919,7 @@ export default function LibraryIngredients() {
                         key={i.id}
                         type="button"
                         onClick={() => { setMergeTargetId(i.id); setMergeQuery(i.translated_name || i.name); }}
-                        className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 hover:bg-zinc-50 first:rounded-t-2xl last:rounded-b-2xl"
+                        className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900 first:rounded-t-2xl last:rounded-b-2xl"
                       >
                         {i.translated_name || i.name}
                       </button>
@@ -927,7 +927,7 @@ export default function LibraryIngredients() {
                   {ingredients
                     .filter(i => i.id !== mergingIng.id)
                     .filter(i => (i.translated_name || i.name).toLowerCase().includes(mergeQuery.trim().toLowerCase())).length === 0 && (
-                    <p className="px-5 py-3 text-sm text-zinc-400 italic">No matching ingredients.</p>
+                    <p className="px-5 py-3 text-sm text-zinc-400 dark:text-zinc-500 italic">No matching ingredients.</p>
                   )}
                 </div>
               )}
@@ -936,7 +936,7 @@ export default function LibraryIngredients() {
               <button
                 type="button"
                 onClick={() => setMergingIng(null)}
-                className="flex-1 py-3 rounded-2xl bg-zinc-100 text-zinc-600 font-bold hover:bg-zinc-200 transition-all"
+                className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
               >
                 Cancel
               </button>
@@ -997,8 +997,8 @@ function IngredientDetailModal({
   return (
     <div className="fixed inset-0 z-[115] flex items-center justify-center p-6">
       <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white w-full max-w-2xl rounded-[40px] shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
-        <div className="relative w-full aspect-[16/9] bg-zinc-100">
+      <div className="relative bg-white dark:bg-zinc-900 w-full max-w-2xl rounded-[40px] shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
+        <div className="relative w-full aspect-[16/9] bg-zinc-100 dark:bg-zinc-800">
           {ing.image_urls?.[0] ? (
             <ResolvedImage
               src={ing.image_urls[0]}
@@ -1010,7 +1010,7 @@ function IngredientDetailModal({
               <RenderFaIcon name={ing.icon || 'FaEgg'} />
             </div>
           )}
-          <button onClick={onClose} className="absolute top-4 right-4 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center text-zinc-600 hover:text-zinc-900">
+          <button onClick={onClose} className="absolute top-4 right-4 w-10 h-10 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100">
             <span className="material-symbols-outlined">close</span>
           </button>
           {ing.image_urls?.length > 1 && (
@@ -1028,25 +1028,25 @@ function IngredientDetailModal({
               <span className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[11px] shrink-0" style={{ backgroundColor: ing.category_color || '#71717a' }}>
                 <RenderFaIcon name={ing.icon || 'FaEgg'} />
               </span>
-              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{ing.translated_category_name || ing.category_name || 'Uncategorized'}</span>
+              <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{ing.translated_category_name || ing.category_name || 'Uncategorized'}</span>
             </div>
-            <h2 className="text-3xl font-black text-zinc-900">{displayName}</h2>
+            <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100">{displayName}</h2>
             {ing.parent_name && (
               <button onClick={() => onOpenVariety(ing.parent_ingredient_id)} className="text-sm font-bold text-primary hover:underline mt-1">
                 ↳ variety of {ing.parent_name}
               </button>
             )}
-            {ing.description && <p className="text-sm text-zinc-500 mt-3 leading-relaxed">{ing.description}</p>}
+            {ing.description && <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-3 leading-relaxed">{ing.description}</p>}
           </div>
 
           {nutritionRows.length > 0 && (
             <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Nutrition (per 100g)</p>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 bg-zinc-50 p-4 rounded-2xl">
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Nutrition (per 100g)</p>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
                 {nutritionRows.map(([label, value, unit]) => (
                   <div key={label}>
-                    <p className="text-[9px] font-bold text-zinc-400 uppercase">{label}</p>
-                    <p className="text-sm font-black text-zinc-900">{String(value)}<span className="text-[10px] font-bold text-zinc-400 ml-0.5">{unit}</span></p>
+                    <p className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase">{label}</p>
+                    <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{String(value)}<span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 ml-0.5">{unit}</span></p>
                   </div>
                 ))}
               </div>
@@ -1055,12 +1055,12 @@ function IngredientDetailModal({
 
           {ing.seasonal_months?.length > 0 && (
             <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Seasonality</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Seasonality</p>
               <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
                 {MONTH_LABELS.map((label, i) => {
                   const active = ing.seasonal_months.includes(i + 1);
                   return (
-                    <div key={label} className={`text-center py-2 rounded-lg text-[10px] font-bold ${active ? 'bg-primary text-white' : 'bg-zinc-50 text-zinc-300'}`}>
+                    <div key={label} className={`text-center py-2 rounded-lg text-[10px] font-bold ${active ? 'bg-primary text-white' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-300 dark:text-zinc-600'}`}>
                       {label}
                     </div>
                   );
@@ -1071,10 +1071,10 @@ function IngredientDetailModal({
 
           {ing.synonyms?.length > 0 && (
             <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Synonyms</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Synonyms</p>
               <div className="flex flex-wrap gap-1.5">
                 {ing.synonyms.map((s: string, i: number) => (
-                  <span key={i} className="px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-100 text-zinc-600">{s}</span>
+                  <span key={i} className="px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">{s}</span>
                 ))}
               </div>
             </div>
@@ -1082,10 +1082,10 @@ function IngredientDetailModal({
 
           {ing.translations?.length > 0 && (
             <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Translations</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Translations</p>
               <div className="flex flex-wrap gap-1.5">
                 {ing.translations.map((t: any, i: number) => (
-                  <span key={i} className="px-2 py-0.5 bg-zinc-100 text-zinc-500 text-[9px] font-black uppercase rounded border border-zinc-200">{t.lang}: {t.text}</span>
+                  <span key={i} className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[9px] font-black uppercase rounded border border-zinc-200 dark:border-zinc-700">{t.lang}: {t.text}</span>
                 ))}
               </div>
             </div>
@@ -1093,7 +1093,7 @@ function IngredientDetailModal({
 
           {ing.tags?.length > 0 && (
             <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Tags</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Tags</p>
               <div className="flex flex-wrap gap-1.5">
                 {ing.tags.map((t: any) => (
                   <span key={t.id} className="px-3 py-1.5 text-white text-xs font-bold rounded-full" style={{ backgroundColor: t.color || '#3f3f46' }}>
@@ -1107,12 +1107,12 @@ function IngredientDetailModal({
           <div className="flex gap-3 pt-4">
             <Link
               to={`/?q=${encodeURIComponent(ing.name)}`}
-              className="flex-1 py-3 rounded-2xl bg-zinc-100 text-zinc-600 font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-2"
             >
               <span className="material-symbols-outlined text-lg">search</span>
               Recipes
             </Link>
-            <button type="button" onClick={onMerge} className="flex-1 py-3 rounded-2xl bg-zinc-100 text-zinc-600 font-bold hover:bg-zinc-200 transition-all flex items-center justify-center gap-2">
+            <button type="button" onClick={onMerge} className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-2">
               <span className="material-symbols-outlined text-lg">call_merge</span>
               Merge
             </button>

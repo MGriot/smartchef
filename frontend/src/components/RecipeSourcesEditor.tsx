@@ -44,11 +44,11 @@ export default function RecipeSourcesEditor({ sources, onChange }: RecipeSources
     <div>
       <div className="flex flex-wrap gap-2 mb-3 items-end">
         <div>
-          <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">Type</label>
+          <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">Type</label>
           <select
             value={draftType}
             onChange={e => setDraftType(e.target.value as RecipeSourceEntry['type'])}
-            className="px-3 py-2.5 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
+            className="px-3 py-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
           >
             {(Object.keys(SOURCE_TYPE_META) as RecipeSourceEntry['type'][]).map(t => (
               <option key={t} value={t}>{SOURCE_TYPE_META[t].label}</option>
@@ -56,22 +56,22 @@ export default function RecipeSourcesEditor({ sources, onChange }: RecipeSources
           </select>
         </div>
         <div className="flex-1 min-w-[140px]">
-          <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">Label</label>
+          <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">Label</label>
           <input
             type="text" value={draftLabel}
             onChange={e => setDraftLabel(e.target.value)}
             placeholder={draftType === 'book' ? 'e.g. The Flavor Bible, p. 214' : 'e.g. Original recipe'}
-            className="w-full px-3 py-2.5 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
+            className="w-full px-3 py-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
           />
         </div>
         <div className="flex-1 min-w-[140px]">
-          <label className="block text-[9px] uppercase font-bold text-zinc-400 mb-1">URL (optional for books)</label>
+          <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">URL (optional for books)</label>
           <input
             type="url" value={draftUrl}
             onChange={e => setDraftUrl(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSource(); } }}
             placeholder="https://…"
-            className="w-full px-3 py-2.5 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
+            className="w-full px-3 py-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
           />
         </div>
         <button
@@ -87,11 +87,11 @@ export default function RecipeSourcesEditor({ sources, onChange }: RecipeSources
           {sources.map((s, idx) => {
             const meta = SOURCE_TYPE_META[s.type] || SOURCE_TYPE_META.other;
             return (
-              <div key={idx} className="flex items-center gap-3 px-4 py-2.5 bg-zinc-50 rounded-xl border border-zinc-100">
+              <div key={idx} className="flex items-center gap-3 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
                 <span className="material-symbols-outlined text-primary text-lg shrink-0">{meta.icon}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-zinc-700 truncate">{s.label || s.url || meta.label}</p>
-                  {s.url && s.label && <p className="text-xs text-zinc-400 truncate">{s.url}</p>}
+                  <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300 truncate">{s.label || s.url || meta.label}</p>
+                  {s.url && s.label && <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">{s.url}</p>}
                 </div>
                 <button
                   type="button" onClick={() => removeSource(idx)}

@@ -16,7 +16,7 @@ function ImageThumbnail({ url, onRemove }: { url: string; onRemove: () => void }
   const src = useResolvedImageSrc(url);
   if (!src) return null; // still resolving a local path — nothing to show yet
   return (
-    <div className="relative group w-16 h-16 rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50">
+    <div className="relative group w-16 h-16 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900">
       <img src={src} alt="" className="w-full h-full object-cover" onError={e => (e.currentTarget.style.opacity = '0.2')} />
       <button
         type="button"
@@ -92,7 +92,7 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addUrl(); } }}
           placeholder="https://…"
-          className="flex-1 px-4 py-2.5 bg-white rounded-xl border border-zinc-200 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
+          className="flex-1 px-4 py-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
         />
         <button
           type="button"
@@ -113,7 +113,7 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="shrink-0 flex items-center gap-1.5 px-4 rounded-xl bg-zinc-100 text-zinc-600 text-sm font-bold hover:bg-zinc-200 transition-colors disabled:opacity-50"
+          className="shrink-0 flex items-center gap-1.5 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-sm font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-sm">{uploading ? 'sync' : 'upload'}</span>
           {uploading ? 'Uploading…' : 'Upload'}

@@ -57,9 +57,9 @@ export default function LibrarySeasonality() {
     <AppLayout librarySection="seasonality">
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-3xl font-black text-zinc-900">{t('nav.seasonality')}</h1>
+          <h1 className="text-3xl font-black text-zinc-900 dark:text-zinc-100">{t('nav.seasonality')}</h1>
         </div>
-        <p className="text-sm text-zinc-400 font-medium mb-8">{t('seasonality.hint')}</p>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mb-8">{t('seasonality.hint')}</p>
 
         {/* Month selector */}
         <div className="flex flex-wrap gap-2 mb-8">
@@ -71,7 +71,7 @@ export default function LibrarySeasonality() {
                 key={key}
                 onClick={() => setSelectedMonth(month)}
                 className={`px-4 py-2.5 rounded-full text-sm font-bold capitalize transition-all ${
-                  active ? 'bg-primary text-white shadow-sm shadow-primary/20' : 'bg-white border border-zinc-200 text-zinc-500 hover:border-zinc-300'
+                  active ? 'bg-primary text-white shadow-sm shadow-primary/20' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600'
                 }`}
               >
                 {monthLabels[i]}
@@ -81,23 +81,23 @@ export default function LibrarySeasonality() {
         </div>
 
         {loading ? (
-          <p className="text-sm text-zinc-400 font-medium">{t('common.loading')}</p>
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('common.loading')}</p>
         ) : withSeasonData.length === 0 ? (
-          <p className="text-sm text-zinc-400 font-medium">{t('seasonality.noData')}</p>
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('seasonality.noData')}</p>
         ) : (
           <>
             <div className="mb-10">
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">
                 {t('seasonality.inSeason', { month: monthLabels[selectedMonth - 1] })} — {inSeasonNow.length}
               </p>
               {inSeasonNow.length === 0 ? (
-                <p className="text-sm text-zinc-300 font-medium">{t('seasonality.noneInSeason')}</p>
+                <p className="text-sm text-zinc-300 dark:text-zinc-600 font-medium">{t('seasonality.noneInSeason')}</p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {inSeasonNow.map(ing => (
                     <div key={ing.id} className="flex items-center gap-3 px-4 py-3 bg-primary/5 border border-primary/15 rounded-2xl">
                       <RenderFaIcon name={ing.icon || 'FaEgg'} className="text-primary text-lg shrink-0" />
-                      <span className="text-sm font-bold text-zinc-800 truncate">{ing.translated_name || ing.name}</span>
+                      <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 truncate">{ing.translated_name || ing.name}</span>
                     </div>
                   ))}
                 </div>
@@ -106,12 +106,12 @@ export default function LibrarySeasonality() {
 
             {outOfSeason.length > 0 && (
               <div>
-                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">
+                <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">
                   {t('seasonality.outOfSeason')} — {outOfSeason.length}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {outOfSeason.map(ing => (
-                    <div key={ing.id} className="flex items-center gap-2 px-3 py-1.5 bg-zinc-50 rounded-full text-xs font-medium text-zinc-400">
+                    <div key={ing.id} className="flex items-center gap-2 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 rounded-full text-xs font-medium text-zinc-400 dark:text-zinc-500">
                       <RenderFaIcon name={ing.icon || 'FaEgg'} className="text-[13px]" />
                       {ing.translated_name || ing.name}
                     </div>

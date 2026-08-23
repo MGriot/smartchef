@@ -238,8 +238,8 @@ export default function RecipeImport() {
     <AppLayout>
       <div className="p-6 sm:p-12 max-w-6xl mx-auto">
           <div className="mb-12">
-            <h1 className="text-4xl sm:text-6xl font-black text-zinc-900 tracking-tighter mb-4">{t('import.title')}</h1>
-            <p className="text-zinc-500 text-lg max-w-xl leading-relaxed">
+            <h1 className="text-4xl sm:text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter mb-4">{t('import.title')}</h1>
+            <p className="text-zinc-500 dark:text-zinc-400 text-lg max-w-xl leading-relaxed">
               {t('import.subtitle')}
             </p>
           </div>
@@ -247,33 +247,33 @@ export default function RecipeImport() {
           <div className="grid grid-cols-12 gap-10">
             {/* Input Form */}
             <div className="col-span-12 lg:col-span-7">
-              <div className="bg-white rounded-[40px] shadow-sm border border-zinc-100 overflow-hidden">
-                <div className="p-8 border-b border-zinc-50 flex justify-between items-center">
+              <div className="bg-white dark:bg-zinc-900 rounded-[40px] shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+                <div className="p-8 border-b border-zinc-50 dark:border-zinc-800 flex justify-between items-center">
                    <h3 className="text-[10px] font-black text-primary tracking-[0.2em] uppercase">{t('import.sourceMaterial')}</h3>
-                   <div className="flex bg-zinc-100 p-1 rounded-xl">
+                   <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
                       <button
                         onClick={() => setSourceType('url')}
-                        className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'url' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400'}`}
+                        className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'url' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
                       >{t('import.url')}</button>
                       <button
                          onClick={() => setSourceType('text')}
-                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'text' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400'}`}
+                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'text' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
                       >{t('import.rawText')}</button>
                       <button
                          onClick={() => setSourceType('file')}
-                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'file' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400'}`}
+                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'file' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
                       >{t('import.importFileTab')}</button>
                    </div>
                 </div>
                 <div className="p-10">
                   {sourceType === 'file' ? (
                     <>
-                      <p className="text-xs text-zinc-400 font-medium mb-4">
-                        {t('import.fileHintPrefix')} <code className="bg-zinc-100 rounded px-1.5 py-0.5">.smartchef.json</code> {t('import.fileHintSuffix')}
+                      <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mb-4">
+                        {t('import.fileHintPrefix')} <code className="bg-zinc-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">.smartchef.json</code> {t('import.fileHintSuffix')}
                       </p>
-                      <label className="flex flex-col items-center justify-center gap-3 w-full h-48 bg-zinc-50/50 rounded-3xl border-2 border-dashed border-zinc-200 cursor-pointer hover:border-primary/40 transition-colors">
-                        <span className="material-symbols-outlined text-3xl text-zinc-300">upload_file</span>
-                        <span className="text-sm font-bold text-zinc-500">
+                      <label className="flex flex-col items-center justify-center gap-3 w-full h-48 bg-zinc-50/50 dark:bg-zinc-900/50 rounded-3xl border-2 border-dashed border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-primary/40 transition-colors">
+                        <span className="material-symbols-outlined text-3xl text-zinc-300 dark:text-zinc-600">upload_file</span>
+                        <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400">
                           {selectedFile ? selectedFile.name : t('import.chooseFile')}
                         </span>
                         <input
@@ -299,7 +299,7 @@ export default function RecipeImport() {
                         </div>
                       )}
                       {fileResult && (
-                        <div className="mt-8 bg-white rounded-3xl border border-zinc-100 p-8">
+                        <div className="mt-8 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800 p-8">
                           <div className="flex items-center gap-2 mb-4 text-primary">
                             <span className="material-symbols-outlined">check_circle</span>
                             <p className="font-black">
@@ -308,7 +308,7 @@ export default function RecipeImport() {
                           </div>
                           {fileResult.matchedIngredients.length > 0 && (
                             <>
-                              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
+                              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">
                                 {t('import.ingredientsCount', { count: fileResult.matchedIngredients.length })}
                               </p>
                               <div className="flex flex-wrap gap-2 mb-4">
@@ -316,7 +316,7 @@ export default function RecipeImport() {
                                   <span
                                     key={i}
                                     title={ing.isNew ? t('import.newIngredientCreated') : t('import.matchedPercent', { percent: Math.round(ing.confidence * 100) })}
-                                    className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${ing.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'}`}
+                                    className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${ing.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'}`}
                                   >
                                     {ing.isNew && <span className="material-symbols-outlined text-[12px]">fiber_new</span>}
                                     {ing.ingredientName}
@@ -327,7 +327,7 @@ export default function RecipeImport() {
                           )}
                           {fileResult.matchedTools.length > 0 && (
                             <>
-                              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">
+                              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">
                                 {t('import.toolsCount', { count: fileResult.matchedTools.length })}
                               </p>
                               <div className="flex flex-wrap gap-2 mb-4">
@@ -335,7 +335,7 @@ export default function RecipeImport() {
                                   <span
                                     key={i}
                                     title={tool.isNew ? t('import.newToolCreated') : t('import.matchedToExistingTool')}
-                                    className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${tool.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'}`}
+                                    className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${tool.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'}`}
                                   >
                                     {tool.isNew && <span className="material-symbols-outlined text-[12px]">fiber_new</span>}
                                     {tool.toolName}
@@ -347,7 +347,7 @@ export default function RecipeImport() {
                           {fileResult.warnings.length > 0 && (
                             <div className="mb-4 space-y-1.5">
                               {fileResult.warnings.map((w, i) => (
-                                <p key={i} className="text-[11px] text-zinc-400 leading-snug">{w}</p>
+                                <p key={i} className="text-[11px] text-zinc-400 dark:text-zinc-500 leading-snug">{w}</p>
                               ))}
                             </div>
                           )}
@@ -366,19 +366,19 @@ export default function RecipeImport() {
                       value={inputVal}
                       onChange={(e) => setInputVal(e.target.value)}
                       placeholder="https://ricette.giallozafferano.it/..."
-                      className="w-full bg-zinc-50/50 rounded-2xl border-none focus:ring-2 focus:ring-primary/10 text-zinc-700 font-medium p-6"
+                      className="w-full bg-zinc-50/50 dark:bg-zinc-900/50 rounded-2xl border-none focus:ring-2 focus:ring-primary/10 text-zinc-700 dark:text-zinc-300 font-medium p-6"
                     />
                   ) : (
                     <>
                       <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs text-zinc-400 font-medium">
+                        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">
                           {t('import.notSureFormat')}
                         </p>
                         <div className="flex gap-2 shrink-0 ml-4">
                           <button
                             type="button"
                             onClick={copyTemplate}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-100 text-zinc-600 text-[11px] font-bold hover:bg-zinc-200 transition-colors whitespace-nowrap"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[11px] font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors whitespace-nowrap"
                           >
                             <span className="material-symbols-outlined text-[14px]">{templateCopied ? 'check' : 'content_copy'}</span>
                             {templateCopied ? t('import.copied') : t('import.copyTemplate')}
@@ -397,7 +397,7 @@ export default function RecipeImport() {
                         value={inputVal}
                         onChange={(e) => setInputVal(e.target.value)}
                         placeholder={t('import.rawTextPlaceholder')}
-                        className="w-full h-80 bg-zinc-50/50 rounded-3xl border-none focus:ring-2 focus:ring-primary/10 text-zinc-700 font-medium leading-relaxed resize-none p-6 hide-scrollbar"
+                        className="w-full h-80 bg-zinc-50/50 dark:bg-zinc-900/50 rounded-3xl border-none focus:ring-2 focus:ring-primary/10 text-zinc-700 dark:text-zinc-300 font-medium leading-relaxed resize-none p-6 hide-scrollbar"
                       />
                     </>
                   )}
@@ -427,61 +427,61 @@ export default function RecipeImport() {
             {/* Sidebar Stats & Preview */}
             <div className="col-span-12 lg:col-span-5 space-y-8">
                {!result && !parsing && (
-                 <div className="bg-white rounded-[40px] p-8 shadow-sm border border-zinc-100 text-center">
-                    <span className="material-symbols-outlined text-4xl text-zinc-300 mb-3">auto_fix_high</span>
-                    <p className="text-sm text-zinc-400 font-medium">{t('import.pasteToPreview')}</p>
+                 <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
+                    <span className="material-symbols-outlined text-4xl text-zinc-300 dark:text-zinc-600 mb-3">auto_fix_high</span>
+                    <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('import.pasteToPreview')}</p>
                  </div>
                )}
 
                {parsing && (
-                 <div className="bg-white rounded-[40px] p-8 shadow-sm border border-zinc-100 relative overflow-hidden group">
+                 <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 relative overflow-hidden group">
                     <div className="relative z-10 flex flex-col items-center text-center">
-                       <div className="w-16 h-16 rounded-full bg-white shadow-xl flex items-center justify-center mb-6 relative">
+                       <div className="w-16 h-16 rounded-full bg-white dark:bg-zinc-900 shadow-xl flex items-center justify-center mb-6 relative">
                           <span className="material-symbols-outlined text-primary text-3xl animate-pulse">model_training</span>
                           <div className="absolute inset-0 rounded-full border-2 border-primary/20 animate-ping"></div>
                        </div>
-                       <h3 className="text-2xl font-black text-zinc-900 mb-2">{t('import.culinaryAiActive')}</h3>
+                       <h3 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 mb-2">{t('import.culinaryAiActive')}</h3>
                        <p className="text-primary font-bold text-xs tracking-tight">{parseStatusText}</p>
-                       <div className="w-full h-1.5 bg-zinc-100 rounded-full mt-5 overflow-hidden">
+                       <div className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full mt-5 overflow-hidden">
                          <div
                            className="h-full bg-gradient-to-r from-primary to-primary-container rounded-full transition-all duration-500 ease-out"
                            style={{ width: `${parseProgressPct}%` }}
                          />
                        </div>
-                       <p className="text-zinc-400 text-[11px] mt-3 font-bold tabular-nums">{t('import.elapsed', { time: formatElapsed(elapsedMs) })}</p>
-                       <p className="text-zinc-400 text-[11px] mt-2">{t('import.localModelNote')}</p>
+                       <p className="text-zinc-400 dark:text-zinc-500 text-[11px] mt-3 font-bold tabular-nums">{t('import.elapsed', { time: formatElapsed(elapsedMs) })}</p>
+                       <p className="text-zinc-400 dark:text-zinc-500 text-[11px] mt-2">{t('import.localModelNote')}</p>
                     </div>
                  </div>
                )}
 
                {result && (
-                 <div className="bg-white rounded-[40px] overflow-hidden shadow-xl shadow-zinc-200/50 border border-zinc-100">
+                 <div className="bg-white dark:bg-zinc-900 rounded-[40px] overflow-hidden shadow-xl shadow-zinc-200/50 border border-zinc-100 dark:border-zinc-800">
                     <div className="p-8">
-                       <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('import.preview')}</p>
-                       <h4 className="text-2xl font-black text-zinc-900 leading-tight mb-6">{result.title}</h4>
+                       <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('import.preview')}</p>
+                       <h4 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 leading-tight mb-6">{result.title}</h4>
                        <div className="flex gap-8 mb-6">
                           <div>
-                             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('recipeDetail.servings')}</p>
-                             <p className="text-sm font-black text-zinc-900 tracking-tight">{t('import.peopleCount', { count: result.servings })}</p>
+                             <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('recipeDetail.servings')}</p>
+                             <p className="text-sm font-black text-zinc-900 dark:text-zinc-100 tracking-tight">{t('import.peopleCount', { count: result.servings })}</p>
                           </div>
                           {result.prepTimeMin && (
                             <div>
-                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('recipeDetail.prepTime')}</p>
-                               <p className="text-sm font-black text-zinc-900 tracking-tight">{t('import.minsCount', { count: result.prepTimeMin })}</p>
+                               <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('recipeDetail.prepTime')}</p>
+                               <p className="text-sm font-black text-zinc-900 dark:text-zinc-100 tracking-tight">{t('import.minsCount', { count: result.prepTimeMin })}</p>
                             </div>
                           )}
                           {result.restTimeMin && (
                             <div>
-                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('recipeDetail.waitingTime')}</p>
-                               <p className="text-sm font-black text-zinc-900 tracking-tight">{t('import.minsCount', { count: result.restTimeMin })}</p>
+                               <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('recipeDetail.waitingTime')}</p>
+                               <p className="text-sm font-black text-zinc-900 dark:text-zinc-100 tracking-tight">{t('import.minsCount', { count: result.restTimeMin })}</p>
                             </div>
                           )}
                           <div>
-                             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">{t('import.confidence')}</p>
-                             <p className="text-sm font-black text-zinc-900 tracking-tight">{Math.round(result.overallConfidence * 100)}%</p>
+                             <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('import.confidence')}</p>
+                             <p className="text-sm font-black text-zinc-900 dark:text-zinc-100 tracking-tight">{Math.round(result.overallConfidence * 100)}%</p>
                           </div>
                        </div>
-                       <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">
+                       <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">
                          {t('import.ingredientsAndSteps', { ingCount: result.matchedIngredients.length, stepCount: result.steps.length })}
                        </p>
                        <div className="flex flex-wrap gap-2 mb-6">
@@ -489,7 +489,7 @@ export default function RecipeImport() {
                              <span
                                 key={i}
                                 title={ing.isNew ? t('import.newIngredientCreated') : t('import.matchedPercent', { percent: Math.round(ing.confidence * 100) })}
-                                className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${ing.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'}`}
+                                className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${ing.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'}`}
                              >
                                 {ing.isNew && <span className="material-symbols-outlined text-[12px]">fiber_new</span>}
                                 {ing.ingredientName}
@@ -498,7 +498,7 @@ export default function RecipeImport() {
                        </div>
                        {result.matchedTools.length > 0 && (
                          <>
-                           <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">
+                           <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">
                              {t('import.toolsCount', { count: result.matchedTools.length })}
                            </p>
                            <div className="flex flex-wrap gap-2 mb-6">
@@ -506,7 +506,7 @@ export default function RecipeImport() {
                                  <span
                                     key={i}
                                     title={tool.isNew ? t('import.newToolCreated') : t('import.matchedToExistingTool')}
-                                    className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${tool.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 text-zinc-500'}`}
+                                    className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${tool.isNew ? 'bg-amber-50 text-amber-700' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'}`}
                                  >
                                     {tool.isNew && <span className="material-symbols-outlined text-[12px]">fiber_new</span>}
                                     {tool.toolName}
@@ -518,7 +518,7 @@ export default function RecipeImport() {
                        {result.warnings.length > 0 && (
                          <div className="mb-6 space-y-1.5">
                            {result.warnings.map((w, i) => (
-                             <p key={i} className="text-[11px] text-zinc-400 leading-snug">{w}</p>
+                             <p key={i} className="text-[11px] text-zinc-400 dark:text-zinc-500 leading-snug">{w}</p>
                            ))}
                          </div>
                        )}

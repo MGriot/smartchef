@@ -78,11 +78,11 @@ export default function Login({ hasAccount, onAuthenticated }: LoginProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#fafaf5] flex items-center justify-center p-6 font-outfit">
-      <div className="w-full max-w-md bg-white rounded-[40px] shadow-sm border border-zinc-100 p-10">
+    <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center p-6 font-outfit">
+      <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-[40px] shadow-sm border border-zinc-100 dark:border-zinc-800 p-10">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-black text-primary tracking-tight mb-2">SmartChef</h1>
-          <p className="text-sm text-zinc-400 font-medium">
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">
             {hasAccount ? t('login.enterPasswordToContinue') : t('login.setUpInstance')}
           </p>
         </div>
@@ -90,24 +90,24 @@ export default function Login({ hasAccount, onAuthenticated }: LoginProps) {
         {hasAccount ? (
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t('login.username')}</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('login.username')}</label>
               <input
                 type="text"
                 autoFocus
                 autoCapitalize="none"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
                 placeholder={t('login.usernamePlaceholder')}
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t('login.password')}</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('login.password')}</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
                 placeholder="••••••••"
               />
             </div>
@@ -123,39 +123,39 @@ export default function Login({ hasAccount, onAuthenticated }: LoginProps) {
         ) : (
           <form onSubmit={handleSetup} className="space-y-5">
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t('login.yourName')}</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('login.yourName')}</label>
               <input
                 type="text"
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
                 placeholder={t('login.namePlaceholder')}
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t('login.username')}</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('login.username')}</label>
               <input
                 type="text"
                 autoCapitalize="none"
                 value={username}
                 onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
                 placeholder={t('login.usernamePlaceholder')}
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t('login.password')}</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('login.password')}</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
                 placeholder={t('login.atLeastFourChars')}
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">{t('login.avatarOptional')}</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('login.avatarOptional')}</label>
               {AVATAR_PRESETS.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-3">
                   {AVATAR_PRESETS.map((preset) => (
@@ -163,7 +163,7 @@ export default function Login({ hasAccount, onAuthenticated }: LoginProps) {
                       key={preset}
                       type="button"
                       onClick={() => setAvatarUrl(preset)}
-                      className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200'}`}
+                      className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200 dark:hover:ring-zinc-700'}`}
                     >
                       <img src={preset} alt="" className="w-full h-full object-cover" />
                     </button>

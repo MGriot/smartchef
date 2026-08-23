@@ -27,7 +27,7 @@ const NAV_LINKS: { to: string; labelKey: string }[] = [
   { to: '/history', labelKey: 'nav.history' },
 ];
 
-const IDLE_LINK = "flex items-center gap-3 px-4 py-3 text-zinc-500 hover:bg-zinc-50 rounded-xl font-semibold text-sm transition-all group";
+const IDLE_LINK = "flex items-center gap-3 px-4 py-3 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl font-semibold text-sm transition-all group";
 const ACTIVE_LINK = "flex items-center gap-3 px-4 py-3 bg-primary/5 text-primary rounded-xl font-bold text-sm transition-all shadow-sm shadow-primary/5 border border-primary/10";
 
 function LibraryLink({ to, icon, label, active }: { to: string; icon: string; label: string; active: boolean }) {
@@ -71,10 +71,10 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
       : location.pathname === to;
 
   return (
-    <div className="min-h-screen bg-[#fafaf5] text-zinc-900 font-outfit">
+    <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-outfit">
       <OfflineBanner />
       <header
-        className="min-h-[65px] bg-white border-b border-zinc-100 flex items-center justify-between px-8 sticky top-0 z-50"
+        className="min-h-[65px] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between px-8 sticky top-0 z-50"
         style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'max(2rem, env(safe-area-inset-left))', paddingRight: 'max(2rem, env(safe-area-inset-right))' }}
       >
         <div className="flex items-center gap-4 lg:gap-12">
@@ -83,7 +83,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             onClick={() => setMobileMenuOpen((v) => !v)}
             aria-label={t('common.menu')}
             aria-expanded={mobileMenuOpen}
-            className="lg:hidden w-9 h-9 -ml-1.5 flex items-center justify-center rounded-full hover:bg-zinc-100 active:scale-95 transition-all shrink-0"
+            className="lg:hidden w-9 h-9 -ml-1.5 flex items-center justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 active:scale-95 transition-all shrink-0"
           >
             <span className="material-symbols-outlined">{mobileMenuOpen ? 'close' : 'menu'}</span>
           </button>
@@ -96,7 +96,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
                 className={
                   isActive(link.to)
                     ? "text-primary font-bold text-sm border-b-2 border-primary pb-0.5 transition-colors"
-                    : "text-zinc-400 font-medium text-sm hover:text-primary transition-colors"
+                    : "text-zinc-400 dark:text-zinc-500 font-medium text-sm hover:text-primary transition-colors"
                 }
               >
                 {t(link.labelKey)}
@@ -117,7 +117,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             value={i18n.language}
             onChange={(e) => handleLanguageChange(e.target.value)}
             aria-label={t('common.language')}
-            className="text-xs font-bold text-zinc-500 bg-zinc-50 rounded-full pl-3 pr-7 py-1.5 border border-zinc-200 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+            className="text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-3 pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
           >
             {SUPPORTED_LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>{l.label}</option>
@@ -126,7 +126,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           <Link
             to="/account"
             title={account?.name ?? t('common.account')}
-            className="w-8 h-8 rounded-full bg-zinc-200 border-2 border-white shadow-sm overflow-hidden shrink-0 hover:ring-2 hover:ring-primary/30 transition-all"
+            className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 border-2 border-white shadow-sm overflow-hidden shrink-0 hover:ring-2 hover:ring-primary/30 transition-all"
           >
             <CoverImage src={account?.avatarUrl} alt={account?.name ?? t('common.account')} className="w-full h-full object-cover" fallbackSrc={DEFAULT_AVATAR} />
           </Link>
@@ -134,7 +134,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
       </header>
 
       {mobileMenuOpen && (
-        <nav className="lg:hidden bg-white border-b border-zinc-100 px-4 py-3 space-y-1 shadow-sm">
+        <nav className="lg:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm">
           <Link
             to="/recipe/new"
             className="flex items-center gap-3 px-4 py-3 bg-primary text-white rounded-xl font-bold text-sm mb-2"
@@ -149,7 +149,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           ))}
           {librarySection && (
             <>
-              <p className="px-4 pt-3 pb-1 text-[10px] font-black text-zinc-400 tracking-[0.2em] uppercase">{t('library.management')}</p>
+              <p className="px-4 pt-3 pb-1 text-[10px] font-black text-zinc-400 dark:text-zinc-500 tracking-[0.2em] uppercase">{t('library.management')}</p>
               <LibraryLink to="/library/ingredients" icon="restaurant" label={t('nav.ingredients')} active={librarySection === 'ingredients'} />
               <LibraryLink to="/library/tools" icon="construction" label={t('nav.tools')} active={librarySection === 'tools'} />
               <LibraryLink to="/library/units" icon="straighten" label={t('nav.units')} active={librarySection === 'units'} />
@@ -163,10 +163,10 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
 
       <div className="flex min-h-[calc(100vh-65px)]">
         {librarySection && (
-          <aside className="hidden lg:flex w-[280px] shrink-0 bg-white border-r border-zinc-100 flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
+          <aside className="hidden lg:flex w-[280px] shrink-0 bg-white dark:bg-zinc-900 border-r border-zinc-100 dark:border-zinc-800 flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
             <div className="mb-8 p-2">
               <h2 className="text-lg font-black text-primary leading-tight">{t('library.management')}</h2>
-              <p className="text-[10px] font-bold text-zinc-400 tracking-[0.2em] uppercase">{t('library.kitchenEssentials')}</p>
+              <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 tracking-[0.2em] uppercase">{t('library.kitchenEssentials')}</p>
             </div>
             <nav className="space-y-1">
               <LibraryLink to="/library/ingredients" icon="restaurant" label={t('nav.ingredients')} active={librarySection === 'ingredients'} />

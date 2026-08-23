@@ -68,7 +68,7 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
-          className={className || 'flex-1 min-w-0 border-none bg-zinc-50 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20'}
+          className={className || 'flex-1 min-w-0 border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20'}
         />
         <input
           ref={fileInputRef}
@@ -89,7 +89,7 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
       </div>
       {error && <p className="text-xs text-red-500 font-medium mt-1">{error}</p>}
       {value && previewSrc && (
-        <div className="mt-3 w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50">
+        <div className="mt-3 w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900">
           <img src={previewSrc} alt="" className="w-full h-full object-cover" onError={e => (e.currentTarget.style.opacity = '0.2')} />
         </div>
       )}

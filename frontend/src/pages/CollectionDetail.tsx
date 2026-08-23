@@ -152,7 +152,7 @@ export default function CollectionDetail() {
     return (
       <AppLayout>
         <div className="flex flex-col items-center justify-center h-80 text-center">
-          <h3 className="text-2xl font-bold font-headline text-zinc-800 mb-2">Collection not found</h3>
+          <h3 className="text-2xl font-bold font-headline text-zinc-800 dark:text-zinc-200 mb-2">Collection not found</h3>
           <Link to="/" className="text-primary font-bold">Back to Gallery</Link>
         </div>
       </AppLayout>
@@ -167,27 +167,27 @@ export default function CollectionDetail() {
       <div className="px-8 lg:px-12 py-10 max-w-[1400px] mx-auto">
         <div className="flex justify-between items-start mb-10">
           <div>
-            <Link to="/" className="text-zinc-400 hover:text-primary text-sm font-bold flex items-center gap-1 mb-4">
+            <Link to="/" className="text-zinc-400 dark:text-zinc-500 hover:text-primary text-sm font-bold flex items-center gap-1 mb-4">
               <span className="material-symbols-outlined text-[18px]">arrow_back</span> Gallery
             </Link>
             <h1 className="text-5xl font-extrabold tracking-tight font-headline text-on-surface mb-2">{collection.name}</h1>
             {collection.description && <p className="text-secondary text-lg max-w-xl">{collection.description}</p>}
           </div>
           <div className="flex gap-2">
-            <button onClick={handleExportCollection} title="Export Collection" className="w-11 h-11 rounded-full bg-zinc-100 hover:bg-zinc-200 flex items-center justify-center text-zinc-500 transition-all">
+            <button onClick={handleExportCollection} title="Export Collection" className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
               <span className="material-symbols-outlined text-[20px]">ios_share</span>
             </button>
-            <button onClick={openEdit} className="w-11 h-11 rounded-full bg-zinc-100 hover:bg-zinc-200 flex items-center justify-center text-zinc-500 transition-all">
+            <button onClick={openEdit} className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
               <span className="material-symbols-outlined text-[20px]">edit</span>
             </button>
-            <button onClick={handleDeleteCollection} className="w-11 h-11 rounded-full bg-zinc-100 hover:bg-red-100 hover:text-red-500 flex items-center justify-center text-zinc-500 transition-all">
+            <button onClick={handleDeleteCollection} className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-red-100 hover:text-red-500 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
               <span className="material-symbols-outlined text-[20px]">delete</span>
             </button>
           </div>
         </div>
 
         {/* Add recipe */}
-        <div className="bg-white rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] mb-10 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] mb-10 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
           <div className="flex-1">
             <Autocomplete
               value={addRecipeId}
@@ -195,7 +195,7 @@ export default function CollectionDetail() {
               onSelect={(rid) => setAddRecipeId(rid)}
               onClear={() => setAddRecipeId('')}
               placeholder="Search a recipe to add…"
-              className="w-full px-4 py-3 bg-zinc-50 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-medium"
+              className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-medium"
             />
           </div>
           <button
@@ -210,15 +210,15 @@ export default function CollectionDetail() {
 
         {collection.recipes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-60 text-center">
-            <span className="material-symbols-outlined text-6xl text-zinc-300 mb-4">restaurant</span>
-            <p className="text-zinc-500 text-sm">No recipes in this collection yet — add some above.</p>
+            <span className="material-symbols-outlined text-6xl text-zinc-300 dark:text-zinc-600 mb-4">restaurant</span>
+            <p className="text-zinc-500 dark:text-zinc-400 text-sm">No recipes in this collection yet — add some above.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
             {collection.recipes.map(recipe => {
               const totalTime = (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0);
               return (
-                <div key={recipe.id} className="group relative bg-white rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300">
+                <div key={recipe.id} className="group relative bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300">
                   <button
                     onClick={() => handleRemoveRecipe(recipe.id)}
                     title="Remove from collection"
@@ -236,10 +236,10 @@ export default function CollectionDetail() {
                       />
                     </div>
                     <div className="p-6">
-                      <h3 className="text-xl font-bold font-headline text-zinc-900 mb-3 group-hover:text-primary transition-colors duration-200">
+                      <h3 className="text-xl font-bold font-headline text-zinc-900 dark:text-zinc-100 mb-3 group-hover:text-primary transition-colors duration-200">
                         {recipe.translated_title || recipe.title}
                       </h3>
-                      <div className="flex items-center gap-5 text-zinc-500 text-[13px] font-medium">
+                      <div className="flex items-center gap-5 text-zinc-500 dark:text-zinc-400 text-[13px] font-medium">
                         <div className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>schedule</span>
                           {totalTime > 0 ? `${totalTime} min` : '—'}
@@ -262,19 +262,19 @@ export default function CollectionDetail() {
       {editing && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setEditing(false)} />
-          <div className="relative bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-3xl font-black text-zinc-900 mb-8">Edit Collection</h2>
+          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">Edit Collection</h2>
             <form onSubmit={handleSaveEdit} className="space-y-6">
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Name</label>
-                <input type="text" required value={editName} onChange={e => setEditName(e.target.value)} className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all" />
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Name</label>
+                <input type="text" required value={editName} onChange={e => setEditName(e.target.value)} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Description</label>
-                <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} className="w-full h-24 px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium transition-all" />
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Description</label>
+                <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} className="w-full h-24 px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium transition-all" />
               </div>
               <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setEditing(false)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">Cancel</button>
+                <button type="button" onClick={() => setEditing(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
                 <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">Save</button>
               </div>
             </form>

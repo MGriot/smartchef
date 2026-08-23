@@ -27,7 +27,7 @@ export default function SynonymsEditor({ value, onChange }: SynonymsEditorProps)
     <div>
       <div className="flex flex-wrap gap-1.5 mb-2">
         {value.map((s, idx) => (
-          <span key={idx} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-100 text-zinc-600">
+          <span key={idx} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
             {s}
             <button type="button" onClick={() => remove(idx)} className="hover:text-red-500">
               <span className="material-symbols-outlined text-[13px] block">close</span>
@@ -47,7 +47,7 @@ export default function SynonymsEditor({ value, onChange }: SynonymsEditorProps)
         }}
         onBlur={commit}
         placeholder="Type a synonym and press Enter…"
-        className="w-full border-none bg-zinc-50 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
+        className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
       />
     </div>
   );

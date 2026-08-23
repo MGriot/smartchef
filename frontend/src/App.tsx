@@ -123,7 +123,7 @@ export default function App() {
 
   if (auth.status === "loading") {
     return (
-      <div className="min-h-screen bg-[#fafaf5] flex items-center justify-center">
+      <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center">
         <span className="material-symbols-outlined text-4xl text-primary animate-spin">progress_activity</span>
       </div>
     );
