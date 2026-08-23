@@ -596,6 +596,58 @@ export function syncNow(onProgress?: (progress: TransferProgress) => void): Prom
   return serialize(() => syncNowInternal(onProgress));
 }
 
+export interface RepairResult {
+  /** Entities whose Local Storage row got rewritten from this device's own
+   *  git history — 0 is the expected, healthy outcome (nothing was stuck). */
+  repaired: number;
+  failedEntities: Array<{ entityType: string; entityId: string; error: string }>;
+}
+
+/** Re-applies this device's OWN current Hidden Clone history onto Local
+ *  Storage — a pure local repair, no network involved, for a real bug this
+ *  device could be stuck with: an entity whose row got created
+ *  successfully while its whole-array fields (steps/ingredients/toolIds)
+ *  silently failed to write (a global-id collision in conflicts.local.ts's
+ *  writeArrayField(), fixed 2026-08-23). The git commit this device
+ *  already has is fully correct either way — only the LOCAL SQLITE WRITE
+ *  step could have failed — but nothing re-triggers that write on its own:
+ *  mergeRemoteIntoLocal() no-ops whenever localOid === remoteOid, which is
+ *  exactly the case once this device has already pulled and committed
+ *  everything it's going to get from the remote side.
+ *
+ *  Implemented as mergeRemoteIntoLocal(dir, gitdir, null, ownHeadOid) —
+ *  passing null as "local" makes every entity's every field look like a
+ *  fresh fast-forward from "remote" (this device's own HEAD), the exact
+ *  same code path a brand-new device's first sync already takes (see
+ *  mergeRemoteIntoLocal()'s own doc comment and its "first sync" test) —
+ *  reusing it here means repair goes through the same, already-correct
+ *  array-field write path as every other sync, not a second
+ *  implementation that could drift out of sync with it. Safe to run at
+ *  any time, not just as a one-off recovery: re-applying already-correct
+ *  data is idempotent, and commitNowInternal() below only actually
+ *  commits if something genuinely changed. */
+export async function repairLocalStorage(): Promise<RepairResult> {
+  return serialize(async () => {
+    const { dir, gitdir } = await ensureHiddenCloneInitialized();
+    let ownHeadOid: string;
+    try {
+      ownHeadOid = await git.resolveRef({ fs: gitfs, dir, gitdir, ref: 'HEAD' });
+    } catch {
+      return { repaired: 0, failedEntities: [] }; // no commits yet — nothing to repair from
+    }
+
+    const result = await mergeRemoteIntoLocal(dir, gitdir, null, ownHeadOid);
+    for (const touched of result.touchedEntities) {
+      const dirName = ENTITY_TYPE_TO_DIR[touched.entityType];
+      if (!dirName) continue;
+      await gitfs.promises.writeFile(`${dir}/${dirName}/${touched.entityId}.json`, JSON.stringify(touched.finalFields, null, 2));
+    }
+    if (result.touchedEntities.length > 0) await commitNowInternal();
+
+    return { repaired: result.entitiesCreated + result.entitiesUpdated, failedEntities: result.failedEntities };
+  });
+}
+
 export async function getLastSyncAt(): Promise<string | null> {
   const { value } = await Preferences.get({ key: LAST_SYNC_KEY });
   return value ?? null;

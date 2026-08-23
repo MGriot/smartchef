@@ -371,6 +371,8 @@ function FolderSyncCard() {
   const [syncing, setSyncing] = useState(false);
   const [resyncingAll, setResyncingAll] = useState(false);
   const [resyncProgress, setResyncProgress] = useState<{ phase: string; done: number; total: number } | null>(null);
+  const [repairing, setRepairing] = useState(false);
+  const [repairMessage, setRepairMessage] = useState<string | null>(null);
   const [choosingFolder, setChoosingFolder] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
@@ -503,6 +505,37 @@ function FolderSyncCard() {
     } finally {
       setResyncingAll(false);
       setResyncProgress(null);
+    }
+  };
+
+  // Recovers from a real, now-fixed bug: an entity's row could get created
+  // successfully during a sync while its whole-array fields (steps/
+  // ingredients/toolIds) silently failed to write (a global-id collision
+  // in writeArrayField() — see gitSync.ts's repairLocalStorage() for the
+  // full story). This device's own git history already has the correct
+  // data; ordinary Sync Now won't re-trigger the write on its own once
+  // there's nothing new from the remote side to pull, so this is the
+  // actual fix, not "sync again" (which the failedEntities message below
+  // used to suggest, before this button existed to do the right thing).
+  const handleRepairLocalStorage = async () => {
+    setRepairing(true);
+    setError(null);
+    setRepairMessage(null);
+    try {
+      const { repairLocalStorage } = await import('../lib/sync/gitSync');
+      const outcome = await repairLocalStorage();
+      setRepairMessage(
+        outcome.repaired > 0
+          ? `Repaired ${outcome.repaired} item${outcome.repaired === 1 ? '' : 's'} from this device's own sync history.`
+          : "Nothing needed repair — this device's data already matches its own sync history."
+      );
+      if (outcome.failedEntities.length > 0) {
+        setError(`${outcome.failedEntities.length} item(s) still couldn't be repaired — see the console for details.`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not repair local data');
+    } finally {
+      setRepairing(false);
     }
   };
 
@@ -903,10 +936,10 @@ function FolderSyncCard() {
         {!syncing && result && result.failedEntities.length > 0 && (
           <p className="text-xs text-red-600 font-medium">
             {result.failedEntities.length} item{result.failedEntities.length === 1 ? '' : 's'} from other devices couldn't be
-            saved here ({result.failedEntities.map((f) => f.entityType).join(', ')}) — try Sync Now again; if it keeps
-            happening, that data may need attention on the device that created it.
+            saved here ({result.failedEntities.map((f) => f.entityType).join(', ')}) — try Repair Local Data below.
           </p>
         )}
+        {!repairing && repairMessage && <p className="text-xs text-zinc-500 font-medium">{repairMessage}</p>}
 
         <div className="flex gap-3 flex-wrap">
           <button
@@ -927,6 +960,16 @@ function FolderSyncCard() {
           >
             <span className={`material-symbols-outlined text-lg ${resyncingAll ? 'animate-spin' : ''}`}>refresh</span>
             {resyncingAll ? 'Resyncing…' : 'Resync All'}
+          </button>
+          <button
+            type="button"
+            onClick={handleRepairLocalStorage}
+            disabled={repairing || syncing || resyncingAll}
+            title="Re-applies this device's own sync history onto its local data — fixes an item whose ingredients/steps/tools went missing after syncing, without needing anything from another device"
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 text-zinc-600 rounded-2xl font-black text-sm hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            <span className={`material-symbols-outlined text-lg ${repairing ? 'animate-spin' : ''}`}>build</span>
+            {repairing ? 'Repairing…' : 'Repair Local Data'}
           </button>
           <button
             type="button"
