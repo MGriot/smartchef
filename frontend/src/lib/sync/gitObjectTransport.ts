@@ -145,7 +145,11 @@ export const DEFAULT_REMOTE_TRACKING_REF_NAME = 'refs/remotes/sync-folder/main';
 // caller that cares about the input ordering (existing tests assert an
 // exact uploadedObjectPaths array) still gets it, even though the workers
 // below finish in whatever order their I/O actually resolves.
-async function mapWithConcurrency<T, R>(
+// Exported so gitPacking.ts's own per-object loops (quarantine/verify/
+// restore/delete, all real Android Filesystem-plugin round-trips) share
+// this instead of running sequentially — the exact anti-pattern this
+// function was written to fix here, previously reproduced there.
+export async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
   fn: (item: T, index: number) => Promise<R>
@@ -163,13 +167,14 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-/** How many objects a push/pull touches at once — tuned down, not up:
- *  Android's SAF backend serializes access to the same tree from its own
- *  side in places, so pushing this much higher stops helping and just adds
- *  contention. Electron's direct-fs transport would tolerate more, but one
- *  shared constant is simpler than a per-platform tune and this is already
- *  a large win over concurrency 1. */
-const TRANSFER_CONCURRENCY = 8;
+/** How many objects a push/pull (or gitPacking.ts's own per-object steps)
+ *  touches at once — tuned down, not up: Android's SAF backend serializes
+ *  access to the same tree from its own side in places, so pushing this
+ *  much higher stops helping and just adds contention. Electron's
+ *  direct-fs transport would tolerate more, but one shared constant is
+ *  simpler than a per-platform tune and this is already a large win over
+ *  concurrency 1. */
+export const TRANSFER_CONCURRENCY = 8;
 
 export interface TransferProgress {
   phase: 'push' | 'pull';

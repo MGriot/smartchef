@@ -49,7 +49,7 @@
 
 import * as git from 'isomorphic-git';
 import type { GitPlumbingFs } from './gitObjectTransport';
-import { listLocalObjectPaths, oidFromObjectPath, sha1Hex } from './gitObjectTransport';
+import { listLocalObjectPaths, oidFromObjectPath, sha1Hex, mapWithConcurrency, TRANSFER_CONCURRENCY } from './gitObjectTransport';
 
 // Packing/verifying/pruning all cost real I/O — not worth paying for a
 // handful of objects. Below this, packLooseObjectsAfterPush() is a no-op;
@@ -131,28 +131,61 @@ export async function packLooseObjectsAfterPush(fs: GitPlumbingFs, dir: string, 
 
   await fs.mkdir(`${dir}/${QUARANTINE_DIR}`).catch(() => {}); // EEXIST from a prior run — fine
 
-  const quarantined: string[] = [];
-  try {
-    for (const relPath of loosePaths) {
-      const qPath = `${QUARANTINE_DIR}/${quarantineFilename(relPath)}`;
+  // Every step below is one Android Filesystem-plugin round-trip per
+  // object — run with the same bounded concurrency push/pull already use
+  // (gitObjectTransport.ts's mapWithConcurrency/TRANSFER_CONCURRENCY) for
+  // the identical reason: hundreds of these done one at a time in series
+  // made a device's first GC pass (potentially years of accumulated
+  // history) visibly slow a whole sync cycle, the same "sync takes a long
+  // time" problem that concurrency already fixed for push/pull's own
+  // per-object work.
+  //
+  // Correctness under concurrency: each step below never lets one item's
+  // failure throw out of mapWithConcurrency (which would abandon the
+  // other in-flight items with no way to know which succeeded) — it
+  // catches per-item and returns a per-item outcome instead, so the
+  // caller can always tell exactly which files actually got quarantined
+  // regardless of completion order.
+  const quarantineOutcomes = await mapWithConcurrency(loosePaths, TRANSFER_CONCURRENCY, async (relPath) => {
+    const qPath = `${QUARANTINE_DIR}/${quarantineFilename(relPath)}`;
+    try {
       await fs.rename(`${dir}/${relPath}`, `${dir}/${qPath}`);
-      quarantined.push(relPath);
+      return { relPath, ok: true };
+    } catch (err) {
+      console.warn(`SmartChef: GC quarantine rename failed for ${relPath}:`, err);
+      return { relPath, ok: false };
     }
+  });
+  const quarantined = quarantineOutcomes.filter((o) => o.ok).map((o) => o.relPath);
 
-    // Independently prove the pack actually serves every one of these
-    // objects BEFORE permanently deleting anything. This can only be a
-    // real test — not a silent no-op that happens to "pass" via the
-    // loose file it's supposed to be replacing — because those loose
-    // files were just moved out of their expected location above:
-    // isomorphic-git checks loose storage before packed storage on every
-    // read, so with the loose copy gone, a successful read here can only
-    // have come from genuinely walking objects/pack/*.idx.
-    for (const oid of oids) {
-      await git.readObject({ fs: { promises: fs }, dir, gitdir, oid });
-    }
-  } catch (err) {
-    console.warn('SmartChef: GC pack verification failed, restoring loose objects untouched:', err);
-    for (const relPath of quarantined) {
+  // Independently prove the pack actually serves every one of these
+  // objects BEFORE permanently deleting anything — but only bother
+  // checking if every file actually made it into quarantine; a partial
+  // quarantine already means restoring, no need to also read through the
+  // pack first. This can only be a real test of the pack itself — not a
+  // silent no-op that happens to "pass" via the loose file it's supposed
+  // to be replacing — because those loose files were just moved out of
+  // their expected location above: isomorphic-git checks loose storage
+  // before packed storage on every read, so with the loose copy gone, a
+  // successful read here can only have come from genuinely walking
+  // objects/pack/*.idx.
+  const fullyQuarantined = quarantined.length === loosePaths.length;
+  const verified = fullyQuarantined && (
+    await mapWithConcurrency(oids, TRANSFER_CONCURRENCY, async (oid) => {
+      try {
+        await git.readObject({ fs: { promises: fs }, dir, gitdir, oid });
+        return true;
+      } catch (err) {
+        console.warn(`SmartChef: GC pack verification failed for oid ${oid}:`, err);
+        return false;
+      }
+    })
+  ).every(Boolean);
+
+  if (!verified) {
+    if (!fullyQuarantined) console.warn('SmartChef: GC quarantine was incomplete, restoring what was moved and skipping this pass');
+    else console.warn('SmartChef: GC pack verification failed, restoring loose objects untouched');
+    await mapWithConcurrency(quarantined, TRANSFER_CONCURRENCY, async (relPath) => {
       const qPath = `${QUARANTINE_DIR}/${quarantineFilename(relPath)}`;
       await fs.rename(`${dir}/${qPath}`, `${dir}/${relPath}`).catch((restoreErr) => {
         // A failed restore here is the one genuinely bad outcome this
@@ -164,16 +197,16 @@ export async function packLooseObjectsAfterPush(fs: GitPlumbingFs, dir: string, 
         // scan... this doesn't self-heal today, hence the loud log.
         console.error(`SmartChef: could not restore quarantined object ${relPath} — it remains at ${qPath}:`, restoreErr);
       });
-    }
+    });
     return { packed: 0 };
   }
 
   // Verified — the quarantined copies are now genuinely redundant with
   // the pack; delete them for real.
-  for (const relPath of quarantined) {
+  await mapWithConcurrency(quarantined, TRANSFER_CONCURRENCY, async (relPath) => {
     const qPath = `${QUARANTINE_DIR}/${quarantineFilename(relPath)}`;
     await fs.unlink(`${dir}/${qPath}`).catch(() => {});
-  }
+  });
   await fs.rmdir(`${dir}/${QUARANTINE_DIR}`).catch(() => {}); // best-effort tidy-up, matches rmdir()'s existing tolerant stance elsewhere
 
   return { packed: oids.length };
