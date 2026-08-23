@@ -27,6 +27,7 @@ import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
 import { mergeEntity } from '../structuredMerge';
 import { entityExists, createEntity, applyEntityMergeResult, getMergeableFieldNames } from '../../services/conflicts.local';
+import { mapWithConcurrency, TRANSFER_CONCURRENCY } from './gitObjectTransport';
 
 // Recipes reference ingredients/tools by id (recipe_ingredients.ingredient_id/
 // unit_id, recipe_steps.tool_ids/technique_ids) — nothing in Local Storage
@@ -165,58 +166,78 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
     git.listFiles({ fs: gitfs, dir, gitdir, ref: remoteOid }),
   ]);
 
+  // Applies one entity's three-way merge and writes the outcome — same
+  // logic regardless of entity type, but called either sequentially
+  // (recipes, where matrioska sub-recipe dependency ordering matters — see
+  // orderRecipeIdsByDependency()) or concurrently (every other entity
+  // type, which have no ordering dependency on one another). Each of
+  // readEntityJson/entityExists/applyEntityMergeResult/createEntity is a
+  // real Android SQLite/git-object round-trip, so a device pulling a
+  // sizeable library for the first time — every entity is a "create,"
+  // none skippable — used to pay hundreds or thousands of these one at a
+  // time in series; this is the same "sync takes a long time" fix
+  // gitObjectTransport.ts's mapWithConcurrency already applies to
+  // push/pull's own per-object work.
+  //
+  // One malformed entity (a field shape this device's schema version
+  // doesn't expect, a write that violates a constraint the source device
+  // didn't have) must not abort any other entity's write — each gets its
+  // own outcome; a thrown write here is recorded and skipped, not
+  // propagated. Mutating the shared `result` object from concurrently-
+  // running calls is safe: JS has no true parallelism, so each `result.x++`/
+  // `.push()` below runs to completion before another call's continuation
+  // gets a turn — no locking needed.
+  async function applyOneEntity(dirName: string, entityType: string, fieldNames: string[], id: string): Promise<void> {
+    const filepath = `${dirName}/${id}.json`;
+    const [baseJson, localJson, remoteJson] = await Promise.all([
+      readEntityJson(dir, gitdir, baseOid, filepath),
+      readEntityJson(dir, gitdir, localOid, filepath),
+      readEntityJson(dir, gitdir, remoteOid, filepath),
+    ]);
+
+    const merged = mergeEntity(baseJson ?? {}, localJson ?? {}, remoteJson ?? {}, fieldNames);
+    if (Object.keys(merged.applied).length === 0 && merged.conflicts.length === 0) return;
+
+    try {
+      if (await entityExists(entityType, id)) {
+        const outcome = await applyEntityMergeResult(entityType, id, merged);
+        if (outcome.appliedFields.length > 0) {
+          result.entitiesUpdated++;
+          result.touchedEntities.push({ entityType, entityId: id, finalFields: { ...localJson, ...merged.applied } });
+        }
+        result.conflictsRecorded += outcome.conflictsRecorded;
+      } else if (remoteJson) {
+        // Doesn't exist locally at all yet — nothing to merge into, this
+        // is a brand-new entity another device created. mergeEntity()
+        // already fast-forwarded every field it knows about (local was
+        // "no value" everywhere, same as base), but a create wants the
+        // complete remote row, not just the subset mergeEntity() happened
+        // to consider — createEntity() itself still allowlists/drops
+        // whole-array fields, same safety net as the merge path.
+        await createEntity(entityType, id, remoteJson);
+        result.entitiesCreated++;
+        result.touchedEntities.push({ entityType, entityId: id, finalFields: remoteJson });
+      }
+      // Neither exists locally nor has a remote value to create from
+      // shouldn't be reachable (id came from one of the two file lists),
+      // but isn't treated as an error if it somehow happens — just a no-op.
+    } catch (err) {
+      console.error(`SmartChef: failed to write merged ${entityType} ${id} into Local Storage:`, err);
+      result.failedEntities.push({ entityType, entityId: id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   for (const { dirName, entityType } of ENTITY_DIRS) {
     const fieldNames = getMergeableFieldNames(entityType);
     if (!fieldNames) continue;
 
     const ids = new Set([...entityIdsFromFiles(localFiles, dirName), ...entityIdsFromFiles(remoteFiles, dirName)]);
-    const orderedIds = entityType === 'recipe' ? await orderRecipeIdsByDependency(ids, dir, gitdir, localOid, remoteOid) : [...ids];
 
-    for (const id of orderedIds) {
-      const filepath = `${dirName}/${id}.json`;
-      const [baseJson, localJson, remoteJson] = await Promise.all([
-        readEntityJson(dir, gitdir, baseOid, filepath),
-        readEntityJson(dir, gitdir, localOid, filepath),
-        readEntityJson(dir, gitdir, remoteOid, filepath),
-      ]);
-
-      const merged = mergeEntity(baseJson ?? {}, localJson ?? {}, remoteJson ?? {}, fieldNames);
-      if (Object.keys(merged.applied).length === 0 && merged.conflicts.length === 0) continue;
-
-      // One malformed entity (a field shape this device's schema version
-      // doesn't expect, a write that violates a constraint the source
-      // device didn't have) must not silently abort every entity after it
-      // in iteration order — Set iteration order isn't something a caller
-      // should ever have their whole sync's completeness depend on. Each
-      // entity gets its own outcome; a thrown write here is recorded and
-      // skipped, not propagated.
-      try {
-        if (await entityExists(entityType, id)) {
-          const outcome = await applyEntityMergeResult(entityType, id, merged);
-          if (outcome.appliedFields.length > 0) {
-            result.entitiesUpdated++;
-            result.touchedEntities.push({ entityType, entityId: id, finalFields: { ...localJson, ...merged.applied } });
-          }
-          result.conflictsRecorded += outcome.conflictsRecorded;
-        } else if (remoteJson) {
-          // Doesn't exist locally at all yet — nothing to merge into, this
-          // is a brand-new entity another device created. mergeEntity()
-          // already fast-forwarded every field it knows about (local was
-          // "no value" everywhere, same as base), but a create wants the
-          // complete remote row, not just the subset mergeEntity() happened
-          // to consider — createEntity() itself still allowlists/drops
-          // whole-array fields, same safety net as the merge path.
-          await createEntity(entityType, id, remoteJson);
-          result.entitiesCreated++;
-          result.touchedEntities.push({ entityType, entityId: id, finalFields: remoteJson });
-        }
-        // Neither exists locally nor has a remote value to create from
-        // shouldn't be reachable (id came from one of the two file lists),
-        // but isn't treated as an error if it somehow happens — just a no-op.
-      } catch (err) {
-        console.error(`SmartChef: failed to write merged ${entityType} ${id} into Local Storage:`, err);
-        result.failedEntities.push({ entityType, entityId: id, error: err instanceof Error ? err.message : String(err) });
-      }
+    if (entityType === 'recipe') {
+      const orderedIds = await orderRecipeIdsByDependency(ids, dir, gitdir, localOid, remoteOid);
+      for (const id of orderedIds) await applyOneEntity(dirName, entityType, fieldNames, id);
+    } else {
+      await mapWithConcurrency([...ids], TRANSFER_CONCURRENCY, (id) => applyOneEntity(dirName, entityType, fieldNames, id));
     }
   }
 
