@@ -14,7 +14,8 @@ import * as tags from './tags.local';
 import * as techniques from './techniques.local';
 import { importSnapshot, exportSnapshot } from './backup.local';
 import { getStandaloneProfile } from '../lib/standalone';
-import { electronGeocode } from '../lib/electronBridge';
+import { electronGeocode, isElectron } from '../lib/electronBridge';
+import { androidGeocode } from '../lib/gitHttpBridge';
 
 export interface LocalDispatchResult {
   status: number;
@@ -216,16 +217,21 @@ async function dispatchBackup(segments: string[], method: string, init?: Request
   return NOT_HANDLED;
 }
 
-/** Standalone-mode equivalent of backend/src/routes/geocode.ts — Android has
- *  no way to make this call at all yet (no IPC bridge, and Nominatim's
- *  User-Agent requirement rules out a plain renderer fetch()), so it 501s
- *  there same as before; RegionPicker.tsx already treats that as "no pin,"
- *  not an error. Electron routes it through the main process — see
- *  lib/electronBridge.ts's electronGeocode(). */
+/** Standalone-mode equivalent of backend/src/routes/geocode.ts. Electron
+ *  routes the Nominatim request through its main process (Node's fetch,
+ *  not subject to CORS or the WebView's header restrictions — see
+ *  lib/electronBridge.ts's electronGeocode()); Android routes it through
+ *  the same GitHttpPlugin native request gitRemoteTransport.ts already
+ *  uses for git servers (see lib/gitHttpBridge.ts's androidGeocode()) —
+ *  neither is a browser fetch(), so both can set the User-Agent header
+ *  Nominatim's usage policy requires, which a plain renderer fetch()
+ *  can't. Either way, no match/any failure resolves to null, which
+ *  RegionPicker.tsx/RegionsMap.tsx already treat as "not geocoded yet,"
+ *  not an error. */
 async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const q = sp.get('q');
   if (!q) return { status: 400, error: 'Missing q' };
-  const result = await electronGeocode(q);
+  const result = isElectron() ? await electronGeocode(q) : await androidGeocode(q);
   if (!result) return { status: 404, error: 'No match found' };
   return { status: 200, data: result };
 }
