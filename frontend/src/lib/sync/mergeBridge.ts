@@ -53,8 +53,18 @@ async function readEntityJson(dir: string, gitdir: string, oid: string | null, f
   try {
     const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid, filepath });
     return JSON.parse(new TextDecoder().decode(blob)) as Record<string, unknown>;
-  } catch {
-    return null; // absent at this commit (never existed there, or a corrupt blob) — treated as "no value", same tolerance reconcileEntity() already has for a bad file
+  } catch (err) {
+    // Absent at this commit (never existed there) is expected and silent
+    // — but a blob that DOES exist there and fails to read/parse anyway
+    // (missing object, corruption, truncation) looks identical from here,
+    // and used to be swallowed with zero trace either way. Logged now so
+    // at least a connected debugger has something to go on; the caller
+    // (applyOneEntity in this same file) is what actually surfaces this
+    // to the user, by cross-checking against the tree listing it already
+    // has — this function alone can't tell "absent" from "unreadable"
+    // apart, only log that SOMETHING made it return null here.
+    console.error(`SmartChef: readEntityJson failed for ${filepath} at ${oid}:`, err);
+    return null;
   }
 }
 
@@ -165,6 +175,7 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
     localOid ? git.listFiles({ fs: gitfs, dir, gitdir, ref: localOid }) : Promise.resolve([]),
     git.listFiles({ fs: gitfs, dir, gitdir, ref: remoteOid }),
   ]);
+  const remoteFileSet = new Set(remoteFiles);
 
   // Applies one entity's three-way merge and writes the outcome — same
   // logic regardless of entity type, but called either sequentially
@@ -196,7 +207,27 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
     ]);
 
     const merged = mergeEntity(baseJson ?? {}, localJson ?? {}, remoteJson ?? {}, fieldNames);
-    if (Object.keys(merged.applied).length === 0 && merged.conflicts.length === 0) return;
+    if (Object.keys(merged.applied).length === 0 && merged.conflicts.length === 0) {
+      // A file genuinely listed in the remote tree but unreadable here
+      // (missing/corrupt object, a truncated fetch) looks IDENTICAL to
+      // "nothing changed" to mergeEntity() above — readEntityJson() has
+      // to tolerate a bad file the same way it tolerates a legitimately-
+      // absent one (see its own comment), so this is the one place left
+      // that can tell the two apart: the remote tree listing itself,
+      // gathered independently of any blob read. Found in production —
+      // an entire entity type silently, permanently produced zero
+      // applied fields on every single one of its entities, with no
+      // visible error anywhere — surfaced now via the same failedEntities
+      // mechanism a thrown write already uses, instead of staying invisible.
+      if (remoteJson === null && remoteFileSet.has(filepath)) {
+        result.failedEntities.push({
+          entityType,
+          entityId: id,
+          error: "Could not read this item's data from the sync history (listed but unreadable) — try syncing again.",
+        });
+      }
+      return;
+    }
 
     try {
       if (await entityExists(entityType, id)) {

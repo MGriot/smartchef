@@ -118,6 +118,43 @@ describe('mergeRemoteIntoLocal', () => {
     expect(result.failedEntities).toEqual([{ entityType: 'recipe', entityId: 'bad-recipe', error: 'simulated write failure for bad-recipe' }]);
   });
 
+  it('surfaces a failedEntities entry when a file the remote tree lists fails to read, instead of silently treating it as unchanged', async () => {
+    // Regression test for a real, shipped, production bug: an entity type
+    // could produce zero applied fields for EVERY one of its entities,
+    // forever, with no visible error anywhere — because readEntityJson()
+    // deliberately can't tell "this file legitimately doesn't exist at
+    // this commit" apart from "this file is listed but its blob failed to
+    // read" (see that function's own comment) and mergeEntity() treats an
+    // empty remote object as "nothing changed" either way. This is the
+    // one place that CAN tell them apart, using the tree listing itself.
+    trees['local'] = {};
+    trees['remote'] = { 'ingredients/i1.json': { name: 'Salt', calories_kcal: 0 } };
+    trees[baseKey('local', 'remote')] = {};
+
+    const git = await import('isomorphic-git');
+    const realReadBlob = git.readBlob;
+    // Reject specifically for the remote-side read (Promise.all fires
+    // base/local/remote concurrently, in no guaranteed completion order,
+    // so a plain mockRejectedValueOnce could just as easily hit the
+    // base or local read instead of the one this test actually cares
+    // about) — the base/local reads fall through to the real (fake)
+    // implementation, which already correctly no-ops for a nonexistent
+    // path in an empty tree.
+    const readBlobSpy = vi.spyOn(git, 'readBlob').mockImplementation(async (args) => {
+      if (args.oid === 'remote') throw new Error('simulated blob read failure');
+      return realReadBlob(args);
+    });
+
+    const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'local', 'remote');
+
+    readBlobSpy.mockRestore();
+    expect(dbEntities.ingredient.has('i1')).toBe(false); // never created — mergeEntity() saw nothing to apply
+    expect(result.entitiesCreated).toBe(0);
+    expect(result.failedEntities).toEqual([
+      { entityType: 'ingredient', entityId: 'i1', error: expect.stringContaining('sync history') },
+    ]);
+  });
+
   it('fast-forwards a field that only changed on the remote for an entity that already exists locally', async () => {
     dbEntities.recipe.set('r1', { id: 'r1', title: 'Lasagna', servings: 4 });
     trees[baseKey('local', 'remote')] = { 'recipes/r1.json': { title: 'Lasagna', servings: 4 } };
