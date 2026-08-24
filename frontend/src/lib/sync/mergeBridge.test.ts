@@ -86,7 +86,7 @@ function baseKey(localOid: string, remoteOid: string): string {
 describe('mergeRemoteIntoLocal', () => {
   it('does nothing when local and remote are the same commit', async () => {
     const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'same-oid', 'same-oid');
-    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [] });
+    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [], entityScanCounts: {} });
   });
 
   it('creates a brand-new entity that only exists on the remote side', async () => {
@@ -192,7 +192,18 @@ describe('mergeRemoteIntoLocal', () => {
 
     const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'local', 'remote');
 
-    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [] });
+    expect(result).toEqual({
+      entitiesCreated: 0,
+      entitiesUpdated: 0,
+      conflictsRecorded: 0,
+      touchedEntities: [],
+      failedEntities: [],
+      entityScanCounts: {
+        ingredient: { remoteFiles: 0, localFiles: 0 },
+        tool: { remoteFiles: 0, localFiles: 0 },
+        recipe: { remoteFiles: 1, localFiles: 1 },
+      },
+    });
   });
 
   it('treats every remote entity as new when this device has no local commits yet (first sync)', async () => {

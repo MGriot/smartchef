@@ -93,6 +93,18 @@ function formatAppliedByType(byType: Partial<Record<string, number>>): string {
     .join(', ');
 }
 
+// Diagnostic-only, not user-facing polish: "remote files this device's
+// tree walk actually found" per entity type, independent of whether any
+// of them ended up applied — see MergeBridgeResult.entityScanCounts for
+// why. A type that's supposed to have entries but reads 0 here means the
+// gap is upstream of Structured Merge entirely (the fetch, or which
+// commit got resolved as "remote"), not the merge/write logic downstream.
+function formatScanCounts(counts: Record<string, { remoteFiles: number; localFiles: number }>): string {
+  return Object.entries(counts)
+    .map(([type, c]) => `${type} ${c.remoteFiles}↓/${c.localFiles}↑`)
+    .join(', ');
+}
+
 function formatRelativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
@@ -938,6 +950,11 @@ function FolderSyncCard() {
           <p className="text-xs text-red-600 font-medium">
             {result.failedEntities.length} item{result.failedEntities.length === 1 ? '' : 's'} from other devices couldn't be
             saved here ({result.failedEntities.map((f) => f.entityType).join(', ')}) — try Repair Local Data below.
+          </p>
+        )}
+        {!syncing && result && Object.keys(result.entityScanCounts).length > 0 && (
+          <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">
+            Scan (remote↓/local↑): {formatScanCounts(result.entityScanCounts)}
           </p>
         )}
         {!repairing && repairMessage && <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{repairMessage}</p>}

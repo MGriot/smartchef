@@ -282,6 +282,12 @@ export interface SyncResult {
    *  so a real failure shows up in the UI instead of only a console log
    *  nobody but a developer would ever open. */
   failedEntities: Array<{ entityType: string; entityId: string; error: string }>;
+  /** Passthrough of mergeBridge.ts's own per-entity-type scan counts — see
+   *  MergeBridgeResult.entityScanCounts for why this exists. Only the last
+   *  merge call's counts are kept per type (git-remote/folder mode can run
+   *  applyMergeIfNeeded() more than once in a retry loop; a later count is
+   *  always at least as accurate as an earlier one from the same cycle). */
+  entityScanCounts: Record<string, { remoteFiles: number; localFiles: number }>;
 }
 
 /** The main entry point — call on app foreground/resume, on a periodic
@@ -324,6 +330,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
   let pushedObjects = 0;
   let pulledObjects = 0;
   const failedEntities: Array<{ entityType: string; entityId: string; error: string }> = [];
+  const entityScanCounts: Record<string, { remoteFiles: number; localFiles: number }> = {};
 
   // Android's "sync paused — folder access lost" banner (Account.tsx,
   // driven by androidMirror.ts's pause-reason state) predates this
@@ -390,6 +397,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
     applied += mergeResult.entitiesCreated + mergeResult.entitiesUpdated;
     conflicts += mergeResult.conflictsRecorded;
     failedEntities.push(...mergeResult.failedEntities);
+    Object.assign(entityScanCounts, mergeResult.entityScanCounts);
 
     for (const touched of mergeResult.touchedEntities) {
       const dirName = ENTITY_TYPE_TO_DIR[touched.entityType];
@@ -589,7 +597,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
 
   const lastSyncAt = new Date().toISOString();
   await Preferences.set({ key: LAST_SYNC_KEY, value: lastSyncAt });
-  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, pushedObjects, pulledObjects, failedEntities };
+  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, pushedObjects, pulledObjects, failedEntities, entityScanCounts };
 }
 
 export function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {

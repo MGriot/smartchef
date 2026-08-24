@@ -151,6 +151,18 @@ export interface MergeBridgeResult {
    *  entity's data is malformed, worth surfacing rather than just hoping
    *  the next sync magically succeeds where this one silently didn't. */
   failedEntities: Array<{ entityType: string; entityId: string; error: string }>;
+  /** How many files this cycle actually found under each entity type's
+   *  directory, at both the local and remote tree — independent of
+   *  whether any of them ended up applied. A device whose Ingredients
+   *  library silently never fills in, with zero errors anywhere, means
+   *  the code below never even iterated any ingredient — this is the one
+   *  signal that can distinguish "found 0 remote files" (something upstream
+   *  of this module — the fetch, or remoteOid itself — isn't seeing the
+   *  data it should) from "found the files but nothing about them
+   *  warranted a change" or "found and applied them, something later
+   *  discarded it". Surfaced in Account.tsx since not everyone hitting
+   *  this can attach a debugger to see it any other way. */
+  entityScanCounts: Record<string, { remoteFiles: number; localFiles: number }>;
 }
 
 /** Merges a freshly-fetched remote commit into local state. No-op (all
@@ -164,7 +176,7 @@ export interface MergeBridgeResult {
  *  owns deciding what the Hidden Clone's own next commit looks like once
  *  Local Storage reflects the merge outcome. */
 export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid: string | null, remoteOid: string): Promise<MergeBridgeResult> {
-  const result: MergeBridgeResult = { entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [] };
+  const result: MergeBridgeResult = { entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [], entityScanCounts: {} };
   if (localOid === remoteOid) return result;
 
   const baseOid: string | null = localOid
@@ -262,7 +274,10 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
     const fieldNames = getMergeableFieldNames(entityType);
     if (!fieldNames) continue;
 
-    const ids = new Set([...entityIdsFromFiles(localFiles, dirName), ...entityIdsFromFiles(remoteFiles, dirName)]);
+    const localIdsForType = entityIdsFromFiles(localFiles, dirName);
+    const remoteIdsForType = entityIdsFromFiles(remoteFiles, dirName);
+    result.entityScanCounts[entityType] = { remoteFiles: remoteIdsForType.length, localFiles: localIdsForType.length };
+    const ids = new Set([...localIdsForType, ...remoteIdsForType]);
 
     if (entityType === 'recipe') {
       const orderedIds = await orderRecipeIdsByDependency(ids, dir, gitdir, localOid, remoteOid);
