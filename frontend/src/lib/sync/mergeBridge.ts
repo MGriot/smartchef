@@ -30,15 +30,22 @@ import { entityExists, createEntity, applyEntityMergeResult, getMergeableFieldNa
 import { mapWithConcurrency, TRANSFER_CONCURRENCY } from './gitObjectTransport';
 
 // Recipes reference ingredients/tools by id (recipe_ingredients.ingredient_id/
-// unit_id, recipe_steps.tool_ids/technique_ids) — nothing in Local Storage
-// enforces those as real foreign keys (no PRAGMA foreign_keys here), so a
-// recipe written before what it references exists doesn't throw, but it
-// does leave a dangling reference until the rest of the batch catches up.
+// unit_id, recipe_steps.tool_ids/technique_ids). Local Storage's actual
+// SQLite engine DOES enforce foreign keys despite no PRAGMA foreign_keys
+// statement anywhere in this codebase (confirmed the hard way — see
+// db/local.ts's dropDanglingForeignKeys() for the production bug that
+// taught us this) — recipe_ingredients.ingredient_id is a real FK to
+// ingredients(id), and ingredients IS a synced entity type here, so a
+// recipe written before the ingredient it references exists would throw,
+// not just dangle silently. Processing leaf types first and recipes last
+// avoids that outright: every recipe is written only after everything it
+// could reference already exists. (unit_id used to have the same
+// problem for a different reason — see dropDanglingForeignKeys()'s own
+// comment for why that one got its FK dropped instead of reordered.)
 // Combined with each entity's write now being isolated (one failure
 // doesn't abort the batch — see the try/catch below), a later entity that
 // *does* fail would leave that dangling reference permanent, not just
-// transient. Processing leaf types first and recipes last means every
-// recipe is written after everything it could reference already exists.
+// transient.
 const ENTITY_DIRS: Array<{ dirName: string; entityType: string }> = [
   { dirName: 'ingredients', entityType: 'ingredient' },
   { dirName: 'tools', entityType: 'tool' },

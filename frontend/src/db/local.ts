@@ -226,7 +226,19 @@ CREATE TABLE IF NOT EXISTS ingredient_category_translations (
 
 CREATE TABLE IF NOT EXISTS ingredients (
   id             TEXT PRIMARY KEY,
-  category_id    TEXT NOT NULL REFERENCES ingredient_categories(id),
+  -- Deliberately NOT "REFERENCES ingredient_categories(id)" — categories
+  -- are per-device seed data (SEED_SQL below gives every device its own
+  -- random ids, never synced via mergeBridge.ts's ENTITY_DIRS), so a
+  -- synced-in ingredient's category_id essentially never matches a row
+  -- that exists on this device. A real FK here throws "FOREIGN KEY
+  -- constraint failed" on every single cross-device ingredient create —
+  -- confirmed as this app's actual behavior despite no PRAGMA
+  -- foreign_keys statement anywhere (see dropDanglingForeignKeys() below
+  -- for the full story and the migration that removes this on existing
+  -- devices). listIngredients()'s LEFT JOIN + COALESCE already treats a
+  -- non-matching category_id as "Uncategorized" by design, so nothing
+  -- downstream needed this to be a hard reference in the first place.
+  category_id    TEXT NOT NULL,
   name           TEXT NOT NULL,
   description    TEXT,
   icon           TEXT,
@@ -359,7 +371,10 @@ CREATE TABLE IF NOT EXISTS recipes (
   rest_time_min   INTEGER,
   rating          INTEGER,
   yield_amount    REAL,
-  yield_unit_id   TEXT REFERENCES units(id),
+  -- Same reasoning as ingredients.category_id above — units are per-device
+  -- seed data too, never synced, so a hard REFERENCES units(id) here
+  -- throws on a perfectly legitimate synced recipe.
+  yield_unit_id   TEXT,
   tags            TEXT DEFAULT '[]',
   regions         TEXT DEFAULT '[]',
   region_coords   TEXT DEFAULT '{}',
@@ -430,7 +445,12 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
   sub_recipe_id TEXT REFERENCES recipes(id),
   quantity      REAL,
   quantity_text TEXT,
-  unit_id       TEXT REFERENCES units(id),
+  -- Same reasoning as ingredients.category_id above — a hard FK here
+  -- threw on almost every synced-in recipe_ingredients row (nearly every
+  -- ingredient line has a unit), and writeArrayField()'s DELETE-then-
+  -- reinsert shape meant a mid-loop throw left the recipe's ingredient
+  -- list truncated to whichever rows inserted before the failing one.
+  unit_id       TEXT,
   notes         TEXT,
   is_optional   INTEGER DEFAULT 0,
   -- Optional "Per il condimento"/"Per l'impasto" style header for a run of
@@ -557,6 +577,143 @@ async function addColumnIfMissing(db: SQLiteDBConnection, table: string, column:
   }
 }
 
+async function hasForeignKeyTo(db: SQLiteDBConnection, table: string, refTable: string): Promise<boolean> {
+  const info = await db.query(`PRAGMA foreign_key_list(${table})`);
+  return (info.values ?? []).some((row: { table?: string }) => row.table === refTable);
+}
+
+// One-time migration for devices that created their local DB before the
+// SCHEMA_SQL edit above: ingredients.category_id, recipes.yield_unit_id,
+// and recipe_ingredients.unit_id used to be real
+// "REFERENCES ingredient_categories(id)"/"REFERENCES units(id)" foreign
+// keys. Both referenced tables are per-device seed data (SEED_SQL gives
+// every device its own random ids; neither is a synced entity type in
+// mergeBridge.ts's ENTITY_DIRS), so a value that arrived via sync from
+// another device essentially never matches a row that exists here — and
+// this app's actual SQLite engine DOES enforce foreign keys despite no
+// PRAGMA foreign_keys statement anywhere in this codebase (confirmed the
+// hard way in backup.local.ts's recipe-restore path). The practical result,
+// found in production: createEntity() for a synced ingredient, and
+// writeArrayField()'s recipe_ingredients insert for a synced recipe, threw
+// "FOREIGN KEY constraint failed" on essentially every cross-device
+// ingredient/recipe-ingredient-line — caught by mergeBridge.ts's own
+// try/catch and reported as a failedEntities error, but with a message
+// that gave no hint the actual cause was a schema constraint that should
+// never have been enforced in the first place, not a real data problem.
+//
+// SQLite has no ALTER TABLE support for dropping a column's REFERENCES
+// clause, so each table gets rebuilt: create the new shape, copy every
+// row across, drop the old table, rename the new one into place. Detected
+// via PRAGMA foreign_key_list rather than a version flag, so this safely
+// no-ops both on a device that already migrated and on a brand-new device
+// whose SCHEMA_SQL never had the FK to begin with — the common case going
+// forward, this function existing only for devices provisioned before it.
+async function dropDanglingForeignKeys(db: SQLiteDBConnection): Promise<void> {
+  if (await hasForeignKeyTo(db, 'ingredients', 'ingredient_categories')) {
+    await db.execute('PRAGMA foreign_keys=OFF');
+    await db.execute(`
+      CREATE TABLE ingredients_new (
+        id             TEXT PRIMARY KEY,
+        category_id    TEXT NOT NULL,
+        name           TEXT NOT NULL,
+        description    TEXT,
+        icon           TEXT,
+        image_urls     TEXT DEFAULT '[]',
+        calories_kcal  REAL,
+        protein_g      REAL,
+        carbs_g        REAL,
+        fat_g          REAL,
+        fiber_g        REAL,
+        sugar_g        REAL,
+        sodium_mg      REAL,
+        seasonal_months TEXT DEFAULT '[]',
+        synonyms       TEXT DEFAULT '[]',
+        parent_ingredient_id TEXT REFERENCES ingredients(id),
+        sync_status    TEXT DEFAULT 'local',
+        created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at     TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO ingredients_new (id, category_id, name, description, icon, image_urls, calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months, synonyms, parent_ingredient_id, sync_status, created_at, updated_at)
+        SELECT id, category_id, name, description, icon, image_urls, calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months, synonyms, parent_ingredient_id, sync_status, created_at, updated_at
+        FROM ingredients;
+      DROP TABLE ingredients;
+      ALTER TABLE ingredients_new RENAME TO ingredients;
+      CREATE INDEX IF NOT EXISTS idx_ingredients_category ON ingredients(category_id);
+      CREATE INDEX IF NOT EXISTS idx_ingredients_parent ON ingredients(parent_ingredient_id);
+    `);
+    await db.execute('PRAGMA foreign_keys=ON');
+  }
+
+  if (await hasForeignKeyTo(db, 'recipes', 'units')) {
+    await db.execute('PRAGMA foreign_keys=OFF');
+    await db.execute(`
+      CREATE TABLE recipes_new (
+        id              TEXT PRIMARY KEY,
+        title           TEXT NOT NULL,
+        description     TEXT,
+        difficulty      TEXT DEFAULT 'medium',
+        servings        INTEGER NOT NULL DEFAULT 4,
+        prep_time_min   INTEGER,
+        cook_time_min   INTEGER,
+        rest_time_min   INTEGER,
+        rating          INTEGER,
+        yield_amount    REAL,
+        yield_unit_id   TEXT,
+        tags            TEXT DEFAULT '[]',
+        regions         TEXT DEFAULT '[]',
+        region_coords   TEXT DEFAULT '{}',
+        cover_image_url TEXT,
+        source_url      TEXT,
+        sources         TEXT DEFAULT '[]',
+        is_component    INTEGER DEFAULT 0,
+        language_code   TEXT,
+        times_cooked    INTEGER NOT NULL DEFAULT 0,
+        creator_name    TEXT,
+        storage_instructions TEXT,
+        tips            TEXT,
+        sync_status     TEXT DEFAULT 'local',
+        created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at      TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO recipes_new (id, title, description, difficulty, servings, prep_time_min, cook_time_min, rest_time_min, rating, yield_amount, yield_unit_id, tags, regions, region_coords, cover_image_url, source_url, sources, is_component, language_code, times_cooked, creator_name, storage_instructions, tips, sync_status, created_at, updated_at)
+        SELECT id, title, description, difficulty, servings, prep_time_min, cook_time_min, rest_time_min, rating, yield_amount, yield_unit_id, tags, regions, region_coords, cover_image_url, source_url, sources, is_component, language_code, times_cooked, creator_name, storage_instructions, tips, sync_status, created_at, updated_at
+        FROM recipes;
+      DROP TABLE recipes;
+      ALTER TABLE recipes_new RENAME TO recipes;
+    `);
+    await db.execute('PRAGMA foreign_keys=ON');
+  }
+
+  if (await hasForeignKeyTo(db, 'recipe_ingredients', 'units')) {
+    await db.execute('PRAGMA foreign_keys=OFF');
+    await db.execute(`
+      CREATE TABLE recipe_ingredients_new (
+        id            TEXT PRIMARY KEY,
+        recipe_id     TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+        sort_order    INTEGER NOT NULL DEFAULT 0,
+        ingredient_id TEXT REFERENCES ingredients(id),
+        subtype_id    TEXT,
+        sub_recipe_id TEXT REFERENCES recipes(id),
+        quantity      REAL,
+        quantity_text TEXT,
+        unit_id       TEXT,
+        notes         TEXT,
+        is_optional   INTEGER DEFAULT 0,
+        group_name    TEXT,
+        created_at    TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO recipe_ingredients_new (id, recipe_id, sort_order, ingredient_id, subtype_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional, group_name, created_at)
+        SELECT id, recipe_id, sort_order, ingredient_id, subtype_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional, group_name, created_at
+        FROM recipe_ingredients;
+      DROP TABLE recipe_ingredients;
+      ALTER TABLE recipe_ingredients_new RENAME TO recipe_ingredients;
+      CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
+      CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_sub_recipe ON recipe_ingredients(sub_recipe_id) WHERE sub_recipe_id IS NOT NULL;
+    `);
+    await db.execute('PRAGMA foreign_keys=ON');
+  }
+}
+
 /** Idempotent — safe to call on every app start. Creates the schema if
  *  this is a brand-new local DB, seeds a starter catalog on the very
  *  first run only. */
@@ -576,6 +733,7 @@ export async function initLocalSchema(): Promise<void> {
     await addColumnIfMissing(db, 'tools', 'synonyms', "TEXT DEFAULT '[]'");
     await addColumnIfMissing(db, 'tags', 'synonyms', "TEXT DEFAULT '[]'");
     await addColumnIfMissing(db, 'techniques', 'synonyms', "TEXT DEFAULT '[]'");
+    await dropDanglingForeignKeys(db);
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {
       await db.execute(SEED_SQL);
