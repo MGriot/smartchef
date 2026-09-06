@@ -174,7 +174,7 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
   profile: {
     table: 'profiles',
     nameColumn: 'name',
-    scalarFields: new Set(['name', 'avatar_url', 'deleted_at']),
+    scalarFields: new Set(['name', 'avatar_url', 'role', 'deleted_at']),
   },
 };
 
@@ -189,10 +189,6 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
 // associations under — NOT `tools` (ticket 02's Answer uses "tools" as
 // shorthand for the concept; the real entity JSON's key is toolIds).
 const ARRAY_FIELDS = new Set(['steps', 'ingredients', 'toolIds']);
-
-/** Exposed so the Conflicts list UI can tell which fields it can't offer a
- *  resolution button for yet, without duplicating this list. */
-export const ARRAY_FIELD_NAMES: ReadonlySet<string> = ARRAY_FIELDS;
 
 /** The full set of field names Structured Merge should compare for an
  *  entity type — scalar columns plus, for recipes, the three whole-array
@@ -341,6 +337,117 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
   for (const toolId of (value as string[] | null) ?? []) {
     await query(`INSERT INTO recipe_tools (recipe_id, tool_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [entityId, toolId]);
   }
+}
+
+// ── Readable lines for the Conflicts list's diff view ───────────────────
+// ADR 0002 still stands — these three fields have no per-row identity, so
+// this doesn't turn them into a real per-row merge. It just renders the
+// same whole-array values the count-only view already had access to as
+// short human-readable lines (resolving ingredient/subtype/sub-recipe/
+// unit/tool ids through this device's own local tables), so lineDiff.ts's
+// existing LCS diff — already used for tags/regions — has readable text to
+// work with instead of raw row objects, which is what steps/ingredients
+// actually needed to stop being "3 items vs 0 items" with no further detail.
+// An id this device doesn't have locally yet (e.g. an ingredient only the
+// other device knows about) falls back to a short id label rather than
+// failing the whole diff.
+
+async function idLabelMap(table: string, column: string, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const clean = [...new Set(ids.filter((id): id is string => !!id))];
+  if (clean.length === 0) return new Map();
+  const placeholders = clean.map((_, i) => `$${i + 1}`).join(', ');
+  const rows = await query<{ id: string; label: string }>(
+    `SELECT id, ${column} AS label FROM ${table} WHERE id IN (${placeholders})`,
+    clean
+  );
+  return new Map(rows.map((r) => [r.id, r.label]));
+}
+
+function shortId(id: string): string {
+  return `${id.slice(0, 8)}…`;
+}
+
+// Array-of-id fields — anywhere an entity holds a bare list of another
+// table's ids — get the same "resolve to a name" treatment `toolIds` needed
+// first: a raw UUID list diffs correctly (LCS still matches/mismatches ids
+// fine) but reads as noise. `steps`/`ingredients` aren't here because
+// they're arrays of ROW OBJECTS, not ids — see formatStepLine()/
+// formatIngredientLine() below for those two instead.
+const ID_ARRAY_FIELDS: Record<string, Record<string, { table: string; column: string; label: string }>> = {
+  recipe: { toolIds: { table: 'tools', column: 'name', label: 'tool' } },
+  tag: { exclude_tag_ids: { table: 'tags', column: 'name', label: 'tag' } },
+};
+
+function formatStepLine(row: RawRecipeStepRow): string {
+  const num = row.step_number != null ? `${row.step_number}. ` : '';
+  const title = row.title ? `${row.title}: ` : '';
+  const duration = row.duration_min ? ` (${row.duration_min} min)` : '';
+  return `${num}${title}${row.description ?? ''}${duration}`.trim();
+}
+
+function formatIngredientLine(
+  row: RawRecipeIngredientRow,
+  names: { ingredient: Map<string, string>; subtype: Map<string, string>; recipe: Map<string, string>; unit: Map<string, string> }
+): string {
+  const unitSymbol = row.unit_id ? names.unit.get(row.unit_id) : undefined;
+  const qty = row.quantity_text || (row.quantity != null ? `${row.quantity}${unitSymbol ? ` ${unitSymbol}` : ''}` : '');
+
+  let label: string;
+  if (row.ingredient_id) {
+    const base = names.ingredient.get(row.ingredient_id) ?? `ingredient ${shortId(row.ingredient_id)}`;
+    const subtype = row.subtype_id ? names.subtype.get(row.subtype_id) : undefined;
+    label = subtype ? `${base} (${subtype})` : base;
+  } else if (row.sub_recipe_id) {
+    label = `${names.recipe.get(row.sub_recipe_id) ?? `recipe ${shortId(row.sub_recipe_id)}`} (sub-recipe)`;
+  } else {
+    label = 'ingredient';
+  }
+
+  const parts = [qty, label].filter(Boolean);
+  if (row.notes) parts.push(`— ${row.notes}`);
+  if (row.is_optional) parts.push('(optional)');
+  return parts.join(' ');
+}
+
+/** Renders one array-valued conflict field as short human-readable lines,
+ *  for lineDiff.ts to diff against the other side. Covers three shapes:
+ *  recipe.steps/ingredients (whole-array row objects, ADR 0002 — bespoke
+ *  formatting below), any registered id-array field (ID_ARRAY_FIELDS —
+ *  resolved to names), and any other plain array of primitives (tags,
+ *  regions, image_urls, seasonal_months, ...), which needs no resolution
+ *  and diffs fine as its own string form. Throws only for an array of
+ *  objects this hasn't been taught to format (e.g. recipe.sources) —
+ *  callers fall back to the count-only view for those. */
+export async function formatArrayFieldLines(entityType: string, fieldName: string, value: unknown): Promise<string[]> {
+  const arr = (value as unknown[] | null) ?? [];
+
+  if (entityType === 'recipe' && fieldName === 'steps') {
+    return (arr as RawRecipeStepRow[]).map(formatStepLine);
+  }
+
+  if (entityType === 'recipe' && fieldName === 'ingredients') {
+    const rows = arr as RawRecipeIngredientRow[];
+    const [ingredientNames, subtypeNames, recipeNames, unitSymbols] = await Promise.all([
+      idLabelMap('ingredients', 'name', rows.map((r) => r.ingredient_id)),
+      idLabelMap('ingredient_subtypes', 'name', rows.map((r) => r.subtype_id)),
+      idLabelMap('recipes', 'title', rows.map((r) => r.sub_recipe_id)),
+      idLabelMap('units', 'symbol', rows.map((r) => r.unit_id)),
+    ]);
+    return rows.map((row) => formatIngredientLine(row, { ingredient: ingredientNames, subtype: subtypeNames, recipe: recipeNames, unit: unitSymbols }));
+  }
+
+  const idField = ID_ARRAY_FIELDS[entityType]?.[fieldName];
+  if (idField) {
+    const ids = arr.filter((id): id is string => typeof id === 'string');
+    const names = await idLabelMap(idField.table, idField.column, ids);
+    return ids.map((id) => names.get(id) ?? `${idField.label} ${shortId(id)}`);
+  }
+
+  if (arr.every((v) => v === null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) {
+    return arr.map((v) => String(v));
+  }
+
+  throw new Error(`formatArrayFieldLines: don't know how to format '${entityType}.${fieldName}' as diffable lines`);
 }
 
 /** Re-commits one entity into the Hidden Clone after a local write —

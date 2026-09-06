@@ -6,6 +6,8 @@ import { useStore } from '../store/app.store';
 import type { ThemeMode } from '../store/app.store';
 import { apiFetch, isNative } from '../lib/api';
 import { AVATAR_PRESETS } from '../lib/avatarPresets';
+import { ResolvedImage } from '../components/CoverImage';
+import type { StandaloneProfile } from '../lib/standalone';
 import type { SyncResult } from '../lib/sync/gitSync';
 import type { TransferProgress } from '../lib/sync/gitObjectTransport';
 import type { SyncInterval, SyncIntervalUnit } from '../lib/sync/syncSettings';
@@ -130,32 +132,77 @@ function conflictValuePreview(value: unknown): string {
   return String(value);
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+type LineDiffOp = { type: 'same' | 'removed' | 'added'; text: string };
+
+/** GitHub-style unified diff: a colored +/- gutter plus a full-row red/
+ *  green background, instead of a plain badge — the ask being "make the
+ *  differences easier to actually see," not just technically present. */
+function LineDiffView({ ops }: { ops: LineDiffOp[] }) {
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden font-mono text-xs">
+      <div className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-3 text-[10px] font-sans font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+        <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400"><span className="w-2 h-2 rounded-sm bg-red-500 inline-block" />mine only</span>
+        <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />theirs only</span>
+      </div>
+      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        {ops.map((op, i) => (
+          <div key={i} className={`flex ${op.type === 'removed' ? 'bg-red-50 dark:bg-red-950/30' : op.type === 'added' ? 'bg-emerald-50 dark:bg-emerald-950/30' : ''}`}>
+            <span
+              className={`w-7 shrink-0 text-center select-none font-black ${
+                op.type === 'removed' ? 'bg-red-100 text-red-500 dark:bg-red-900/40 dark:text-red-400' : op.type === 'added' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400' : 'text-zinc-300 dark:text-zinc-700'
+              }`}
+            >
+              {op.type === 'removed' ? '−' : op.type === 'added' ? '+' : ''}
+            </span>
+            <span className={`px-3 py-1 flex-1 whitespace-pre-wrap ${op.type === 'removed' ? 'text-red-800 dark:text-red-300' : op.type === 'added' ? 'text-emerald-800 dark:text-emerald-300' : 'text-zinc-600 dark:text-zinc-400'}`}>
+              {op.text}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict; onResolve: (chosen: 'local' | 'remote') => void }) {
-  const [ops, setOps] = useState<{ type: 'same' | 'removed' | 'added'; text: string }[] | null>(null);
+  const [ops, setOps] = useState<LineDiffOp[] | null>(null);
+  const [unsupported, setUnsupported] = useState(false);
   const isArrayField = Array.isArray(conflict.localValue) || Array.isArray(conflict.remoteValue);
-  // steps/ingredients/toolIds (ARRAY_FIELDS in conflicts.local.ts) are
-  // whole-array fields of ROW OBJECTS, not strings — ADR 0002 already
-  // ruled out per-row diffing for them (no stable per-row identity), so
-  // the line-diff below only ever applies to genuine string-array fields
-  // (tags, regions, synonyms, ...). Running diffLines() on an object
-  // array used to push raw row objects into DiffOp.text and render them
-  // directly as JSX children — React error #31 (Objects are not valid as
-  // a React child), uncaught, blanking the whole app the moment any
-  // recipe had a steps/ingredients/toolIds conflict pending.
-  const isDiffableStringArray = isStringArray(conflict.localValue) && isStringArray(conflict.remoteValue);
-
+  // Every array-valued field — plain string/number lists (tags, regions,
+  // seasonal_months...), id-reference lists (toolIds, exclude_tag_ids...),
+  // and recipe's steps/ingredients row objects — goes through
+  // conflicts.local.ts's formatArrayFieldLines(), which resolves whatever
+  // it can into a readable line per item (ADR 0002 still applies: this is
+  // display only, not per-row merging). It only throws for an array of
+  // objects it hasn't been taught to format (e.g. recipe.sources) — that
+  // falls back to the plain count-only view below instead of crashing.
   useEffect(() => {
-    if (!isDiffableStringArray) return;
-    import('../lib/lineDiff').then(({ diffLines }) => {
-      setOps(diffLines(conflict.localValue as string[], conflict.remoteValue as string[]));
-    });
-  }, [conflict, isDiffableStringArray]);
+    let cancelled = false;
+    setOps(null);
+    setUnsupported(false);
+    if (!isArrayField) return;
 
-  if (isArrayField && !isDiffableStringArray) {
+    (async () => {
+      try {
+        const [{ formatArrayFieldLines }, { diffLines }] = await Promise.all([
+          import('../services/conflicts.local'),
+          import('../lib/lineDiff'),
+        ]);
+        const [localLines, remoteLines] = await Promise.all([
+          formatArrayFieldLines(conflict.entityType, conflict.fieldName, conflict.localValue),
+          formatArrayFieldLines(conflict.entityType, conflict.fieldName, conflict.remoteValue),
+        ]);
+        if (!cancelled) setOps(diffLines(localLines, remoteLines));
+      } catch (err) {
+        console.error('ConflictFieldDiff: could not format array field for diff', err);
+        if (!cancelled) setUnsupported(true);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [conflict, isArrayField]);
+
+  if (isArrayField && unsupported) {
     return (
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-zinc-200 dark:border-zinc-700">
@@ -176,28 +223,10 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
     );
   }
 
-  if (isDiffableStringArray) {
+  if (isArrayField) {
     return (
       <div className="space-y-2">
-        <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-          <div className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
-            <span className="flex items-center gap-1 text-red-600"><span className="w-2 h-2 rounded-sm bg-red-200 inline-block" />only in mine</span>
-            <span className="flex items-center gap-1 text-emerald-600"><span className="w-2 h-2 rounded-sm bg-emerald-200 inline-block" />only in theirs</span>
-          </div>
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {(ops ?? []).map((op, i) => (
-              <div
-                key={i}
-                className={`px-3 py-1.5 text-xs font-medium flex gap-2 ${
-                  op.type === 'removed' ? 'bg-red-50 text-red-800' : op.type === 'added' ? 'bg-emerald-50 text-emerald-800' : 'text-zinc-600 dark:text-zinc-400'
-                }`}
-              >
-                <span className="font-black w-3 shrink-0">{op.type === 'removed' ? '−' : op.type === 'added' ? '+' : ''}</span>
-                {op.text}
-              </div>
-            ))}
-          </div>
-        </div>
+        <LineDiffView ops={ops ?? []} />
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">Keep mine</button>
           <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Keep theirs</button>
@@ -318,7 +347,7 @@ function ConflictsCard() {
   }
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
+    <div className="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-1">Needs Your Attention</h2>
       <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mb-4">
         {groups.size} item{groups.size === 1 ? '' : 's'} changed differently on two devices.
@@ -359,6 +388,10 @@ function FolderSyncCard() {
   const navigate = useNavigate();
   const [standalone, setStandalone] = useState(false);
   const [electron, setElectron] = useState(false);
+  // Sync settings affect the whole shared library across every device, not
+  // just this profile — only an admin profile may change them (mirrors the
+  // same admin-only gating server mode already applies to Manage Users).
+  const [isAdmin, setIsAdmin] = useState(false);
   const [syncMode, setSyncModeState] = useState<'folder' | 'git-remote'>('folder');
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [gitRemoteUrl, setGitRemoteUrl] = useState('');
@@ -410,6 +443,8 @@ function FolderSyncCard() {
       setStandalone(isStandalone);
       setElectron(isElectronApp);
       if (!isStandalone) return;
+      const { getActiveProfile } = await import('../lib/standalone');
+      setIsAdmin((await getActiveProfile())?.role === 'admin');
       const { getLastSyncAt, getDeviceId, getDeviceName } = await import('../lib/sync/gitSync');
       const { getSyncMode, getGitRemoteConfig, getSyncInterval } = await import('../lib/sync/syncSettings');
       setLastSyncAt(await getLastSyncAt());
@@ -661,8 +696,40 @@ function FolderSyncCard() {
 
   if (!standalone) return null;
 
+  // Non-admin profiles can still see sync status and trigger a manual sync
+  // (that's just using the existing configuration), but changing WHERE this
+  // library syncs to, its credentials, its interval, or device management
+  // affects every device sharing this library — reserved for an admin.
+  if (!isAdmin) {
+    return (
+      <div className="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Sync</h2>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
+              {lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Never synced yet'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSyncNow}
+            disabled={syncing}
+            className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-2xl font-black text-sm hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
+            {syncing ? 'Syncing…' : 'Sync Now'}
+          </button>
+        </div>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+          Only an admin profile can change where this library syncs to, its credentials, or its devices.
+        </p>
+        {error && <p className="mt-4 text-sm text-red-600 font-medium">{error}</p>}
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
+    <div className="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Folder Sync</h2>
@@ -1015,7 +1082,7 @@ function OfflineDownloadsCard() {
     <button
       type="button"
       onClick={() => navigate('/downloads')}
-      className="w-full flex items-center justify-between gap-4 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8 text-left hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
+      className="w-full flex items-center justify-between gap-4 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 text-left hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
     >
       <div>
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Offline Downloads</h2>
@@ -1065,7 +1132,7 @@ function SyncCard() {
   if (!status) return null;
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Multi-Device Sync</h2>
@@ -1257,7 +1324,7 @@ function LlmProviderCard() {
   const cloudProvider = provider !== 'ollama' ? (provider as CloudProvider) : null;
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">AI Provider</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
@@ -1339,7 +1406,7 @@ function ManageUsersCard() {
   return (
     <Link
       to="/manage-users"
-      className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8 hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
+      className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
     >
       <div>
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Manage Users</h2>
@@ -1410,7 +1477,7 @@ function BackupCard() {
   };
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Backup &amp; Restore</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
@@ -1471,7 +1538,7 @@ function StandaloneProfileCard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    import('../lib/standalone').then(({ getStandaloneProfile }) => getStandaloneProfile()).then((profile) => {
+    import('../lib/standalone').then(({ getActiveProfile }) => getActiveProfile()).then((profile) => {
       setName(profile?.name ?? '');
       setSavedName(profile?.name ?? '');
       setAvatarUrl(profile?.avatarUrl ?? '');
@@ -1585,6 +1652,118 @@ function StandaloneProfileCard() {
   );
 }
 
+/** Admin-only list of every profile on this shared library — promote/demote
+ *  and delete, mirroring server mode's ManageUsersCard/ManageUsers.tsx.
+ *  Renders nothing for a non-admin active profile (same gating pattern as
+ *  `{!standalone && account?.role === 'admin' && <ManageUsersCard />}` below). */
+function AllProfilesCard() {
+  const [activeProfile, setActiveProfile] = useState<StandaloneProfile | null>(null);
+  const [profiles, setProfiles] = useState<StandaloneProfile[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = () => {
+    import('../lib/standalone').then(async ({ getActiveProfile, listStandaloneProfiles }) => {
+      setActiveProfile(await getActiveProfile());
+      setProfiles(await listStandaloneProfiles());
+    });
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  if (activeProfile?.role !== 'admin') return null;
+
+  const handlePromote = async (p: StandaloneProfile, role: 'admin' | 'user') => {
+    setBusyId(p.id);
+    setError(null);
+    try {
+      const { setProfileRole } = await import('../lib/standalone');
+      await setProfileRole(p.id, role);
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change role');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDelete = async (p: StandaloneProfile) => {
+    if (!window.confirm(`Remove ${p.name}? Recipes and ingredients they created stay untouched — this only removes their profile from the picker.`)) return;
+    setBusyId(p.id);
+    setError(null);
+    try {
+      const { removeProfile } = await import('../lib/standalone');
+      await removeProfile(p.id);
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove profile');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const otherAdmins = (profiles ?? []).filter((p) => p.role === 'admin').length;
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+      <div className="mb-6">
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Profiles</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Everyone who's set up a profile on this shared library.</p>
+      </div>
+      {profiles === null ? (
+        <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading…</p>
+      ) : (
+        <div className="space-y-2">
+          {profiles.map((p) => {
+            const isSelf = p.id === activeProfile.id;
+            const isLastAdmin = p.role === 'admin' && otherAdmins <= 1;
+            return (
+              <div key={p.id} className="flex items-center gap-3 px-4 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
+                <span className="w-8 h-8 rounded-full overflow-hidden bg-zinc-200 dark:bg-zinc-700 shrink-0 flex items-center justify-center">
+                  {p.avatarUrl ? (
+                    <ResolvedImage src={p.avatarUrl} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="material-symbols-outlined text-sm text-zinc-400 dark:text-zinc-500">person</span>
+                  )}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">{p.name}{isSelf ? ' (you)' : ''}</p>
+                </div>
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shrink-0 ${p.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'}`}>
+                  {p.role}
+                </span>
+                {!isSelf && (
+                  <button
+                    type="button"
+                    onClick={() => handlePromote(p, p.role === 'admin' ? 'user' : 'admin')}
+                    disabled={busyId === p.id || (p.role === 'admin' && isLastAdmin)}
+                    title={p.role === 'admin' && isLastAdmin ? "Can't demote the last admin" : p.role === 'admin' ? `Demote ${p.name} to user` : `Promote ${p.name} to admin`}
+                    className="px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0 disabled:opacity-50"
+                  >
+                    {busyId === p.id ? '…' : p.role === 'admin' ? 'Demote' : 'Promote'}
+                  </button>
+                )}
+                {!isSelf && (
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(p)}
+                    disabled={busyId === p.id || (p.role === 'admin' && isLastAdmin)}
+                    title={p.role === 'admin' && isLastAdmin ? "Can't delete the last admin" : `Remove ${p.name}`}
+                    className="w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center hover:bg-red-100 transition-colors shrink-0 disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-sm">{busyId === p.id ? 'sync' : 'delete'}</span>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {error && <p className="mt-4 text-sm text-red-600 font-medium">{error}</p>}
+    </div>
+  );
+}
+
 const THEME_OPTIONS: { mode: ThemeMode; label: string; icon: string }[] = [
   { mode: 'light', label: 'Light', icon: 'light_mode' },
   { mode: 'dark', label: 'Dark', icon: 'dark_mode' },
@@ -1596,7 +1775,7 @@ function AppearanceCard() {
   const setThemeMode = useStore((s) => s.setThemeMode);
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Appearance</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Choose how SmartChef looks on this device.</p>
@@ -1675,7 +1854,7 @@ export default function Account() {
 
   return (
     <AppLayout>
-      <div className="p-6 sm:p-12 max-w-2xl mx-auto">
+      <div className="p-6 sm:p-12 max-w-6xl mx-auto">
         <div className="mb-10">
           <button
             onClick={() => navigate(-1)}
@@ -1687,8 +1866,15 @@ export default function Account() {
           <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">Account</h1>
         </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-start">
+        <div className="lg:col-span-2">
         {standalone === null ? null : standalone ? (
-          <StandaloneProfileCard />
+          <>
+            <StandaloneProfileCard />
+            <div className="mt-6 sm:mt-8">
+              <AllProfilesCard />
+            </div>
+          </>
         ) : (
           <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
             <div>
@@ -1757,6 +1943,7 @@ export default function Account() {
             </div>
           </form>
         )}
+        </div>
 
         <AppearanceCard />
         {!standalone && account?.role === 'admin' && <ManageUsersCard />}
@@ -1766,6 +1953,7 @@ export default function Account() {
         {isNative() && !standalone && <OfflineDownloadsCard />}
         {standalone && <ConflictsCard />}
         <FolderSyncCard />
+      </div>
       </div>
     </AppLayout>
   );

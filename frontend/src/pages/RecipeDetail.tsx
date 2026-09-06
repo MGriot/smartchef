@@ -10,6 +10,8 @@ import RecipeSourcesEditor, { RecipeSourceEntry, SOURCE_TYPE_META } from '../com
 import ImageUrlInput from '../components/ImageUrlInput';
 import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
 import TagPicker from '../components/TagPicker';
+import { pickIngredientName } from '../lib/ingredientDisplay';
+import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/recipeDraftCoercion';
 import RegionPicker from '../components/RegionPicker';
 import RegionsMap from '../components/RegionsMap';
 import RenderStepText from '../components/RenderStepText';
@@ -28,6 +30,7 @@ interface Ingredient {
   sortOrder: number;
   ingredientId: string | null;
   ingredientName: string;
+  ingredientPluralName?: string | null;
   subRecipeId?: string | null;
   subRecipeTitle?: string | null;
   quantity: number | null;
@@ -235,7 +238,7 @@ const SubIngredientList: React.FC<{
             const scaled = ing.quantity ? ((ing.quantity * servings) / baseServings) : null;
             return (
               <div key={i} className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400 py-1">
-                <span>{ing.ingredientName || ing.subRecipeTitle}</span>
+                <span>{ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaled) : ing.subRecipeTitle}</span>
                 <span className="text-zinc-400 dark:text-zinc-500 font-medium">
                   {scaled !== null ? scaled % 1 === 0 ? scaled : scaled.toFixed(1) : ''} {ing.unitSymbol || ing.quantityText || ''}
                 </span>
@@ -287,7 +290,14 @@ const RecipeDetail: React.FC = () => {
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
   const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; icon: string | null; translated_name?: string | null }[]>([]);
   const [allRecipes, setAllRecipes] = useState<{ id: string; title: string; translated_title?: string | null }[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
   const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
+  // Inline "create new ingredient/tool/technique" without leaving the
+  // editor — see RecipeCreate.tsx's identical pattern.
+  const [pendingIngredient, setPendingIngredient] = useState<{ idx: number; name: string; categoryId: string; pluralName: string; description: string } | null>(null);
+  const [creatingPendingIngredient, setCreatingPendingIngredient] = useState(false);
+  const [newToolName, setNewToolName] = useState('');
+  const [newTechniqueName, setNewTechniqueName] = useState('');
   const { t, i18n } = useTranslation();
   const isOnline = useOnlineStatus();
   const contentLang = useStore((s) => s.contentLang);
@@ -364,17 +374,19 @@ const RecipeDetail: React.FC = () => {
     if (mode === 'edit') {
       (async () => {
         try {
-          const [tRes, uRes, iRes, rRes] = await Promise.all([
+          const [tRes, uRes, iRes, rRes, catRes] = await Promise.all([
             apiFetch(`/api/tools${libraryLang ? `?lang=${libraryLang}` : ''}`),
             apiFetch(`/api/units${libraryLang ? `?lang=${libraryLang}` : ''}`),
             apiFetch(`/api/ingredients${libraryLang ? `?lang=${libraryLang}` : ''}`),
             apiFetch(`/api/recipes${libraryLang ? `?lang=${libraryLang}` : ''}`),
+            apiFetch(`/api/ingredients/categories${libraryLang ? `?lang=${libraryLang}` : ''}`),
           ]);
-          const [tJson, uJson, iJson, rJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), rRes.json()]);
+          const [tJson, uJson, iJson, rJson, catJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), rRes.json(), catRes.json()]);
           setAllTools(tJson.data || []);
           setAllUnits(uJson.data || []);
           setAllIngredients(iJson.data || []);
           setAllRecipes(rJson.data || []);
+          setCategories(catJson.data || []);
         } catch (err) { console.error('Library fetch failed:', err); }
       })();
     }
@@ -501,10 +513,14 @@ const RecipeDetail: React.FC = () => {
   }, [id, recipe?.id, recipe?.servings]);
 
   /* ── Scale quantity ─────────────────────────────────────────────── */
+  const scaleNum = (qty: number | null): number | null => {
+    if (qty === null) return null;
+    if (!recipe) return qty;
+    return (qty * servings) / recipe.servings;
+  };
   const scale = (qty: number | null): string => {
-    if (qty === null) return '';
-    if (!recipe) return String(qty);
-    const v = (qty * servings) / recipe.servings;
+    const v = scaleNum(qty);
+    if (v === null) return '';
     return v % 1 === 0 ? String(v) : v.toFixed(1);
   };
 
@@ -575,6 +591,25 @@ const RecipeDetail: React.FC = () => {
     if (!id || !draft.title) return;
     setSaving(true);
     try {
+      // Any tool not already in the library (pasted from raw-text JSON,
+      // never confirmed via the Kitchen Tools grid) gets created for real
+      // now — its id up to this point was only a locally-generated
+      // placeholder, not a real toolId the backend can save a reference to.
+      const resolvedToolIds: string[] = [];
+      for (const tool of draft.tools || []) {
+        if (allTools.some(at => at.id === tool.id)) {
+          resolvedToolIds.push(tool.id);
+          continue;
+        }
+        const toolRes = await apiFetch('/api/tools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: tool.name }),
+        });
+        const toolJson = await toolRes.json();
+        if (toolRes.ok) resolvedToolIds.push(toolJson.data.id);
+      }
+
       const body = {
         title: draft.title,
         description: draft.description || '',
@@ -621,7 +656,7 @@ const RecipeDetail: React.FC = () => {
           stepIngredients: s.stepIngredients || [],
           translations: s.translations || [],
         })),
-        toolIds: (draft.tools || []).map(t => t.id),
+        toolIds: resolvedToolIds,
       };
 
       const res = await apiFetch(`/api/recipes/${id}`, {
@@ -1022,9 +1057,29 @@ const RecipeDetail: React.FC = () => {
     const applyRawText = (): Partial<Recipe> | null => {
       try {
         const parsed = JSON.parse(rawText);
-        setDraft(parsed);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error(`Expected a JSON object, got ${Array.isArray(parsed) ? 'an array' : typeof parsed}`);
+        }
+        // Merge onto the current draft rather than replacing it wholesale.
+        // ingredients/steps/tools/techniques also accept the same looser
+        // shape the AI import pipeline produces (steps as plain sentences,
+        // tools/techniques as plain names, ingredients as {name, quantity,
+        // unit, note}) via coerce*() below — anything that still isn't
+        // recognizable just becomes an empty array instead of undefined,
+        // which is what used to crash every .map() in the form below to a
+        // blank screen.
+        const merged: Partial<Recipe> = { ...draft, ...parsed };
+        if ('ingredients' in parsed) merged.ingredients = coerceIngredients(parsed.ingredients) as unknown as Ingredient[];
+        if ('steps' in parsed) merged.steps = coerceSteps(parsed.steps) as unknown as Step[];
+        if ('tools' in parsed) merged.tools = coerceNamedEntities(parsed.tools) as unknown as Tool[];
+        if ('techniques' in parsed) merged.techniques = coerceNamedEntities(parsed.techniques) as unknown as Technique[];
+        const arrayFields: (keyof Recipe)[] = ['ingredients', 'steps', 'tools', 'techniques', 'tags', 'regions', 'sources', 'translations'];
+        for (const field of arrayFields) {
+          if (!Array.isArray(merged[field])) (merged as Record<string, unknown>)[field] = draft[field] ?? [];
+        }
+        setDraft(merged);
         setRawTextError(null);
-        return parsed;
+        return merged;
       } catch (err) {
         setRawTextError(err instanceof Error ? err.message : 'Invalid JSON');
         return null;
@@ -1168,6 +1223,19 @@ const RecipeDetail: React.FC = () => {
       }));
     const getEntryType = (idx: number, ing: Ingredient): 'ingredient' | 'recipe' =>
       ingredientEntryTypes[idx] ?? (ing.subRecipeId ? 'recipe' : 'ingredient');
+    // An ingredient can need matching two ways: parsed from raw-text with a
+    // name but no library id yet, OR — for an already-saved recipe — an id
+    // that no longer resolves to any row in allIngredients (the ingredient
+    // was deleted, or hasn't synced to this device yet). Both cases used to
+    // just render a blank, unexplained box; both now get the same
+    // search/create-new treatment. Same idea for a dangling sub-recipe
+    // reference, using the denormalized subRecipeTitle as the fallback text
+    // since the linked recipe itself isn't in allRecipes to look up.
+    const ingredientNeedsMatching = (ing: Ingredient) =>
+      (!ing.ingredientId && !!ing.ingredientName) ||
+      (!!ing.ingredientId && !allIngredients.some(i => i.id === ing.ingredientId));
+    const subRecipeDangling = (ing: Ingredient) =>
+      !!ing.subRecipeId && !allRecipes.some(r => r.id === ing.subRecipeId);
     const setEntryType = (idx: number, type: 'ingredient' | 'recipe') => {
       setIngredientEntryTypes(prev => ({ ...prev, [idx]: type }));
       if (type === 'recipe') {
@@ -1209,6 +1277,75 @@ const RecipeDetail: React.FC = () => {
         }
         return { ...prev, tools: [...tools, tool] };
       });
+
+    // Inline "create new" without leaving the editor — same pattern as
+    // RecipeCreate.tsx's identical handlers.
+    const confirmCreateIngredient = async () => {
+      if (!pendingIngredient || !pendingIngredient.categoryId) return;
+      setCreatingPendingIngredient(true);
+      try {
+        const res = await apiFetch('/api/ingredients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: pendingIngredient.name,
+            categoryId: pendingIngredient.categoryId,
+            pluralName: pendingIngredient.pluralName || undefined,
+            description: pendingIngredient.description || undefined,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create ingredient');
+        const newIngredient = { id: json.data.id, name: pendingIngredient.name };
+        setAllIngredients(prev => [...prev, newIngredient]);
+        updateIngredient(pendingIngredient.idx, 'ingredientId', newIngredient.id);
+        updateIngredient(pendingIngredient.idx, 'ingredientName', newIngredient.name);
+        setPendingIngredient(null);
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : 'Could not create ingredient');
+      } finally {
+        setCreatingPendingIngredient(false);
+      }
+    };
+
+    const createToolInline = async () => {
+      const name = newToolName.trim();
+      if (!name) return;
+      try {
+        const res = await apiFetch('/api/tools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create tool');
+        const newTool: Tool = { id: json.data.id, name, icon: null, category: null };
+        setAllTools(prev => [...prev, newTool]);
+        setDraft(prev => ({ ...prev, tools: [...(prev.tools || []), newTool] }));
+        setNewToolName('');
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : 'Could not create tool');
+      }
+    };
+
+    const createTechniqueInline = async (onCreated: (id: string) => void) => {
+      const name = newTechniqueName.trim();
+      if (!name) return;
+      try {
+        const res = await apiFetch('/api/techniques', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create technique');
+        setAllTechniques(prev => [...prev, { id: json.data.id, name, icon: null }]);
+        setNewTechniqueName('');
+        onCreated(json.data.id);
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : 'Could not create technique');
+      }
+    };
 
     return (
       <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 font-body">
@@ -1262,7 +1399,7 @@ const RecipeDetail: React.FC = () => {
             />
           </main>
         ) : (
-        <main className="max-w-4xl mx-auto px-6 py-10 space-y-8">
+        <main className="max-w-6xl mx-auto px-6 py-10 space-y-8">
           {/* Title & description */}
           <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
             <label className="block mb-6">
@@ -1277,6 +1414,7 @@ const RecipeDetail: React.FC = () => {
                   >
                     {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                   </select>
+                  <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
                 </span>
               </div>
               <input
@@ -1291,7 +1429,7 @@ const RecipeDetail: React.FC = () => {
               <textarea
                 value={draft.description || ''}
                 onChange={e => updateDraft('description', e.target.value)}
-                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px]"
+                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px] max-h-[50vh] overflow-y-auto [field-sizing:content]"
                 placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
               />
             </label>
@@ -1300,7 +1438,7 @@ const RecipeDetail: React.FC = () => {
               <textarea
                 value={draft.storage_instructions || ''}
                 onChange={e => updateDraft('storage_instructions', e.target.value || null)}
-                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
                 placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
               />
             </label>
@@ -1309,7 +1447,7 @@ const RecipeDetail: React.FC = () => {
               <textarea
                 value={draft.tips || ''}
                 onChange={e => updateDraft('tips', e.target.value || null)}
-                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
                 placeholder={t('recipeDetail.tipsPlaceholder')}
               />
             </label>
@@ -1323,7 +1461,7 @@ const RecipeDetail: React.FC = () => {
           </div>
 
           {/* Translations */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+          <div id="translations-section" className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)] scroll-mt-24">
             <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.translations')}</h3>
             <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-6">{t('recipeDetail.translationsHint')}</p>
             <TranslationsEditor
@@ -1469,6 +1607,41 @@ const RecipeDetail: React.FC = () => {
                   </button>
                 );
               })}
+              {/* Pasted-but-not-yet-in-the-library tools (e.g. from raw-text
+                  JSON) — otherwise invisible here since this grid only
+                  lists allTools, yet still silently in draft.tools and
+                  would fail to save as a real toolId. Shown so they can be
+                  reviewed/removed before saving auto-creates them for real. */}
+              {(draft.tools || []).filter(t => !allTools.some(at => at.id === t.id)).map(tool => (
+                <button
+                  key={tool.id}
+                  onClick={() => toggleTool(tool)}
+                  title={t('recipeDetail.ingredientNeedsMatching')}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
+                >
+                  <RenderFaIcon name="FaKitchenSet" className="text-lg" />
+                  <span className="text-sm font-bold">{tool.name}</span>
+                  <span className="material-symbols-outlined text-sm">close</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <input
+                type="text"
+                value={newToolName}
+                onChange={(e) => setNewToolName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createToolInline(); } }}
+                placeholder={t('recipeDetail.newToolPlaceholder')}
+                className="flex-1 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+              />
+              <button
+                type="button"
+                onClick={createToolInline}
+                disabled={!newToolName.trim()}
+                className="px-4 py-2 rounded-lg bg-zinc-900 text-white text-sm font-bold disabled:opacity-50"
+              >
+                {t('recipeDetail.addTool')}
+              </button>
             </div>
           </div>
 
@@ -1480,7 +1653,7 @@ const RecipeDetail: React.FC = () => {
                 <span className="material-symbols-outlined text-sm">add</span> {t('recipeDetail.addIngredient')}
               </button>
             </div>
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               {(draft.ingredients || []).map((ing, idx) => (
                 <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group border border-zinc-100 dark:border-zinc-800">
                   <button
@@ -1510,7 +1683,8 @@ const RecipeDetail: React.FC = () => {
                       </div>
                       {getEntryType(idx, ing) === 'recipe' ? (
                         <Autocomplete
-                          value={ing.subRecipeId || ''}
+                          value={subRecipeDangling(ing) ? '' : (ing.subRecipeId || '')}
+                          unmatchedLabel={subRecipeDangling(ing) ? (ing.subRecipeTitle || t('recipeDetail.ingredientNeedsMatching')) : undefined}
                           options={allRecipes.filter(r => r.id !== id).map(r => ({ id: r.id, label: r.translated_title || r.title }))}
                           onSelect={(subId, label) => {
                             updateIngredient(idx, 'subRecipeId', subId);
@@ -1521,11 +1695,16 @@ const RecipeDetail: React.FC = () => {
                             updateIngredient(idx, 'subRecipeTitle', null);
                           }}
                           placeholder={t('recipeDetail.typeToSearch')}
-                          className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                          className={`w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 ${
+                            subRecipeDangling(ing)
+                              ? 'border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700'
+                              : 'border-none bg-white dark:bg-zinc-900'
+                          }`}
                         />
                       ) : (
                         <Autocomplete
-                          value={ing.ingredientId || ''}
+                          value={ingredientNeedsMatching(ing) ? '' : (ing.ingredientId || '')}
+                          unmatchedLabel={ingredientNeedsMatching(ing) ? (ing.ingredientName || t('recipeDetail.ingredientNeedsMatching')) : undefined}
                           options={allIngredients.map(i => ({ id: i.id, label: i.translated_name || i.name }))}
                           onSelect={(id2, label) => {
                             updateIngredient(idx, 'ingredientId', id2);
@@ -1535,12 +1714,86 @@ const RecipeDetail: React.FC = () => {
                             updateIngredient(idx, 'ingredientId', null);
                             updateIngredient(idx, 'ingredientName', '');
                           }}
+                          onCreateNew={(name) => setPendingIngredient({ idx, name, categoryId: categories[0]?.id || '', pluralName: '', description: '' })}
+                          createNewLabel={(name) => t('import.createNew', { name })}
                           placeholder={t('recipeDetail.typeToSearch')}
-                          className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                          className={`w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 ${
+                            ingredientNeedsMatching(ing)
+                              ? 'border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700'
+                              : 'border-none bg-white dark:bg-zinc-900'
+                          }`}
                         />
+                      )}
+                      {ingredientNeedsMatching(ing) && getEntryType(idx, ing) === 'ingredient' && (
+                        <p className="text-[9px] text-amber-600 dark:text-amber-500 font-bold mt-1">{t('recipeDetail.ingredientNeedsMatching')}</p>
                       )}
                       {getEntryType(idx, ing) === 'recipe' && (
                         <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-1">{t('recipeDetail.subRecipeCycleWarning')}</p>
+                      )}
+                      {pendingIngredient?.idx === idx && (
+                        <div className="mt-2 bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-2">
+                          <div>
+                            <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredient')}</label>
+                            <input
+                              type="text"
+                              value={pendingIngredient.name}
+                              onChange={(e) => setPendingIngredient({ ...pendingIngredient, name: e.target.value })}
+                              className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('import.pickCategory')}</label>
+                              <select
+                                value={pendingIngredient.categoryId}
+                                onChange={(e) => setPendingIngredient({ ...pendingIngredient, categoryId: e.target.value })}
+                                className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                              >
+                                <option value="">{t('import.pickCategory')}</option>
+                                {categories.map(c => (
+                                  <option key={c.id} value={c.id}>{c.translated_name || c.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.pluralOptional')}</label>
+                              <input
+                                type="text"
+                                value={pendingIngredient.pluralName}
+                                onChange={(e) => setPendingIngredient({ ...pendingIngredient, pluralName: e.target.value })}
+                                placeholder={t('recipeDetail.pluralPlaceholder')}
+                                className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.descriptionOptional')}</label>
+                            <input
+                              type="text"
+                              value={pendingIngredient.description}
+                              onChange={(e) => setPendingIngredient({ ...pendingIngredient, description: e.target.value })}
+                              className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                            />
+                          </div>
+                          <p className="text-[9px] text-zinc-400 dark:text-zinc-500">{t('recipeDetail.moreDetailsLaterHint')}</p>
+                          <div className="flex gap-2 justify-end">
+                          <button
+                            type="button"
+                            disabled={!pendingIngredient.categoryId || !pendingIngredient.name.trim() || creatingPendingIngredient}
+                            onClick={confirmCreateIngredient}
+                            className="px-3 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold disabled:opacity-50"
+                          >
+                            {creatingPendingIngredient ? '…' : t('import.createNew', { name: pendingIngredient.name })}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPendingIngredient(null)}
+                            className="px-2 py-1.5 rounded-lg text-zinc-400 dark:text-zinc-500 text-[11px] font-bold hover:text-zinc-600 dark:hover:text-zinc-400"
+                          >
+                            {t('common.cancel')}
+                          </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                     <div className="col-span-3">
@@ -1699,9 +1952,9 @@ const RecipeDetail: React.FC = () => {
                     </div>
                   </div>
 
-                  {allTechniques.length > 0 && (
-                    <div className="mt-4">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
+                  <div className="mt-4">
+                    <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
+                    {allTechniques.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-1">
                         {allTechniques.map(tech => {
                           const isUsed = (step.techniqueIds || []).includes(tech.id);
@@ -1723,8 +1976,31 @@ const RecipeDetail: React.FC = () => {
                           );
                         })}
                       </div>
+                    )}
+                    <div className="flex gap-2 mt-2">
+                      <input
+                        type="text"
+                        value={newTechniqueName}
+                        onChange={(e) => setNewTechniqueName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            createTechniqueInline((newId) => updateStep(idx, 'techniqueIds', [...(step.techniqueIds || []), newId]));
+                          }
+                        }}
+                        placeholder={t('recipeDetail.newTechniquePlaceholder')}
+                        className="flex-1 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-primary/20"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => createTechniqueInline((newId) => updateStep(idx, 'techniqueIds', [...(step.techniqueIds || []), newId]))}
+                        disabled={!newTechniqueName.trim()}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-900 text-white text-[11px] font-bold disabled:opacity-50"
+                      >
+                        {t('recipeDetail.addTechnique')}
+                      </button>
                     </div>
-                  )}
+                  </div>
 
                   {(draft.ingredients || []).length > 0 && (
                     <div className="mt-4">
@@ -2134,7 +2410,7 @@ const RecipeDetail: React.FC = () => {
                           <span className="material-symbols-outlined text-primary text-[18px]">package_2</span>
                         )}
                         <span className={`text-sm ${ing.subRecipeId ? 'font-bold text-zinc-800 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'}`}>
-                          {ing.ingredientName || ing.subRecipeTitle}
+                          {ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaleNum(ing.quantity)) : ing.subRecipeTitle}
                         </span>
                       </div>
                       <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">

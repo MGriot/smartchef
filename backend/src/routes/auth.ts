@@ -325,3 +325,32 @@ authRouter.delete("/users/:id", async (req: Request, res: Response) => {
   await query("DELETE FROM account WHERE id=$1", [req.params.id]);
   res.status(204).send();
 });
+
+const UpdateRoleSchema = z.object({ role: z.enum(["admin", "user"]) });
+
+// PATCH /auth/users/:id/role — admin-only. Same self-lockout and
+// last-admin guards as DELETE above; role can otherwise only be set at
+// creation time (POST /users) until now.
+authRouter.patch("/users/:id/role", async (req: Request, res: Response) => {
+  const admin = await requireAdminFromCookie(req);
+  if (!admin) return res.status(403).json({ error: "Admin only" });
+
+  const parsed = UpdateRoleSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const target = await queryOne<{ role: string }>("SELECT role FROM account WHERE id=$1", [req.params.id]);
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  if (target.role === "admin" && parsed.data.role === "user") {
+    if (req.params.id === admin.id) {
+      return res.status(400).json({ error: "You can't demote yourself — ask another admin to do it" });
+    }
+    const adminCount = await queryOne<{ count: string }>("SELECT COUNT(*) AS count FROM account WHERE role='admin'");
+    if (Number(adminCount?.count ?? 0) <= 1) {
+      return res.status(400).json({ error: "Can't demote the last admin" });
+    }
+  }
+
+  await query("UPDATE account SET role=$1 WHERE id=$2", [parsed.data.role, req.params.id]);
+  res.json({ data: { id: req.params.id, role: parsed.data.role } });
+});

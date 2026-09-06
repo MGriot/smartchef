@@ -14,6 +14,7 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import { apiFetch } from '../lib/api';
+import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/recipeDraftCoercion';
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Ingredient {
@@ -105,6 +106,13 @@ const RecipeCreate: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const isOnline = useOnlineStatus();
 
+  // Raw-text edit: same JSON-over-`draft` alternative to the GUI form
+  // already offered on the edit-existing-recipe screen (RecipeDetail.tsx) —
+  // ported here so a brand-new recipe can be pasted/bulk-edited as text too.
+  const [rawTextMode, setRawTextMode] = useState(false);
+  const [rawText, setRawText] = useState('');
+  const [rawTextError, setRawTextError] = useState<string | null>(null);
+
   // Library data
   const contentLang = useStore((s) => s.contentLang);
   const [allTools, setAllTools] = useState<Tool[]>([]);
@@ -112,9 +120,18 @@ const RecipeCreate: React.FC = () => {
   const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
   const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; icon: string | null; translated_name?: string | null }[]>([]);
   const [allRecipes, setAllRecipes] = useState<{ id: string; title: string; translated_title?: string | null }[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
   // Per-row "Ingredient" vs "Recipe" toggle for the ingredient picker — not
   // persisted, purely a UI switch between the two Autocomplete data sources.
   const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
+  // Inline "create new ingredient" prompt (Autocomplete's onCreateNew) — set
+  // while a row is waiting for the user to pick a category before the new
+  // ingredient is actually created, so creating one doesn't require leaving
+  // this page for the ingredient library screen.
+  const [pendingIngredient, setPendingIngredient] = useState<{ idx: number; name: string; categoryId: string; pluralName: string; description: string } | null>(null);
+  const [creatingPendingIngredient, setCreatingPendingIngredient] = useState(false);
+  const [newToolName, setNewToolName] = useState('');
+  const [newTechniqueName, setNewTechniqueName] = useState('');
 
   // Draft state
   const [draft, setDraft] = useState<Partial<Recipe>>({
@@ -154,19 +171,21 @@ const RecipeCreate: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        const [tRes, uRes, iRes, techRes, rRes] = await Promise.all([
+        const [tRes, uRes, iRes, techRes, rRes, catRes] = await Promise.all([
           apiFetch(`/api/tools${langQuery}`),
           apiFetch(`/api/units${langQuery}`),
           apiFetch(`/api/ingredients${langQuery}`),
           apiFetch(`/api/techniques${langQuery}`),
           apiFetch(`/api/recipes${langQuery}`),
+          apiFetch(`/api/ingredients/categories${langQuery}`),
         ]);
-        const [tJson, uJson, iJson, techJson, rJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), techRes.json(), rRes.json()]);
+        const [tJson, uJson, iJson, techJson, rJson, catJson] = await Promise.all([tRes.json(), uRes.json(), iRes.json(), techRes.json(), rRes.json(), catRes.json()]);
         setAllTools(tJson.data || []);
         setAllUnits(uJson.data || []);
         setAllIngredients(iJson.data || []);
         setAllTechniques(techJson.data || []);
         setAllRecipes(rJson.data || []);
+        setCategories(catJson.data || []);
       } catch (err) {
         console.error('RecipeCreate: Library fetch failed:', err);
       }
@@ -301,6 +320,15 @@ const RecipeCreate: React.FC = () => {
 
   const getEntryType = (idx: number, ing: Ingredient): 'ingredient' | 'recipe' =>
     ingredientEntryTypes[idx] ?? (ing.subRecipeId ? 'recipe' : 'ingredient');
+  // An ingredient/sub-recipe reference whose id doesn't resolve to anything
+  // in allIngredients/allRecipes (parsed from raw-text with only a name, or
+  // pointing at something not yet loaded) — same search/create-new
+  // treatment either way instead of an unexplained blank box.
+  const ingredientNeedsMatching = (ing: Ingredient) =>
+    (!ing.ingredientId && !!ing.ingredientName) ||
+    (!!ing.ingredientId && !allIngredients.some(i => i.id === ing.ingredientId));
+  const subRecipeDangling = (ing: Ingredient) =>
+    !!ing.subRecipeId && !allRecipes.some(r => r.id === ing.subRecipeId);
 
   const setEntryType = (idx: number, type: 'ingredient' | 'recipe') => {
     setIngredientEntryTypes(prev => ({ ...prev, [idx]: type }));
@@ -347,33 +375,127 @@ const RecipeCreate: React.FC = () => {
       return { ...prev, tools: [...tools, tool] };
     });
 
+  // Creates a brand-new ingredient without leaving the recipe editor —
+  // Autocomplete's "Create '<query>'" row opens this two-step prompt
+  // (name is already known, just need a category) instead of forcing a
+  // trip to the ingredient library screen and back.
+  const confirmCreateIngredient = async () => {
+    if (!pendingIngredient || !pendingIngredient.categoryId) return;
+    setCreatingPendingIngredient(true);
+    try {
+      const res = await apiFetch('/api/ingredients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: pendingIngredient.name,
+          categoryId: pendingIngredient.categoryId,
+          pluralName: pendingIngredient.pluralName || undefined,
+          description: pendingIngredient.description || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create ingredient');
+      const newIngredient = { id: json.data.id, name: pendingIngredient.name };
+      setAllIngredients(prev => [...prev, newIngredient]);
+      updateIngredient(pendingIngredient.idx, 'ingredientId', newIngredient.id);
+      updateIngredient(pendingIngredient.idx, 'ingredientName', newIngredient.name);
+      setPendingIngredient(null);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not create ingredient');
+    } finally {
+      setCreatingPendingIngredient(false);
+    }
+  };
+
+  const createToolInline = async () => {
+    const name = newToolName.trim();
+    if (!name) return;
+    try {
+      const res = await apiFetch('/api/tools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create tool');
+      const newTool: Tool = { id: json.data.id, name, icon: null };
+      setAllTools(prev => [...prev, newTool]);
+      setDraft(prev => ({ ...prev, tools: [...(prev.tools || []), newTool] }));
+      setNewToolName('');
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not create tool');
+    }
+  };
+
+  const createTechniqueInline = async (onCreated: (id: string) => void) => {
+    const name = newTechniqueName.trim();
+    if (!name) return;
+    try {
+      const res = await apiFetch('/api/techniques', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create technique');
+      setAllTechniques(prev => [...prev, { id: json.data.id, name, icon: null }]);
+      setNewTechniqueName('');
+      onCreated(json.data.id);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not create technique');
+    }
+  };
+
   /* ── Save logic ────────────────────────────────── */
-  const handleSave = async () => {
-    if (!draft.title) return;
+  // Optional `overrideDraft` lets the raw-text toggle below hand in the
+  // just-parsed JSON directly instead of reading `draft` — setDraft()'s
+  // update wouldn't be visible yet in this same closure otherwise.
+  const handleSave = async (overrideDraft?: Partial<Recipe>) => {
+    const d = overrideDraft || draft;
+    if (!d.title) return;
     setSaving(true);
     try {
+      // Any tool not already in the library (pasted from raw-text JSON,
+      // never confirmed via the Kitchen Tools grid above) gets created for
+      // real now — its id up to this point was only a locally-generated
+      // placeholder, not a real toolId the backend can save a reference to.
+      const resolvedToolIds: string[] = [];
+      for (const tool of d.tools || []) {
+        if (allTools.some(at => at.id === tool.id)) {
+          resolvedToolIds.push(tool.id);
+          continue;
+        }
+        const res = await apiFetch('/api/tools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: tool.name }),
+        });
+        const json = await res.json();
+        if (res.ok) resolvedToolIds.push(json.data.id);
+      }
+
       const body = {
-        title: draft.title,
-        description: draft.description || '',
-        storageInstructions: draft.storage_instructions || undefined,
-        tips: draft.tips || undefined,
-        difficulty: draft.difficulty || 'medium',
-        servings: draft.servings || 4,
-        prepTimeMin: draft.prep_time_min || undefined,
-        cookTimeMin: draft.cook_time_min || undefined,
-        restTimeMin: draft.rest_time_min || undefined,
-        tags: draft.tags || [],
-        regions: draft.regions || [],
-        regionCoords: draft.region_coords || {},
-        yieldAmount: draft.yield_amount || undefined,
-        yieldUnitId: draft.yield_unit_id || undefined,
-        coverImageUrl: draft.cover_image_url || null,
-        sourceUrl: draft.source_url || null,
-        sources: draft.sources || [],
-        isComponent: draft.is_component || false,
-        languageCode: draft.language_code || contentLang || undefined,
-        translations: draft.translations || [],
-        ingredients: (draft.ingredients || []).map((ing, i) => ({
+        title: d.title,
+        description: d.description || '',
+        storageInstructions: d.storage_instructions || undefined,
+        tips: d.tips || undefined,
+        difficulty: d.difficulty || 'medium',
+        servings: d.servings || 4,
+        prepTimeMin: d.prep_time_min || undefined,
+        cookTimeMin: d.cook_time_min || undefined,
+        restTimeMin: d.rest_time_min || undefined,
+        tags: d.tags || [],
+        regions: d.regions || [],
+        regionCoords: d.region_coords || {},
+        yieldAmount: d.yield_amount || undefined,
+        yieldUnitId: d.yield_unit_id || undefined,
+        coverImageUrl: d.cover_image_url || null,
+        sourceUrl: d.source_url || null,
+        sources: d.sources || [],
+        isComponent: d.is_component || false,
+        languageCode: d.language_code || contentLang || undefined,
+        translations: d.translations || [],
+        ingredients: (d.ingredients || []).map((ing, i) => ({
           sortOrder: i,
           ingredientId: ing.ingredientId || undefined,
           subRecipeId: ing.subRecipeId || undefined,
@@ -384,7 +506,7 @@ const RecipeCreate: React.FC = () => {
           notes: ing.notes || undefined,
           groupName: ing.groupName || undefined,
         })),
-        steps: (draft.steps || []).map((s, i) => ({
+        steps: (d.steps || []).map((s, i) => ({
           stepNumber: i + 1,
           title: s.title || undefined,
           description: s.description,
@@ -396,7 +518,7 @@ const RecipeCreate: React.FC = () => {
           stepIngredients: s.stepIngredients || [],
           translations: s.translations || [],
         })),
-        toolIds: (draft.tools || []).map(t => t.id),
+        toolIds: resolvedToolIds,
       };
 
       const res = await apiFetch('/api/recipes', {
@@ -421,6 +543,63 @@ const RecipeCreate: React.FC = () => {
     }
   };
 
+  const enterRawTextMode = () => {
+    setRawText(JSON.stringify(draft, null, 2));
+    setRawTextError(null);
+    setRawTextMode(true);
+  };
+  // Returns the parsed draft (and leaves raw mode active with an error
+  // shown) on invalid JSON — null in that case — so callers can bail out
+  // instead of silently discarding whatever the user typed. Same pattern
+  // as RecipeDetail.tsx's edit-mode raw-text toggle.
+  const applyRawText = (): Partial<Recipe> | null => {
+    try {
+      const parsed = JSON.parse(rawText);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`Expected a JSON object, got ${Array.isArray(parsed) ? 'an array' : typeof parsed}`);
+      }
+      // Merge onto the current draft rather than replacing it wholesale.
+      // ingredients/steps/tools also accept the same looser shape the AI
+      // import pipeline produces (steps as plain sentences, tools as plain
+      // names, ingredients as {name, quantity, unit, note}) via
+      // coerce*() below — anything that still isn't recognizable just
+      // becomes an empty array instead of undefined, which is what used to
+      // crash every .map() in the form below to a blank screen.
+      const merged: Partial<Recipe> = { ...draft, ...parsed };
+      if ('ingredients' in parsed) merged.ingredients = coerceIngredients(parsed.ingredients) as unknown as Ingredient[];
+      if ('steps' in parsed) merged.steps = coerceSteps(parsed.steps) as unknown as Step[];
+      if ('tools' in parsed) merged.tools = coerceNamedEntities(parsed.tools) as unknown as Tool[];
+      const arrayFields: (keyof Recipe)[] = ['ingredients', 'steps', 'tools', 'tags', 'regions', 'sources', 'translations'];
+      for (const field of arrayFields) {
+        if (!Array.isArray(merged[field])) (merged as Record<string, unknown>)[field] = draft[field] ?? [];
+      }
+      setDraft(merged);
+      setRawTextError(null);
+      return merged;
+    } catch (err) {
+      setRawTextError(err instanceof Error ? err.message : 'Invalid JSON');
+      return null;
+    }
+  };
+  const toggleRawText = () => {
+    if (rawTextMode) {
+      if (!applyRawText()) return;
+      setRawTextMode(false);
+    } else {
+      enterRawTextMode();
+    }
+  };
+  const handleCreateClick = () => {
+    if (rawTextMode) {
+      const parsed = applyRawText();
+      if (!parsed) return;
+      setRawTextMode(false);
+      handleSave(parsed);
+      return;
+    }
+    handleSave();
+  };
+
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 font-body">
       {/* Header */}
@@ -430,17 +609,42 @@ const RecipeCreate: React.FC = () => {
           <span className="text-sm font-bold">{t('common.cancel')}</span>
         </Link>
         <h2 className="text-lg font-headline font-bold text-zinc-800 dark:text-zinc-200">{t('recipeCreate.newRecipe')}</h2>
-        <button
-          onClick={handleSave}
-          disabled={saving || !draft.title}
-          className="flex items-center gap-2 px-5 py-2 bg-primary text-white rounded-full font-bold text-sm hover:bg-primary/90 transition-all disabled:opacity-50"
-        >
-          <span className="material-symbols-outlined text-sm">{saving ? 'sync' : 'add'}</span>
-          {saving ? t('recipeCreate.creating') : t('recipeCreate.createRecipe')}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={toggleRawText}
+            disabled={saving}
+            title={rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
+            className="flex items-center gap-2 px-4 py-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full font-bold text-sm transition-all disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-sm">{rawTextMode ? 'edit_note' : 'code'}</span>
+            {rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
+          </button>
+          <button
+            onClick={handleCreateClick}
+            disabled={saving || (!rawTextMode && !draft.title)}
+            className="flex items-center gap-2 px-5 py-2 bg-primary text-white rounded-full font-bold text-sm hover:bg-primary/90 transition-all disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-sm">{saving ? 'sync' : 'add'}</span>
+            {saving ? t('recipeCreate.creating') : t('recipeCreate.createRecipe')}
+          </button>
+        </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-10 space-y-8">
+      {rawTextMode ? (
+        <main className="max-w-4xl mx-auto px-6 py-10 space-y-4">
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('recipeDetail.rawTextEditHint')}</p>
+          {rawTextError && (
+            <p className="text-sm text-red-600 font-medium bg-red-50 rounded-xl px-4 py-3">{rawTextError}</p>
+          )}
+          <textarea
+            value={rawText}
+            onChange={e => setRawText(e.target.value)}
+            spellCheck={false}
+            className="w-full h-[70vh] rounded-3xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 font-mono text-xs leading-relaxed focus:ring-2 focus:ring-primary/20 focus:outline-none"
+          />
+        </main>
+      ) : (
+      <main className="max-w-6xl mx-auto px-6 py-10 space-y-8">
         {/* Title & description */}
         <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
           <label className="block mb-6">
@@ -455,6 +659,7 @@ const RecipeCreate: React.FC = () => {
                 >
                   {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                 </select>
+                <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
               </span>
             </div>
             <input
@@ -469,7 +674,7 @@ const RecipeCreate: React.FC = () => {
             <textarea
               value={draft.description || ''}
               onChange={e => updateDraft('description', e.target.value)}
-              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px]"
+              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px] max-h-[50vh] overflow-y-auto [field-sizing:content]"
               placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
             />
           </label>
@@ -478,7 +683,7 @@ const RecipeCreate: React.FC = () => {
             <textarea
               value={draft.storage_instructions || ''}
               onChange={e => updateDraft('storage_instructions', e.target.value || null)}
-              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
               placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
             />
           </label>
@@ -487,7 +692,7 @@ const RecipeCreate: React.FC = () => {
             <textarea
               value={draft.tips || ''}
               onChange={e => updateDraft('tips', e.target.value || null)}
-              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
               placeholder={t('recipeDetail.tipsPlaceholder')}
             />
           </label>
@@ -501,7 +706,7 @@ const RecipeCreate: React.FC = () => {
         </div>
 
         {/* Translations */}
-        <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+        <div id="translations-section" className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)] scroll-mt-24">
           <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.translations')}</h3>
           <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-6">{t('recipeDetail.translationsHint')}</p>
           <TranslationsEditor
@@ -620,6 +825,41 @@ const RecipeCreate: React.FC = () => {
                 </button>
               );
             })}
+            {/* Pasted-but-not-yet-in-the-library tools (e.g. from raw-text
+                JSON) — otherwise invisible here since this grid only lists
+                allTools, yet still silently in draft.tools and would fail
+                to save as a real toolId. Shown so they can be reviewed/
+                removed before saving auto-creates them for real. */}
+            {(draft.tools || []).filter(t => !allTools.some(at => at.id === t.id)).map(tool => (
+              <button
+                key={tool.id}
+                onClick={() => toggleTool(tool)}
+                title={t('recipeDetail.ingredientNeedsMatching')}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
+              >
+                <RenderFaIcon name="FaKitchenSet" className="text-lg" />
+                <span className="text-sm font-bold">{tool.name}</span>
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-4">
+            <input
+              type="text"
+              value={newToolName}
+              onChange={(e) => setNewToolName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createToolInline(); } }}
+              placeholder={t('recipeDetail.newToolPlaceholder')}
+              className="flex-1 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+            />
+            <button
+              type="button"
+              onClick={createToolInline}
+              disabled={!newToolName.trim()}
+              className="px-4 py-2 rounded-lg bg-zinc-900 text-white text-sm font-bold disabled:opacity-50"
+            >
+              {t('recipeDetail.addTool')}
+            </button>
           </div>
         </div>
 
@@ -631,7 +871,7 @@ const RecipeCreate: React.FC = () => {
               <span className="material-symbols-outlined text-sm">add</span> {t('recipeDetail.addIngredient')}
             </button>
           </div>
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {(draft.ingredients || []).map((ing, idx) => (
               <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group border border-zinc-100 dark:border-zinc-800">
                 <button
@@ -661,7 +901,8 @@ const RecipeCreate: React.FC = () => {
                     </div>
                     {getEntryType(idx, ing) === 'recipe' ? (
                       <Autocomplete
-                        value={ing.subRecipeId || ''}
+                        value={subRecipeDangling(ing) ? '' : (ing.subRecipeId || '')}
+                        unmatchedLabel={subRecipeDangling(ing) ? (ing.subRecipeTitle || t('recipeDetail.ingredientNeedsMatching')) : undefined}
                         options={allRecipes.map(r => ({ id: r.id, label: r.translated_title || r.title }))}
                         onSelect={(id, label) => {
                           updateIngredient(idx, 'subRecipeId', id);
@@ -672,11 +913,16 @@ const RecipeCreate: React.FC = () => {
                           updateIngredient(idx, 'subRecipeTitle', null);
                         }}
                         placeholder={t('recipeDetail.typeToSearch')}
-                        className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                        className={`w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 ${
+                          subRecipeDangling(ing)
+                            ? 'border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700'
+                            : 'border-none bg-white dark:bg-zinc-900'
+                        }`}
                       />
                     ) : (
                       <Autocomplete
-                        value={ing.ingredientId || ''}
+                        value={ingredientNeedsMatching(ing) ? '' : (ing.ingredientId || '')}
+                        unmatchedLabel={ingredientNeedsMatching(ing) ? (ing.ingredientName || t('recipeDetail.ingredientNeedsMatching')) : undefined}
                         options={allIngredients.map(i => ({ id: i.id, label: i.translated_name || i.name }))}
                         onSelect={(id, label) => {
                           updateIngredient(idx, 'ingredientId', id);
@@ -686,12 +932,86 @@ const RecipeCreate: React.FC = () => {
                           updateIngredient(idx, 'ingredientId', null);
                           updateIngredient(idx, 'ingredientName', '');
                         }}
+                        onCreateNew={(name) => setPendingIngredient({ idx, name, categoryId: categories[0]?.id || '', pluralName: '', description: '' })}
+                        createNewLabel={(name) => t('import.createNew', { name })}
                         placeholder={t('recipeDetail.typeToSearch')}
-                        className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                        className={`w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 ${
+                          ingredientNeedsMatching(ing)
+                            ? 'border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700'
+                            : 'border-none bg-white dark:bg-zinc-900'
+                        }`}
                       />
+                    )}
+                    {ingredientNeedsMatching(ing) && getEntryType(idx, ing) === 'ingredient' && (
+                      <p className="text-[9px] text-amber-600 dark:text-amber-500 font-bold mt-1">{t('recipeDetail.ingredientNeedsMatching')}</p>
                     )}
                     {getEntryType(idx, ing) === 'recipe' && (
                       <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-1">{t('recipeDetail.subRecipeCycleWarning')}</p>
+                    )}
+                    {pendingIngredient?.idx === idx && (
+                      <div className="mt-2 bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-2">
+                        <div>
+                          <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredient')}</label>
+                          <input
+                            type="text"
+                            value={pendingIngredient.name}
+                            onChange={(e) => setPendingIngredient({ ...pendingIngredient, name: e.target.value })}
+                            className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('import.pickCategory')}</label>
+                            <select
+                              value={pendingIngredient.categoryId}
+                              onChange={(e) => setPendingIngredient({ ...pendingIngredient, categoryId: e.target.value })}
+                              className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                            >
+                              <option value="">{t('import.pickCategory')}</option>
+                              {categories.map(c => (
+                                <option key={c.id} value={c.id}>{c.translated_name || c.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.pluralOptional')}</label>
+                            <input
+                              type="text"
+                              value={pendingIngredient.pluralName}
+                              onChange={(e) => setPendingIngredient({ ...pendingIngredient, pluralName: e.target.value })}
+                              placeholder={t('recipeDetail.pluralPlaceholder')}
+                              className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.descriptionOptional')}</label>
+                          <input
+                            type="text"
+                            value={pendingIngredient.description}
+                            onChange={(e) => setPendingIngredient({ ...pendingIngredient, description: e.target.value })}
+                            className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                          />
+                        </div>
+                        <p className="text-[9px] text-zinc-400 dark:text-zinc-500">{t('recipeDetail.moreDetailsLaterHint')}</p>
+                        <div className="flex gap-2 justify-end">
+                        <button
+                          type="button"
+                          disabled={!pendingIngredient.categoryId || !pendingIngredient.name.trim() || creatingPendingIngredient}
+                          onClick={confirmCreateIngredient}
+                          className="px-3 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold disabled:opacity-50"
+                        >
+                          {creatingPendingIngredient ? '…' : t('import.createNew', { name: pendingIngredient.name })}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPendingIngredient(null)}
+                          className="px-2 py-1.5 rounded-lg text-zinc-400 dark:text-zinc-500 text-[11px] font-bold hover:text-zinc-600 dark:hover:text-zinc-400"
+                        >
+                          {t('common.cancel')}
+                        </button>
+                        </div>
+                      </div>
                     )}
                   </div>
                   <div className="col-span-3">
@@ -838,9 +1158,9 @@ const RecipeCreate: React.FC = () => {
                   </div>
                 </div>
 
-                {allTechniques.length > 0 && (
-                  <div className="mt-4">
-                    <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
+                <div className="mt-4">
+                  <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
+                  {allTechniques.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       {allTechniques.map(tech => {
                         const isUsed = (step.techniqueIds || []).includes(tech.id);
@@ -862,8 +1182,31 @@ const RecipeCreate: React.FC = () => {
                         );
                       })}
                     </div>
+                  )}
+                  <div className="flex gap-2 mt-2">
+                    <input
+                      type="text"
+                      value={newTechniqueName}
+                      onChange={(e) => setNewTechniqueName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          createTechniqueInline((newId) => updateStep(idx, 'techniqueIds', [...(step.techniqueIds || []), newId]));
+                        }
+                      }}
+                      placeholder={t('recipeDetail.newTechniquePlaceholder')}
+                      className="flex-1 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-primary/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => createTechniqueInline((newId) => updateStep(idx, 'techniqueIds', [...(step.techniqueIds || []), newId]))}
+                      disabled={!newTechniqueName.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-zinc-900 text-white text-[11px] font-bold disabled:opacity-50"
+                    >
+                      {t('recipeDetail.addTechnique')}
+                    </button>
                   </div>
-                )}
+                </div>
 
                 {(draft.ingredients || []).length > 0 && (
                   <div className="mt-4">
@@ -940,6 +1283,7 @@ const RecipeCreate: React.FC = () => {
           </div>
         </div>
       </main>
+      )}
     </div>
   );
 };

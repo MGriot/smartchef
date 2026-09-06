@@ -26,6 +26,8 @@ export default function ManageUsers() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [roleChangingId, setRoleChangingId] = useState<string | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
 
   const fetchUsers = () => {
     apiFetch('/api/auth/users')
@@ -49,6 +51,25 @@ export default function ManageUsers() {
       setDeleteError(err instanceof Error ? err.message : 'Failed to delete user');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleRoleChange = async (user: User, role: 'admin' | 'user') => {
+    setRoleChangingId(user.id);
+    setRoleError(null);
+    try {
+      const res = await apiFetch(`/api/auth/users/${user.id}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Failed to change role');
+      setUsers((prev) => (prev ? prev.map((u) => (u.id === user.id ? { ...u, role } : u)) : prev));
+    } catch (err) {
+      setRoleError(err instanceof Error ? err.message : 'Failed to change role');
+    } finally {
+      setRoleChangingId(null);
     }
   };
 
@@ -124,6 +145,17 @@ export default function ManageUsers() {
                   {u.id !== account?.id && (
                     <button
                       type="button"
+                      onClick={() => handleRoleChange(u, u.role === 'admin' ? 'user' : 'admin')}
+                      disabled={roleChangingId === u.id}
+                      className="px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0 disabled:opacity-50"
+                      title={u.role === 'admin' ? `Demote ${u.name} to user` : `Promote ${u.name} to admin`}
+                    >
+                      {roleChangingId === u.id ? '…' : u.role === 'admin' ? 'Demote' : 'Promote'}
+                    </button>
+                  )}
+                  {u.id !== account?.id && (
+                    <button
+                      type="button"
                       onClick={() => handleDelete(u)}
                       disabled={deletingId === u.id}
                       className="w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center hover:bg-red-100 transition-colors shrink-0 disabled:opacity-50"
@@ -138,6 +170,7 @@ export default function ManageUsers() {
               ))}
             </div>
           )}
+          {roleError && <p className="mt-4 text-sm text-red-600 font-medium">{roleError}</p>}
           {deleteError && <p className="mt-4 text-sm text-red-600 font-medium">{deleteError}</p>}
         </div>
 

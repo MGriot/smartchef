@@ -247,7 +247,13 @@ export async function listRecipes(params: ListRecipesParams) {
   let sql = `
     SELECT r.*, ${translatedCols},
            (SELECT COUNT(*) FROM recipe_ingredients cri2 WHERE cri2.recipe_id = r.id) AS ingredient_count,
-           r.creator_name AS creator_name, NULL AS creator_avatar_url
+           r.creator_name AS creator_name,
+           -- Best-effort: creator_name is a plain denormalized string, not a
+           -- profile FK (see the comment at the top of this file), so this
+           -- can only match by name — a scalar subquery (not a JOIN) so two
+           -- profiles sharing a name never duplicate this row. Picks the
+           -- earliest-created match as a deterministic tie-break.
+           (SELECT avatar_url FROM profiles cp WHERE cp.name = r.creator_name AND cp.deleted_at IS NULL ORDER BY cp.created_at LIMIT 1) AS creator_avatar_url
     FROM recipes r
     ${langJoin}
     WHERE r.sync_status != 'deleted'
@@ -372,7 +378,8 @@ export async function getRecipe(id: string, lang?: string) {
   }
 
   const recipe = await queryOne<Record<string, unknown>>(
-    `SELECT r.*, ${translatedCols}, r.creator_name AS creator_name, NULL AS creator_avatar_url
+    `SELECT r.*, ${translatedCols}, r.creator_name AS creator_name,
+            (SELECT avatar_url FROM profiles cp WHERE cp.name = r.creator_name AND cp.deleted_at IS NULL ORDER BY cp.created_at LIMIT 1) AS creator_avatar_url
      FROM recipes r
      ${langJoin}
      WHERE r.id = $1`,
@@ -390,7 +397,7 @@ export async function getRecipe(id: string, lang?: string) {
 
   // ── Ingredients ──────────────────────────────────────────────────────
   const ingredientRows = await query<Record<string, unknown>>(
-    `SELECT ri.*, i.name AS ingredient_name, sr.title AS sub_recipe_title, u.symbol AS unit_symbol
+    `SELECT ri.*, i.name AS ingredient_name, i.plural_name AS ingredient_plural_name, sr.title AS sub_recipe_title, u.symbol AS unit_symbol
      FROM recipe_ingredients ri
      LEFT JOIN ingredients i ON i.id = ri.ingredient_id
      LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
@@ -402,14 +409,16 @@ export async function getRecipe(id: string, lang?: string) {
   const ingredients = [];
   for (const row of ingredientRows) {
     let ingredientName = row.ingredient_name as string | null;
+    let ingredientPluralName = row.ingredient_plural_name as string | null;
     let translatedNotes: string | null = null;
     if (lang) {
       if (row.ingredient_id) {
-        const it = await queryOne<{ translated_name: string }>(
-          `SELECT translated_name FROM ingredient_translations WHERE ingredient_id = $1 AND LOWER(language_code) = LOWER($2)`,
+        const it = await queryOne<{ translated_name: string; plural_translation: string | null }>(
+          `SELECT translated_name, plural_translation FROM ingredient_translations WHERE ingredient_id = $1 AND LOWER(language_code) = LOWER($2)`,
           [row.ingredient_id, lang]
         );
         ingredientName = it?.translated_name ?? ingredientName;
+        ingredientPluralName = it?.plural_translation ?? ingredientPluralName;
       }
       const rit = await queryOne<{ notes: string }>(
         `SELECT notes FROM recipe_ingredient_translations WHERE recipe_ingredient_id = $1 AND LOWER(language_code) = LOWER($2)`,
@@ -426,6 +435,7 @@ export async function getRecipe(id: string, lang?: string) {
       sortOrder: row.sort_order,
       ingredientId: row.ingredient_id,
       ingredientName,
+      ingredientPluralName,
       subRecipeId: row.sub_recipe_id,
       subRecipeTitle: row.sub_recipe_title,
       quantity: row.quantity,

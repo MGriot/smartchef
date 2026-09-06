@@ -197,6 +197,12 @@ CREATE TABLE IF NOT EXISTS profiles (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   avatar_url  TEXT,
+  -- 'admin' | 'user'. First profile ever created on a fresh library becomes
+  -- admin automatically (see createProfile() in profiles.local.ts); a UX
+  -- guardrail against accidental deletion/promotion mistakes, not a real
+  -- security boundary — standalone mode has no auth layer to enforce it.
+  -- Backfilled onto pre-existing local DBs via addColumnIfMissing() below.
+  role        TEXT NOT NULL DEFAULT 'user',
   deleted_at  TEXT,
   created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at  TEXT DEFAULT CURRENT_TIMESTAMP
@@ -264,6 +270,13 @@ CREATE TABLE IF NOT EXISTS ingredients (
   -- db/migrations/036_ingredient_parent.sql. Backfilled via
   -- addColumnIfMissing() below.
   parent_ingredient_id TEXT REFERENCES ingredients(id),
+  -- Optional canonical-English plural ("apples" for "apple") so display can
+  -- pick the right form when a recipe's scaled quantity isn't 1, and so
+  -- matching can recognize a plural in pasted/imported text against the
+  -- singular catalog entry. NULL = no plural on file, falls back to 'name'
+  -- everywhere (never a regression for ingredients nobody filled this in
+  -- for). Backfilled via addColumnIfMissing() below.
+  plural_name    TEXT,
   sync_status    TEXT DEFAULT 'local',
   created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at     TEXT DEFAULT CURRENT_TIMESTAMP
@@ -285,6 +298,9 @@ CREATE TABLE IF NOT EXISTS ingredient_translations (
   ingredient_id   TEXT NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
   language_code   TEXT NOT NULL,
   translated_name TEXT NOT NULL,
+  -- Per-language plural, same optional/fallback-to-singular convention as
+  -- ingredients.plural_name above. Backfilled via addColumnIfMissing() below.
+  plural_translation TEXT,
   UNIQUE(ingredient_id, language_code)
 );
 
@@ -609,8 +625,19 @@ async function hasForeignKeyTo(db: SQLiteDBConnection, table: string, refTable: 
 // whose SCHEMA_SQL never had the FK to begin with — the common case going
 // forward, this function existing only for devices provisioned before it.
 async function dropDanglingForeignKeys(db: SQLiteDBConnection): Promise<void> {
+  // Every call below passes `transaction: false` (execute()'s 2nd arg,
+  // default true) — @capacitor-community/sqlite's executeSQL() wraps a
+  // transaction:true call in its own BEGIN/COMMIT, and SQLite documents
+  // "PRAGMA foreign_keys" as a no-op while a transaction is pending. Left
+  // at the default, the OFF below silently never takes effect (foreign_keys
+  // stays ON for the whole rebuild that follows, in its OWN separate
+  // transaction:true call) and the DROP-and-rebuild throws the exact
+  // "FOREIGN KEY constraint failed" this function exists to get rid of —
+  // confirmed against a real device's production database (290 ingredients/
+  // 43 recipes): identical SQL succeeds with the transaction wrapper
+  // removed and fails identically to the field report with it left on.
   if (await hasForeignKeyTo(db, 'ingredients', 'ingredient_categories')) {
-    await db.execute('PRAGMA foreign_keys=OFF');
+    await db.execute('PRAGMA foreign_keys=OFF', false);
     await db.execute(`
       CREATE TABLE ingredients_new (
         id             TEXT PRIMARY KEY,
@@ -640,12 +667,12 @@ async function dropDanglingForeignKeys(db: SQLiteDBConnection): Promise<void> {
       ALTER TABLE ingredients_new RENAME TO ingredients;
       CREATE INDEX IF NOT EXISTS idx_ingredients_category ON ingredients(category_id);
       CREATE INDEX IF NOT EXISTS idx_ingredients_parent ON ingredients(parent_ingredient_id);
-    `);
-    await db.execute('PRAGMA foreign_keys=ON');
+    `, false);
+    await db.execute('PRAGMA foreign_keys=ON', false);
   }
 
   if (await hasForeignKeyTo(db, 'recipes', 'units')) {
-    await db.execute('PRAGMA foreign_keys=OFF');
+    await db.execute('PRAGMA foreign_keys=OFF', false);
     await db.execute(`
       CREATE TABLE recipes_new (
         id              TEXT PRIMARY KEY,
@@ -680,12 +707,12 @@ async function dropDanglingForeignKeys(db: SQLiteDBConnection): Promise<void> {
         FROM recipes;
       DROP TABLE recipes;
       ALTER TABLE recipes_new RENAME TO recipes;
-    `);
-    await db.execute('PRAGMA foreign_keys=ON');
+    `, false);
+    await db.execute('PRAGMA foreign_keys=ON', false);
   }
 
   if (await hasForeignKeyTo(db, 'recipe_ingredients', 'units')) {
-    await db.execute('PRAGMA foreign_keys=OFF');
+    await db.execute('PRAGMA foreign_keys=OFF', false);
     await db.execute(`
       CREATE TABLE recipe_ingredients_new (
         id            TEXT PRIMARY KEY,
@@ -709,8 +736,8 @@ async function dropDanglingForeignKeys(db: SQLiteDBConnection): Promise<void> {
       ALTER TABLE recipe_ingredients_new RENAME TO recipe_ingredients;
       CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
       CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_sub_recipe ON recipe_ingredients(sub_recipe_id) WHERE sub_recipe_id IS NOT NULL;
-    `);
-    await db.execute('PRAGMA foreign_keys=ON');
+    `, false);
+    await db.execute('PRAGMA foreign_keys=ON', false);
   }
 }
 
@@ -733,6 +760,21 @@ export async function initLocalSchema(): Promise<void> {
     await addColumnIfMissing(db, 'tools', 'synonyms', "TEXT DEFAULT '[]'");
     await addColumnIfMissing(db, 'tags', 'synonyms', "TEXT DEFAULT '[]'");
     await addColumnIfMissing(db, 'techniques', 'synonyms', "TEXT DEFAULT '[]'");
+    await addColumnIfMissing(db, 'profiles', 'role', "TEXT NOT NULL DEFAULT 'user'");
+    // createProfile() (profiles.local.ts) only makes the *first-ever*
+    // profile an admin — a device upgrading from before `role` existed has
+    // one or more profiles that all just got backfilled to 'user' above, so
+    // without this, nobody would ever be admin and the promote/delete UI
+    // (gated to admins) would be permanently unreachable. One-time, and a
+    // no-op once any profile is already an admin.
+    const existingAdmin = await db.query("SELECT id FROM profiles WHERE role='admin' AND deleted_at IS NULL LIMIT 1");
+    if ((existingAdmin.values?.length ?? 0) === 0) {
+      const earliest = await db.query("SELECT id FROM profiles WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1");
+      const earliestId = earliest.values?.[0]?.id;
+      if (earliestId) await db.execute(`UPDATE profiles SET role='admin' WHERE id='${earliestId}'`);
+    }
+    await addColumnIfMissing(db, 'ingredients', 'plural_name', 'TEXT');
+    await addColumnIfMissing(db, 'ingredient_translations', 'plural_translation', 'TEXT');
     await dropDanglingForeignKeys(db);
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {

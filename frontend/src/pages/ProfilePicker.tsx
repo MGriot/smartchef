@@ -89,6 +89,9 @@ export default function ProfilePicker({ onPicked }: ProfilePickerProps) {
                       )}
                     </span>
                     <span className="font-bold text-zinc-900 dark:text-zinc-100">{p.name}</span>
+                    {p.role === 'admin' && (
+                      <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider">Admin</span>
+                    )}
                     {activating === p.id && <span className="material-symbols-outlined text-primary animate-spin ml-auto text-lg">sync</span>}
                   </button>
                 ))}

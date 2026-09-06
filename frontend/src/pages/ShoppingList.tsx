@@ -3,6 +3,7 @@ import AppLayout from '../components/AppLayout';
 import Autocomplete from '../components/Autocomplete';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import { pickIngredientName } from '../lib/ingredientDisplay';
 
 interface MenuSummary {
   id: string;
@@ -28,6 +29,7 @@ interface ShoppingListItem {
   id: string;
   ingredientId?: string;
   ingredientName?: string;
+  ingredientPluralName?: string;
   totalQuantity?: number;
   quantityText?: string;
   unit?: { symbol: string; name: string };
@@ -49,6 +51,11 @@ interface ShoppingListSummary {
   menu_id: string | null;
   item_count: string | number;
   created_at: string;
+}
+
+function displayName(item: ShoppingListItem): string {
+  if (!item.ingredientName) return 'Ingredient';
+  return pickIngredientName(item.ingredientName, item.ingredientPluralName, item.totalQuantity ?? null);
 }
 
 function formatQty(item: ShoppingListItem): string {
@@ -405,7 +412,7 @@ export default function ShoppingList() {
                       className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{item.ingredientName || 'Ingredient'}</p>
+                      <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item)}</p>
                       {item.sourceDetails.length > 0 && (
                         <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium truncate">
                           Used in: {item.sourceDetails.map(s => s.recipeTitle).join(', ')}
@@ -429,7 +436,7 @@ export default function ShoppingList() {
                             onChange={e => handleToggleCheck(item.id, e.target.checked)}
                             className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
                           />
-                          <span className={`flex-1 text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{item.ingredientName || 'Ingredient'}</span>
+                          <span className={`flex-1 text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item)}</span>
                           <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">{item.forQuantity}</span>
                         </label>
                       ))}

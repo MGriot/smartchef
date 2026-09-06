@@ -30,6 +30,7 @@ export interface StandaloneProfile {
   id: string;
   name: string;
   avatarUrl?: string;
+  role?: 'admin' | 'user';
 }
 
 let cachedEnabled: boolean | undefined; // undefined = not loaded yet
@@ -106,7 +107,7 @@ export async function getActiveProfile(): Promise<StandaloneProfile | null> {
   const { getProfile } = await import('../services/profiles.local');
   const row = await getProfile(id);
   if (!row) return null;
-  return { id: row.id, name: row.name, avatarUrl: row.avatar_url ?? undefined };
+  return { id: row.id, name: row.name, avatarUrl: row.avatar_url ?? undefined, role: row.role };
 }
 
 /** Kept for existing callers (localRouter.ts's creator_name/cooked_by_name
@@ -123,7 +124,7 @@ export async function getStandaloneProfile(): Promise<{ name: string; avatarUrl?
 export async function listStandaloneProfiles(): Promise<StandaloneProfile[]> {
   const { listProfiles } = await import('../services/profiles.local');
   const rows = await listProfiles();
-  return rows.map((r) => ({ id: r.id, name: r.name, avatarUrl: r.avatar_url ?? undefined }));
+  return rows.map((r) => ({ id: r.id, name: r.name, avatarUrl: r.avatar_url ?? undefined, role: r.role }));
 }
 
 /** First-run: initializes the local schema, marks standalone mode enabled,
@@ -209,4 +210,22 @@ export async function clearStandaloneProfile(): Promise<void> {
   await Preferences.remove({ key: ENABLED_KEY });
   await Preferences.remove({ key: ACTIVE_PROFILE_KEY });
   await Preferences.remove({ key: LEGACY_PROFILE_KEY });
+}
+
+/** Promotes/demotes another profile — Account page's admin-only profile
+ *  list. Guards (last-admin, self-demote) live in profiles.local.ts; this
+ *  just supplies "who's asking" from the active-profile pointer. */
+export async function setProfileRole(id: string, role: 'admin' | 'user'): Promise<void> {
+  const actingId = await getActiveProfileId();
+  const { updateProfileRole } = await import('../services/profiles.local');
+  await updateProfileRole(id, role, actingId);
+}
+
+/** Deletes another profile (soft-delete) — Account page's admin-only
+ *  profile list. Guards (active-profile, last-admin) live in
+ *  profiles.local.ts. */
+export async function removeProfile(id: string): Promise<void> {
+  const actingId = await getActiveProfileId();
+  const { deleteProfile } = await import('../services/profiles.local');
+  await deleteProfile(id, actingId);
 }

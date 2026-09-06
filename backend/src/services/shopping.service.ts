@@ -189,9 +189,10 @@ export async function loadShoppingList(listId: UUID, ownerId: UUID): Promise<Sho
     id: UUID; ingredient_id: UUID | null; total_quantity: string | null;
     quantity_text: string | null; unit_id: UUID | null; is_checked: boolean;
     source_details: ShoppingListItemSource[]; ingredient_name: string | null;
+    ingredient_plural_name: string | null;
     unit_symbol: string | null; unit_name: string | null;
   }>(
-    `SELECT sli.*, i.name AS ingredient_name, u.symbol AS unit_symbol, u.name AS unit_name
+    `SELECT sli.*, i.name AS ingredient_name, i.plural_name AS ingredient_plural_name, u.symbol AS unit_symbol, u.name AS unit_name
      FROM shopping_list_items sli
      LEFT JOIN ingredients i ON i.id = sli.ingredient_id
      LEFT JOIN units u ON u.id = sli.unit_id
@@ -204,6 +205,7 @@ export async function loadShoppingList(listId: UUID, ownerId: UUID): Promise<Sho
     shoppingListId: listId,
     ingredientId: r.ingredient_id ?? undefined,
     ingredientName: r.ingredient_name ?? undefined,
+    ingredientPluralName: r.ingredient_plural_name ?? undefined,
     totalQuantity: r.total_quantity != null ? parseFloat(r.total_quantity) : undefined,
     quantityText: r.quantity_text ?? undefined,
     unitId: r.unit_id ?? undefined,

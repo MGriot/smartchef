@@ -10,7 +10,7 @@ import { calculatePortions, resolveCookSequence } from "../services/matrioska.en
 import { calculateRecipeNutrition } from "../services/nutrition.service";
 import { computeAutoTagNames, unionTagNames } from "../services/tags.service";
 import { parseRecipeWithLLM, translateRecipeContent } from "../services/llm.parser";
-import { matchLLMResultToDB } from "../services/ingredient.matcher";
+import { proposeIngredientMatches, proposeToolMatches, proposeTechniqueMatches } from "../services/ingredient.matcher";
 import { v4 as uuidv4 } from "uuid";
 
 export const recipeRouter = Router();
@@ -285,6 +285,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
   let stepTranslatedNotes = "NULL";
   let toolTranslatedName = "NULL";
   let ingredientNameCol = "i.name";
+  let ingredientPluralNameCol = "i.plural_name";
   let ingredientTranslatedNotes = "NULL";
   if (lang) {
     params.push(lang);
@@ -295,6 +296,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
     stepTranslatedNotes = "rst.notes";
     toolTranslatedName = "tt.name";
     ingredientNameCol = "COALESCE(it_lang.translated_name, i.name)";
+    ingredientPluralNameCol = "COALESCE(it_lang.plural_translation, i.plural_name)";
     ingredientTranslatedNotes = "rit_lang.notes";
   }
 
@@ -321,6 +323,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'id', ri.id, 'sortOrder', ri.sort_order,
               'ingredientId', ri.ingredient_id,
               'ingredientName', ${ingredientNameCol},
+              'ingredientPluralName', ${ingredientPluralNameCol},
               'subRecipeId', ri.sub_recipe_id,
               'subRecipeTitle', sr.title,
               'quantity', ri.quantity,
@@ -586,13 +589,41 @@ recipeRouter.post("/parse", async (req: Request, res: Response) => {
   }
 
   try {
+    // Returns the raw LLM result unmatched — matching now happens via the
+    // Review Matches step (POST /recipes/match-suggestions below), the same
+    // pipeline the local/non-AI parser path uses, so a recipe never gets a
+    // new ingredient/tool/technique silently created without the user
+    // seeing it first.
     const llmResult = await parseRecipeWithLLM(parsed.data);
-    const matched = await matchLLMResultToDB(llmResult);
-    res.json({ data: matched });
+    res.json({ data: llmResult });
   } catch (err) {
     console.error("Recipe parse failed:", err);
     res.status(502).json({ error: err instanceof Error ? err.message : "Impossibile analizzare la ricetta" });
   }
+});
+
+// ── POST /recipes/match-suggestions ───────────────────────────────────
+// Read-only fuzzy-match suggestions for a parsed-but-not-yet-matched
+// recipe's ingredient/tool/technique names — used by the Import screen's
+// Review Matches step after either the AI path (POST /parse above) or the
+// frontend's local template/JSON parser. Never writes to the DB; the
+// frontend commits chosen/created items itself via the existing
+// POST /ingredients, /tools, /techniques endpoints.
+recipeRouter.post("/match-suggestions", async (req: Request, res: Response) => {
+  const schema = z.object({
+    ingredientNames: z.array(z.string()).default([]),
+    toolNames: z.array(z.string()).default([]),
+    techniqueNames: z.array(z.string()).default([]),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const [ingredients, tools, techniques] = await Promise.all([
+    proposeIngredientMatches(parsed.data.ingredientNames),
+    proposeToolMatches(parsed.data.toolNames),
+    proposeTechniqueMatches(parsed.data.techniqueNames),
+  ]);
+  res.json({ data: { ingredients, tools, techniques } });
 });
 
 // Deliberately unimplemented — the future integration point for a planned

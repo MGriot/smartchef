@@ -24,8 +24,33 @@ vi.mock('@capacitor-community/sqlite', () => ({
       isConnection: async () => ({ result: false }),
       createConnection: async () => ({
         open: async () => {},
-        execute: async (sql: string) => {
-          db.exec(sql);
+        // transaction defaults to true, matching the real plugin's
+        // execute(statements, transaction = true, ...) signature, and wraps
+        // in a real BEGIN/COMMIT accordingly. NOTE: this does NOT reproduce
+        // db/local.ts's real 2026-09 dropDanglingForeignKeys() regression
+        // (its migration calls omitted `transaction: false`, so an embedded
+        // "PRAGMA foreign_keys=OFF" silently no-op'd and the table rebuild
+        // threw "FOREIGN KEY constraint failed" on real devices) — confirmed
+        // by direct testing that node:sqlite's PRAGMA-inside-a-transaction
+        // behavior differs from the real Electron backend's
+        // better-sqlite3-multiple-ciphers build (which can't run under
+        // plain Node/vitest at all — it's compiled against Electron's Node
+        // ABI). That regression was caught and verified fixed by running
+        // the real migration against a copy of a real production database
+        // through the actual compiled module, not through this suite.
+        execute: async (sql: string, transaction = true) => {
+          if (!transaction) {
+            db.exec(sql);
+            return;
+          }
+          db.exec('BEGIN');
+          try {
+            db.exec(sql);
+            db.exec('COMMIT');
+          } catch (err) {
+            db.exec('ROLLBACK');
+            throw err;
+          }
         },
         query: async (sql: string, params: unknown[] = []) => {
           const stmt = db.prepare(sql);

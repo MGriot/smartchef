@@ -37,6 +37,7 @@ export interface Ingredient {
   categoryId: UUID;
   category?: IngredientCategory;
   name: string;
+  pluralName?: string;
   description?: string;
   densityGPerMl?: number;
   defaultUnit?: string;
@@ -203,6 +204,7 @@ export interface ShoppingListItem {
   shoppingListId: UUID;
   ingredientId?: UUID;
   ingredientName?: string;
+  ingredientPluralName?: string;
   ingredient?: Ingredient;
   totalQuantity?: number;
   quantityText?: string;

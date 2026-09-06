@@ -19,6 +19,7 @@ ingredientsRouter.get("/", async (req: Request, res: Response) => {
             p.name AS parent_name,
             ${lang ? "COALESCE(ict.name, ic.name)" : "ic.name"} AS translated_category_name,
             ${lang ? "it_lang.translated_name" : "NULL"} AS translated_name,
+            ${lang ? "it_lang.plural_translation" : "NULL"} AS translated_plural_name,
             COALESCE(
               (SELECT json_agg(json_build_object('lang', t.language_code, 'text', t.translated_name))
                FROM ingredient_translations t WHERE t.ingredient_id = i.id),
@@ -198,8 +199,15 @@ const IngredientSchema = z.object({
   tagIds: z.array(z.string().uuid()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
-    text: z.string()
+    text: z.string(),
+    // Per-language plural — see db/migrations/038_ingredient_plural.sql.
+    // Optional; blank falls back to the singular translated_name everywhere.
+    pluralText: z.string().optional().nullable(),
   })).optional(),
+  // Canonical-English plural ("apples" for "apple") — see
+  // db/migrations/038_ingredient_plural.sql. Optional; blank falls back to
+  // `name` everywhere.
+  pluralName: z.string().optional().nullable(),
   // Month numbers (1-12, Northern hemisphere) this ingredient is in season
   // for. Empty/omitted = no seasonality data, not "year-round" — see
   // db/migrations/034_ingredient_seasonality.sql.
@@ -231,19 +239,19 @@ ingredientsRouter.post("/", async (req: Request, res: Response) => {
   await query(
     `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
        calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months,
-       synonyms, parent_ingredient_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+       synonyms, parent_ingredient_id, plural_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
      d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
-     d.synonyms ?? [], d.parentIngredientId ?? null]
+     d.synonyms ?? [], d.parentIngredientId ?? null, d.pluralName || null]
   );
 
   if (d.translations && d.translations.length > 0) {
     for (const t of d.translations) {
       await query(
-        `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-        [id, t.lang, t.text]
+        `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name, plural_translation) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+        [id, t.lang, t.text, t.pluralText || null]
       );
     }
   }
@@ -276,12 +284,12 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
   await query(
     `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,
        calories_kcal=$6, protein_g=$7, carbs_g=$8, fat_g=$9, fiber_g=$10, sugar_g=$11, sodium_mg=$12,
-       seasonal_months=$13, synonyms=$14, parent_ingredient_id=$15, updated_at=now()
-     WHERE id=$16`,
+       seasonal_months=$13, synonyms=$14, parent_ingredient_id=$15, plural_name=$16, updated_at=now()
+     WHERE id=$17`,
     [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
      d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
-     d.synonyms ?? [], parentIngredientId, id]
+     d.synonyms ?? [], parentIngredientId, d.pluralName || null, id]
   );
 
   if (d.translations) {
@@ -289,8 +297,8 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
     for (const t of d.translations) {
       if (t.lang && t.text) {
         await query(
-          `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name) VALUES ($1, $2, $3)`,
-          [id, t.lang, t.text]
+          `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name, plural_translation) VALUES ($1, $2, $3, $4)`,
+          [id, t.lang, t.text, t.pluralText || null]
         );
       }
     }
