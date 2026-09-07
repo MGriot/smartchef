@@ -9,6 +9,8 @@
 // meaning the caller still needs the AI path (freeform prose).
 // ════════════════════════════════════════════════════════════════════════
 
+import { parseAmount } from '../lib/ingredientAmount';
+
 export interface TemplateParseIngredient {
   name: string;
   quantity?: number;
@@ -99,6 +101,10 @@ function lineStartsWithAnyLabel(line: string, allAliasLists: string[][]): boolea
   return allAliasLists.some((aliases) => matchLabel(line, aliases) !== null);
 }
 
+
+/** Whole-number scalar fields (servings, the time fields) — deliberately
+ *  NOT parseAmount(): these are never fractions, and reading "1 1/2" out of
+ *  a minutes field as 1.5 would be worse than reading it as 1. */
 function parseFirstNumber(text: string): number | undefined {
   const m = text.match(/[\d]+(?:[.,]\d+)?/);
   if (!m) return undefined;
@@ -120,7 +126,10 @@ function parseIngredientLine(line: string): TemplateParseIngredient | null {
   const m = line.match(INGREDIENT_LINE_RE);
   if (!m) return { name: stripped };
   const [, qtyRaw, unitRaw, nameRaw, notesRaw] = m;
-  const quantity = qtyRaw ? parseFirstNumber(qtyRaw) : undefined;
+  // parseAmount(), not a bare digit match: INGREDIENT_LINE_RE's amount
+  // group already accepts "/" and this line may well read "- 1/2 cipolla",
+  // which used to come through as quantity 1.
+  const quantity = qtyRaw ? parseAmount(qtyRaw) : undefined;
   return {
     name: (nameRaw || stripped).trim(),
     quantity,

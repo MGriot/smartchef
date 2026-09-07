@@ -7,6 +7,7 @@ import { apiFetch } from '../lib/api';
 import { tryParseStructuredText, TemplateParseResult } from '../services/recipeTemplateParser';
 import { proposeMatches, ProposedMatches } from '../services/matchSuggestions';
 import { matchUnitId, type MatchSuggestion } from '../lib/fuzzyMatch';
+import { repairIngredientAmount } from '../lib/ingredientAmount';
 
 interface MatchedIngredient {
   ingredientId: string;
@@ -157,7 +158,26 @@ export default function RecipeImport() {
   // Runs the same matching step regardless of how `d` was produced (AI or
   // the local template/JSON parser) — the whole point of splitting parsing
   // from matching is that this step behaves identically either way.
-  const beginReview = async (d: TemplateParseResult) => {
+  const beginReview = async (rawDraft: TemplateParseResult) => {
+    // Repair badly-split amounts before anything else sees the draft.
+    // This is the one place both producers meet (the local template parser
+    // above and the AI response below), so the AI path — which is the one
+    // that actually produced "quantity: 1, notes: '/2'" for "½ carota" in
+    // this library — gets fixed here rather than needing the model to
+    // behave. See lib/ingredientAmount.ts.
+    const d: TemplateParseResult = {
+      ...rawDraft,
+      ingredients: rawDraft.ingredients.map((ing) => {
+        const repaired = repairIngredientAmount(ing);
+        return {
+          ...ing,
+          // The draft type uses `undefined` for "absent"; the repair helper
+          // accepts either, so normalize on the way back in.
+          quantity: repaired.quantity ?? undefined,
+          notes: repaired.notes ?? undefined,
+        };
+      }),
+    };
     setDraft(d);
     setMatching(true);
     setError(null);
@@ -617,7 +637,7 @@ export default function RecipeImport() {
                       type="url"
                       value={inputVal}
                       onChange={(e) => setInputVal(e.target.value)}
-                      placeholder="https://ricette.giallozafferano.it/..."
+                      placeholder={t('import.urlPlaceholder')}
                       className="w-full bg-zinc-50/50 dark:bg-zinc-900/50 rounded-2xl border-none focus:ring-2 focus:ring-primary/10 text-zinc-700 dark:text-zinc-300 font-medium p-6"
                     />
                   ) : (
