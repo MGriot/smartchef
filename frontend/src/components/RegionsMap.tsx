@@ -140,6 +140,16 @@ export default function RegionsMap({ regions, coords = {} }: RegionsMapProps) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png"
           maxZoom={19}
+          // Wikimedia rejects a tile request whose Referer isn't http(s) —
+          // it answers 403, and since a failed <img> is silent, the map just
+          // renders as the bare `background` colour above with the GeoJSON
+          // overlays (plain SVG, no network) still drawn on top. The Electron
+          // build serves its pages from capacitor-electron://-/, and Chromium
+          // attaches that as the Referer on every tile, so the desktop app got
+          // no basemap at all while Android (served from https://localhost)
+          // was fine. Sending no Referer at all is accepted — verified against
+          // the live endpoint: no Referer 200, capacitor-electron:// 403.
+          referrerPolicy="no-referrer"
         />
         {areas.map((a) => (
           <GeoJSON
