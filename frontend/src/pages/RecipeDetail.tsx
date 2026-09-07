@@ -1403,682 +1403,718 @@ const RecipeDetail: React.FC = () => {
             />
           </main>
         ) : (
-        <main className="max-w-6xl mx-auto px-6 py-10 space-y-8">
-          {/* Title & description */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <label className="block mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold block">{t('recipeDetail.recipeTitle')}</span>
-                <span className="flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium">
-                  {t('recipeDetail.writtenIn')}
-                  <select
-                    value={draft.language_code || recipe.language_code || 'en'}
-                    onChange={e => updateDraft('language_code', e.target.value)}
-                    className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 py-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-primary/20 cursor-pointer"
-                  >
-                    {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-                  </select>
-                  <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
-                </span>
-              </div>
-              <input
-                type="text" value={draft.title || ''}
-                onChange={e => updateDraft('title', e.target.value)}
-                className="w-full text-3xl font-headline font-bold border-none bg-transparent focus:ring-0 p-0 placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
-                placeholder={t('recipeDetail.enterTitlePlaceholder')}
-              />
-            </label>
-            <label className="block mb-6">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.description')}</span>
-              <textarea
-                value={draft.description || ''}
-                onChange={e => updateDraft('description', e.target.value)}
-                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px] max-h-[50vh] overflow-y-auto [field-sizing:content]"
-                placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
-              />
-            </label>
-            <label className="block mb-6">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>
-              <textarea
-                value={draft.storage_instructions || ''}
-                onChange={e => updateDraft('storage_instructions', e.target.value || null)}
-                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
-                placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
-              />
-            </label>
-            <label className="block mb-6">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.tips')}</span>
-              <textarea
-                value={draft.tips || ''}
-                onChange={e => updateDraft('tips', e.target.value || null)}
-                className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
-                placeholder={t('recipeDetail.tipsPlaceholder')}
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.coverImage')}</span>
-              <ImageUrlInput
-                value={draft.cover_image_url || ''}
-                onChange={url => updateDraft('cover_image_url', url)}
-              />
-            </label>
-          </div>
-
-          {/* Translations */}
-          <div id="translations-section" className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)] scroll-mt-24">
-            <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.translations')}</h3>
-            <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-6">{t('recipeDetail.translationsHint')}</p>
-            <TranslationsEditor
-              translations={draft.translations || []}
-              onChange={translations => updateDraft('translations', translations)}
-            />
-            <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800">
-              <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.aiTranslate')}</span>
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-3">{t('recipeDetail.aiTranslateHint')}</p>
-              <div className="flex items-center gap-3">
-                <select
-                  value={aiTranslateLang}
-                  onChange={e => setAiTranslateLang(e.target.value)}
-                  className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
-                >
-                  {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={handleAiTranslate}
-                  disabled={aiTranslating}
-                  className="px-5 py-3 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
-                >
-                  {aiTranslating && <span className="material-symbols-outlined text-base animate-spin">sync</span>}
-                  {aiTranslating ? t('recipeDetail.aiTranslating') : t('recipeDetail.aiTranslateButton')}
-                </button>
-              </div>
-              {aiTranslateError && <p className="mt-3 text-sm text-red-600 font-medium">{aiTranslateError}</p>}
-            </div>
-          </div>
-
-          {/* Metadata grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: t('recipeDetail.servings'), field: 'servings', type: 'number' },
-              { label: t('recipeDetail.prepMin'), field: 'prep_time_min', type: 'number' },
-              { label: t('recipeDetail.cookMin'), field: 'cook_time_min', type: 'number' },
-              { label: t('recipeDetail.restMin'), field: 'rest_time_min', type: 'number' },
-            ].map(f => (
-              <label key={f.field} className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-[0_1px_6px_rgba(0,0,0,0.03)]">
-                <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold block mb-2">{f.label}</span>
-                <input
-                  type="number" value={String((draft as any)[f.field] || '')}
-                  onChange={e => updateDraft(f.field, e.target.value ? parseInt(e.target.value) : null)}
-                  className="w-full border-none bg-transparent text-2xl font-bold text-zinc-800 dark:text-zinc-200 p-0 focus:ring-0"
-                />
-              </label>
-            ))}
-          </div>
-
-          {/* Yield (optional — enables weight/volume amounts when this recipe is used as a sub-recipe ingredient) */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.yield')}</h3>
-            <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{t('recipeDetail.yieldHint')}</p>
-            <div className="flex gap-3 max-w-sm">
-              <input
-                type="number" step="any" value={draft.yield_amount ?? ''}
-                onChange={e => updateDraft('yield_amount', e.target.value ? parseFloat(e.target.value) : null)}
-                placeholder={t('recipeDetail.yieldAmountPlaceholder')}
-                className="flex-1 border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
-              />
-              <select
-                value={draft.yield_unit_id || ''}
-                onChange={e => updateDraft('yield_unit_id', e.target.value || null)}
-                className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
-              >
-                <option value="">{t('recipeDetail.unitEllipsis')}</option>
-                {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Difficulty + Tags */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <div className="flex flex-wrap gap-6">
-              <label>
-                <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.difficulty')}</span>
-                <select
-                  value={draft.difficulty || 'medium'}
-                  onChange={e => updateDraft('difficulty', e.target.value)}
-                  className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
-                >
-                  {['easy','medium','hard','expert'].map(d => (
-                    <option key={d} value={d}>{t(difficultyKey[d])}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.yourRating')}</span>
-                <StarRating value={draft.rating} onChange={rating => updateDraft('rating', rating)} />
-              </label>
-              <div className="flex-1 min-w-[200px]">
-                <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.tags')}</span>
-                <TagPicker value={draft.tags || []} onChange={tags => updateDraft('tags', tags)} />
-              </div>
-            </div>
-          </div>
-
-          {/* Regions */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <h3 className="font-headline font-bold text-xl mb-2">{t('recipeDetail.regions')}</h3>
-            <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{t('recipeDetail.regionsHint')}</p>
-            <RegionPicker
-              value={draft.regions || []}
-              onChange={regions => updateDraft('regions', regions)}
-              coords={draft.region_coords || {}}
-              onCoordsChange={coords => updateDraft('region_coords', coords)}
-            />
-            {isOnline && (draft.regions || []).length > 0 && (
-              <div className="mt-4">
-                <RegionsMap regions={draft.regions || []} coords={draft.region_coords || {}} />
-              </div>
-            )}
-          </div>
-
-          {/* Sources & References */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <h3 className="font-headline font-bold text-xl mb-6">{t('recipeDetail.sourcesReferences')}</h3>
-            <RecipeSourcesEditor
-              sources={draft.sources || []}
-              onChange={sources => updateDraft('sources', sources)}
-            />
-          </div>
-
-          {/* Kitchen Tools Selector */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <h3 className="font-headline font-bold text-xl mb-6">{t('recipeDetail.kitchenTools')}</h3>
-            <div className="flex flex-wrap gap-3">
-              {allTools.map(tool => {
-                const isSelected = (draft.tools || []).some(t => t.id === tool.id);
-                return (
-                  <button
-                    key={tool.id}
-                    onClick={() => toggleTool(tool)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 transition-all ${
-                      isSelected
-                        ? 'bg-primary/10 border-primary text-primary'
-                        : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600'
-                    }`}
-                  >
-                    <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-lg" />
-                    <span className="text-sm font-bold">{tool.translated_name || tool.name}</span>
-                  </button>
-                );
-              })}
-              {/* Pasted-but-not-yet-in-the-library tools (e.g. from raw-text
-                  JSON) — otherwise invisible here since this grid only
-                  lists allTools, yet still silently in draft.tools and
-                  would fail to save as a real toolId. Shown so they can be
-                  reviewed/removed before saving auto-creates them for real. */}
-              {(draft.tools || []).filter(t => !allTools.some(at => at.id === t.id)).map(tool => (
-                <button
-                  key={tool.id}
-                  onClick={() => toggleTool(tool)}
-                  title={t('recipeDetail.ingredientNeedsMatching')}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400"
-                >
-                  <RenderFaIcon name="FaKitchenSet" className="text-lg" />
-                  <span className="text-sm font-bold">{tool.name}</span>
-                  <span className="material-symbols-outlined text-sm">close</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2 mt-4">
-              <input
-                type="text"
-                value={newToolName}
-                onChange={(e) => setNewToolName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createToolInline(); } }}
-                placeholder={t('recipeDetail.newToolPlaceholder')}
-                className="flex-1 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
-              />
-              <button
-                type="button"
-                onClick={createToolInline}
-                disabled={!newToolName.trim()}
-                className="px-4 py-2 rounded-lg bg-zinc-900 text-white text-sm font-bold disabled:opacity-50"
-              >
-                {t('recipeDetail.addTool')}
-              </button>
-            </div>
-          </div>
-
-          {/* Ingredients Editor */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-headline font-bold text-xl">{t('recipeDetail.ingredients')}</h3>
-              <button onClick={addIngredient} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-full text-sm font-bold hover:bg-primary/90 transition-colors">
-                <span className="material-symbols-outlined text-sm">add</span> {t('recipeDetail.addIngredient')}
-              </button>
-            </div>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              {(draft.ingredients || []).map((ing, idx) => (
-                <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group border border-zinc-100 dark:border-zinc-800">
-                  <button
-                    onClick={() => removeIngredient(idx)}
-                    className="absolute top-3 right-3 w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
-                  >
-                    <span className="material-symbols-outlined text-sm">delete</span>
-                  </button>
-                  <div className="grid grid-cols-12 gap-4">
-                    <div className="col-span-6">
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">{t('recipeDetail.ingredient')}</label>
-                        <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
-                          {(['ingredient', 'recipe'] as const).map((type) => (
-                            <button
-                              key={type}
-                              type="button"
-                              onClick={() => setEntryType(idx, type)}
-                              className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase transition-colors ${
-                                getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
-                              }`}
-                            >
-                              {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      {getEntryType(idx, ing) === 'recipe' ? (
-                        <Autocomplete
-                          value={subRecipeDangling(ing) ? '' : (ing.subRecipeId || '')}
-                          unmatchedLabel={subRecipeDangling(ing) ? (ing.subRecipeTitle || t('recipeDetail.ingredientNeedsMatching')) : undefined}
-                          options={allRecipes.filter(r => r.id !== id).map(r => ({ id: r.id, label: r.translated_title || r.title }))}
-                          onSelect={(subId, label) => {
-                            updateIngredient(idx, 'subRecipeId', subId);
-                            updateIngredient(idx, 'subRecipeTitle', label);
-                          }}
-                          onClear={() => {
-                            updateIngredient(idx, 'subRecipeId', null);
-                            updateIngredient(idx, 'subRecipeTitle', null);
-                          }}
-                          placeholder={t('recipeDetail.typeToSearch')}
-                          className={`w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 ${
-                            subRecipeDangling(ing)
-                              ? 'border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700'
-                              : 'border-none bg-white dark:bg-zinc-900'
-                          }`}
-                        />
-                      ) : (
-                        <Autocomplete
-                          value={ingredientNeedsMatching(ing) ? '' : (ing.ingredientId || '')}
-                          unmatchedLabel={ingredientNeedsMatching(ing) ? (ing.ingredientName || t('recipeDetail.ingredientNeedsMatching')) : undefined}
-                          options={allIngredients.map(i => ({ id: i.id, label: i.translated_name || i.name }))}
-                          onSelect={(id2, label) => {
-                            updateIngredient(idx, 'ingredientId', id2);
-                            updateIngredient(idx, 'ingredientName', label);
-                          }}
-                          onClear={() => {
-                            updateIngredient(idx, 'ingredientId', null);
-                            updateIngredient(idx, 'ingredientName', '');
-                          }}
-                          onCreateNew={(name) => setPendingIngredient({ idx, name, categoryId: categories[0]?.id || '', pluralName: '', description: '' })}
-                          createNewLabel={(name) => t('import.createNew', { name })}
-                          placeholder={t('recipeDetail.typeToSearch')}
-                          className={`w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 ${
-                            ingredientNeedsMatching(ing)
-                              ? 'border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700'
-                              : 'border-none bg-white dark:bg-zinc-900'
-                          }`}
-                        />
-                      )}
-                      {ingredientNeedsMatching(ing) && getEntryType(idx, ing) === 'ingredient' && (
-                        <p className="text-[9px] text-amber-600 dark:text-amber-500 font-bold mt-1">{t('recipeDetail.ingredientNeedsMatching')}</p>
-                      )}
-                      {getEntryType(idx, ing) === 'recipe' && (
-                        <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-1">{t('recipeDetail.subRecipeCycleWarning')}</p>
-                      )}
-                      {pendingIngredient?.idx === idx && (
-                        <div className="mt-2 bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-2">
-                          <div>
-                            <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredient')}</label>
-                            <input
-                              type="text"
-                              value={pendingIngredient.name}
-                              onChange={(e) => setPendingIngredient({ ...pendingIngredient, name: e.target.value })}
-                              className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('import.pickCategory')}</label>
-                              <select
-                                value={pendingIngredient.categoryId}
-                                onChange={(e) => setPendingIngredient({ ...pendingIngredient, categoryId: e.target.value })}
-                                className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
-                              >
-                                <option value="">{t('import.pickCategory')}</option>
-                                {categories.map(c => (
-                                  <option key={c.id} value={c.id}>{c.translated_name || c.name}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.pluralOptional')}</label>
-                              <input
-                                type="text"
-                                value={pendingIngredient.pluralName}
-                                onChange={(e) => setPendingIngredient({ ...pendingIngredient, pluralName: e.target.value })}
-                                placeholder={t('recipeDetail.pluralPlaceholder')}
-                                className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
-                              />
-                            </div>
-                          </div>
-                          <div>
-                            <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.descriptionOptional')}</label>
-                            <input
-                              type="text"
-                              value={pendingIngredient.description}
-                              onChange={(e) => setPendingIngredient({ ...pendingIngredient, description: e.target.value })}
-                              className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
-                            />
-                          </div>
-                          <p className="text-[9px] text-zinc-400 dark:text-zinc-500">{t('recipeDetail.moreDetailsLaterHint')}</p>
-                          <div className="flex gap-2 justify-end">
-                          <button
-                            type="button"
-                            disabled={!pendingIngredient.categoryId || !pendingIngredient.name.trim() || creatingPendingIngredient}
-                            onClick={confirmCreateIngredient}
-                            className="px-3 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold disabled:opacity-50"
-                          >
-                            {creatingPendingIngredient ? '…' : t('import.createNew', { name: pendingIngredient.name })}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPendingIngredient(null)}
-                            className="px-2 py-1.5 rounded-lg text-zinc-400 dark:text-zinc-500 text-[11px] font-bold hover:text-zinc-600 dark:hover:text-zinc-400"
-                          >
-                            {t('common.cancel')}
-                          </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="col-span-3">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.qty')}</label>
-                      <input
-                        type="number" step="any" value={ing.quantity || ''}
-                        onChange={e => updateIngredient(idx, 'quantity', parseFloat(e.target.value))}
-                        className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
-                      />
-                    </div>
-                    <div className="col-span-3">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.unit')}</label>
+        <main className="max-w-7xl mx-auto px-6 py-10">
+          {/* Two columns: what you actually edit on the left, everything
+              that describes the recipe in a sticky rail on the right. As one
+              1104px column the two big editors were cards 9 and 10, roughly
+              five screens below the fold, behind eight metadata cards - and
+              ~890px of the window was empty gutter either side of them. */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
+            <div className="xl:col-span-8 space-y-8 min-w-0">
+              {/* Title & description */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <label className="block mb-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold block">{t('recipeDetail.recipeTitle')}</span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium">
+                      {t('recipeDetail.writtenIn')}
                       <select
-                        value={ing.unitId || ''}
-                        onChange={e => {
-                          const sym = allUnits.find(u => u.id === e.target.value)?.symbol || '';
-                          updateIngredient(idx, 'unitId', e.target.value);
-                          updateIngredient(idx, 'unitSymbol', sym);
-                        }}
-                        className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                        value={draft.language_code || recipe.language_code || 'en'}
+                        onChange={e => updateDraft('language_code', e.target.value)}
+                        className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 py-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-primary/20 cursor-pointer"
                       >
-                        <option value="">{t('recipeDetail.unitEllipsis')}</option>
-                        {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
+                        {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                       </select>
-                    </div>
-                    <div className="col-span-6">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.groupOptional')}</label>
-                      <input
-                        type="text" value={ing.groupName || ''}
-                        onChange={e => updateIngredient(idx, 'groupName', e.target.value || null)}
-                        className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
-                        placeholder={t('recipeDetail.groupPlaceholder')}
-                      />
-                    </div>
-                    <div className="col-span-6">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.chefsNoteOptional')}</label>
-                      <input
-                        type="text" value={ing.notes || ''}
-                        onChange={e => updateIngredient(idx, 'notes', e.target.value)}
-                        className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
-                        placeholder={t('recipeDetail.chefsNoteIngredientPlaceholder')}
-                      />
-                    </div>
-                    <div className="col-span-12">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredientTranslationsOptional')}</label>
-                      <TranslationsEditor
-                        translations={ing.translations || []}
-                        onChange={translations => updateIngredient(idx, 'translations', translations)}
-                        showTitleDescription={false}
-                        notesLabel={t('recipeDetail.chefsNoteIngredientPlaceholder')}
-                        compact
-                      />
-                    </div>
+                      <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
+                    </span>
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Steps editor */}
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-headline font-bold text-xl">{t('recipeDetail.steps')}</h3>
-              <button onClick={addStep} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-full text-sm font-bold hover:bg-primary/90 transition-colors">
-                <span className="material-symbols-outlined text-sm">add</span> {t('recipeDetail.addStep')}
-              </button>
-            </div>
-            <div className="space-y-4">
-              {(draft.steps || []).map((step, idx) => (
-                <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group">
-                  <button
-                    onClick={() => removeStep(idx)}
-                    className="absolute top-3 right-3 w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
-                  >
-                    <span className="material-symbols-outlined text-sm">delete</span>
-                  </button>
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">{idx + 1}</span>
-                    <input
-                      type="text" value={step.title || ''}
-                      onChange={e => updateStep(idx, 'title', e.target.value)}
-                      className="flex-1 border-none bg-transparent font-headline font-bold text-lg p-0 focus:ring-0"
-                      placeholder={t('recipeDetail.stepTitleOptional')}
-                    />
-                  </div>
-                  <StepEditor
-                    description={step.description}
-                    onChangeDescription={text => updateStep(idx, 'description', text)}
-                    ingredients={draft.ingredients || []}
-                    tools={allTools}
-                    units={allUnits}
-                    techniques={allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }))}
-                    onInsertIngredient={(sortOrder, amount) => setStepIngredient(idx, sortOrder, amount)}
-                    onInsertTool={(toolId) => addToolToStep(idx, toolId)}
+                  <input
+                    type="text" value={draft.title || ''}
+                    onChange={e => updateDraft('title', e.target.value)}
+                    className="w-full text-3xl font-headline font-bold border-none bg-transparent focus:ring-0 p-0 placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
+                    placeholder={t('recipeDetail.enterTitlePlaceholder')}
                   />
-                  <div className="mt-3">
-                    <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.stepPhotoOptional')}</label>
-                    <ImageUrlInput
-                      value={step.imageUrl || ''}
-                      onChange={url => updateStep(idx, 'imageUrl', url || null)}
-                      className="flex-1 min-w-0 border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="mt-3">
-                    <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.stepTranslationsOptional')}</label>
-                    <TranslationsEditor
-                      translations={step.translations || []}
-                      onChange={translations => updateStep(idx, 'translations', translations)}
-                      titleLabel={t('recipeDetail.stepTitle')}
-                      descriptionLabel={t('recipeDetail.stepDescription')}
-                      notesLabel={t('recipeDetail.chefsNote')}
-                      compact
-                    />
-                  </div>
+                </label>
+                <label className="block mb-6">
+                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.description')}</span>
                   <textarea
-                    value={step.notes || ''}
-                    onChange={e => updateStep(idx, 'notes', e.target.value)}
-                    className="w-full mt-3 border border-dashed border-primary/20 bg-primary/5 rounded-xl p-3 text-xs italic resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
-                    placeholder={t('recipeDetail.chefsNoteStepPlaceholder')}
+                    value={draft.description || ''}
+                    onChange={e => updateDraft('description', e.target.value)}
+                    className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[150px] max-h-[50vh] overflow-y-auto [field-sizing:content]"
+                    placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
                   />
-                  
-                  <div className="grid grid-cols-2 gap-4 mt-4">
+                </label>
+                <label className="block mb-6">
+                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>
+                  <textarea
+                    value={draft.storage_instructions || ''}
+                    onChange={e => updateDraft('storage_instructions', e.target.value || null)}
+                    className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[110px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
+                    placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
+                  />
+                </label>
+                <label className="block mb-6">
+                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.tips')}</span>
+                  <textarea
+                    value={draft.tips || ''}
+                    onChange={e => updateDraft('tips', e.target.value || null)}
+                    className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[110px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
+                    placeholder={t('recipeDetail.tipsPlaceholder')}
+                  />
+                </label>
+              </div>
 
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.durationMin')}</label>
-                      <input
-                        type="number" value={step.durationMin || ''}
-                        onChange={e => updateStep(idx, 'durationMin', e.target.value ? parseInt(e.target.value) : null)}
-                        className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
-                        placeholder={t('recipeDetail.min')}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.toolsForThisStep')}</label>
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {(draft.tools || []).map(tool => {
-                          const isUsed = (step.toolIds || []).includes(tool.id);
-                          return (
-                            <button
-                              key={tool.id}
-                              onClick={() => {
-                                const current = step.toolIds || [];
-                                const next = current.includes(tool.id) ? current.filter(id => id !== tool.id) : [...current, tool.id];
-                                updateStep(idx, 'toolIds', next);
-                              }}
-                              className={`p-1.5 rounded-lg border transition-all ${
-                                isUsed ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
-                              }`}
-                              title={tool.translated_name || tool.name}
-                            >
-                              <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-lg" />
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
-                    {allTechniques.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {allTechniques.map(tech => {
-                          const isUsed = (step.techniqueIds || []).includes(tech.id);
-                          return (
-                            <button
-                              key={tech.id}
-                              onClick={() => {
-                                const current = step.techniqueIds || [];
-                                const next = current.includes(tech.id) ? current.filter(id => id !== tech.id) : [...current, tech.id];
-                                updateStep(idx, 'techniqueIds', next);
-                              }}
-                              className={`p-1.5 rounded-lg border transition-all ${
-                                isUsed ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
-                              }`}
-                              title={tech.translated_name || tech.name}
-                            >
-                              <RenderFaIcon name={tech.icon || 'FaFire'} className="text-lg" />
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                    <div className="flex gap-2 mt-2">
-                      <input
-                        type="text"
-                        value={newTechniqueName}
-                        onChange={(e) => setNewTechniqueName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            createTechniqueInline((newId) => updateStep(idx, 'techniqueIds', [...(step.techniqueIds || []), newId]));
-                          }
-                        }}
-                        placeholder={t('recipeDetail.newTechniquePlaceholder')}
-                        className="flex-1 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-primary/20"
-                      />
+              {/* Ingredients Editor */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="font-headline font-bold text-xl">{t('recipeDetail.ingredients')}</h3>
+                  <button onClick={addIngredient} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-full text-sm font-bold hover:bg-primary/90 transition-colors">
+                    <span className="material-symbols-outlined text-sm">add</span> {t('recipeDetail.addIngredient')}
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {(draft.ingredients || []).map((ing, idx) => (
+                    <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group border border-zinc-100 dark:border-zinc-800">
                       <button
-                        type="button"
-                        onClick={() => createTechniqueInline((newId) => updateStep(idx, 'techniqueIds', [...(step.techniqueIds || []), newId]))}
-                        disabled={!newTechniqueName.trim()}
-                        className="px-3 py-1.5 rounded-lg bg-zinc-900 text-white text-[11px] font-bold disabled:opacity-50"
+                        onClick={() => removeIngredient(idx)}
+                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
                       >
-                        {t('recipeDetail.addTechnique')}
+                        <span className="material-symbols-outlined text-sm">delete</span>
                       </button>
-                    </div>
-                  </div>
-
-                  {(draft.ingredients || []).length > 0 && (
-                    <div className="mt-4">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredientsUsedInStep')}</label>
-                      <div className="space-y-1.5 mt-1">
-                        {(draft.ingredients || []).map(ing => {
-                          const ref = (step.stepIngredients || []).find(si => si.ingredientSortOrder === ing.sortOrder);
-                          const isUsed = !!ref;
-                          return (
-                            <div key={ing.sortOrder} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${isUsed ? 'bg-primary/5 border-primary/20' : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'}`}>
+                      <div className="grid grid-cols-12 gap-4">
+                        <div className="col-span-6">
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">{t('recipeDetail.ingredient')}</label>
+                            <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
+                              {(['ingredient', 'recipe'] as const).map((type) => (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  onClick={() => setEntryType(idx, type)}
+                                  className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                                    getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
+                                  }`}
+                                >
+                                  {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {getEntryType(idx, ing) === 'recipe' ? (
+                            <Autocomplete
+                              value={subRecipeDangling(ing) ? '' : (ing.subRecipeId || '')}
+                              unmatchedLabel={subRecipeDangling(ing) ? (ing.subRecipeTitle || t('recipeDetail.ingredientNeedsMatching')) : undefined}
+                              options={allRecipes.filter(r => r.id !== id).map(r => ({ id: r.id, label: r.translated_title || r.title }))}
+                              onSelect={(subId, label) => {
+                                updateIngredient(idx, 'subRecipeId', subId);
+                                updateIngredient(idx, 'subRecipeTitle', label);
+                              }}
+                              onClear={() => {
+                                updateIngredient(idx, 'subRecipeId', null);
+                                updateIngredient(idx, 'subRecipeTitle', null);
+                              }}
+                              placeholder={t('recipeDetail.typeToSearch')}
+                              className={`w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 ${
+                                subRecipeDangling(ing)
+                                  ? 'border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700'
+                                  : 'border-none bg-white dark:bg-zinc-900'
+                              }`}
+                            />
+                          ) : (
+                            <Autocomplete
+                              value={ingredientNeedsMatching(ing) ? '' : (ing.ingredientId || '')}
+                              unmatchedLabel={ingredientNeedsMatching(ing) ? (ing.ingredientName || t('recipeDetail.ingredientNeedsMatching')) : undefined}
+                              options={allIngredients.map(i => ({ id: i.id, label: i.translated_name || i.name }))}
+                              onSelect={(id2, label) => {
+                                updateIngredient(idx, 'ingredientId', id2);
+                                updateIngredient(idx, 'ingredientName', label);
+                              }}
+                              onClear={() => {
+                                updateIngredient(idx, 'ingredientId', null);
+                                updateIngredient(idx, 'ingredientName', '');
+                              }}
+                              onCreateNew={(name) => setPendingIngredient({ idx, name, categoryId: categories[0]?.id || '', pluralName: '', description: '' })}
+                              createNewLabel={(name) => t('import.createNew', { name })}
+                              placeholder={t('recipeDetail.typeToSearch')}
+                              className={`w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 ${
+                                ingredientNeedsMatching(ing)
+                                  ? 'border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700'
+                                  : 'border-none bg-white dark:bg-zinc-900'
+                              }`}
+                            />
+                          )}
+                          {ingredientNeedsMatching(ing) && getEntryType(idx, ing) === 'ingredient' && (
+                            <p className="text-[9px] text-amber-600 dark:text-amber-500 font-bold mt-1">{t('recipeDetail.ingredientNeedsMatching')}</p>
+                          )}
+                          {getEntryType(idx, ing) === 'recipe' && (
+                            <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-1">{t('recipeDetail.subRecipeCycleWarning')}</p>
+                          )}
+                          {pendingIngredient?.idx === idx && (
+                            <div className="mt-2 bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-2">
+                              <div>
+                                <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredient')}</label>
+                                <input
+                                  type="text"
+                                  value={pendingIngredient.name}
+                                  onChange={(e) => setPendingIngredient({ ...pendingIngredient, name: e.target.value })}
+                                  className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('import.pickCategory')}</label>
+                                  <select
+                                    value={pendingIngredient.categoryId}
+                                    onChange={(e) => setPendingIngredient({ ...pendingIngredient, categoryId: e.target.value })}
+                                    className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                                  >
+                                    <option value="">{t('import.pickCategory')}</option>
+                                    {categories.map(c => (
+                                      <option key={c.id} value={c.id}>{c.translated_name || c.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.pluralOptional')}</label>
+                                  <input
+                                    type="text"
+                                    value={pendingIngredient.pluralName}
+                                    onChange={(e) => setPendingIngredient({ ...pendingIngredient, pluralName: e.target.value })}
+                                    placeholder={t('recipeDetail.pluralPlaceholder')}
+                                    className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.descriptionOptional')}</label>
+                                <input
+                                  type="text"
+                                  value={pendingIngredient.description}
+                                  onChange={(e) => setPendingIngredient({ ...pendingIngredient, description: e.target.value })}
+                                  className="w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                                />
+                              </div>
+                              <p className="text-[9px] text-zinc-400 dark:text-zinc-500">{t('recipeDetail.moreDetailsLaterHint')}</p>
+                              <div className="flex gap-2 justify-end">
                               <button
                                 type="button"
-                                onClick={() => toggleStepIngredient(idx, ing.sortOrder)}
-                                className={`text-xs font-bold flex-1 text-left ${isUsed ? 'text-primary' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
+                                disabled={!pendingIngredient.categoryId || !pendingIngredient.name.trim() || creatingPendingIngredient}
+                                onClick={confirmCreateIngredient}
+                                className="px-3 py-1.5 rounded-lg bg-primary text-white text-[11px] font-bold disabled:opacity-50"
                               >
-                                {ing.ingredientName || ing.subRecipeTitle || t('recipeDetail.unnamedIngredient')}
-                                {ing.quantity ? ` (${ing.quantity}${ing.unitSymbol ? ' ' + ing.unitSymbol : ''} total)` : ''}
+                                {creatingPendingIngredient ? '…' : t('import.createNew', { name: pendingIngredient.name })}
                               </button>
-                              {isUsed && (
-                                <>
-                                  <div className="flex bg-white dark:bg-zinc-900 rounded-lg p-0.5 border border-zinc-100 dark:border-zinc-800 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => setStepIngredientMode(idx, ing.sortOrder, 'fraction')}
-                                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${(ref!.amountMode || 'fraction') === 'fraction' ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500'}`}
-                                    >%</button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setStepIngredientMode(idx, ing.sortOrder, 'absolute')}
-                                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${ref!.amountMode === 'absolute' ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500'}`}
-                                    >{t('recipeDetail.amt')}</button>
-                                  </div>
-                                  {(ref!.amountMode || 'fraction') === 'fraction' ? (
-                                    <>
-                                      <input
-                                        type="range" min="0.05" max="1" step="0.05"
-                                        value={ref!.portion}
-                                        onChange={e => updateStepIngredientPortion(idx, ing.sortOrder, parseFloat(e.target.value))}
-                                        className="w-24 accent-primary"
-                                      />
-                                      <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 w-10 text-right">{Math.round(ref!.portion * 100)}%</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <input
-                                        type="number" step="any" value={ref!.quantity ?? ''}
-                                        onChange={e => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', e.target.value ? parseFloat(e.target.value) : null)}
-                                        className="w-14 border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
-                                      />
-                                      <select
-                                        value={ref!.unitId || ''}
-                                        onChange={e => {
-                                          const sym = allUnits.find(u => u.id === e.target.value)?.symbol || '';
-                                          updateStepIngredientAmount(idx, ing.sortOrder, 'unitId', e.target.value || null);
-                                          updateStepIngredientAmount(idx, ing.sortOrder, 'unitSymbol', sym);
-                                        }}
-                                        className="w-16 border-none bg-white dark:bg-zinc-900 rounded px-1 py-1 text-[10px] focus:ring-2 focus:ring-primary/20"
-                                      >
-                                        <option value="">{t('recipeDetail.unitEllipsis')}</option>
-                                        {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol}</option>)}
-                                      </select>
-                                    </>
-                                  )}
-                                </>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => setPendingIngredient(null)}
+                                className="px-2 py-1.5 rounded-lg text-zinc-400 dark:text-zinc-500 text-[11px] font-bold hover:text-zinc-600 dark:hover:text-zinc-400"
+                              >
+                                {t('common.cancel')}
+                              </button>
+                              </div>
                             </div>
-                          );
-                        })}
+                          )}
+                        </div>
+                        <div className="col-span-3">
+                          <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.qty')}</label>
+                          <input
+                            type="number" step="any" value={ing.quantity || ''}
+                            onChange={e => updateIngredient(idx, 'quantity', parseFloat(e.target.value))}
+                            className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                          />
+                        </div>
+                        <div className="col-span-3">
+                          <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.unit')}</label>
+                          <select
+                            value={ing.unitId || ''}
+                            onChange={e => {
+                              const sym = allUnits.find(u => u.id === e.target.value)?.symbol || '';
+                              updateIngredient(idx, 'unitId', e.target.value);
+                              updateIngredient(idx, 'unitSymbol', sym);
+                            }}
+                            className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                          >
+                            <option value="">{t('recipeDetail.unitEllipsis')}</option>
+                            {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
+                          </select>
+                        </div>
+                        <div className="col-span-6">
+                          <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.groupOptional')}</label>
+                          <input
+                            type="text" value={ing.groupName || ''}
+                            onChange={e => updateIngredient(idx, 'groupName', e.target.value || null)}
+                            className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                            placeholder={t('recipeDetail.groupPlaceholder')}
+                          />
+                        </div>
+                        <div className="col-span-6">
+                          <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.chefsNoteOptional')}</label>
+                          <input
+                            type="text" value={ing.notes || ''}
+                            onChange={e => updateIngredient(idx, 'notes', e.target.value)}
+                            className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                            placeholder={t('recipeDetail.chefsNoteIngredientPlaceholder')}
+                          />
+                        </div>
+                        <details className="col-span-12">
+                          <summary className="cursor-pointer text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 select-none">{t('recipeDetail.ingredientTranslationsOptional')}</summary>
+                          <TranslationsEditor
+                            translations={ing.translations || []}
+                            onChange={translations => updateIngredient(idx, 'translations', translations)}
+                            showTitleDescription={false}
+                            notesLabel={t('recipeDetail.chefsNoteIngredientPlaceholder')}
+                            compact
+                          />
+                        </details>
                       </div>
                     </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Steps editor */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="font-headline font-bold text-xl">{t('recipeDetail.steps')}</h3>
+                  <button onClick={addStep} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-full text-sm font-bold hover:bg-primary/90 transition-colors">
+                    <span className="material-symbols-outlined text-sm">add</span> {t('recipeDetail.addStep')}
+                  </button>
+                </div>
+                <div className="space-y-4">
+                  {(draft.steps || []).map((step, idx) => (
+                    <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group">
+                      <button
+                        onClick={() => removeStep(idx)}
+                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
+                      >
+                        <span className="material-symbols-outlined text-sm">delete</span>
+                      </button>
+                      <div className="flex items-center gap-3 mb-3">
+                        <span className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">{idx + 1}</span>
+                        <input
+                          type="text" value={step.title || ''}
+                          onChange={e => updateStep(idx, 'title', e.target.value)}
+                          className="flex-1 border-none bg-transparent font-headline font-bold text-lg p-0 focus:ring-0"
+                          placeholder={t('recipeDetail.stepTitleOptional')}
+                        />
+                      </div>
+                      <StepEditor
+                        description={step.description}
+                        onChangeDescription={text => updateStep(idx, 'description', text)}
+                        ingredients={draft.ingredients || []}
+                        tools={allTools}
+                        units={allUnits}
+                        techniques={allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }))}
+                        onInsertIngredient={(sortOrder, amount) => setStepIngredient(idx, sortOrder, amount)}
+                        onInsertTool={(toolId) => addToolToStep(idx, toolId)}
+                      />
+                      <div className="mt-3">
+                        <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.stepPhotoOptional')}</label>
+                        <ImageUrlInput
+                          value={step.imageUrl || ''}
+                          onChange={url => updateStep(idx, 'imageUrl', url || null)}
+                          className="flex-1 min-w-0 border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                        />
+                      </div>
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 select-none">{t('recipeDetail.stepTranslationsOptional')}</summary>
+                        <TranslationsEditor
+                          translations={step.translations || []}
+                          onChange={translations => updateStep(idx, 'translations', translations)}
+                          titleLabel={t('recipeDetail.stepTitle')}
+                          descriptionLabel={t('recipeDetail.stepDescription')}
+                          notesLabel={t('recipeDetail.chefsNote')}
+                          compact
+                        />
+                      </details>
+                      <textarea
+                        value={step.notes || ''}
+                        onChange={e => updateStep(idx, 'notes', e.target.value)}
+                        className="w-full mt-3 border border-dashed border-primary/20 bg-primary/5 rounded-xl p-3 text-xs italic resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
+                        placeholder={t('recipeDetail.chefsNoteStepPlaceholder')}
+                      />
+                  
+                      <div className="grid grid-cols-2 gap-4 mt-4">
+
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.durationMin')}</label>
+                          <input
+                            type="number" value={step.durationMin || ''}
+                            onChange={e => updateStep(idx, 'durationMin', e.target.value ? parseInt(e.target.value) : null)}
+                            className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                            placeholder={t('recipeDetail.min')}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.toolsForThisStep')}</label>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {(draft.tools || []).map(tool => {
+                              const isUsed = (step.toolIds || []).includes(tool.id);
+                              return (
+                                <button
+                                  key={tool.id}
+                                  onClick={() => {
+                                    const current = step.toolIds || [];
+                                    const next = current.includes(tool.id) ? current.filter(id => id !== tool.id) : [...current, tool.id];
+                                    updateStep(idx, 'toolIds', next);
+                                  }}
+                                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all ${
+                                    isUsed ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
+                                  }`}
+                                >
+                                  <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-base" />
+                                  <span className="text-[11px] font-bold">{tool.translated_name || tool.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
+                        {allTechniques.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {allTechniques.map(tech => {
+                              const isUsed = (step.techniqueIds || []).includes(tech.id);
+                              return (
+                                <button
+                                  key={tech.id}
+                                  onClick={() => {
+                                    const current = step.techniqueIds || [];
+                                    const next = current.includes(tech.id) ? current.filter(id => id !== tech.id) : [...current, tech.id];
+                                    updateStep(idx, 'techniqueIds', next);
+                                  }}
+                                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all ${
+                                    isUsed ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
+                                  }`}
+                                >
+                                  <RenderFaIcon name={tech.icon || 'FaFire'} className="text-base" />
+                                  <span className="text-[11px] font-bold">{tech.translated_name || tech.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="flex gap-2 mt-2">
+                          <input
+                            type="text"
+                            value={newTechniqueName}
+                            onChange={(e) => setNewTechniqueName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                createTechniqueInline((newId) => updateStep(idx, 'techniqueIds', [...(step.techniqueIds || []), newId]));
+                              }
+                            }}
+                            placeholder={t('recipeDetail.newTechniquePlaceholder')}
+                            className="flex-1 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-primary/20"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => createTechniqueInline((newId) => updateStep(idx, 'techniqueIds', [...(step.techniqueIds || []), newId]))}
+                            disabled={!newTechniqueName.trim()}
+                            className="px-3 py-1.5 rounded-lg bg-zinc-900 text-white text-[11px] font-bold disabled:opacity-50"
+                          >
+                            {t('recipeDetail.addTechnique')}
+                          </button>
+                        </div>
+                      </div>
+
+                      {(draft.ingredients || []).length > 0 && (
+                        <details
+                          className="mt-4 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2"
+                          // Opened once on mount when the step already picks
+                          // something, then left uncontrolled so toggling it
+                          // stays a plain DOM interaction with no re-render.
+                          ref={el => { if (el && !el.dataset.init) { el.dataset.init = '1'; el.open = (step.stepIngredients || []).length > 0; } }}
+                        >
+                          <summary className="cursor-pointer text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 select-none">
+                            {t('recipeDetail.stepIngredientsSelected', { used: (step.stepIngredients || []).length, total: (draft.ingredients || []).length })}
+                          </summary>
+                          <div className="space-y-1.5 mt-2">
+                            {(draft.ingredients || []).map(ing => {
+                              const ref = (step.stepIngredients || []).find(si => si.ingredientSortOrder === ing.sortOrder);
+                              const isUsed = !!ref;
+                              return (
+                                <div key={ing.sortOrder} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${isUsed ? 'bg-primary/5 border-primary/20' : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'}`}>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleStepIngredient(idx, ing.sortOrder)}
+                                    className={`text-xs font-bold flex-1 text-left ${isUsed ? 'text-primary' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
+                                  >
+                                    {ing.ingredientName || ing.subRecipeTitle || t('recipeDetail.unnamedIngredient')}
+                                    {ing.quantity ? ` (${ing.quantity}${ing.unitSymbol ? ' ' + ing.unitSymbol : ''} total)` : ''}
+                                  </button>
+                                  {isUsed && (
+                                    <>
+                                      <div className="flex bg-white dark:bg-zinc-900 rounded-lg p-0.5 border border-zinc-100 dark:border-zinc-800 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => setStepIngredientMode(idx, ing.sortOrder, 'fraction')}
+                                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${(ref!.amountMode || 'fraction') === 'fraction' ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500'}`}
+                                        >%</button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setStepIngredientMode(idx, ing.sortOrder, 'absolute')}
+                                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-colors ${ref!.amountMode === 'absolute' ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500'}`}
+                                        >{t('recipeDetail.amt')}</button>
+                                      </div>
+                                      {(ref!.amountMode || 'fraction') === 'fraction' ? (
+                                        <>
+                                          <input
+                                            type="range" min="0.05" max="1" step="0.05"
+                                            value={ref!.portion}
+                                            onChange={e => updateStepIngredientPortion(idx, ing.sortOrder, parseFloat(e.target.value))}
+                                            className="w-24 accent-primary"
+                                          />
+                                          <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 w-10 text-right">{Math.round(ref!.portion * 100)}%</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <input
+                                            type="number" step="any" value={ref!.quantity ?? ''}
+                                            onChange={e => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', e.target.value ? parseFloat(e.target.value) : null)}
+                                            className="w-14 border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
+                                          />
+                                          <select
+                                            value={ref!.unitId || ''}
+                                            onChange={e => {
+                                              const sym = allUnits.find(u => u.id === e.target.value)?.symbol || '';
+                                              updateStepIngredientAmount(idx, ing.sortOrder, 'unitId', e.target.value || null);
+                                              updateStepIngredientAmount(idx, ing.sortOrder, 'unitSymbol', sym);
+                                            }}
+                                            className="w-16 border-none bg-white dark:bg-zinc-900 rounded px-1 py-1 text-[10px] focus:ring-2 focus:ring-primary/20"
+                                          >
+                                            <option value="">{t('recipeDetail.unitEllipsis')}</option>
+                                            {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol}</option>)}
+                                          </select>
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <aside className="xl:col-span-4 space-y-6 min-w-0 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto xl:pr-1">
+              {/* Cover image - metadata, so it belongs in the rail rather than
+                  at the bottom of the text card. */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.coverImage')}</span>
+                <ImageUrlInput
+                  value={draft.cover_image_url || ''}
+                  onChange={url => updateDraft('cover_image_url', url)}
+                />
+              </div>
+
+              {/* Numbers - servings/times were four separate full-width tiles and
+                  difficulty and the rating sat in a card whose left third was empty
+                  below them. One card, 2x2. */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: t('recipeDetail.servings'), field: 'servings' },
+                    { label: t('recipeDetail.prepMin'), field: 'prep_time_min' },
+                    { label: t('recipeDetail.cookMin'), field: 'cook_time_min' },
+                    { label: t('recipeDetail.restMin'), field: 'rest_time_min' },
+                  ].map(f => (
+                    <label key={f.field} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl px-4 py-3 border border-zinc-100 dark:border-zinc-800">
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold block mb-1">{f.label}</span>
+                      <input
+                        type="number" value={String((draft as any)[f.field] || '')}
+                        onChange={e => updateDraft(f.field, e.target.value ? parseInt(e.target.value) : null)}
+                        className="w-full border-none bg-transparent text-xl font-bold text-zinc-800 dark:text-zinc-200 p-0 focus:ring-0"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="flex items-end justify-between gap-4 mt-4">
+                  <label className="min-w-0">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-1.5 block">{t('recipeDetail.difficulty')}</span>
+                    <select
+                      value={draft.difficulty || 'medium'}
+                      onChange={e => updateDraft('difficulty', e.target.value)}
+                      className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-3 py-2 font-medium text-sm focus:ring-2 focus:ring-primary/20"
+                    >
+                      {['easy','medium','hard','expert'].map(d => (
+                        <option key={d} value={d}>{t(difficultyKey[d])}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="shrink-0">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-1.5 block">{t('recipeDetail.yourRating')}</span>
+                    <StarRating value={draft.rating} onChange={rating => updateDraft('rating', rating)} />
+                  </label>
+                </div>
+              </div>
+
+              {/* Yield (optional — enables weight/volume amounts when this recipe is used as a sub-recipe ingredient) */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <h3 className="font-headline font-bold text-lg mb-2">{t('recipeDetail.yield')}</h3>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{t('recipeDetail.yieldHint')}</p>
+                <div className="flex gap-3">
+                  <input
+                    type="number" step="any" value={draft.yield_amount ?? ''}
+                    onChange={e => updateDraft('yield_amount', e.target.value ? parseFloat(e.target.value) : null)}
+                    placeholder={t('recipeDetail.yieldAmountPlaceholder')}
+                    className="flex-1 min-w-0 border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
+                  />
+                  <select
+                    value={draft.yield_unit_id || ''}
+                    onChange={e => updateDraft('yield_unit_id', e.target.value || null)}
+                    className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="">{t('recipeDetail.unitEllipsis')}</option>
+                    {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Tags */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.tags')}</h3>
+                <TagPicker value={draft.tags || []} onChange={tags => updateDraft('tags', tags)} />
+              </div>
+
+              {/* Regions */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <h3 className="font-headline font-bold text-lg mb-2">{t('recipeDetail.regions')}</h3>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{t('recipeDetail.regionsHint')}</p>
+                <RegionPicker
+                  value={draft.regions || []}
+                  onChange={regions => updateDraft('regions', regions)}
+                  coords={draft.region_coords || {}}
+                  onCoordsChange={coords => updateDraft('region_coords', coords)}
+                />
+                {isOnline && (draft.regions || []).length > 0 && (
+                  <div className="mt-4">
+                    <RegionsMap regions={draft.regions || []} coords={draft.region_coords || {}} />
+                  </div>
+                )}
+              </div>
+
+              {/* Kitchen tools - the picker used to render all of allTools (24 chips,
+                  four rows, ~200px) just to show the one that was selected. What's
+                  picked is on top now; the rest of the library is one click away. */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.kitchenTools')}</h3>
+                <div className="flex flex-wrap gap-2">
+                  {(draft.tools || []).map(tool => {
+                    // A tool pasted through raw-text JSON isn't in the library yet and
+                    // would fail to save as a real toolId - flagged amber so it can be
+                    // reviewed before saving auto-creates it.
+                    const known = allTools.some(at => at.id === tool.id);
+                    return (
+                      <button
+                        key={tool.id}
+                        onClick={() => toggleTool(tool)}
+                        title={known ? undefined : t('recipeDetail.ingredientNeedsMatching')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 transition-all ${
+                          known
+                            ? 'bg-primary/10 border-primary text-primary'
+                            : 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
+                        }`}
+                      >
+                        <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-base" />
+                        <span className="text-xs font-bold">{tool.translated_name || tool.name}</span>
+                        <span className="material-symbols-outlined text-sm">close</span>
+                      </button>
+                    );
+                  })}
+                  {(draft.tools || []).length === 0 && (
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500">{t('recipeDetail.noToolsSelected')}</p>
                   )}
                 </div>
-              ))}
-            </div>
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-xs font-bold text-primary select-none">
+                    {t('recipeDetail.addFromToolLibrary', { count: allTools.filter(at => !(draft.tools || []).some(dt => dt.id === at.id)).length })}
+                  </summary>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {allTools.filter(at => !(draft.tools || []).some(dt => dt.id === at.id)).map(tool => (
+                      <button
+                        key={tool.id}
+                        onClick={() => toggleTool(tool)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl border-2 bg-zinc-50 dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600 transition-all"
+                      >
+                        <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-base" />
+                        <span className="text-xs font-bold">{tool.translated_name || tool.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <input
+                      type="text"
+                      value={newToolName}
+                      onChange={(e) => setNewToolName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createToolInline(); } }}
+                      placeholder={t('recipeDetail.newToolPlaceholder')}
+                      className="flex-1 min-w-0 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={createToolInline}
+                      disabled={!newToolName.trim()}
+                      className="px-4 py-2 rounded-lg bg-zinc-900 text-white text-sm font-bold disabled:opacity-50 shrink-0"
+                    >
+                      {t('recipeDetail.addTool')}
+                    </button>
+                  </div>
+                </details>
+              </div>
+
+              {/* Sources & References */}
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.sourcesReferences')}</h3>
+                <RecipeSourcesEditor
+                  sources={draft.sources || []}
+                  onChange={sources => updateDraft('sources', sources)}
+                />
+              </div>
+
+              {/* Translations */}
+              <div id="translations-section" className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] scroll-mt-24">
+                <details>
+                <summary className="cursor-pointer font-headline font-bold text-lg select-none">{t('recipeDetail.translations')}</summary>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2 mb-6">{t('recipeDetail.translationsHint')}</p>
+                <TranslationsEditor
+                  translations={draft.translations || []}
+                  onChange={translations => updateDraft('translations', translations)}
+                />
+                <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800">
+                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.aiTranslate')}</span>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-3">{t('recipeDetail.aiTranslateHint')}</p>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={aiTranslateLang}
+                      onChange={e => setAiTranslateLang(e.target.value)}
+                      className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
+                    >
+                      {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAiTranslate}
+                      disabled={aiTranslating}
+                      className="px-5 py-3 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {aiTranslating && <span className="material-symbols-outlined text-base animate-spin">sync</span>}
+                      {aiTranslating ? t('recipeDetail.aiTranslating') : t('recipeDetail.aiTranslateButton')}
+                    </button>
+                  </div>
+                  {aiTranslateError && <p className="mt-3 text-sm text-red-600 font-medium">{aiTranslateError}</p>}
+                </div>
+                </details>
+              </div>
+            </aside>
           </div>
         </main>
         )}
