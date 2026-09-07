@@ -649,6 +649,13 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
 // ── PUT /recipes/:id ──────────────────────────────────────────────────
 
 export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: string }> {
+  // Split timing: the SQLite writes below are proportional to the recipe's
+  // own size, while syncRecipe() is not — it goes through gitSync's single
+  // shared queue, so it can block for seconds behind an unrelated commit or
+  // sync cycle no matter how small the recipe is. See gitSync.ts's
+  // logIfSlow(). Only prints when something is actually slow.
+  const { logIfSlow } = await import('../lib/sync/gitSync');
+  const dbStartedAt = performance.now();
   await withTransaction(async (client) => {
     const yieldUnitId = await resolveExistingId(client, 'units', d.yieldUnitId);
     await client.query(
@@ -716,7 +723,11 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
     await upsertRecipeTranslations(client, id, d.translations);
   });
 
+  logIfSlow('updateRecipe db writes', dbStartedAt, `${(d.ingredients ?? []).length} ingredients, ${(d.steps ?? []).length} steps`);
+
+  const syncStartedAt = performance.now();
   await syncRecipe(id);
+  logIfSlow('updateRecipe syncRecipe', syncStartedAt);
   return { id };
 }
 

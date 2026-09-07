@@ -122,33 +122,42 @@ export default function RegionsMap({ regions, coords = {} }: RegionsMapProps) {
         style={{ background: '#c8dce8' }}
         className="w-full h-full"
       >
-        {/* Wikimedia's public tile service — genuinely free, no API key or
-            signup required for reasonable external embedding (see
-            https://wikitech.wikimedia.org/wiki/Maps/Public_tile_service_terms_of_use).
-            Switched from CARTO's basemaps.cartocdn.com after CARTO started
-            requiring a (free, but signup-gated) API key for that endpoint —
-            its tiles now render with a diagonal "API KEY REQUIRED"
-            watermark without one. tile.openstreetmap.org itself already
-            actively blocks this app's traffic (see git history), which is
-            why this isn't just OSM's own tile server.
-            No `{r}` (@2x retina) suffix on purpose — Wikimedia's raster
-            tiles aren't reliably pre-rendered at @2x for every tile
-            (sparser areas especially, e.g. open ocean), which showed up as
-            solid gray gaps on HiDPI displays. Slightly softer on retina
-            screens, but every tile actually exists. */}
+        {/* Esri's public ArcGIS Online basemap. Free, no API key, no signup,
+            and — the property that actually matters here — it serves tiles
+            regardless of what Referer the request carries.
+
+            This app has now been through every other obvious option, each
+            of which failed for its own reason:
+              - tile.openstreetmap.org answers `x-blocked: Access denied`.
+                Their tile usage policy forbids embedding raw OSM tiles in
+                an app without running your own infrastructure, so this is
+                policy, not a bug, and won't change.
+              - basemaps.cartocdn.com began requiring a (free, signup-gated)
+                API key and now watermarks tiles "API KEY REQUIRED".
+              - maps.wikimedia.org 403s any request whose Referer isn't
+                http(s). The Electron build serves its pages from
+                capacitor-electron://-/, which Chromium attaches as the
+                Referer on every tile <img>, so the desktop app got a blank
+                basemap while Android (https://localhost) was fine. Setting
+                referrerPolicy="no-referrer" was not enough to rescue it in
+                the real app, which is why the provider changed instead of
+                the header.
+
+            Measured against the live endpoints with the app's own
+            Electron user agent, both with `Referer: capacitor-electron://-/`
+            and with none at all:
+              wikimedia   ref:403  noref:200   <- the bug
+              esri        ref:200  noref:200   <- chosen
+            So this works on Electron, Android and web alike, and does not
+            depend on any header being stripped.
+
+            referrerPolicy is kept as belt-and-braces (it tested fine both
+            ways above) so a future provider that dislikes the custom scheme
+            degrades to "no Referer" rather than to a blank map. */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png"
+          attribution='Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom'
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
           maxZoom={19}
-          // Wikimedia rejects a tile request whose Referer isn't http(s) —
-          // it answers 403, and since a failed <img> is silent, the map just
-          // renders as the bare `background` colour above with the GeoJSON
-          // overlays (plain SVG, no network) still drawn on top. The Electron
-          // build serves its pages from capacitor-electron://-/, and Chromium
-          // attaches that as the Referer on every tile, so the desktop app got
-          // no basemap at all while Android (served from https://localhost)
-          // was fine. Sending no Referer at all is accepted — verified against
-          // the live endpoint: no Referer 200, capacitor-electron:// 403.
           referrerPolicy="no-referrer"
         />
         {areas.map((a) => (

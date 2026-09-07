@@ -52,10 +52,31 @@ const LAST_SYNC_KEY = 'smartchef.sync.lastSyncAt';
 // reason — is what actually prevents two callers racing through git
 // operations at once.
 let gitQueue: Promise<unknown> = Promise.resolve();
-function serialize<T>(fn: () => Promise<T>): Promise<T> {
-  const next = gitQueue.then(fn, fn);
+
+/** Slow-path timing, printed only when something actually took a while, so
+ *  a normal session stays quiet. Added while chasing "saving a recipe takes
+ *  a long time": because everything below shares ONE queue, a save's own
+ *  work can be fast while the save still blocks for seconds behind an
+ *  unrelated commit or a full sync cycle already in flight. Separating
+ *  "waited for the queue" from "did my own work" is the only way to tell
+ *  those two apart from the outside. */
+const SLOW_MS = 400;
+export function logIfSlow(label: string, startedAt: number, extra = ''): void {
+  const ms = Math.round(performance.now() - startedAt);
+  if (ms >= SLOW_MS) console.info(`[smartchef/perf] ${label}: ${ms}ms${extra ? ' ' + extra : ''}`);
+}
+
+function serialize<T>(fn: () => Promise<T>, label?: string): Promise<T> {
+  const queuedAt = performance.now();
+  const next = gitQueue.then(run, run);
   gitQueue = next.catch(() => {});
   return next;
+
+  function run(): Promise<T> {
+    if (label) logIfSlow(`${label} waited for git queue`, queuedAt);
+    const startedAt = performance.now();
+    return fn().finally(() => label && logIfSlow(`${label} own work`, startedAt));
+  }
 }
 
 type EntityType = 'recipes' | 'ingredients' | 'tools' | 'tags' | 'techniques' | 'profiles';
@@ -136,7 +157,14 @@ function author() {
 export function writeEntityFile(type: EntityType, id: string, data: Record<string, unknown>): Promise<void> {
   return serialize(async () => {
     const { dir } = await ensureHiddenCloneInitialized();
-    await gitfs.promises.writeFile(`${dir}/${type}/${id}.json`, JSON.stringify(data, null, 2));
+    const json = JSON.stringify(data, null, 2);
+    // Payload size is logged because a recipe carrying a data: URI as its
+    // cover image (rather than a link or a stored local path) makes this
+    // one file megabytes long, which then has to be written, hashed and
+    // committed on every single save.
+    const startedAt = performance.now();
+    await gitfs.promises.writeFile(`${dir}/${type}/${id}.json`, json);
+    logIfSlow(`writeEntityFile(${type}) fs write`, startedAt, `${Math.round(json.length / 1024)}KB`);
     scheduleCommit();
   });
 }
@@ -161,7 +189,9 @@ export function scheduleCommit(delayMs = 2000): void {
  *  going through commitNow() there would deadlock. */
 async function commitNowInternal(): Promise<boolean> {
   const { dir, gitdir } = await ensureHiddenCloneInitialized();
+  const statusStartedAt = performance.now();
   const matrix = await git.statusMatrix({ fs: gitfs, dir, gitdir, filepaths: ALL_ENTITY_DIRS });
+  logIfSlow('commit statusMatrix', statusStartedAt, `${matrix.length} files`);
   const changed = matrix.some(([, head, workdir, stage]) => !(head === 1 && workdir === 1 && stage === 1));
   if (!changed) return false;
 
@@ -179,7 +209,7 @@ async function commitNowInternal(): Promise<boolean> {
 }
 
 export function commitNow(): Promise<boolean> {
-  return serialize(commitNowInternal);
+  return serialize(commitNowInternal, 'commitNow');
 }
 
 // ── Remote transport resolution — which platform, and has the user
@@ -601,7 +631,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
 }
 
 export function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
-  return serialize(() => syncNowInternal(onProgress));
+  return serialize(() => syncNowInternal(onProgress), 'syncNow');
 }
 
 export interface RepairResult {
