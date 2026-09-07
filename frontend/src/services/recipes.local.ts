@@ -27,7 +27,7 @@
 // route here at all.
 // ════════════════════════════════════════════════════════════════════════
 
-import { query, queryOne, withTransaction, type LocalClient } from "../db/local";
+import { query, queryOne, withTransaction, inPlaceholders, type LocalClient } from "../db/local";
 import { calculatePortions, resolveCookSequence } from "./matrioska.local";
 import { computeAutoTagNames, unionTagNames } from "./tags.local";
 
@@ -87,9 +87,6 @@ export async function resyncAllRecipes(onProgress?: (done: number, total: number
   return rows.length;
 }
 
-function inPlaceholders(params: unknown[], values: unknown[]): string {
-  return values.map(v => { params.push(v); return `$${params.length}`; }).join(', ');
-}
 
 // ── Types ──────────────────────────────────────────────────────────────
 

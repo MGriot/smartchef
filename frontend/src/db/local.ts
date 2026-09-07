@@ -133,6 +133,32 @@ export async function queryOne<T = Record<string, unknown>>(text: string, params
   return rows[0] ?? null;
 }
 
+// ── IN (...) batching helpers ─────────────────────────────────────────────
+// Every plugin call from query() is a real bridge crossing with per-call
+// latency (see docs/plans/2026-08-22-android-performance-plan.md), so any
+// "one lookup per row" loop wants collapsing into a single `IN (...)` query
+// plus a lookup map. These two helpers are what that rewrite needs.
+
+/** Appends `values` to `params` and returns the matching `$1, $2, ...` list
+ *  to splice into an `IN (...)`. */
+export function inPlaceholders(params: unknown[], values: unknown[]): string {
+  return values.map(v => { params.push(v); return `$${params.length}`; }).join(', ');
+}
+
+/** Splits `values` into runs small enough that one `IN (...)` per run stays
+ *  under SQLite's bound-parameter ceiling. That ceiling is 32766 on any
+ *  modern build but only 999 on older ones, and this app ships against two
+ *  different engines (better-sqlite3-multiple-ciphers on Electron, the
+ *  Android plugin's own build) — 500 is comfortably under the lower figure
+ *  on both, and the whole point of the callers below is to stop imposing
+ *  arbitrary row ceilings, so the batching must not quietly reintroduce one. */
+export function chunk<T>(values: T[], size = 500): T[][] {
+  if (values.length <= size) return values.length ? [values] : [];
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
+
 /** Client handle passed into withTransaction()'s callback — mirrors
  *  `pg.PoolClient`'s `query() => {rows}` shape (not this module's own
  *  `query() => T[]`) since that's the shape every ported route file's

@@ -12,7 +12,7 @@
 // already controls the request shape), so it's not a real trust boundary.
 // ════════════════════════════════════════════════════════════════════════
 
-import { query, queryOne } from "../db/local";
+import { query, queryOne, inPlaceholders, chunk } from "../db/local";
 
 function newId(): string {
   return crypto.randomUUID();
@@ -59,6 +59,21 @@ export interface ListIngredientsParams {
   lang?: string;
 }
 
+/** Result cap applied ONLY to the `q` search path, where the caller wants a
+ *  short pick-list rather than the whole library (RecipeImport.tsx's
+ *  runSearch() slices to 8 anyway). The unfiltered path is deliberately
+ *  uncapped: every one of its callers — LibraryIngredients.tsx,
+ *  LibrarySeasonality.tsx, RecipeCreate.tsx, RecipeDetail.tsx and
+ *  localMatcher.ts — consumes the whole list client-side (grouping it by
+ *  category, or matching against it), so a cap there doesn't paginate,
+ *  it just silently deletes ingredients from the UI. A shared `LIMIT 200`
+ *  used to sit here and did exactly that: with 220 ingredients ordered by
+ *  category name, the entire last-sorting category ("Vegetables & Produce")
+ *  fell past row 200 and rendered as an empty section, and localMatcher.ts
+ *  couldn't see those rows either, so importing a recipe naming one of them
+ *  created a duplicate ingredient instead of matching the existing row. */
+const SEARCH_RESULT_LIMIT = 200;
+
 export async function listIngredients({ q, lang }: ListIngredientsParams) {
   const params: unknown[] = [];
   let where = `WHERE i.sync_status != 'deleted'`;
@@ -79,41 +94,104 @@ export async function listIngredients({ q, lang }: ListIngredientsParams) {
      LEFT JOIN ingredients p ON p.id = i.parent_ingredient_id
      ${where}
      ORDER BY COALESCE(ic.name, 'Uncategorized'), i.name
-     LIMIT 200`,
+     ${q ? `LIMIT ${SEARCH_RESULT_LIMIT}` : ''}`,
     params
   );
+  if (rows.length === 0) return [];
 
-  const result = [];
-  for (const row of rows) {
-    const id = row.id as string;
-    const translations = await query<{ language_code: string; translated_name: string }>(
-      `SELECT language_code, translated_name FROM ingredient_translations WHERE ingredient_id = $1`,
-      [id]
+  // Everything below resolves translations/tags for the WHOLE result set in
+  // a fixed number of queries instead of once (or once per tag) per row.
+  // With the LIMIT gone this is what keeps the page affordable: the old
+  // per-row version cost roughly `rows x 3 + tags` sequential bridge
+  // round-trips, which grew without bound as the library grew — the exact
+  // N+1 shape docs/plans/2026-08-22-android-performance-plan.md exists to
+  // stamp out.
+  const ids = rows.map(r => r.id as string);
+
+  const translationsByIngredient = new Map<string, Array<{ language_code: string; translated_name: string }>>();
+  for (const idBatch of chunk(ids)) {
+    const p: unknown[] = [];
+    const trs = await query<{ ingredient_id: string; language_code: string; translated_name: string }>(
+      `SELECT ingredient_id, language_code, translated_name
+       FROM ingredient_translations WHERE ingredient_id IN (${inPlaceholders(p, idBatch)})`,
+      p
     );
-    const translatedName = lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.translated_name ?? null : null;
-    const translatedCategoryName = lang && row.category_id
-      ? (await queryOne<{ name: string }>(
-          `SELECT name FROM ingredient_category_translations WHERE category_id = $1 AND LOWER(language_code) = LOWER($2)`,
-          [row.category_id, lang]
-        ))?.name ?? row.category_name
-      : row.category_name;
+    for (const t of trs) {
+      const list = translationsByIngredient.get(t.ingredient_id);
+      if (list) list.push(t);
+      else translationsByIngredient.set(t.ingredient_id, [t]);
+    }
+  }
 
-    const tagRows = await query<{ id: string; name: string; color: string | null; icon: string | null }>(
-      `SELECT tg.id, tg.name, tg.color, tg.icon
+  const categoryNameByCategoryId = new Map<string, string>();
+  const categoryIds = [...new Set(rows.map(r => r.category_id).filter(Boolean))] as string[];
+  if (lang && categoryIds.length > 0) {
+    for (const catBatch of chunk(categoryIds)) {
+      const p: unknown[] = [];
+      const placeholders = inPlaceholders(p, catBatch);
+      p.push(lang);
+      const cts = await query<{ category_id: string; name: string }>(
+        `SELECT category_id, name FROM ingredient_category_translations
+         WHERE category_id IN (${placeholders}) AND LOWER(language_code) = LOWER($${p.length})`,
+        p
+      );
+      for (const c of cts) categoryNameByCategoryId.set(c.category_id, c.name);
+    }
+  }
+
+  const tagRowsByIngredient = new Map<string, Array<{ id: string; name: string; color: string | null; icon: string | null }>>();
+  const allTagIds = new Set<string>();
+  for (const idBatch of chunk(ids)) {
+    const p: unknown[] = [];
+    const tagRows = await query<{ ingredient_id: string; id: string; name: string; color: string | null; icon: string | null }>(
+      `SELECT igt.ingredient_id, tg.id, tg.name, tg.color, tg.icon
        FROM ingredient_tags igt
        JOIN tags tg ON tg.id = igt.tag_id
-       WHERE igt.ingredient_id = $1`,
-      [id]
+       WHERE igt.ingredient_id IN (${inPlaceholders(p, idBatch)})`,
+      p
     );
-    const tags = [];
     for (const t of tagRows) {
-      const translatedTagName = lang
-        ? (await queryOne<{ name: string }>(`SELECT name FROM tag_translations WHERE tag_id = $1 AND LOWER(language_code) = LOWER($2)`, [t.id, lang]))?.name ?? null
-        : null;
-      tags.push({ id: t.id, name: t.name, translated_name: translatedTagName, color: t.color, icon: t.icon });
+      allTagIds.add(t.id);
+      const list = tagRowsByIngredient.get(t.ingredient_id);
+      if (list) list.push(t);
+      else tagRowsByIngredient.set(t.ingredient_id, [t]);
     }
+  }
 
-    result.push({
+  const tagTranslationByTagId = new Map<string, string>();
+  if (lang && allTagIds.size > 0) {
+    for (const tagBatch of chunk([...allTagIds])) {
+      const p: unknown[] = [];
+      const placeholders = inPlaceholders(p, tagBatch);
+      p.push(lang);
+      const tts = await query<{ tag_id: string; name: string }>(
+        `SELECT tag_id, name FROM tag_translations
+         WHERE tag_id IN (${placeholders}) AND LOWER(language_code) = LOWER($${p.length})`,
+        p
+      );
+      for (const t of tts) tagTranslationByTagId.set(t.tag_id, t.name);
+    }
+  }
+
+  return rows.map(row => {
+    const id = row.id as string;
+    const translations = translationsByIngredient.get(id) ?? [];
+    const translatedName = lang
+      ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.translated_name ?? null
+      : null;
+    const translatedCategoryName = lang && row.category_id
+      ? categoryNameByCategoryId.get(row.category_id as string) ?? row.category_name
+      : row.category_name;
+
+    const tags = (tagRowsByIngredient.get(id) ?? []).map(t => ({
+      id: t.id,
+      name: t.name,
+      translated_name: lang ? tagTranslationByTagId.get(t.id) ?? null : null,
+      color: t.color,
+      icon: t.icon,
+    }));
+
+    return {
       ...row,
       image_urls: JSON.parse((row.image_urls as string) ?? '[]'),
       seasonal_months: JSON.parse((row.seasonal_months as string) ?? '[]'),
@@ -122,9 +200,8 @@ export async function listIngredients({ q, lang }: ListIngredientsParams) {
       translated_name: translatedName,
       translations: translations.map(t => ({ lang: t.language_code, text: t.translated_name })),
       tags,
-    });
-  }
-  return result;
+    };
+  });
 }
 
 export interface IngredientInput {

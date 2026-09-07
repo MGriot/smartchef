@@ -7,6 +7,17 @@ export const ingredientsRouter = Router();
 export const unitsRouter = Router();
 export const toolsRouter = Router();
 
+/** Result cap applied ONLY to the `q` search path, where the caller wants a
+ *  short pick-list rather than the whole library. The unfiltered path is
+ *  deliberately uncapped: its callers fetch the full list once and group or
+ *  match against it entirely client-side, so a cap there doesn't paginate,
+ *  it silently deletes ingredients from the UI — a shared `LIMIT 200` here
+ *  hid the whole last-sorting category once the library passed 200 rows.
+ *  Kept in sync with the same constant in
+ *  frontend/src/services/ingredients.local.ts (standalone mode's
+ *  independent port of this route). */
+const SEARCH_RESULT_LIMIT = 200;
+
 // GET /ingredients
 ingredientsRouter.get("/", async (req: Request, res: Response) => {
   const { q, lang } = req.query;
@@ -45,7 +56,7 @@ ingredientsRouter.get("/", async (req: Request, res: Response) => {
      WHERE i.sync_status != 'deleted'
        ${q ? `AND (i.name ILIKE $${params.length} OR EXISTS (SELECT 1 FROM unnest(i.synonyms) syn WHERE syn ILIKE $${params.length}))` : ""}
      ORDER BY COALESCE(ic.name, 'Uncategorized'), i.name
-     LIMIT 200`,
+     ${q ? `LIMIT ${SEARCH_RESULT_LIMIT}` : ""}`,
     params
   );
   res.json({ data: rows });
