@@ -18,6 +18,7 @@ import Account from "./pages/Account";
 import ManageUsers from "./pages/ManageUsers";
 import SyncHistory from "./pages/SyncHistory";
 import Downloads from "./pages/Downloads";
+import Atlas from "./pages/Atlas";
 import Login from "./pages/Login";
 import ServerConnect from "./pages/ServerConnect";
 import ProfilePicker from "./pages/ProfilePicker";
@@ -163,6 +164,7 @@ export default function App() {
         <Route path="/manage-users" element={<ManageUsers />} />
         <Route path="/sync-history" element={<SyncHistory />} />
         <Route path="/downloads" element={<Downloads />} />
+        <Route path="/atlas" element={<Atlas />} />
       </Routes>
     </BrowserRouter>
   );

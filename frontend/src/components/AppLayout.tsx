@@ -25,6 +25,7 @@ const NAV_LINKS: { to: string; labelKey: string }[] = [
   { to: '/import', labelKey: 'nav.import' },
   { to: '/library/ingredients', labelKey: 'nav.library' },
   { to: '/history', labelKey: 'nav.history' },
+  { to: '/atlas', labelKey: 'nav.atlas' },
 ];
 
 const IDLE_LINK = "flex items-center gap-3 px-4 py-3 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl font-semibold text-sm transition-all group";

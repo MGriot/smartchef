@@ -13,7 +13,27 @@
     "library": "Library",
     "history": "History",
     "search": "Search",
-    "createRecipe": "Create Recipe"
+    "createRecipe": "Create Recipe",
+    "atlas": "Atlas"
+  },
+  "atlas": {
+    "title": "Atlas",
+    "subtitle": "Where your recipes come from, and how many you have for each place.",
+    "mappedRecipes": "Mapped recipes",
+    "regionsCovered": "Places covered",
+    "totalCooks": "Total cooks",
+    "unmapped": "No region",
+    "ranking": "Ranking",
+    "allRegions": "All regions",
+    "selection": "Selection",
+    "clearSelection": "Clear",
+    "recipes": "Recipes",
+    "cooked": "Cooked",
+    "avgRating": "Average rating",
+    "topTags": "Most frequent tags",
+    "noRecipes": "No recipes for this selection.",
+    "emptyState": "No recipe has a region yet. Open one, go to Regions and add a country or a place.",
+    "loading": "Loading…"
   },
   "common": {
     "cancel": "Cancel",

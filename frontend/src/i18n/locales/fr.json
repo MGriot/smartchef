@@ -13,7 +13,27 @@
     "library": "Bibliothèque",
     "history": "Historique",
     "search": "Rechercher",
-    "createRecipe": "Créer une Recette"
+    "createRecipe": "Créer une Recette",
+    "atlas": "Atlas"
+  },
+  "atlas": {
+    "title": "Atlas",
+    "subtitle": "D'où viennent vos recettes, et combien vous en avez pour chaque lieu.",
+    "mappedRecipes": "Recettes cartographiées",
+    "regionsCovered": "Lieux couverts",
+    "totalCooks": "Préparations totales",
+    "unmapped": "Sans région",
+    "ranking": "Classement",
+    "allRegions": "Toutes les régions",
+    "selection": "Sélection",
+    "clearSelection": "Effacer",
+    "recipes": "Recettes",
+    "cooked": "Préparées",
+    "avgRating": "Note moyenne",
+    "topTags": "Étiquettes les plus fréquentes",
+    "noRecipes": "Aucune recette pour cette sélection.",
+    "emptyState": "Aucune recette n'a encore de région. Ouvrez-en une, allez dans Régions et ajoutez un pays ou un lieu.",
+    "loading": "Chargement…"
   },
   "common": {
     "cancel": "Annuler",

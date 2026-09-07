@@ -13,7 +13,27 @@
     "library": "Libreria",
     "history": "Cronologia",
     "search": "Cerca",
-    "createRecipe": "Crea Ricetta"
+    "createRecipe": "Crea Ricetta",
+    "atlas": "Atlante"
+  },
+  "atlas": {
+    "title": "Atlante",
+    "subtitle": "Da dove vengono le tue ricette, e quante ne hai per ogni luogo.",
+    "mappedRecipes": "Ricette mappate",
+    "regionsCovered": "Luoghi coperti",
+    "totalCooks": "Cotture totali",
+    "unmapped": "Senza regione",
+    "ranking": "Classifica",
+    "allRegions": "Tutte le regioni",
+    "selection": "Selezione",
+    "clearSelection": "Azzera",
+    "recipes": "Ricette",
+    "cooked": "Cotture",
+    "avgRating": "Voto medio",
+    "topTags": "Tag più frequenti",
+    "noRecipes": "Nessuna ricetta per questa selezione.",
+    "emptyState": "Nessuna ricetta ha ancora una regione. Aprine una, vai su Regioni e aggiungi un paese o un luogo.",
+    "loading": "Caricamento…"
   },
   "common": {
     "cancel": "Annulla",
