@@ -92,7 +92,7 @@ export default function TagPicker({ value, onChange, by = 'name' }: TagPickerPro
       ))}
       {customValues.length > 0 && (
         <div>
-          <p className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5">Custom (not in catalog)</p>
+          <p className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5">{t('editors.customNotInCatalog')}</p>
           <div className="flex flex-wrap gap-1.5">
             {customValues.map(v => (
               <span key={v} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-dashed border-zinc-300 dark:border-zinc-600">

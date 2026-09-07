@@ -394,14 +394,14 @@ const RecipeCreate: React.FC = () => {
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create ingredient');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.couldNotCreateIngredient'));
       const newIngredient = { id: json.data.id, name: pendingIngredient.name };
       setAllIngredients(prev => [...prev, newIngredient]);
       updateIngredient(pendingIngredient.idx, 'ingredientId', newIngredient.id);
       updateIngredient(pendingIngredient.idx, 'ingredientName', newIngredient.name);
       setPendingIngredient(null);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Could not create ingredient');
+      window.alert(err instanceof Error ? err.message : t('errors.couldNotCreateIngredient'));
     } finally {
       setCreatingPendingIngredient(false);
     }
@@ -417,13 +417,13 @@ const RecipeCreate: React.FC = () => {
         body: JSON.stringify({ name }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create tool');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.couldNotCreateTool'));
       const newTool: Tool = { id: json.data.id, name, icon: null };
       setAllTools(prev => [...prev, newTool]);
       setDraft(prev => ({ ...prev, tools: [...(prev.tools || []), newTool] }));
       setNewToolName('');
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Could not create tool');
+      window.alert(err instanceof Error ? err.message : t('errors.couldNotCreateTool'));
     }
   };
 
@@ -437,12 +437,12 @@ const RecipeCreate: React.FC = () => {
         body: JSON.stringify({ name }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create technique');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.couldNotCreateTechnique'));
       setAllTechniques(prev => [...prev, { id: json.data.id, name, icon: null }]);
       setNewTechniqueName('');
       onCreated(json.data.id);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Could not create technique');
+      window.alert(err instanceof Error ? err.message : t('errors.couldNotCreateTechnique'));
     }
   };
 
@@ -531,7 +531,7 @@ const RecipeCreate: React.FC = () => {
         console.log('RecipeCreate: Save success, navigating to:', json.data.id);
         navigate(`/recipe/${json.data.id}`);
       } else {
-        const errMsg = json.error ? JSON.stringify(json.error) : 'Unknown error';
+        const errMsg = json.error ? JSON.stringify(json.error) : t('errors.unknownError');
         console.error('RecipeCreate: Save failed', errMsg);
         window.alert(t('recipeCreate.failedToCreate', { error: errMsg }));
         setSaving(false);
@@ -577,7 +577,7 @@ const RecipeCreate: React.FC = () => {
       setRawTextError(null);
       return merged;
     } catch (err) {
-      setRawTextError(err instanceof Error ? err.message : 'Invalid JSON');
+      setRawTextError(err instanceof Error ? err.message : t('errors.invalidJson'));
       return null;
     }
   };

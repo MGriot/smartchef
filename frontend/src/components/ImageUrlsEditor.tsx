@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import { isStandaloneMode } from '../lib/standalone';
 import { storeImage } from '../lib/localImages';
@@ -39,6 +40,7 @@ function ImageThumbnail({ url, onRemove }: { url: string; onRemove: () => void }
  * like a pasted one.
  */
 export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -73,11 +75,11 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
       formData.append('file', file);
       const res = await apiFetch('/api/uploads', { method: 'POST', body: formData });
       const json = await res.json();
-      if (!res.ok || !json.data?.url) throw new Error(json.error ? JSON.stringify(json.error) : 'Upload failed');
+      if (!res.ok || !json.data?.url) throw new Error(json.error ? JSON.stringify(json.error) : t('editors.uploadFailed'));
       addUrl(json.data.url);
     } catch (err) {
       console.error('Image upload failed:', err);
-      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+      setUploadError(err instanceof Error ? err.message : t('editors.uploadFailed'));
     } finally {
       setUploading(false);
     }
@@ -91,7 +93,7 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
           value={draft}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addUrl(); } }}
-          placeholder="https://…"
+          placeholder={t('editors.urlPlaceholder')}
           className="flex-1 px-4 py-2.5 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
         />
         <button

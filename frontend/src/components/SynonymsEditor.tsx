@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface SynonymsEditorProps {
   value: string[];
@@ -10,6 +11,7 @@ interface SynonymsEditorProps {
  *  for either name finds the same catalog row. Purely search metadata —
  *  never shown anywhere the canonical name already is. */
 export default function SynonymsEditor({ value, onChange }: SynonymsEditorProps) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState('');
 
   const commit = () => {
@@ -46,7 +48,7 @@ export default function SynonymsEditor({ value, onChange }: SynonymsEditorProps)
           if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); }
         }}
         onBlur={commit}
-        placeholder="Type a synonym and press Enter…"
+        placeholder={t('editors.synonymPlaceholder')}
         className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary/20"
       />
     </div>
