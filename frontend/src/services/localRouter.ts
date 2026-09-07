@@ -12,6 +12,7 @@ import * as recipes from './recipes.local';
 import * as ingredients from './ingredients.local';
 import * as tags from './tags.local';
 import * as techniques from './techniques.local';
+import * as share from './share.local';
 import { importSnapshot, exportSnapshot } from './backup.local';
 import { getStandaloneProfile } from '../lib/standalone';
 import { electronGeocode, isElectron } from '../lib/electronBridge';
@@ -228,6 +229,29 @@ async function dispatchBackup(segments: string[], method: string, init?: Request
  *  can't. Either way, no match/any failure resolves to null, which
  *  RegionPicker.tsx/RegionsMap.tsx already treat as "not geocoded yet,"
  *  not an error. */
+/** Only the export half of backend/src/routes/share.ts is ported — see
+ *  share.local.ts's header. Import and collection export fall through to
+ *  the NOT_HANDLED branch, which answers with a clear "not available
+ *  offline yet" rather than trying to reach a server that isn't there. */
+async function dispatchShare(segments: string[], method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  const [, kind, id, action] = segments; // segments[0] === 'share'
+
+  if (kind === 'recipes' && id === 'export-bulk' && method === 'POST') {
+    const body = parseBody(init);
+    const recipeIds: string[] = Array.isArray(body?.recipeIds) ? body.recipeIds : [];
+    if (recipeIds.length === 0) return { status: 400, error: 'recipeIds is required' };
+    return { status: 200, data: await share.exportRecipesBulk(recipeIds) };
+  }
+
+  if (kind === 'recipes' && id && action === 'export' && method === 'GET') {
+    const bundle = await share.exportRecipe(id);
+    if (!bundle) return { status: 404, error: 'Ricetta non trovata' };
+    return { status: 200, data: bundle };
+  }
+
+  return NOT_HANDLED;
+}
+
 async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const q = sp.get('q');
   if (!q) return { status: 400, error: 'Missing q' };
@@ -248,7 +272,7 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
   const { segments, searchParams } = segmentsAndQuery(path);
   const method = (init?.method ?? 'GET').toUpperCase();
 
-  if (!['recipes', 'ingredients', 'units', 'tools', 'tags', 'techniques', 'backup', 'geocode'].includes(segments[0])) {
+  if (!['recipes', 'ingredients', 'units', 'tools', 'tags', 'techniques', 'backup', 'geocode', 'share'].includes(segments[0])) {
     return null;
   }
 
@@ -266,6 +290,7 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
     else if (segments[0] === 'tags') result = await dispatchTags(segments, method, searchParams, init);
     else if (segments[0] === 'techniques') result = await dispatchTechniques(segments, method, searchParams, init);
     else if (segments[0] === 'geocode') result = await dispatchGeocode(searchParams);
+    else if (segments[0] === 'share') result = await dispatchShare(segments, method, init);
     else result = await dispatchBackup(segments, method, init);
   } catch (err) {
     console.error(`Local dispatch failed for ${method} ${path}:`, err);
