@@ -21,6 +21,7 @@ import CoverImage, { ResolvedImage } from '../components/CoverImage';
 import { apiFetch, isNative } from '../lib/api';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
+import { buildCookidooExport, type CookidooExport } from '../lib/cookidooExport';
 
 /* ═══════════════════════════════════════════════════════════════════════
    TYPES
@@ -269,6 +270,9 @@ const RecipeDetail: React.FC = () => {
   const [completedSteps, setCompletedSteps] = useState<Set<string>>(new Set());
   const [addedToCart, setAddedToCart] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [cookidooExport, setCookidooExport] = useState<CookidooExport | null>(null);
+  const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [allCollections, setAllCollections] = useState<{ id: string; name: string }[]>([]);
   const [memberCollectionIds, setMemberCollectionIds] = useState<Set<string>>(new Set());
   const [loadingCollections, setLoadingCollections] = useState(false);
@@ -467,10 +471,10 @@ const RecipeDetail: React.FC = () => {
       // RecipeImport.tsx's parse call, just above the backend's own 600s cap.
       const res = await apiFetch(`/api/recipes/${id}/translate/${aiTranslateLang}`, { method: 'POST', timeoutMs: 650_000 });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Translation failed');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.translationFailed'));
       await fetchRecipe();
     } catch (err) {
-      setAiTranslateError(err instanceof Error ? err.message : 'Translation failed');
+      setAiTranslateError(err instanceof Error ? err.message : t('errors.translationFailed'));
     } finally {
       setAiTranslating(false);
     }
@@ -672,7 +676,7 @@ const RecipeDetail: React.FC = () => {
       setMode('view');
     } catch (err) {
       console.error('Save failed:', err);
-      alert(err instanceof Error ? err.message : 'Save failed.');
+      alert(err instanceof Error ? err.message : t('errors.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -1081,7 +1085,7 @@ const RecipeDetail: React.FC = () => {
         setRawTextError(null);
         return merged;
       } catch (err) {
-        setRawTextError(err instanceof Error ? err.message : 'Invalid JSON');
+        setRawTextError(err instanceof Error ? err.message : t('errors.invalidJson'));
         return null;
       }
     };
@@ -1295,14 +1299,14 @@ const RecipeDetail: React.FC = () => {
           }),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create ingredient');
+        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.couldNotCreateIngredient'));
         const newIngredient = { id: json.data.id, name: pendingIngredient.name };
         setAllIngredients(prev => [...prev, newIngredient]);
         updateIngredient(pendingIngredient.idx, 'ingredientId', newIngredient.id);
         updateIngredient(pendingIngredient.idx, 'ingredientName', newIngredient.name);
         setPendingIngredient(null);
       } catch (err) {
-        window.alert(err instanceof Error ? err.message : 'Could not create ingredient');
+        window.alert(err instanceof Error ? err.message : t('errors.couldNotCreateIngredient'));
       } finally {
         setCreatingPendingIngredient(false);
       }
@@ -1318,13 +1322,13 @@ const RecipeDetail: React.FC = () => {
           body: JSON.stringify({ name }),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create tool');
+        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.couldNotCreateTool'));
         const newTool: Tool = { id: json.data.id, name, icon: null, category: null };
         setAllTools(prev => [...prev, newTool]);
         setDraft(prev => ({ ...prev, tools: [...(prev.tools || []), newTool] }));
         setNewToolName('');
       } catch (err) {
-        window.alert(err instanceof Error ? err.message : 'Could not create tool');
+        window.alert(err instanceof Error ? err.message : t('errors.couldNotCreateTool'));
       }
     };
 
@@ -1338,12 +1342,12 @@ const RecipeDetail: React.FC = () => {
           body: JSON.stringify({ name }),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not create technique');
+        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.couldNotCreateTechnique'));
         setAllTechniques(prev => [...prev, { id: json.data.id, name, icon: null }]);
         setNewTechniqueName('');
         onCreated(json.data.id);
       } catch (err) {
-        window.alert(err instanceof Error ? err.message : 'Could not create technique');
+        window.alert(err instanceof Error ? err.message : t('errors.couldNotCreateTechnique'));
       }
     };
 
@@ -2140,35 +2144,166 @@ const RecipeDetail: React.FC = () => {
     </button>
   );
 
+  const recipeSlug = (recipe.translated_title || recipe.title || 'recipe')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+  const downloadTextFile = (contents: string, filename: string, mime: string) => {
+    const url = URL.createObjectURL(new Blob([contents], { type: mime }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExportRecipe = async () => {
+    setShowExportMenu(false);
     try {
       const res = await apiFetch(`/api/share/recipes/${id}/export`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : 'Export failed');
-      const slug = (recipe.translated_title || recipe.title || 'recipe').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-      const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${slug}.smartchef.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      downloadTextFile(JSON.stringify(json.data, null, 2), `${recipeSlug}.smartchef.json`, 'application/json');
     } catch (err) {
       console.error('Recipe export failed:', err);
     }
   };
 
+  /* ── Cookidoo (Bimby/Thermomix) export ─────────────────────────────────
+     Built entirely from the already-loaded `recipe` rather than through
+     /api/share: that route has no standalone-mode counterpart in
+     localRouter.ts, and this export is text the user pastes by hand, so
+     there's nothing a server round-trip would add. Works offline and in
+     standalone mode as a result. */
+  const handleExportForCookidoo = () => {
+    setShowExportMenu(false);
+    setCookidooExport(buildCookidooExport(recipe, {
+      title: t('recipeDetail.cookidoo.fieldTitle'),
+      prepTime: t('recipeDetail.cookidoo.fieldPrepTime'),
+      totalTime: t('recipeDetail.cookidoo.fieldTotalTime'),
+      servings: t('recipeDetail.cookidoo.fieldServings'),
+      servingsValue: (n: number) => t('recipeDetail.cookidoo.portions', { count: n }),
+      ingredients: t('recipeDetail.cookidoo.fieldIngredients'),
+      steps: t('recipeDetail.cookidoo.fieldSteps'),
+      devices: t('recipeDetail.cookidoo.fieldDevices'),
+      tips: t('recipeDetail.cookidoo.fieldTips'),
+      optional: t('recipeDetail.cookidoo.optional'),
+      hourShort: t('recipeDetail.cookidoo.hourShort'),
+      minuteShort: t('recipeDetail.cookidoo.minuteShort'),
+      storagePrefix: t('recipeDetail.cookidoo.storagePrefix'),
+      techniquesPrefix: t('recipeDetail.cookidoo.techniquesPrefix'),
+    }, { servings }));
+  };
+
+  const copyToClipboard = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Electron/older webviews can reject the async clipboard API when the
+      // document isn't focused; the legacy path still works there.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    setCopiedSection(key);
+    window.setTimeout(() => setCopiedSection(c => (c === key ? null : c)), 1500);
+  };
+
   const exportHeaderButton = (
-    <button
-      onClick={handleExportRecipe}
-      className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors"
-      aria-label={t('recipeDetail.exportRecipe')}
-      title={t('recipeDetail.exportRecipe')}
-    >
-      <span className="material-symbols-outlined text-[20px]">ios_share</span>
-    </button>
+    <div className="relative">
+      <button
+        onClick={() => setShowExportMenu(v => !v)}
+        className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors"
+        aria-label={t('recipeDetail.exportRecipe')}
+        title={t('recipeDetail.exportRecipe')}
+      >
+        <span className="material-symbols-outlined text-[20px]">ios_share</span>
+      </button>
+      {showExportMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+          <div className="absolute right-0 top-8 z-50 w-64 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-2">
+            <button
+              onClick={handleExportRecipe}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+            >
+              {t('recipeDetail.exportAsJson')}
+            </button>
+            <button
+              onClick={handleExportForCookidoo}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+            >
+              {t('recipeDetail.exportForCookidoo')}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  const cookidooModal = cookidooExport && (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setCookidooExport(null)}>
+      <div
+        className="w-full max-w-2xl max-h-[85vh] flex flex-col bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-100 dark:border-zinc-800"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 p-6 pb-4 border-b border-zinc-100 dark:border-zinc-800">
+          <div>
+            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('recipeDetail.cookidoo.title')}</h2>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">{t('recipeDetail.cookidoo.hint')}</p>
+          </div>
+          <button
+            onClick={() => setCookidooExport(null)}
+            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+            aria-label={t('common.cancel')}
+          >
+            <span className="material-symbols-outlined text-[22px]">close</span>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {cookidooExport.sections.map(section => (
+            <div key={section.key}>
+              <div className="flex items-center justify-between gap-3 mb-1.5">
+                <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+                  {section.label}
+                </span>
+                <button
+                  onClick={() => copyToClipboard(section.text, section.key)}
+                  className="text-xs font-bold text-primary hover:opacity-70 transition-opacity"
+                >
+                  {copiedSection === section.key ? t('recipeDetail.cookidoo.copied') : t('recipeDetail.cookidoo.copy')}
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap break-words text-sm text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl p-3 font-sans">
+                {section.text}
+              </pre>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 p-4 border-t border-zinc-100 dark:border-zinc-800">
+          <button
+            onClick={() => downloadTextFile(cookidooExport.fullText, `${recipeSlug}.cookidoo.txt`, 'text/plain;charset=utf-8')}
+            className="px-4 py-2.5 rounded-xl text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+          >
+            {t('recipeDetail.cookidoo.download')}
+          </button>
+          <button
+            onClick={() => copyToClipboard(cookidooExport.fullText, '__all__')}
+            className="px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-primary hover:opacity-90 transition-opacity"
+          >
+            {copiedSection === '__all__' ? t('recipeDetail.cookidoo.copied') : t('recipeDetail.cookidoo.copyAll')}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 
   const collectionHeaderButton = (
@@ -2224,6 +2359,7 @@ const RecipeDetail: React.FC = () => {
 
   return (
     <AppLayout headerActions={headerActions}>
+      {cookidooModal}
       {/* ── Hero Image ─────────────────────────────────────────── */}
       <div className="max-w-6xl mx-auto px-6 pt-8">
         <div className="relative h-[360px] md:h-[440px] rounded-3xl overflow-hidden">
