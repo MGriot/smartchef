@@ -580,6 +580,35 @@ async function insertIngredientTranslations(client: LocalClient, recipeIngredien
 
 // ── POST /recipes ──────────────────────────────────────────────────────
 
+
+/** Starts the Hidden Clone write for `id` WITHOUT blocking the caller.
+ *
+ *  Every user-facing save used to `await syncRecipe(id)`, which meant the
+ *  save waited on gitSync's single shared queue. Nothing in the sync
+ *  transports has a timeout (verified across nativeHttpClient,
+ *  gitRemoteTransport, electronRemoteTransport, androidRemoteTransport), so
+ *  one push or fetch against an unreachable or merely very slow remote
+ *  holds that queue indefinitely — and every subsequent save then blocks
+ *  forever. In the UI that is a hard freeze: RecipeDetail.tsx's handleSave
+ *  never reaches setMode('view') or its `finally` setSaving(false), so the
+ *  editor stays open with a spinning button and the recipe looks unsaved
+ *  even though SQLite already committed it.
+ *
+ *  syncRecipe() already swallows its own errors — the intent that "a sync
+ *  failure must never surface as a save failure" was always there, it just
+ *  didn't cover a sync that never finishes. Not awaiting is what actually
+ *  delivers it.
+ *
+ *  The trade-off: if the app is closed in the seconds between the SQLite
+ *  write and the entity-file write, that recipe's change stays local until
+ *  it's edited again or resyncAllRecipes() runs (Account -> Change Folder).
+ *  The commit was already debounced 2s behind this point, so that exposure
+ *  existed regardless; this only widens it slightly, and it is strictly
+ *  better than freezing the editor. */
+function syncRecipeInBackground(id: string): void {
+  void syncRecipe(id);
+}
+
 export async function createRecipe(d: RecipeInput, creatorName: string | null): Promise<{ id: string }> {
   const recipeId = d.id ?? newId();
 
@@ -642,7 +671,7 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
     await upsertRecipeTranslations(client, recipeId, d.translations);
   });
 
-  await syncRecipe(recipeId);
+  syncRecipeInBackground(recipeId);
   return { id: recipeId };
 }
 
@@ -725,9 +754,7 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
 
   logIfSlow('updateRecipe db writes', dbStartedAt, `${(d.ingredients ?? []).length} ingredients, ${(d.steps ?? []).length} steps`);
 
-  const syncStartedAt = performance.now();
-  await syncRecipe(id);
-  logIfSlow('updateRecipe syncRecipe', syncStartedAt);
+  syncRecipeInBackground(id);
   return { id };
 }
 
@@ -760,7 +787,7 @@ export async function deleteRecipe(id: string): Promise<void> {
   // sync — a file simply vanishing from the folder can't be told apart
   // from "another device hasn't created it yet" by a device that pulls
   // later, whereas a row with sync_status='deleted' unambiguously can.
-  await syncRecipe(id);
+  syncRecipeInBackground(id);
 }
 
 // ── Portions / cook-sequence ────────────────────────────────────────────

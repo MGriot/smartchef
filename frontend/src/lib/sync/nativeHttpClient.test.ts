@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 let electronFlag = false;
 const electronHttpRequestMock = vi.fn();
@@ -113,5 +113,45 @@ describe('nativeHttpClient on Electron', () => {
     await nativeHttpClient.request({ url: 'https://example.com', method: 'GET', headers: {} });
 
     expect(gitHttpRequestMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── Request deadline ────────────────────────────────────────────────────
+// A remote that accepts the connection and then never answers used to leave
+// the request pending forever. Because gitSync.ts funnels every git
+// operation through one shared queue, that wedged the queue permanently —
+// no further commit/push/pull for the session, and (before saves stopped
+// awaiting sync) a frozen recipe editor on every save afterwards.
+describe('request deadline', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('rejects a request the Android bridge never answers, instead of hanging forever', async () => {
+    gitHttpRequestMock.mockReturnValue(new Promise(() => {})); // never settles
+    const pending = nativeHttpClient.request({ url: 'https://example.com/repo.git/info/refs', method: 'GET' });
+    const assertion = expect(pending).rejects.toThrow(/no response from https:\/\/example\.com/);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await assertion;
+  });
+
+  it('rejects a request the Electron bridge never answers', async () => {
+    electronFlag = true;
+    electronHttpRequestMock.mockReturnValue(new Promise(() => {}));
+    const pending = nativeHttpClient.request({ url: 'https://git.example.org/x.git/info/refs', method: 'GET' });
+    const assertion = expect(pending).rejects.toThrow(/after 60s/);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await assertion;
+  });
+
+  it('does not reject a request that answers in time', async () => {
+    gitHttpRequestMock.mockResolvedValue({
+      url: 'https://example.com/repo.git/info/refs',
+      statusCode: 200, statusMessage: 'OK', headers: {}, body: btoa('ok'),
+    });
+    const res = await nativeHttpClient.request({ url: 'https://example.com/repo.git/info/refs', method: 'GET' });
+    expect(res.statusCode).toBe(200);
+    // The deadline timer must be cleared on success, or a resolved request
+    // would keep a 60s timer alive and hold the process open.
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

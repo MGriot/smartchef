@@ -69,17 +69,50 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** Neither native bridge below imposes any deadline of its own, so a remote
+ *  that accepts a connection and then never answers left this promise
+ *  pending forever. That is not merely a slow sync: gitSync.ts runs every
+ *  git operation through ONE shared queue, so a single stuck request wedged
+ *  that queue permanently — no further commit, push or pull for the rest of
+ *  the session, and (until saves stopped awaiting it) a frozen editor on
+ *  every subsequent save.
+ *
+ *  Generous on purpose: a real push of a large pack over a slow link is
+ *  legitimately slow, and this bounds ONE HTTP request, not a whole sync
+ *  cycle, so a multi-request fetch can still take much longer in total.
+ *
+ *  Honest limitation: neither bridge exposes cancellation, so this rejects
+ *  the promise but does not abort the in-flight native request. That is
+ *  enough for what actually matters here — the queue is released and the
+ *  next operation proceeds — but the socket may linger until the OS gives
+ *  up on it. */
+const REQUEST_TIMEOUT_MS = 60_000;
+
+function withTimeout<T>(work: Promise<T>, url: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`SmartChef sync: no response from ${url} after ${REQUEST_TIMEOUT_MS / 1000}s`)),
+      REQUEST_TIMEOUT_MS
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
 async function request(req: GitHttpRequest): Promise<GitHttpResponse> {
   const method = req.method ?? 'GET';
   const headers = req.headers ?? {};
   const bodyBytes = await drainBody(req.body);
 
   if (isElectron()) {
-    const res = await electronHttpRequest({ url: req.url, method, headers, body: bodyBytes });
+    const res = await withTimeout(electronHttpRequest({ url: req.url, method, headers, body: bodyBytes }), req.url);
     return { url: res.url, method, headers: res.headers, statusCode: res.statusCode, statusMessage: res.statusMessage, body: singleChunk(res.body) };
   }
 
-  const res = await GitHttp.request({ url: req.url, method, headers, body: bodyBytes ? bytesToBase64(bodyBytes) : undefined });
+  const res = await withTimeout(
+    GitHttp.request({ url: req.url, method, headers, body: bodyBytes ? bytesToBase64(bodyBytes) : undefined }),
+    req.url
+  );
   return {
     url: res.url,
     method,

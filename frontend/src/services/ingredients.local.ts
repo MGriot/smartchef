@@ -241,6 +241,13 @@ async function upsertIngredientTags(ingredientId: string, tagIds?: string[]) {
   }
 }
 
+
+/** Ingredient counterpart of recipes.local.ts's syncRecipeInBackground() —
+ *  see that function for why a save must not await the git queue. */
+function syncIngredientInBackground(id: string): void {
+  void syncIngredient(id);
+}
+
 export async function createIngredient(d: IngredientInput): Promise<{ id: string }> {
   const id = d.id ?? newId();
   await query(
@@ -264,7 +271,7 @@ export async function createIngredient(d: IngredientInput): Promise<{ id: string
   }
   await upsertIngredientTags(id, d.tagIds);
 
-  await syncIngredient(id);
+  syncIngredientInBackground(id);
   return { id };
 }
 
@@ -309,12 +316,12 @@ export async function updateIngredient(id: string, d: IngredientInput): Promise<
     }
   }
   await upsertIngredientTags(id, d.tagIds);
-  await syncIngredient(id);
+  syncIngredientInBackground(id);
 }
 
 export async function deleteIngredient(id: string): Promise<void> {
   await query("UPDATE ingredients SET sync_status='deleted', updated_at=now() WHERE id=$1", [id]);
-  await syncIngredient(id);
+  syncIngredientInBackground(id);
 }
 
 /** Folds a mistakenly-duplicated ingredient into another one — every recipe
@@ -343,7 +350,7 @@ export async function mergeIngredients(sourceId: string, targetId: string): Prom
   await query("DELETE FROM ingredient_tags WHERE ingredient_id=$1", [sourceId]);
 
   await deleteIngredient(sourceId);
-  await syncIngredient(targetId);
+  syncIngredientInBackground(targetId);
 
   const { syncRecipe } = await import('./recipes.local');
   for (const row of affectedRecipes) await syncRecipe(row.recipe_id);
