@@ -154,8 +154,12 @@ export default function RegionsMap({ regions, coords = {} }: RegionsMapProps) {
             referrerPolicy is kept as belt-and-braces (it tested fine both
             ways above) so a future provider that dislikes the custom scheme
             degrades to "no Referer" rather than to a blank map. */}
+        {/* The credit is kept to "Tiles (c) Esri" with the full data-source
+            list moved into the link's title: spelled out inline it wrapped to
+            four lines and covered the bottom quarter of the map, which is
+            only ~220px tall. Hovering still shows the whole list. */}
         <TileLayer
-          attribution='Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom'
+          attribution='Tiles &copy; <a href="https://www.esri.com" title="Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom">Esri</a>'
           url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
           maxZoom={19}
           referrerPolicy="no-referrer"

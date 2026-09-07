@@ -2361,8 +2361,8 @@ const RecipeDetail: React.FC = () => {
     <AppLayout headerActions={headerActions}>
       {cookidooModal}
       {/* ── Hero Image ─────────────────────────────────────────── */}
-      <div className="max-w-6xl mx-auto px-6 pt-8">
-        <div className="relative h-[360px] md:h-[440px] rounded-3xl overflow-hidden">
+      <div className="max-w-7xl mx-auto px-6 pt-8">
+        <div className="relative h-[360px] md:h-[400px] rounded-3xl overflow-hidden">
           <CoverImage
             className="w-full h-full object-cover"
             src={recipe.cover_image_url}
@@ -2426,7 +2426,7 @@ const RecipeDetail: React.FC = () => {
       </div>
 
       {/* ── Stats Bar ──────────────────────────────────────────── */}
-      <div className="max-w-6xl mx-auto px-6 mt-8">
+      <div className="max-w-7xl mx-auto px-6 mt-8">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {[
             { label: t('recipeDetail.prepTime'), val: formatTime(recipe.prep_time_min), icon: 'schedule' },
@@ -2435,52 +2435,58 @@ const RecipeDetail: React.FC = () => {
             { label: t('recipeDetail.totalTime'), val: formatTime(totalTime), icon: 'local_fire_department' },
             { label: t('recipeDetail.complexity'), val: difficultyKey[recipe.difficulty] ? t(difficultyKey[recipe.difficulty]) : recipe.difficulty, icon: 'restaurant', highlight: true },
           ].map((stat, i) => (
-            <div key={i} className={`py-5 px-4 rounded-2xl flex flex-col items-center text-center ${stat.highlight ? 'bg-primary/8 border border-primary/15' : 'bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800'}`}>
+            <div key={i} className={`py-4 px-4 rounded-2xl flex flex-col items-center text-center ${stat.highlight ? 'bg-primary/8 border border-primary/15' : 'bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800'}`}>
               <span className={`material-symbols-outlined mb-1.5 ${stat.highlight ? 'text-primary' : 'text-primary/60'}`} style={{ fontVariationSettings: "'FILL' 1" }}>{stat.icon}</span>
               <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold">{stat.label}</p>
               <p className={`text-lg font-bold font-headline ${stat.highlight ? 'text-primary' : 'text-zinc-800 dark:text-zinc-200'}`}>{stat.val}</p>
             </div>
           ))}
         </div>
-        <div className="mt-4 py-4 px-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 flex items-center justify-between flex-wrap gap-3">
-          <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold">{t('recipeDetail.yourRating')}</p>
-          <StarRating value={recipe.rating} onChange={handleRate} />
-        </div>
-        <div className="mt-3 py-4 px-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary/60" style={{ fontVariationSettings: "'FILL' 1" }}>skillet</span>
-            <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold">
-              {t('recipeDetail.cookedTimes', { count: recipe.times_cooked })}
-            </p>
+        {/* One action bar, not three stacked ones: the rating, the cook log
+            and the timestamps each had their own full-width band, spending
+            ~190px of vertical space on a star row and a counter. */}
+        <div className="mt-4 py-3 px-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800">
+          <div className="flex items-center flex-wrap gap-x-5 gap-y-3">
+            <div className="flex items-center gap-3">
+              <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold">{t('recipeDetail.yourRating')}</p>
+              <StarRating value={recipe.rating} onChange={handleRate} />
+            </div>
+            <div className="hidden lg:block w-px h-6 bg-zinc-100 dark:bg-zinc-800" />
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary/60" style={{ fontVariationSettings: "'FILL' 1" }}>skillet</span>
+              <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold">
+                {t('recipeDetail.cookedTimes', { count: recipe.times_cooked })}
+              </p>
+            </div>
+            <button
+              onClick={handleLogCooked}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary/8 text-primary text-xs font-bold hover:bg-primary/15 transition-colors"
+            >
+              <span className="material-symbols-outlined text-base">add</span>
+              {t('recipeDetail.iCookedThis')}
+            </button>
+            <Link
+              to="/history"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-zinc-400 dark:text-zinc-500 text-xs font-bold hover:text-primary transition-colors"
+            >
+              <span className="material-symbols-outlined text-base">event_available</span>
+              {t('history.viewHistory')}
+            </Link>
+            <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium lg:ml-auto">
+              <span>{t('recipeDetail.created', { date: formatDate(recipe.created_at) })}</span>
+              <span>&middot;</span>
+              <span>{t('recipeDetail.lastEdited', { date: formatDate(recipe.updated_at) })}</span>
+            </div>
           </div>
-          <button
-            onClick={handleLogCooked}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary/8 text-primary text-xs font-bold hover:bg-primary/15 transition-colors"
-          >
-            <span className="material-symbols-outlined text-base">add</span>
-            {t('recipeDetail.iCookedThis')}
-          </button>
-          <Link
-            to="/history"
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full text-zinc-400 dark:text-zinc-500 text-xs font-bold hover:text-primary transition-colors"
-          >
-            <span className="material-symbols-outlined text-base">event_available</span>
-            {t('history.viewHistory')}
-          </Link>
-        </div>
-        <div className="mt-3 px-6 flex items-center gap-4 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium">
-          <span>{t('recipeDetail.created', { date: formatDate(recipe.created_at) })}</span>
-          <span>&middot;</span>
-          <span>{t('recipeDetail.lastEdited', { date: formatDate(recipe.updated_at) })}</span>
         </div>
       </div>
 
       {/* ── Two-column layout ──────────────────────────────────── */}
-      <div className="max-w-6xl mx-auto px-6 mt-10 pb-24">
+      <div className="max-w-7xl mx-auto px-6 mt-10 pb-24">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
 
-          {/* Left column: Servings + Ingredients */}
-          <div className="lg:col-span-4 space-y-8">
+          {/* Left column: Servings + Ingredients + Equipment */}
+          <div className="lg:col-span-5 space-y-8">
             {/* Servings card */}
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
               <div className="flex items-center justify-between mb-4">
@@ -2510,21 +2516,6 @@ const RecipeDetail: React.FC = () => {
                 {addedToCart ? t('recipeDetail.addedToShoppingList') : t('recipeDetail.addToShoppingList')}
               </button>
             </div>
-
-            {/* Regions card */}
-            {recipe.regions && recipe.regions.length > 0 && (
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.regions')}</h3>
-                <div className="flex flex-wrap gap-1.5 mb-4">
-                  {recipe.regions.map((r) => (
-                    <span key={r} className="px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400">
-                      {isCountryCode(r) ? `${flagEmoji(r)} ${countryDisplayName(r, i18n.language)}` : r}
-                    </span>
-                  ))}
-                </div>
-                {isOnline && <RegionsMap regions={recipe.regions} coords={recipe.region_coords || {}} />}
-              </div>
-            )}
 
             {/* Ingredients card */}
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
@@ -2569,117 +2560,45 @@ const RecipeDetail: React.FC = () => {
               </div>
             </div>
 
-            {/* Kitchen Tools card */}
-            {recipe.tools && recipe.tools.length > 0 && (
+            {/* Equipment card - tools and techniques share one card. As two
+                separate cards they read as a pair of near-empty chip boxes
+                stacked on each other; together they are one sidebar block. */}
+            {((recipe.tools && recipe.tools.length > 0) || (recipe.techniques && recipe.techniques.length > 0)) && (
               <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.kitchenTools')}</h3>
-                <div className="flex flex-wrap gap-2">
-                  {recipe.tools.map(tool => (
-                    <div key={tool.id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                      <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-primary text-lg" />
-                      <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">{tool.translated_name || tool.name}</span>
+                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.equipment')}</h3>
+                {recipe.tools && recipe.tools.length > 0 && (
+                  <>
+                    <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold mb-2.5">{t('recipeDetail.kitchenTools')}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {recipe.tools.map(tool => (
+                        <div key={tool.id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                          <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-primary text-lg" />
+                          <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">{tool.translated_name || tool.name}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Techniques card */}
-            {recipe.techniques && recipe.techniques.length > 0 && (
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.techniques')}</h3>
-                <div className="flex flex-wrap gap-2">
-                  {recipe.techniques.map(tech => (
-                    <div key={tech.id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                      <RenderFaIcon name={tech.icon || 'FaFire'} className="text-primary text-lg" />
-                      <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">{tech.translated_name || tech.name}</span>
+                  </>
+                )}
+                {recipe.techniques && recipe.techniques.length > 0 && (
+                  <>
+                    <p className={`text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold mb-2.5 ${recipe.tools && recipe.tools.length > 0 ? 'mt-5' : ''}`}>{t('recipeDetail.techniques')}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {recipe.techniques.map(tech => (
+                        <div key={tech.id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                          <RenderFaIcon name={tech.icon || 'FaFire'} className="text-primary text-lg" />
+                          <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">{tech.translated_name || tech.name}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </>
+                )}
               </div>
             )}
-
-            {/* Storage card */}
-            {recipe.storage_instructions && (
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.storageInstructions')}</h3>
-                <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{recipe.storage_instructions}</p>
-              </div>
-            )}
-
-            {/* Tips card */}
-            {recipe.tips && (
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.tips')}</h3>
-                <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{recipe.tips}</p>
-              </div>
-            )}
-
-            {/* References card */}
-            {recipe.sources && recipe.sources.length > 0 && (
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.references')}</h3>
-                <div className="space-y-2">
-                  {recipe.sources.map((s, idx) => {
-                    const meta = SOURCE_TYPE_META[s.type] || SOURCE_TYPE_META.other;
-                    const content = (
-                      <div className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors">
-                        <span className="material-symbols-outlined text-primary text-lg shrink-0">{meta.icon}</span>
-                        <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 truncate">{s.label || s.url}</span>
-                      </div>
-                    );
-                    return s.url ? (
-                      <a key={idx} href={s.url} target="_blank" rel="noopener noreferrer">{content}</a>
-                    ) : (
-                      <div key={idx}>{content}</div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Nutrition card */}
-            {nutrition && (nutrition.totals.caloriesKcal > 0 || nutrition.totals.proteinG > 0 || nutrition.totals.carbsG > 0 || nutrition.totals.fatG > 0) && (() => {
-              const at = nutritionAtServings()!;
-              const fields: { key: keyof NutritionTotals; label: string; unit: string }[] = [
-                { key: 'caloriesKcal', label: t('recipeDetail.calories'), unit: 'kcal' },
-                { key: 'proteinG', label: t('recipeDetail.protein'), unit: 'g' },
-                { key: 'carbsG', label: t('recipeDetail.carbs'), unit: 'g' },
-                { key: 'fatG', label: t('recipeDetail.fat'), unit: 'g' },
-                { key: 'fiberG', label: t('recipeDetail.fiber'), unit: 'g' },
-                { key: 'sugarG', label: t('recipeDetail.sugar'), unit: 'g' },
-                { key: 'sodiumMg', label: t('recipeDetail.sodium'), unit: 'mg' },
-              ];
-              return (
-                <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                  <h3 className="font-headline font-bold text-lg mb-1">{t('recipeDetail.nutrition')}</h3>
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mb-4">{t('recipeDetail.totalForServings', { count: servings })}</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {fields.map(f => (
-                      <div key={f.key} className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-900">
-                        <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">{f.label}</span>
-                        <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 tabular-nums">
-                          {Math.round(at[f.key])} {f.unit}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-3">
-                    {t('recipeDetail.kcalPerServing', { count: Math.round(at.caloriesKcal / servings) })}
-                  </p>
-                  {nutrition.unresolved.length > 0 && (
-                    <p className="text-[10px] text-amber-600 mt-3 italic">
-                      {t('recipeDetail.nutritionUnavailableFor', { items: nutrition.unresolved.join(', ') })}
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
           </div>
 
 
           {/* Right column: Method + Kitchen Mode button */}
-          <div className="lg:col-span-8">
+          <div className="lg:col-span-7">
             <div className="flex items-center justify-between mb-8">
               <h2 className="font-headline font-extrabold text-3xl text-zinc-900 dark:text-zinc-100">{t('recipeDetail.theMethod')}</h2>
               <button
@@ -2738,6 +2657,106 @@ const RecipeDetail: React.FC = () => {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Details band - origin, storage, tips, nutrition and sources used
+            to sit at the bottom of the sidebar, which made that column run
+            roughly twice as long as the method beside it: every recipe left
+            the whole right half of the page empty below its last step. Full
+            width and columnar they fill exactly that gap, and the map gets
+            more than the ~290px the old sidebar could give it. */}
+        <div className="mt-14 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 items-start">
+          {/* Regions card */}
+          {recipe.regions && recipe.regions.length > 0 && (
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
+              <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.regions')}</h3>
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {recipe.regions.map((r) => (
+                  <span key={r} className="px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400">
+                    {isCountryCode(r) ? `${flagEmoji(r)} ${countryDisplayName(r, i18n.language)}` : r}
+                  </span>
+                ))}
+              </div>
+              {isOnline && <RegionsMap regions={recipe.regions} coords={recipe.region_coords || {}} />}
+            </div>
+          )}
+
+          {/* Storage card */}
+          {recipe.storage_instructions && (
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
+              <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.storageInstructions')}</h3>
+              <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{recipe.storage_instructions}</p>
+            </div>
+          )}
+
+          {/* Tips card */}
+          {recipe.tips && (
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
+              <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.tips')}</h3>
+              <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{recipe.tips}</p>
+            </div>
+          )}
+
+          {/* Nutrition card */}
+          {nutrition && (nutrition.totals.caloriesKcal > 0 || nutrition.totals.proteinG > 0 || nutrition.totals.carbsG > 0 || nutrition.totals.fatG > 0) && (() => {
+            const at = nutritionAtServings()!;
+            const fields: { key: keyof NutritionTotals; label: string; unit: string }[] = [
+              { key: 'caloriesKcal', label: t('recipeDetail.calories'), unit: 'kcal' },
+              { key: 'proteinG', label: t('recipeDetail.protein'), unit: 'g' },
+              { key: 'carbsG', label: t('recipeDetail.carbs'), unit: 'g' },
+              { key: 'fatG', label: t('recipeDetail.fat'), unit: 'g' },
+              { key: 'fiberG', label: t('recipeDetail.fiber'), unit: 'g' },
+              { key: 'sugarG', label: t('recipeDetail.sugar'), unit: 'g' },
+              { key: 'sodiumMg', label: t('recipeDetail.sodium'), unit: 'mg' },
+            ];
+            return (
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
+                <h3 className="font-headline font-bold text-lg mb-1">{t('recipeDetail.nutrition')}</h3>
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mb-4">{t('recipeDetail.totalForServings', { count: servings })}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {fields.map(f => (
+                    <div key={f.key} className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-900">
+                      <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">{f.label}</span>
+                      <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 tabular-nums">
+                        {Math.round(at[f.key])} {f.unit}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-3">
+                  {t('recipeDetail.kcalPerServing', { count: Math.round(at.caloriesKcal / servings) })}
+                </p>
+                {nutrition.unresolved.length > 0 && (
+                  <p className="text-[10px] text-amber-600 mt-3 italic">
+                    {t('recipeDetail.nutritionUnavailableFor', { items: nutrition.unresolved.join(', ') })}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* References card */}
+          {recipe.sources && recipe.sources.length > 0 && (
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
+              <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.references')}</h3>
+              <div className="space-y-2">
+                {recipe.sources.map((s, idx) => {
+                  const meta = SOURCE_TYPE_META[s.type] || SOURCE_TYPE_META.other;
+                  const content = (
+                    <div className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors">
+                      <span className="material-symbols-outlined text-primary text-lg shrink-0">{meta.icon}</span>
+                      <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 truncate">{s.label || s.url}</span>
+                    </div>
+                  );
+                  return s.url ? (
+                    <a key={idx} href={s.url} target="_blank" rel="noopener noreferrer">{content}</a>
+                  ) : (
+                    <div key={idx}>{content}</div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </AppLayout>
