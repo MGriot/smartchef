@@ -6,19 +6,15 @@ import { ResolvedImage } from '../components/CoverImage';
 import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import { TOOL_ICONS } from '../lib/icons';
 
-const TOOL_ICONS = [
-  'FaBlender', 'FaFireBurner', 'FaKitchenSet', 'FaBowlFood', 'FaUtensils',
-  'FaMortarPestle', 'FaGripLines', 'FaMugHot', 'FaBreadSlice', 'FaScaleBalanced',
-  'FaClock', 'FaSnowflake', 'FaBoxOpen', 'FaFilter', 'FaBrush', 'FaTag'
-];
 
 export default function LibraryTools() {
   const [tools, setTools] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingTool, setEditingTool] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', category: '', description: '', icon: 'FaKitchenSet', imageUrls: [] as string[], synonyms: [] as string[] });
+  const [form, setForm] = useState({ name: '', category: '', description: '', icon: 'TbToolsKitchen', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
 
@@ -43,14 +39,14 @@ export default function LibraryTools() {
         name: tool.name,
         category: tool.category || '',
         description: tool.description || '',
-        icon: tool.icon || 'FaKitchenSet',
+        icon: tool.icon || 'TbToolsKitchen',
         imageUrls: tool.image_urls || [],
         synonyms: tool.synonyms || [],
       });
       setTranslations(tool.translations || []);
     } else {
       setEditingTool(null);
-      setForm({ name: '', category: '', description: '', icon: 'FaKitchenSet', imageUrls: [], synonyms: [] });
+      setForm({ name: '', category: '', description: '', icon: 'TbToolsKitchen', imageUrls: [], synonyms: [] });
       setTranslations([]);
     }
     setShowModal(true);
@@ -135,7 +131,7 @@ export default function LibraryTools() {
                             <ResolvedImage src={tool.image_urls[0]} className="w-12 h-12 rounded-2xl object-cover bg-zinc-100 dark:bg-zinc-800" />
                           ) : (
                             <div className="w-12 h-12 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-xl text-zinc-400 dark:text-zinc-500">
-                              <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-[20px]" />
+                              <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-[20px]" />
                             </div>
                           )}
                           <div>

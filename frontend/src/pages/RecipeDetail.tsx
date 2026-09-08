@@ -827,7 +827,7 @@ const RecipeDetail: React.FC = () => {
                             if (!tool) return null;
                             return (
                               <div key={tid} className="flex items-center gap-1.5 px-2 py-1 bg-zinc-700/50 rounded-lg border border-zinc-600/30">
-                                <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-primary text-sm" />
+                                <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-primary text-sm" />
                                 <span className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">{tool.name}</span>
                               </div>
                             );
@@ -842,7 +842,7 @@ const RecipeDetail: React.FC = () => {
                             if (!tech) return null;
                             return (
                               <div key={tid} className="flex items-center gap-1.5 px-2 py-1 bg-zinc-700/50 rounded-lg border border-zinc-600/30">
-                                <RenderFaIcon name={tech.icon || 'FaFire'} className="text-primary text-sm" />
+                                <RenderFaIcon name={tech.icon || 'TbFlame'} className="text-primary text-sm" />
                                 <span className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">{tech.name}</span>
                               </div>
                             );
@@ -967,7 +967,7 @@ const RecipeDetail: React.FC = () => {
                           if (!tool) return null;
                           return (
                             <div key={tid} className="flex items-center gap-1.5 px-2 py-1 bg-zinc-700/50 rounded-lg border border-zinc-600/30">
-                              <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-primary text-sm" />
+                              <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-primary text-sm" />
                               <span className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">{tool.translated_name || tool.name}</span>
                             </div>
                           );
@@ -983,7 +983,7 @@ const RecipeDetail: React.FC = () => {
                           if (!tech) return null;
                           return (
                             <div key={tid} className="flex items-center gap-1.5 px-2 py-1 bg-zinc-700/50 rounded-lg border border-zinc-600/30">
-                              <RenderFaIcon name={tech.icon || 'FaFire'} className="text-primary text-sm" />
+                              <RenderFaIcon name={tech.icon || 'TbFlame'} className="text-primary text-sm" />
                               <span className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">{tech.translated_name || tech.name}</span>
                             </div>
                           );
@@ -1762,7 +1762,7 @@ const RecipeDetail: React.FC = () => {
                                     isUsed ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
                                   }`}
                                 >
-                                  <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-base" />
+                                  <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-base" />
                                   <span className="text-[11px] font-bold">{tool.translated_name || tool.name}</span>
                                 </button>
                               );
@@ -1789,7 +1789,7 @@ const RecipeDetail: React.FC = () => {
                                     isUsed ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
                                   }`}
                                 >
-                                  <RenderFaIcon name={tech.icon || 'FaFire'} className="text-base" />
+                                  <RenderFaIcon name={tech.icon || 'TbFlame'} className="text-base" />
                                   <span className="text-[11px] font-bold">{tech.translated_name || tech.name}</span>
                                 </button>
                               );
@@ -2024,7 +2024,7 @@ const RecipeDetail: React.FC = () => {
                             : 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
                         }`}
                       >
-                        <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-base" />
+                        <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-base" />
                         <span className="text-xs font-bold">{tool.translated_name || tool.name}</span>
                         <span className="material-symbols-outlined text-sm">close</span>
                       </button>
@@ -2045,7 +2045,7 @@ const RecipeDetail: React.FC = () => {
                         onClick={() => toggleTool(tool)}
                         className="flex items-center gap-2 px-3 py-2 rounded-xl border-2 bg-zinc-50 dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600 transition-all"
                       >
-                        <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-base" />
+                        <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-base" />
                         <span className="text-xs font-bold">{tool.translated_name || tool.name}</span>
                       </button>
                     ))}
@@ -2608,7 +2608,7 @@ const RecipeDetail: React.FC = () => {
                     <div className="flex flex-wrap gap-2">
                       {recipe.tools.map(tool => (
                         <div key={tool.id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                          <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-primary text-lg" />
+                          <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-primary text-lg" />
                           <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">{tool.translated_name || tool.name}</span>
                         </div>
                       ))}
@@ -2621,7 +2621,7 @@ const RecipeDetail: React.FC = () => {
                     <div className="flex flex-wrap gap-2">
                       {recipe.techniques.map(tech => (
                         <div key={tech.id} className="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                          <RenderFaIcon name={tech.icon || 'FaFire'} className="text-primary text-lg" />
+                          <RenderFaIcon name={tech.icon || 'TbFlame'} className="text-primary text-lg" />
                           <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">{tech.translated_name || tech.name}</span>
                         </div>
                       ))}

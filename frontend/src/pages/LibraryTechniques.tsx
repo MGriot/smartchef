@@ -6,18 +6,15 @@ import { ResolvedImage } from '../components/CoverImage';
 import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import { TECHNIQUE_ICONS } from '../lib/icons';
 
-const TECHNIQUE_ICONS = [
-  'FaFire', 'FaSnowflake', 'FaHandFist', 'FaKnifeKitchen', 'FaUtensils',
-  'FaBowlFood', 'FaClock', 'FaDroplet', 'FaBlender', 'FaMortarPestle', 'FaTag'
-];
 
 export default function LibraryTechniques() {
   const [techniques, setTechniques] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingTechnique, setEditingTechnique] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', description: '', icon: 'FaFire', imageUrls: [] as string[], synonyms: [] as string[] });
+  const [form, setForm] = useState({ name: '', description: '', icon: 'TbFlame', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
 
@@ -41,14 +38,14 @@ export default function LibraryTechniques() {
       setForm({
         name: technique.name,
         description: technique.description || '',
-        icon: technique.icon || 'FaFire',
+        icon: technique.icon || 'TbFlame',
         imageUrls: technique.image_urls || [],
         synonyms: technique.synonyms || [],
       });
       setTranslations(technique.translations || []);
     } else {
       setEditingTechnique(null);
-      setForm({ name: '', description: '', icon: 'FaFire', imageUrls: [], synonyms: [] });
+      setForm({ name: '', description: '', icon: 'TbFlame', imageUrls: [], synonyms: [] });
       setTranslations([]);
     }
     setShowModal(true);
@@ -132,7 +129,7 @@ export default function LibraryTechniques() {
                             <ResolvedImage src={technique.image_urls[0]} className="w-12 h-12 rounded-2xl object-cover bg-zinc-100 dark:bg-zinc-800" />
                           ) : (
                             <div className="w-12 h-12 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-xl text-zinc-400 dark:text-zinc-500">
-                              <RenderFaIcon name={technique.icon || 'FaFire'} className="text-[20px]" />
+                              <RenderFaIcon name={technique.icon || 'TbFlame'} className="text-[20px]" />
                             </div>
                           )}
                           <div>

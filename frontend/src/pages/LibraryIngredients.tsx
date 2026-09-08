@@ -9,6 +9,7 @@ import SynonymsEditor from '../components/SynonymsEditor';
 import TagPicker from '../components/TagPicker';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import { INGREDIENT_ICONS } from '../lib/icons';
 
 /** Short month names in the UI language. LibrarySeasonality.tsx already
  *  derives its own month labels this way; doing the same here avoids
@@ -22,12 +23,6 @@ function useMonthLabels(): string[] {
   }, [i18n.language]);
 }
 
-const INGREDIENT_ICONS = [
-  'FaEgg', 'FaCarrot', 'FaAppleWhole', 'FaFish', 'FaBacon',
-  'FaLeaf', 'FaDroplet', 'FaBottleWater', 'FaLemon', 'FaPepperHot',
-  'FaPizzaSlice', 'FaHamburger', 'FaIceCream', 'FaWineGlass', 'FaCheese',
-  'FaBreadSlice', 'FaDrumstickBite', 'FaBowlRice', 'FaMugHot', 'FaCookie'
-];
 
 export default function LibraryIngredients() {
   const { t } = useTranslation();
@@ -321,7 +316,7 @@ export default function LibraryIngredients() {
              className="w-full flex items-center justify-between gap-3 px-4 py-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl font-medium text-xs transition-all group"
           >
              <div className="flex items-center gap-2 truncate">
-                <RenderFaIcon name={c.icon || 'FaTag'} className="text-[16px]" color={c.color} />
+                <RenderFaIcon name={c.icon || 'TbTag'} className="text-[16px]" color={c.color} />
                 <span className="truncate">{c.translated_name || c.name}</span>
              </div>
              <span className="material-symbols-outlined text-[14px] opacity-0 group-hover:opacity-100 transition-opacity">edit</span>
@@ -353,7 +348,7 @@ export default function LibraryIngredients() {
                   className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center text-[11px] text-white ring-2 ring-white"
                   style={{ backgroundColor: ing.category_color || '#71717a' }}
                 >
-                  <RenderFaIcon name={ing.icon || 'FaEgg'} />
+                  <RenderFaIcon name={ing.icon || 'TbCarrot'} />
                 </span>
               </>
             ) : (
@@ -361,7 +356,7 @@ export default function LibraryIngredients() {
                 className="w-12 h-12 rounded-2xl flex items-center justify-center text-[24px] text-white"
                 style={{ backgroundColor: ing.category_color || '#71717a' }}
               >
-                <RenderFaIcon name={ing.icon || 'FaEgg'} />
+                <RenderFaIcon name={ing.icon || 'TbCarrot'} />
               </div>
             )}
           </div>
@@ -433,7 +428,7 @@ export default function LibraryIngredients() {
             <ResolvedImage src={ing.image_urls[0]} className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-[40px] text-white" style={{ backgroundColor: ing.category_color || '#71717a' }}>
-              <RenderFaIcon name={ing.icon || 'FaEgg'} />
+              <RenderFaIcon name={ing.icon || 'TbCarrot'} />
             </div>
           )}
           {ing.seasonal_months?.length > 0 && (
@@ -507,7 +502,7 @@ export default function LibraryIngredients() {
         <summary className="flex items-center justify-between cursor-pointer list-none py-4 px-2 select-none">
           <div className="flex items-center gap-3">
             <span className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-[16px]" style={{ backgroundColor: catColor || '#71717a' }}>
-              <RenderFaIcon name={catIcon || 'FaTag'} />
+              <RenderFaIcon name={catIcon || 'TbTag'} />
             </span>
             <span className="font-black text-zinc-900 dark:text-zinc-100 text-lg">{catName}</span>
             <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 text-[10px] font-bold rounded-full">{matched.length}</span>
@@ -599,7 +594,7 @@ export default function LibraryIngredients() {
             ) : (
               <>
                 {categories.map(c => categorySection(c.id, c.translated_name || c.name, c.icon, c.color, ingredients.filter(i => i.category_id === c.id)))}
-                {uncategorized.length > 0 && categorySection(null, t('library.ingredients.uncategorized'), 'FaTag', '#71717a', uncategorized)}
+                {uncategorized.length > 0 && categorySection(null, t('library.ingredients.uncategorized'), 'TbTag', '#71717a', uncategorized)}
               </>
             )}
           </section>
@@ -1019,7 +1014,7 @@ function IngredientDetailModal({
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-[64px] text-white" style={{ backgroundColor: ing.category_color || '#71717a' }}>
-              <RenderFaIcon name={ing.icon || 'FaEgg'} />
+              <RenderFaIcon name={ing.icon || 'TbCarrot'} />
             </div>
           )}
           <button onClick={onClose} className="absolute top-4 right-4 w-10 h-10 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100">
@@ -1038,7 +1033,7 @@ function IngredientDetailModal({
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[11px] shrink-0" style={{ backgroundColor: ing.category_color || '#71717a' }}>
-                <RenderFaIcon name={ing.icon || 'FaEgg'} />
+                <RenderFaIcon name={ing.icon || 'TbCarrot'} />
               </span>
               <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{ing.translated_category_name || ing.category_name || t('library.ingredients.uncategorized')}</span>
             </div>

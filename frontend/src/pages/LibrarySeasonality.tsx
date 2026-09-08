@@ -96,7 +96,7 @@ export default function LibrarySeasonality() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {inSeasonNow.map(ing => (
                     <div key={ing.id} className="flex items-center gap-3 px-4 py-3 bg-primary/5 border border-primary/15 rounded-2xl">
-                      <RenderFaIcon name={ing.icon || 'FaEgg'} className="text-primary text-lg shrink-0" />
+                      <RenderFaIcon name={ing.icon || 'TbCarrot'} className="text-primary text-lg shrink-0" />
                       <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 truncate">{ing.translated_name || ing.name}</span>
                     </div>
                   ))}
@@ -112,7 +112,7 @@ export default function LibrarySeasonality() {
                 <div className="flex flex-wrap gap-2">
                   {outOfSeason.map(ing => (
                     <div key={ing.id} className="flex items-center gap-2 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-900 rounded-full text-xs font-medium text-zinc-400 dark:text-zinc-500">
-                      <RenderFaIcon name={ing.icon || 'FaEgg'} className="text-[13px]" />
+                      <RenderFaIcon name={ing.icon || 'TbCarrot'} className="text-[13px]" />
                       {ing.translated_name || ing.name}
                     </div>
                   ))}

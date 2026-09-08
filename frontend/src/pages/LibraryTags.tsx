@@ -6,12 +6,8 @@ import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { translateTagGroup } from '../lib/tagGroups';
+import { TAG_ICONS } from '../lib/icons';
 
-const TAG_ICONS = [
-  'FaTag', 'FaLeaf', 'FaSeedling', 'FaDrumstickBite', 'FaFish', 'FaShrimp',
-  'FaEgg', 'FaCheese', 'FaWheatAwn', 'FaTree', 'FaUtensils', 'FaBowlFood',
-  'FaCarrot', 'FaIceCream', 'FaMugHot'
-];
 
 const DEFAULT_COLOR = '#3f3f46';
 
@@ -21,7 +17,7 @@ export default function LibraryTags() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingTag, setEditingTag] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', groupName: 'Altro', color: DEFAULT_COLOR, icon: 'FaTag', excludeTagIds: [] as string[], synonyms: [] as string[] });
+  const [form, setForm] = useState({ name: '', groupName: 'Altro', color: DEFAULT_COLOR, icon: 'TbTag', excludeTagIds: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
 
@@ -151,7 +147,7 @@ export default function LibraryTags() {
         name: tag.name,
         groupName: tag.group_name || 'Altro',
         color: tag.color || DEFAULT_COLOR,
-        icon: tag.icon || 'FaTag',
+        icon: tag.icon || 'TbTag',
         excludeTagIds: tag.exclude_tag_ids || [],
         synonyms: tag.synonyms || [],
       });
@@ -161,7 +157,7 @@ export default function LibraryTags() {
       // Left blank (not pre-filled with 'Altro') so the "e.g. Dieta" placeholder
       // and the existing-groups datalist are actually visible — the backend
       // still falls back to 'Altro' if this is saved empty.
-      setForm({ name: '', groupName: '', color: DEFAULT_COLOR, icon: 'FaTag', excludeTagIds: [], synonyms: [] });
+      setForm({ name: '', groupName: '', color: DEFAULT_COLOR, icon: 'TbTag', excludeTagIds: [], synonyms: [] });
       setTranslations([]);
     }
     setShowModal(true);
@@ -282,7 +278,7 @@ export default function LibraryTags() {
                         className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[13px] shrink-0"
                         style={{ backgroundColor: tag.color || DEFAULT_COLOR }}
                       >
-                        <RenderFaIcon name={tag.icon || 'FaTag'} />
+                        <RenderFaIcon name={tag.icon || 'TbTag'} />
                       </span>
                       <span className="text-left">
                         <span className="block font-extrabold text-zinc-900 dark:text-zinc-100 text-sm leading-tight">{tag.translated_name || tag.name}</span>

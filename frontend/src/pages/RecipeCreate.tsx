@@ -820,7 +820,7 @@ const RecipeCreate: React.FC = () => {
                       : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600'
                   }`}
                 >
-                  <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-lg" />
+                  <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-lg" />
                   <span className="text-sm font-bold">{tool.translated_name || tool.name}</span>
                 </button>
               );
@@ -1150,7 +1150,7 @@ const RecipeCreate: React.FC = () => {
                             }`}
                             title={tool.translated_name || tool.name}
                           >
-                            <RenderFaIcon name={tool.icon || 'FaKitchenSet'} className="text-lg" />
+                            <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-lg" />
                           </button>
                         );
                       })}
@@ -1177,7 +1177,7 @@ const RecipeCreate: React.FC = () => {
                             }`}
                             title={tech.translated_name || tech.name}
                           >
-                            <RenderFaIcon name={tech.icon || 'FaFire'} className="text-lg" />
+                            <RenderFaIcon name={tech.icon || 'TbFlame'} className="text-lg" />
                           </button>
                         );
                       })}
