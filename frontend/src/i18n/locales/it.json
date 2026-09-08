@@ -33,7 +33,9 @@
     "topTags": "Tag più frequenti",
     "noRecipes": "Nessuna ricetta per questa selezione.",
     "emptyState": "Nessuna ricetta ha ancora una regione. Aprine una, vai su Regioni e aggiungi un paese o un luogo.",
-    "loading": "Caricamento…"
+    "loading": "Caricamento…",
+    "showOnlyThese": "Mostra solo queste",
+    "andMore": "+{{count}} altre"
   },
   "common": {
     "cancel": "Annulla",

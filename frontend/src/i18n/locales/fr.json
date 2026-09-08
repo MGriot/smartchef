@@ -33,7 +33,9 @@
     "topTags": "Étiquettes les plus fréquentes",
     "noRecipes": "Aucune recette pour cette sélection.",
     "emptyState": "Aucune recette n'a encore de région. Ouvrez-en une, allez dans Régions et ajoutez un pays ou un lieu.",
-    "loading": "Chargement…"
+    "loading": "Chargement…",
+    "showOnlyThese": "Afficher seulement celles-ci",
+    "andMore": "+{{count}} autres"
   },
   "common": {
     "cancel": "Annuler",

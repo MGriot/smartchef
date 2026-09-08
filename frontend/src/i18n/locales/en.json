@@ -33,7 +33,9 @@
     "topTags": "Most frequent tags",
     "noRecipes": "No recipes for this selection.",
     "emptyState": "No recipe has a region yet. Open one, go to Regions and add a country or a place.",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "showOnlyThese": "Show only these",
+    "andMore": "+{{count}} more"
   },
   "common": {
     "cancel": "Cancel",

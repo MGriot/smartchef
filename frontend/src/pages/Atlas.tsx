@@ -60,8 +60,8 @@ export default function Atlas() {
   // once for each of them, so the counts sum to more than the recipe total.
   // That's the honest reading of "how many recipes touch this place", and
   // it's why the header reports mapped *recipes* separately.
-  const { counts, coords, ranked, unmapped } = useMemo(() => {
-    const counts: Record<string, number> = {};
+  const { pins, coords, ranked, unmapped } = useMemo(() => {
+    const byRegion: Record<string, AtlasRecipe[]> = {};
     const coords: Record<string, { lat: number; lng: number }> = {};
     let unmapped = 0;
     for (const r of recipes) {
@@ -70,11 +70,19 @@ export default function Atlas() {
         unmapped++;
         continue;
       }
-      for (const region of regions) counts[region] = (counts[region] || 0) + 1;
+      for (const region of regions) (byRegion[region] ||= []).push(r);
       for (const [k, v] of Object.entries(r.region_coords || {})) coords[k.toLowerCase()] = v;
     }
-    const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    return { counts, coords, ranked, unmapped };
+    // The map wants the recipes themselves (its pins open a card of covers);
+    // the ranking list only wants the counts.
+    const pins = Object.entries(byRegion).map(([key, rs]) => ({
+      key,
+      recipes: rs.map((r) => ({ id: r.id, title: r.translated_title || r.title, cover: r.cover_image_url })),
+    }));
+    const ranked = Object.entries(byRegion)
+      .map(([key, rs]) => [key, rs.length] as [string, number])
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    return { pins, coords, ranked, unmapped };
   }, [recipes]);
 
   const shown = useMemo(() => {
@@ -146,11 +154,13 @@ export default function Atlas() {
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
               <div className="xl:col-span-8 min-w-0">
                 <AtlasMap
-                  counts={counts}
+                  regions={pins}
                   coords={coords}
                   selected={selected}
                   onSelect={setSelected}
                   locale={i18n.language}
+                  showAllLabel={t('atlas.showOnlyThese')}
+                  moreLabel={(n) => t('atlas.andMore', { count: n })}
                 />
               </div>
 
@@ -168,7 +178,7 @@ export default function Atlas() {
                     </button>
                   )}
                 </div>
-                <div className="space-y-1 max-h-[340px] overflow-y-auto pr-1">
+                <div className="space-y-1 max-h-[430px] overflow-y-auto pr-1">
                   {ranked.map(([region, n]) => {
                     const isSelected = selected === region;
                     return (
