@@ -347,7 +347,7 @@ function ConflictsCard() {
   }
 
   return (
-    <div className="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-1">Needs Your Attention</h2>
       <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mb-4">
         {groups.size} item{groups.size === 1 ? '' : 's'} changed differently on two devices.
@@ -702,7 +702,7 @@ function FolderSyncCard() {
   // affects every device sharing this library — reserved for an admin.
   if (!isAdmin) {
     return (
-      <div className="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+      <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Sync</h2>
@@ -729,7 +729,7 @@ function FolderSyncCard() {
   }
 
   return (
-    <div className="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Folder Sync</h2>
@@ -923,9 +923,10 @@ function FolderSyncCard() {
           <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">How often SmartChef checks for changes automatically, besides on app resume and "Sync Now".</p>
         </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div>
           <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Device Name</label>
-          <div className="flex gap-2 max-w-sm">
+          <div className="flex gap-2">
             <input
               type="text"
               value={deviceName}
@@ -938,7 +939,7 @@ function FolderSyncCard() {
           </div>
         </div>
 
-        <div className="flex gap-8 flex-wrap">
+        <div className="flex gap-8 flex-wrap self-end pb-1">
           <div>
             <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">This Device</p>
             <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{deviceId ?? '—'}</p>
@@ -947,6 +948,7 @@ function FolderSyncCard() {
             <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Last Sync</p>
             <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}</p>
           </div>
+        </div>
         </div>
 
         {syncMode === 'folder' && devices.length > 0 && (
@@ -1626,7 +1628,7 @@ function StandaloneProfileCard() {
         <button
           type="submit"
           disabled={saving || !name.trim() || !dirty}
-          className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+          className="px-8 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
           {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
@@ -1854,7 +1856,7 @@ export default function Account() {
 
   return (
     <AppLayout>
-      <div className="p-6 sm:p-12 max-w-6xl mx-auto">
+      <div className="px-6 sm:px-10 py-10 max-w-7xl mx-auto">
         <div className="mb-10">
           <button
             onClick={() => navigate(-1)}
@@ -1866,93 +1868,103 @@ export default function Account() {
           <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">Account</h1>
         </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8 items-start">
-        <div className="lg:col-span-2">
-        {standalone === null ? null : standalone ? (
-          <>
-            <StandaloneProfileCard />
-            <div className="mt-6 sm:mt-8">
-              <AllProfilesCard />
-            </div>
-          </>
-        ) : (
-          <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
-            <div>
-              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Username</label>
-              <input
-                type="text"
-                autoCapitalize="none"
-                value={username}
-                onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Avatar</label>
-              <div className="flex flex-wrap gap-3 mb-4">
-                {AVATAR_PRESETS.map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => setAvatarUrl(preset)}
-                    className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200 dark:hover:ring-zinc-700'}`}
-                  >
-                    <img src={preset} alt="" className="w-full h-full object-cover" />
-                  </button>
-                ))}
-              </div>
-              <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">or use your own image</span>
-              <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
-            </div>
-            <div>
-              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">New Password (leave blank to keep current)</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
-              />
-            </div>
-            {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
-            <div className="flex gap-4 pt-2">
-              <button
-                type="submit"
-                disabled={saving || !name}
-                className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
-                {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
-              </button>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
-              >
-                Log Out
-              </button>
-            </div>
-          </form>
-        )}
+      {/* Identity spans the full width: the avatar picker is fourteen
+          swatches across and only reads as a row when it has the room. */}
+      {standalone === null ? null : standalone ? (
+        <StandaloneProfileCard />
+      ) : (
+      <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
+          />
         </div>
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Username</label>
+          <input
+            type="text"
+            autoCapitalize="none"
+            value={username}
+            onChange={(e) => setUsername(e.target.value.toLowerCase())}
+            className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Avatar</label>
+          <div className="flex flex-wrap gap-3 mb-4">
+            {AVATAR_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setAvatarUrl(preset)}
+                className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200 dark:hover:ring-zinc-700'}`}
+              >
+                <img src={preset} alt="" className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+          <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">or use your own image</span>
+          <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
+        </div>
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">New Password (leave blank to keep current)</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
+          />
+        </div>
+        {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+        <div className="flex gap-4 pt-2">
+          <button
+            type="submit"
+            disabled={saving || !name}
+            className="px-8 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
+            {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
+          >
+            Log Out
+          </button>
+        </div>
+      </form>
+      )}
 
-        <AppearanceCard />
-        {!standalone && account?.role === 'admin' && <ManageUsersCard />}
-        <LlmProviderCard />
-        <BackupCard />
-        <SyncCard />
-        {isNative() && !standalone && <OfflineDownloadsCard />}
-        {standalone && <ConflictsCard />}
-        <FolderSyncCard />
+      {/* Two packed stacks, not a two-column grid. CSS grid locks cards into
+          rows, so the short Appearance card sitting beside the tall AI
+          Provider left ~250px of dead space beneath it, and pushed Backup &
+          Restore into a row of its own with the entire right half empty.
+          Stacks just pack: each column is as tall as its own contents.
+
+          The split is by content width, not importance — sync, conflicts and
+          user management carry wide rows (repo URLs, device lists, diffs);
+          appearance, provider, backup and the profile list are all short
+          controls that read fine in a 490px column. */}
+      <div className="mt-8 grid grid-cols-1 xl:grid-cols-12 gap-6 sm:gap-8 items-start">
+        <div className="xl:col-span-7 space-y-6 sm:space-y-8 min-w-0">
+          <FolderSyncCard />
+          <SyncCard />
+          {standalone && <ConflictsCard />}
+          {isNative() && !standalone && <OfflineDownloadsCard />}
+          {!standalone && account?.role === 'admin' && <ManageUsersCard />}
+        </div>
+        <div className="xl:col-span-5 space-y-6 sm:space-y-8 min-w-0">
+          <AppearanceCard />
+          <LlmProviderCard />
+          <BackupCard />
+          {standalone && <AllProfilesCard />}
+        </div>
       </div>
       </div>
     </AppLayout>
