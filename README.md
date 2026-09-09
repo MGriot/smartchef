@@ -16,6 +16,9 @@
 - [MCP Server](#-mcp-server)
 - [API Routes](#-api-routes)
 - [Matrioska Engine](#-matrioska-engine)
+- [Bringing recipes in from elsewhere](#-bringing-recipes-in-from-elsewhere)
+- [Pantry — what can I cook right now?](#-pantry--what-can-i-cook-right-now)
+- [Sharing a recipe with someone who has no account](#-sharing-a-recipe-with-someone-who-has-no-account)
 - [Multi-device sync](#-multi-device-sync)
 - [Standalone Mode (Windows & Android, No Server)](#-standalone-mode-windows--android-no-server)
 - [Mobile App (Android) & Remote Access via Tailscale](#-mobile-app-android--remote-access-via-tailscale)
@@ -50,10 +53,18 @@ After ~30 seconds, open in your browser:
 
 | Service         | URL                          |
 |-----------------|-------------------------------|
-| **App (UI)**    | http://localhost:8080        |
+| **App (UI)**    | http://localhost:8888        |
 | **Backend API** | http://localhost:3000/health |
 | **MCP Server**  | http://localhost:3002/mcp    |
 | **Ollama AI**   | http://localhost:11434       |
+
+> The UI publishes **8888**, not the more obvious 8080. On Windows, WinNAT
+> reserves TCP port ranges dynamically and had taken `7981-8080`, so nothing
+> on the host — including WSL's port relay — could bind 8080 while the
+> container inside the VM served happily. That combination reads exactly
+> like a broken deploy. Check your own machine's reservations with
+> `netsh interface ipv4 show excludedportrange protocol=tcp`, and change the
+> port back in `docker/docker-compose.yml` if 8080 is free for you.
 
 ```bash
 # 5. Pull the LLM model (first run only — a few GB)
@@ -141,7 +152,7 @@ Expected response:
 ```
 
 Then in the browser:
-1. Go to **http://localhost:8080** (Docker) or **http://localhost:5173** (local)
+1. Go to **http://localhost:8888** (Docker) or **http://localhost:5173** (local)
 2. On first run, set up the instance name/password, then log in
 3. Click **Smart Import** in the sidebar
 4. Paste the URL of any recipe (e.g. from giallozafferano.it), or switch to raw text
@@ -171,7 +182,7 @@ This instance's first (admin) account:
 | Problem | Solution |
 |---|---|
 | Port 5432 already in use | `lsof -i :5432` and stop the local Postgres, or change the port in `docker/docker-compose.yml` |
-| Port 8080 already in use | Change `"8080:80"` to `"8081:80"` in `docker/docker-compose.yml` |
+| The UI port is already in use, or refuses connections | Change `"8888:80"` in `docker/docker-compose.yml` to any free port. If the container is running and healthy but the host still refuses the connection, check `netsh interface ipv4 show excludedportrange protocol=tcp` on Windows — WinNAT reserves ranges dynamically and nothing on the host can bind a port inside one |
 | Ollama slow on first run | Normal — the model is a few GB, wait for the download to finish |
 | Frontend can't reach the API | Locally, check that the proxy in `vite.config.ts` points at `http://localhost:3000` |
 | `pg_trgm` error | Run: `psql smartchef -c "CREATE EXTENSION pg_trgm;"` |
@@ -207,6 +218,8 @@ smartchef/
 │   │   │   ├── shopping.ts             # Shopping list generation + Markdown export
 │   │   │   ├── auth.ts                 # Login/setup, multi-user (admin-invited), LLM provider config (session JWT cookie)
 │   │   │   ├── share.ts                # Export/import a recipe or collection as a portable file
+│   │   │   ├── publicShare.ts          # Public share links: an authenticated owner half, plus the app's only unauthenticated router
+│   │   │   ├── pantry.ts               # Pantry CRUD (per account)
 │   │   │   ├── sync-folder.ts          # Multi-device sync via a shared folder + native offline snapshot pull
 │   │   │   ├── backup.ts               # Manual whole-library backup export/import
 │   │   │   ├── cook-log.ts             # Cook-history calendar (GET /cook-log?from=&to=)
@@ -221,6 +234,7 @@ smartchef/
 │   │   │   ├── ingredient.matcher.ts   # Fuzzy match LLM output → DB (Levenshtein), auto-creates missing ones
 │   │   │   ├── tags.service.ts         # Ingredient-driven auto-tagging
 │   │   │   ├── nutrition.service.ts    # Per-serving nutrition calculation
+│   │   │   ├── pantry.service.ts       # Pantry rows + "what can I cook?" matching
 │   │   │   ├── folder-sync.service.ts  # Whole-library snapshot export/merge (multi-device sync + backups)
 │   │   │   ├── device-identity.service.ts
 │   │   │   └── crdt/vector-clock.ts    # Legacy — not wired into any write path, kept for the old sync.ts routes
@@ -241,13 +255,26 @@ smartchef/
     │   │   ├── RecipeImport.tsx         # AI import wizard (URL / raw text / portable-file import)
     │   │   ├── LibraryIngredients.tsx   # Ingredients + categories + translations
     │   │   ├── LibraryTools.tsx / LibraryUnits.tsx / LibraryTechniques.tsx / LibraryTags.tsx
-    │   │   ├── Planner.tsx              # Weekly meal planner
+    │   │   ├── Planner.tsx              # Weekly meal planner (drag-and-drop, @dnd-kit)
+    │   │   ├── Pantry.tsx               # What's in the house + "what can I cook right now?"
+    │   │   ├── Atlas.tsx                # Recipes on a world map, by region
     │   │   ├── ShoppingList.tsx         # Shopping list
     │   │   ├── CollectionDetail.tsx     # Recipe collection view
     │   │   ├── CookHistory.tsx          # Cook-history month calendar
     │   │   ├── Login.tsx / Account.tsx  # Auth + account settings (avatar presets, LLM provider), Backup & Restore, Multi-Device Sync
     │   │   ├── ManageUsers.tsx          # Admin-only: invite/list/remove instance users
     │   │   └── ServerConnect.tsx        # Native-app-only: connect to a remote SmartChef server
+    │   ├── lib/unitConvert.ts            # Display-only unit/temperature/tin-size conversion — never written back
+    │   ├── lib/cookTimers.ts             # Step timers, module-level so leaving cook mode doesn't cancel the roast
+    │   ├── lib/zipReader.ts              # Minimal zip/gzip reader for migration archives (DecompressionStream)
+    │   ├── hooks/useWakeLock.ts          # Keeps the screen awake in cook mode, re-acquired on visibilitychange
+    │   ├── services/recipeStructuredData.ts  # schema.org JSON-LD / microdata recipe extraction, tried before any LLM
+    │   ├── services/pageFetcher.ts       # Fetches a page's HTML via the backend or the native bridge
+    │   ├── services/migration/           # Paprika/Mealie/Crouton/Mela/Nextcloud/CopyMeThat importers, PDF text and on-device OCR
+    │   ├── services/pantry.local.ts      # Standalone pantry + filter-by-pantry
+    │   ├── components/Modal.tsx          # Shared dialog shell — pinned header/footer, one scrolling body, Escape stack, scroll lock
+    │   ├── components/Form.tsx           # Field/section/translation-row primitives the dialogs are built from
+    │   ├── fonts/                        # Generated Material Symbols subset (see scripts/subset-material-symbols.py)
     │   ├── lib/api.ts                   # apiFetch — same-origin on web, absolute+cookie'd on native, offline fallback/outbox, routes to standalone mode's local router when active
     │   ├── lib/offlineStore.ts          # Native SQLite cache + write outbox (server-mode Android's offline read cache)
     │   ├── lib/countries.ts             # Country code → centroid lat/lng for the region map
@@ -259,8 +286,10 @@ smartchef/
     │   ├── services/*.local.ts          # Standalone-mode ports of the backend routes (recipes, ingredients/units/tools, backup import) — called directly, no HTTP layer
     │   ├── services/localRouter.ts      # Dispatches apiFetch calls to the *.local.ts services when standalone mode is active
     │   ├── components/AppLayout.tsx     # Shared header + sidebar navigation
-    │   ├── components/RegionPicker.tsx / RegionsMap.tsx  # Recipe geolocation chip picker + Leaflet map
+    │   ├── components/RegionPicker.tsx   # Recipe geolocation chip picker
+    │   ├── components/RegionsMap.tsx / AtlasMap.tsx  # Lazy shells; the Leaflet map and its 739 KB of country boundaries live in the *View.tsx files behind them
     │   └── store/app.store.ts           # Global state (Zustand)
+    ├── scripts/subset-material-symbols.py  # Cuts the 3.9 MB icon font down to the ~350 icons the app names (run by `prebuild`)
     ├── android/                         # Capacitor Android project (native wrapper, see below)
     ├── electron/                        # Capacitor Electron project — the Windows desktop app (standalone mode section below)
     ├── nginx.conf                       # SPA routing + API proxy
@@ -302,14 +331,16 @@ All routes below live under `/api` and (aside from `/api/auth/*`) require an aut
 | Base path | Covers |
 |-----------|--------|
 | `/api/auth` | First-run setup, username/password login, logout, account settings (incl. LLM provider config), admin-only user management (`/users`) |
-| `/api/recipes` | CRUD, `?q=&tag=&tags=&ingredientCategories=&regions=&difficulty=&sort=&seasonalOnly=&seasonalMonth=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/:id/translate/:lang` (AI translation), `/:id/collections`, `/parse` (AI import), `/filter-by-pantry` (reserved stub for a future pantry/inventory app — returns 501) |
+| `/api/recipes` | CRUD, `?q=&tag=&tags=&ingredientCategories=&regions=&difficulty=&sort=&seasonalOnly=&seasonalMonth=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/:id/translate/:lang` (AI translation), `/:id/collections`, `/parse` (AI import), `/filter-by-pantry` (which recipes the pantry can cover, resolved through nested sub-recipes) |
 | `/api/ingredients` | Ingredients (incl. `seasonalMonths`), `/categories`, nested `/api/units`, `/api/tools` |
 | `/api/techniques` | Cooking techniques library |
 | `/api/tags` | Managed tag catalog |
 | `/api/collections` | Freeform recipe collections |
 | `/api/menus` | Weekly meal planner |
 | `/api/shopping` | Shopping list generation, item check-off, Markdown export |
-| `/api/share` | Export/import a recipe, bulk recipes, or a collection as a portable `.smartchef.json` file |
+| `/api/pantry` | What's in the cupboard: list, upsert by ingredient, remove |
+| `/api/share` | Export/import a recipe, bulk recipes, or a collection as a portable `.smartchef.json` file; `/links/:recipeId` creates, reads and revokes a public share link |
+| `/api/public` | **The only unauthenticated read path.** `/recipes/:token` returns an allowlisted projection of one shared recipe; `/r/:token` is a server-rendered HTML page, so a link pasted into a chat gets a real preview |
 | `/api/sync-folder` | Multi-device sync status/trigger + native app's offline-cache snapshot pull |
 | `/api/backup` | Manual whole-library backup export/import |
 | `/api/cook-log` | Cook-history calendar (`GET ?from=&to=`), backing the "I cooked this" log |
@@ -339,6 +370,78 @@ GET /api/recipes/:id/portions?servings=10
 
 ---
 
+## 📥 Bringing recipes in from elsewhere
+
+The Import screen has four ways in, and they are tried in order of how much
+they can be trusted.
+
+**A URL.** Most recipe sites publish their recipe as schema.org JSON-LD or
+microdata, which is the actual structured data behind the page — exact
+quantities, units, yields and ISO-8601 times. SmartChef reads that first and
+only falls back to the LLM when a page has neither. That is not a small
+difference: the LLM path truncates the page to fit a context window and
+spends minutes of CPU inference, where the structured path is a parse.
+
+**A file exported from another app.** Paprika (`.paprikarecipes`), Mealie,
+Crouton, Mela, Nextcloud Cookbook and CopyMeThat, plus bare schema.org JSON.
+Zip and gzip archives are unpacked in the browser. Imports go through the
+same fuzzy ingredient matcher the AI path uses, so "400g San Marzano
+tomatoes" resolves to the tomato already in your library rather than minting
+a duplicate.
+
+**A PDF.** Text is extracted directly when the file has a text layer.
+
+**A photo.** OCR runs on your own device via Tesseract — no image is
+uploaded anywhere. The language model for a language is downloaded once
+(~12 MB) and cached, so the first photo needs a connection and none after it
+do. Printed pages photographed straight-on read well; handwriting is
+genuinely hit and miss, which is why extracted text lands in the review box
+rather than importing straight off.
+
+---
+
+## 🥫 Pantry — what can I cook right now?
+
+Record what's in the house (Pantry tab), then ask what it lets you cook.
+
+An entry with no quantity means "I have some" and satisfies any amount —
+being made to weigh the flour before the app will accept it is exactly the
+friction that stops anyone keeping a pantry current. Optional ingredients
+never count against a recipe, and an amount that can't be compared (a pinch,
+a different kind of unit) is assumed to be fine rather than hiding the
+recipe.
+
+The match resolves **through the Matrioska engine**, so a dish whose sauce is
+itself a recipe is judged on the sauce's ingredients too — the one thing
+none of the comparable apps can do, since none of them have nested recipes.
+Loosen the filter to see near-misses and what's short.
+
+---
+
+## 🔗 Sharing a recipe with someone who has no account
+
+Server mode only, and deliberately: a public URL needs a server that is
+running and reachable, which is the one thing standalone mode is defined by
+not having. The offline builds say so and offer the file export instead.
+
+From a recipe page, **Share → Create public link** mints a token and gives
+you a URL. Opening it needs no account. What the visitor gets is an
+allowlist built field by field — not the internal recipe minus a few keys,
+which silently publishes every column added later. Creator, ratings and cook
+log are not included, and internal step references are stripped rather than
+leaking ids.
+
+The token is the credential, so it is 32 bytes of crypto-quality randomness
+and never derived from the recipe id — a guessable token would make every
+recipe public at once. Links can carry an expiry or run until revoked, and
+revoking deletes the link rather than touching the recipe.
+
+`/api/public/r/:token` is a real server-rendered HTML page rather than JSON,
+because a link pasted into a chat gets previewed by fetching it as a
+document: JSON yields no title, image or description.
+
+---
+
 ## 🔄 Multi-device sync
 
 Two independent mechanisms exist — worth being precise about which one actually does what:
@@ -360,6 +463,13 @@ Everything above assumes a running Docker/Postgres backend. SmartChef also runs 
 ### Building the apps
 
 Both are built from the same `frontend/` React codebase via [Capacitor](https://capacitorjs.com); there's no hosted download, so build (or re-build) them yourself:
+
+> **Build prerequisite:** `npm run build` regenerates the Material Symbols
+> icon subset first (`prebuild` → `scripts/subset-material-symbols.py`),
+> which needs Python with `fonttools` installed. Without them the build
+> prints a warning and uses the committed `frontend/src/fonts/` copy, which
+> is correct for the icons in the repo today — you only need Python if you
+> have added new icon names to the source.
 
 **Windows** (`frontend/electron/`, an Electron wrapper):
 ```bash
@@ -394,7 +504,7 @@ Standalone mode isn't limited to one name per device. **Profiles** (who's curren
 
 If you already run the server-mode Docker stack with a real library built up, you don't have to re-create it by hand on a new standalone device:
 
-1. On the **server-mode** instance (the one with your data, e.g. `http://localhost:8080`), go to **Account → Backup & Restore → Export Backup**. This downloads one JSON file containing your whole library — recipes, ingredients, tools, tags, ingredient categories, and cooking techniques, with all translations.
+1. On the **server-mode** instance (the one with your data, e.g. `http://localhost:8888`), go to **Account → Backup & Restore → Export Backup**. This downloads one JSON file containing your whole library — recipes, ingredients, tools, tags, ingredient categories, and cooking techniques, with all translations.
 2. On the **new standalone device** (Windows or Android), finish the offline first-run setup, then go to **Account → Backup & Restore → Restore from Backup** and pick that same JSON file.
 
 Restoring is additive, not destructive, and safe to run more than once: every item is matched by its original id, so anything already present locally is left untouched rather than duplicated or overwritten — importing the same backup twice, or two backups that partially overlap, is a harmless no-op for whatever's already there.
@@ -430,7 +540,7 @@ SmartChef is already an installable PWA, but for a native Android app with a rea
 ### 2. Expose the app over HTTPS
 
 ```bash
-tailscale serve --bg --https=443 http://127.0.0.1:8080
+tailscale serve --bg --https=443 http://127.0.0.1:8888
 ```
 
 Makes the app reachable at `https://<machine-name>.<your-tailnet>.ts.net` with a real certificate (Let's Encrypt, auto-renewed by Tailscale) — no need to configure Caddy/nginx for certs. Verify with `tailscale serve status` and `tailscale status` (shows the exact machine name and whether the phone is already connected to the same tailnet).
@@ -498,6 +608,14 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Nutrition | Per-serving calculation from ingredient nutrition data, resolved through nested sub-recipes | ✅ Complete |
 | Collections & Meal Planner & Shopping List | Freeform recipe collections; weekly planner; shopping list from a saved menu or an ad-hoc cart, aggregated or grouped view, Markdown export | ✅ Complete |
 | AI recipe import | Real Ollama-backed parsing (URL/raw text) with fuzzy ingredient/tool matching, source-language detection, progress feedback, fills every recipe field (ingredient groups, step techniques, storage instructions, tips included); portable-file import/export for sharing between instances | ✅ Complete |
+| Structured-data URL import | schema.org JSON-LD and microdata parsed before the LLM is ever called — exact quantities, units, yields and ISO-8601 times instead of a page truncated to fit a context window. Falls back to the LLM only when a page publishes neither | ✅ Complete |
+| Migration importers | Paprika (`.paprikarecipes`), Mealie, Crouton, Mela, Nextcloud Cookbook, CopyMeThat and bare schema.org JSON; zip/gzip unpacked in the browser via `DecompressionStream`. Imports run through the existing fuzzy matcher rather than trusting foreign ids, so they can't mint duplicate ingredients | ✅ Complete |
+| PDF & photo/OCR import | Text extracted directly from a PDF's text layer; photos read on-device with Tesseract (nothing uploaded — the language model downloads once, ~12 MB, then works offline). Extracted text lands in the review box rather than importing straight off | ✅ Complete |
+| Cook mode, timers & wake lock | Full-screen kitchen mode, including a variant that interleaves a sub-recipe's steps with the main recipe's; step timers held in a module-level store so leaving the screen doesn't cancel the roast; screen kept awake, re-acquired after the app is backgrounded | ✅ Complete |
+| Unit / temperature / tin-size converter | Metric ⇄ imperial, affine temperature, area-based tin scaling. Display-only and never written back, so a converted view can't corrupt the recipe | ✅ Complete |
+| Pantry & "what can I cook?" | Per-account pantry; matching resolves through nested sub-recipes, so a dish whose sauce is itself a recipe is judged on the sauce's ingredients too. A quantity-less entry means "I have some", optional ingredients never count against a recipe, and an incomparable amount is assumed fine rather than hiding the recipe | ✅ Complete |
+| Public share links | Server mode only. A revocable, optionally-expiring token (32 random bytes, never derived from the recipe id) exposes one recipe through an allowlisted projection, plus a server-rendered HTML page so a pasted link previews properly in a chat | ✅ Complete |
+| Drag-and-drop planner | Week grid on `@dnd-kit`; the dead, deprecated `react-beautiful-dnd` dependency was removed rather than replaced with its fork | ✅ Complete |
 | Auth | Username/password login, admin-invited multi-user accounts (recipes stay a shared household cookbook — accounts drive attribution + private shopping list/planner/collections, not access control), session JWT cookie | ✅ Complete |
 | Cloud LLM providers | Optional Anthropic/Gemini/OpenAI for recipe-import parsing and AI translation, per-instance encrypted API keys (Account page); local Ollama stays the default | ✅ Complete |
 | AI recipe translation | One-click translate a recipe's title/description/steps/ingredient notes into another language via whichever LLM provider is configured | ✅ Complete |
@@ -512,6 +630,8 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Native Android app | Capacitor wrapper, Tailscale-based remote HTTPS access, offline read cache + write outbox, native back-gesture handling | ✅ Complete |
 | Multi-device sync & backup | Folder-based whole-library snapshot sync (peer status + manual trigger on the Account page) and manual backup export/restore, both LWW-merged by `updated_at` | ✅ Complete |
 | Standalone mode (no server) | Local SQLite datastore ported from the server routes (`frontend/src/db/local.ts` + `services/*.local.ts`), first-run "use offline on this device" flow, no password | ✅ Complete |
+| Startup & download weight | Route-level code splitting (main bundle 1939 KB → 476 KB); the 925 KB world-boundary chunk moved behind a lazy map shell so it is no longer reachable from a recipe page; the Material Symbols font subset from 3868 KB to 240 KB by build script, since it ships all ~4,300 icons at `font-display: block` and the app names about 350; the PWA precache trimmed 6797 KB → 2107 KB by fetching the OCR core, pdf.js, the world map and the git transport on demand and runtime-caching them instead | ✅ Complete |
+| Standalone read-path query counts | `getRecipe()` resolved translations per row — three queries per ingredient, two per step — and now batches them: ~110 reads → 11 for a 20-ingredient recipe. `filterByPantry()` resolves the whole library from two preloaded queries instead of walking each recipe's sub-recipe tree. `exportSnapshot()` is 19 reads flat. Each has a test asserting the count does not grow with the input, which is what actually holds the line | ✅ Complete |
 | Standalone gallery list performance | Batches tag lookups for the whole recipe list into 2 queries total instead of one query pair per tag per recipe (`services/recipes.local.ts`'s `buildTagsDisplayBatch()`) — the old per-tag loop meant every gallery load paid `recipes × tags` sequential round-trips through `@capacitor-community/sqlite`'s native plugin bridge, visibly slow on Android as the library grew | ✅ Complete |
 | Local git object packing (Folder Sync) | Packs+prunes loose Hidden Clone objects into one local packfile after each sync cycle's push confirms them durably on the remote (`lib/sync/gitPacking.ts`), instead of leaving thousands of tiny loose files behind forever — isomorphic-git reads packed objects transparently, so local `commit`/`merge`/`checkout` get faster as the library grows without any other call site changing; see `docs/plans/2026-08-22-android-performance-plan.md` for the full safety argument and its one documented tradeoff | ✅ Complete |
 | Household Profiles | More than one named profile per shared standalone library (`profiles` table, synced like any other entity); "who's cooking?" picker on a device with no active profile yet, joining an existing Sync Folder offers its existing profiles instead of forcing a new one, Account → Switch Profile to change who a shared device is using without touching local data | ✅ Complete |
