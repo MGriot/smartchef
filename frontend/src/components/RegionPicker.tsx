@@ -76,7 +76,7 @@ export default function RegionPicker({ value, onChange, coords = {}, onCoordsCha
             <span
               key={v}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold ${
-                known ? 'bg-primary/10 text-primary' : 'bg-zinc-100 text-zinc-500 border border-dashed border-zinc-300'
+                known ? 'bg-primary/10 text-primary' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-dashed border-zinc-300 dark:border-zinc-600'
               }`}
             >
               {known && <span>{flagEmoji(v)}</span>}
@@ -102,16 +102,16 @@ export default function RegionPicker({ value, onChange, coords = {}, onCoordsCha
             }
           }}
           placeholder={t('recipeDetail.regionSearchPlaceholder')}
-          className="w-full border-none bg-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+          className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
         />
         {query.trim() && (
-          <div className="absolute z-10 mt-1 w-full bg-white rounded-xl shadow-lg border border-zinc-100 max-h-48 overflow-y-auto">
+          <div className="absolute z-10 mt-1 w-full bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-100 dark:border-zinc-800 max-h-48 overflow-y-auto">
             {suggestions.map((s) => (
               <button
                 key={s.code}
                 type="button"
                 onClick={() => addCountry(s.code)}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-50 flex items-center gap-2"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-900 flex items-center gap-2"
               >
                 <span>{flagEmoji(s.code)}</span>
                 {s.name}
@@ -120,7 +120,7 @@ export default function RegionPicker({ value, onChange, coords = {}, onCoordsCha
             <button
               type="button"
               onClick={addCustom}
-              className="w-full text-left px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-50 border-t border-zinc-100"
+              className="w-full text-left px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800"
             >
               {t('recipeDetail.addCustomRegion', { text: query.trim() })}
             </button>

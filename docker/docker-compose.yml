@@ -107,7 +107,16 @@ services:
     container_name: smartchef_frontend
     restart: unless-stopped
     ports:
-      - "8080:80"
+      # 8888, not the more obvious 8080: Windows/WinNAT reserves TCP port
+      # ranges dynamically, and on this host 7981-8080 (plus 8081-8180,
+      # 8181-8280, 8281-8380 and 8407-8506) are excluded, so nothing on the
+      # host — including WSL's port relay — can bind 8080. The container
+      # served fine inside the VM the whole time; only the host side was
+      # dead, which reads exactly like a broken deploy. Check the current
+      # reservations with:
+      #   netsh interface ipv4 show excludedportrange protocol=tcp
+      # `tailscale serve` must point at the same port — see docker/.env.
+      - "8888:80"
     depends_on:
       - backend
 

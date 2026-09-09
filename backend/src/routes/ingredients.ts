@@ -1,11 +1,22 @@
 import { Router, Request, Response } from "express";
-import { query, queryOne } from "../db/pool";
+import { query, queryOne, withTransaction } from "../db/pool";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 
 export const ingredientsRouter = Router();
 export const unitsRouter = Router();
 export const toolsRouter = Router();
+
+/** Result cap applied ONLY to the `q` search path, where the caller wants a
+ *  short pick-list rather than the whole library. The unfiltered path is
+ *  deliberately uncapped: its callers fetch the full list once and group or
+ *  match against it entirely client-side, so a cap there doesn't paginate,
+ *  it silently deletes ingredients from the UI — a shared `LIMIT 200` here
+ *  hid the whole last-sorting category once the library passed 200 rows.
+ *  Kept in sync with the same constant in
+ *  frontend/src/services/ingredients.local.ts (standalone mode's
+ *  independent port of this route). */
+const SEARCH_RESULT_LIMIT = 200;
 
 // GET /ingredients
 ingredientsRouter.get("/", async (req: Request, res: Response) => {
@@ -16,8 +27,10 @@ ingredientsRouter.get("/", async (req: Request, res: Response) => {
 
   const rows = await query(
     `SELECT i.*, ic.name AS category_name, ic.icon AS category_icon, ic.color AS category_color,
+            p.name AS parent_name,
             ${lang ? "COALESCE(ict.name, ic.name)" : "ic.name"} AS translated_category_name,
             ${lang ? "it_lang.translated_name" : "NULL"} AS translated_name,
+            ${lang ? "it_lang.plural_translation" : "NULL"} AS translated_plural_name,
             COALESCE(
               (SELECT json_agg(json_build_object('lang', t.language_code, 'text', t.translated_name))
                FROM ingredient_translations t WHERE t.ingredient_id = i.id),
@@ -31,18 +44,19 @@ ingredientsRouter.get("/", async (req: Request, res: Response) => {
                ))
                FROM ingredient_tags igt
                JOIN tags tg ON tg.id = igt.tag_id
-               ${lang ? "LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND tgt.language_code = $1" : ""}
+               ${lang ? "LEFT JOIN tag_translations tgt ON tgt.tag_id = tg.id AND LOWER(tgt.language_code) = LOWER($1)" : ""}
                WHERE igt.ingredient_id = i.id),
               '[]'::json
             ) AS tags
      FROM ingredients i
      LEFT JOIN ingredient_categories ic ON ic.id = i.category_id
-     ${lang ? `LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND it_lang.language_code = $1` : ""}
-     ${lang ? `LEFT JOIN ingredient_category_translations ict ON ict.category_id = i.category_id AND ict.language_code = $1` : ""}
+     LEFT JOIN ingredients p ON p.id = i.parent_ingredient_id
+     ${lang ? `LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND LOWER(it_lang.language_code) = LOWER($1)` : ""}
+     ${lang ? `LEFT JOIN ingredient_category_translations ict ON ict.category_id = i.category_id AND LOWER(ict.language_code) = LOWER($1)` : ""}
      WHERE i.sync_status != 'deleted'
-       ${q ? `AND i.name ILIKE $${params.length}` : ""}
+       ${q ? `AND (i.name ILIKE $${params.length} OR EXISTS (SELECT 1 FROM unnest(i.synonyms) syn WHERE syn ILIKE $${params.length}))` : ""}
      ORDER BY COALESCE(ic.name, 'Uncategorized'), i.name
-     LIMIT 200`,
+     ${q ? `LIMIT ${SEARCH_RESULT_LIMIT}` : ""}`,
     params
   );
   res.json({ data: rows });
@@ -59,7 +73,7 @@ ingredientsRouter.get("/categories", async (req: Request, res: Response) => {
               '[]'::json
             ) AS translations
      FROM ingredient_categories c
-     ${lang ? "LEFT JOIN ingredient_category_translations ct ON ct.category_id = c.id AND ct.language_code = $1" : ""}
+     ${lang ? "LEFT JOIN ingredient_category_translations ct ON ct.category_id = c.id AND LOWER(ct.language_code) = LOWER($1)" : ""}
      WHERE c.deleted_at IS NULL
      ORDER BY c.sort_order, c.name`,
     lang ? [lang] : []
@@ -105,6 +119,25 @@ ingredientsRouter.post("/categories", async (req: Request, res: Response) => {
   res.json({ data: { id } });
 });
 
+// PUT /ingredients/categories/reorder — the aisle order.
+//
+// Takes the whole ordered list of ids rather than one category's new
+// position: the shopping list groups by category and walks them in
+// sort_order, so the meaningful unit of change is the sequence itself, and
+// sending it whole makes the write idempotent and free of the gaps and ties
+// that per-item nudges accumulate.
+ingredientsRouter.put("/categories/reorder", async (req: Request, res: Response) => {
+  const parsed = z.object({ ids: z.array(z.string().uuid()).min(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  await Promise.all(
+    parsed.data.ids.map((id, index) =>
+      query("UPDATE ingredient_categories SET sort_order=$1, updated_at=now() WHERE id=$2", [index, id])
+    )
+  );
+  res.json({ success: true });
+});
+
 ingredientsRouter.put("/categories/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
   const parsed = CategorySchema.safeParse(req.body);
@@ -135,7 +168,7 @@ unitsRouter.get("/", async (req: Request, res: Response) => {
               '[]'::json
             ) AS translations
      FROM units u
-     ${lang ? "LEFT JOIN unit_translations ut ON ut.unit_id = u.id AND ut.language_code = $1" : ""}
+     ${lang ? "LEFT JOIN unit_translations ut ON ut.unit_id = u.id AND LOWER(ut.language_code) = LOWER($1)" : ""}
      ORDER BY u.unit_type, u.name`,
     lang ? [lang] : []
   );
@@ -144,7 +177,10 @@ unitsRouter.get("/", async (req: Request, res: Response) => {
 
 // GET /tools
 toolsRouter.get("/", async (req: Request, res: Response) => {
-  const { lang } = req.query;
+  const { lang, q } = req.query;
+  const params: unknown[] = [];
+  if (lang) params.push(lang);
+  if (q) params.push(`%${q}%`);
   const rows = await query(
     `SELECT t.*, ${lang ? "tt.name" : "NULL"} AS translated_name,
             COALESCE(
@@ -153,10 +189,11 @@ toolsRouter.get("/", async (req: Request, res: Response) => {
               '[]'::json
             ) AS translations
      FROM tools t
-     ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND tt.language_code = $1" : ""}
+     ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND LOWER(tt.language_code) = LOWER($1)" : ""}
      WHERE t.deleted_at IS NULL
+       ${q ? `AND (t.name ILIKE $${params.length} OR EXISTS (SELECT 1 FROM unnest(t.synonyms) syn WHERE syn ILIKE $${params.length}))` : ""}
      ORDER BY t.category, t.name`,
-    lang ? [lang] : []
+    params
   );
   res.json({ data: rows });
 });
@@ -182,12 +219,33 @@ const IngredientSchema = z.object({
   categoryId: z.string().uuid(),
   description: z.string().optional().nullable(),
   icon: z.string().optional().nullable(),
-  imageUrls: z.array(z.string().url()).optional(),
+  // Not .url() — POST /api/uploads intentionally returns a same-origin
+  // relative path (/uploads/<file>.webp, see uploads.ts), which a strict
+  // WHATWG URL parse rejects (no scheme). recipes.ts's own image fields
+  // (coverImageUrl, step imageUrl) never had this restriction, which is
+  // why an uploaded recipe cover works but an uploaded ingredient photo
+  // used to fail validation and silently never save.
+  imageUrls: z.array(z.string()).optional(),
   tagIds: z.array(z.string().uuid()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
-    text: z.string()
+    text: z.string(),
+    // Per-language plural — see db/migrations/038_ingredient_plural.sql.
+    // Optional; blank falls back to the singular translated_name everywhere.
+    pluralText: z.string().optional().nullable(),
   })).optional(),
+  // Canonical-English plural ("apples" for "apple") — see
+  // db/migrations/038_ingredient_plural.sql. Optional; blank falls back to
+  // `name` everywhere.
+  pluralName: z.string().optional().nullable(),
+  // Month numbers (1-12, Northern hemisphere) this ingredient is in season
+  // for. Empty/omitted = no seasonality data, not "year-round" — see
+  // db/migrations/034_ingredient_seasonality.sql.
+  seasonalMonths: z.array(z.number().int().min(1).max(12)).optional(),
+  // Alternate names, search-only — see db/migrations/035_synonyms.sql.
+  synonyms: z.array(z.string()).optional(),
+  // "This is a variety of" — see db/migrations/036_ingredient_parent.sql.
+  parentIngredientId: z.string().uuid().optional().nullable(),
   ...NutritionFieldsSchema,
 });
 
@@ -210,18 +268,20 @@ ingredientsRouter.post("/", async (req: Request, res: Response) => {
   const id = d.id ?? uuidv4();
   await query(
     `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
-       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months,
+       synonyms, parent_ingredient_id, plural_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
-     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null]
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
+     d.synonyms ?? [], d.parentIngredientId ?? null, d.pluralName || null]
   );
 
   if (d.translations && d.translations.length > 0) {
     for (const t of d.translations) {
       await query(
-        `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-        [id, t.lang, t.text]
+        `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name, plural_translation) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+        [id, t.lang, t.text, t.pluralText || null]
       );
     }
   }
@@ -236,14 +296,30 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   const d = parsed.data;
+
+  // Same self/ancestor-cycle guard as ingredients.local.ts's updateIngredient().
+  let parentIngredientId = d.parentIngredientId ?? null;
+  if (parentIngredientId) {
+    let cursor: string | null = parentIngredientId;
+    const seen = new Set<string>();
+    while (cursor) {
+      if (cursor === id) { parentIngredientId = null; break; }
+      if (seen.has(cursor)) break;
+      seen.add(cursor);
+      const ancestorRow: { parent_ingredient_id: string | null } | null = await queryOne("SELECT parent_ingredient_id FROM ingredients WHERE id=$1", [cursor]);
+      cursor = ancestorRow?.parent_ingredient_id ?? null;
+    }
+  }
+
   await query(
     `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,
        calories_kcal=$6, protein_g=$7, carbs_g=$8, fat_g=$9, fiber_g=$10, sugar_g=$11, sodium_mg=$12,
-       updated_at=now()
-     WHERE id=$13`,
+       seasonal_months=$13, synonyms=$14, parent_ingredient_id=$15, plural_name=$16, updated_at=now()
+     WHERE id=$17`,
     [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
-     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, id]
+     d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
+     d.synonyms ?? [], parentIngredientId, d.pluralName || null, id]
   );
 
   if (d.translations) {
@@ -251,8 +327,8 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
     for (const t of d.translations) {
       if (t.lang && t.text) {
         await query(
-          `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name) VALUES ($1, $2, $3)`,
-          [id, t.lang, t.text]
+          `INSERT INTO ingredient_translations (ingredient_id, language_code, translated_name, plural_translation) VALUES ($1, $2, $3, $4)`,
+          [id, t.lang, t.text, t.pluralText || null]
         );
       }
     }
@@ -268,6 +344,45 @@ ingredientsRouter.delete("/:id", async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+const MergeIngredientsSchema = z.object({ targetId: z.string().uuid() });
+
+// Folds a mistakenly-duplicated ingredient into another one — every recipe,
+// shopping-list item, and per-ingredient unit conversion that referenced
+// the source is repointed to the target instead (so nothing downstream is
+// affected, it just correctly points at one ingredient going forward), and
+// the source is tombstoned. Mirrors frontend/src/services/ingredients.local.ts's
+// mergeIngredients() for standalone mode.
+ingredientsRouter.post("/:id/merge", async (req: Request, res: Response) => {
+  const { id: sourceId } = req.params;
+  const parsed = MergeIngredientsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const { targetId } = parsed.data;
+  if (sourceId === targetId) return res.status(400).json({ error: "Cannot merge an ingredient into itself" });
+
+  const recipesUpdated = await withTransaction(async (client) => {
+    const affected = await client.query(
+      "SELECT DISTINCT recipe_id FROM recipe_ingredients WHERE ingredient_id=$1",
+      [sourceId]
+    );
+    await client.query("UPDATE recipe_ingredients SET ingredient_id=$1 WHERE ingredient_id=$2", [targetId, sourceId]);
+    await client.query("UPDATE shopping_list_items SET ingredient_id=$1 WHERE ingredient_id=$2", [targetId, sourceId]);
+    await client.query(
+      "UPDATE unit_conversions SET ingredient_id=$1 WHERE ingredient_id=$2 AND NOT EXISTS (SELECT 1 FROM unit_conversions WHERE ingredient_id=$1 AND from_unit_id=unit_conversions.from_unit_id AND to_unit_id=unit_conversions.to_unit_id)",
+      [targetId, sourceId]
+    );
+    await client.query("DELETE FROM unit_conversions WHERE ingredient_id=$1", [sourceId]);
+    await client.query(
+      "INSERT INTO ingredient_tags (ingredient_id, tag_id) SELECT $1, tag_id FROM ingredient_tags WHERE ingredient_id=$2 ON CONFLICT DO NOTHING",
+      [targetId, sourceId]
+    );
+    await client.query("DELETE FROM ingredient_tags WHERE ingredient_id=$1", [sourceId]);
+    await client.query("UPDATE ingredients SET sync_status='deleted', updated_at=now() WHERE id=$1", [sourceId]);
+    return affected.rows.length;
+  });
+
+  res.json({ data: { recipesUpdated } });
+});
+
 // ── Tools Mutazioni ────────────────────────────────────────────────────
 
 const ToolSchema = z.object({
@@ -275,7 +390,8 @@ const ToolSchema = z.object({
   category: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
   icon: z.string().optional().nullable(),
-  imageUrls: z.array(z.string().url()).optional(),
+  imageUrls: z.array(z.string()).optional(), // not .url() — see IngredientSchema's imageUrls comment above
+  synonyms: z.array(z.string()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
     name: z.string().optional().nullable(),
@@ -302,8 +418,8 @@ toolsRouter.post("/", async (req: Request, res: Response) => {
   const d = parsed.data;
   const id = uuidv4();
   await query(
-    "INSERT INTO tools (id, name, category, description, icon, image_urls) VALUES ($1, $2, $3, $4, $5, $6)",
-    [id, d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || []]
+    "INSERT INTO tools (id, name, category, description, icon, image_urls, synonyms) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    [id, d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? []]
   );
   await upsertToolTranslations(id, d.translations);
   res.json({ data: { id } });
@@ -316,8 +432,8 @@ toolsRouter.put("/:id", async (req: Request, res: Response) => {
 
   const d = parsed.data;
   await query(
-    "UPDATE tools SET name=$1, category=$2, description=$3, icon=$4, image_urls=$5 WHERE id=$6",
-    [d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || [], id]
+    "UPDATE tools SET name=$1, category=$2, description=$3, icon=$4, image_urls=$5, synonyms=$6 WHERE id=$7",
+    [d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? [], id]
   );
   await upsertToolTranslations(id, d.translations);
   res.json({ success: true });

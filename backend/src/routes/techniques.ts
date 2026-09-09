@@ -12,7 +12,10 @@ export const techniquesRouter = Router();
 
 // GET /techniques
 techniquesRouter.get("/", async (req: Request, res: Response) => {
-  const { lang } = req.query;
+  const { lang, q } = req.query;
+  const params: unknown[] = [];
+  if (lang) params.push(lang);
+  if (q) params.push(`%${q}%`);
   const rows = await query(
     `SELECT t.*, ${lang ? "tt.name" : "NULL"} AS translated_name,
             COALESCE(
@@ -21,10 +24,11 @@ techniquesRouter.get("/", async (req: Request, res: Response) => {
               '[]'::json
             ) AS translations
      FROM techniques t
-     ${lang ? "LEFT JOIN technique_translations tt ON tt.technique_id = t.id AND tt.language_code = $1" : ""}
+     ${lang ? "LEFT JOIN technique_translations tt ON tt.technique_id = t.id AND LOWER(tt.language_code) = LOWER($1)" : ""}
      WHERE t.deleted_at IS NULL
+       ${q ? `AND (t.name ILIKE $${params.length} OR EXISTS (SELECT 1 FROM unnest(t.synonyms) syn WHERE syn ILIKE $${params.length}))` : ""}
      ORDER BY t.name`,
-    lang ? [lang] : []
+    params
   );
   res.json({ data: rows });
 });
@@ -34,6 +38,7 @@ const TechniqueSchema = z.object({
   description: z.string().optional().nullable(),
   icon: z.string().optional().nullable(),
   imageUrls: z.array(z.string().url()).optional(),
+  synonyms: z.array(z.string()).optional(),
   translations: z.array(z.object({
     lang: z.string(),
     name: z.string().optional().nullable(),
@@ -60,8 +65,8 @@ techniquesRouter.post("/", async (req: Request, res: Response) => {
   const d = parsed.data;
   const id = uuidv4();
   await query(
-    "INSERT INTO techniques (id, name, description, icon, image_urls) VALUES ($1, $2, $3, $4, $5)",
-    [id, d.name, d.description || null, d.icon || null, d.imageUrls || []]
+    "INSERT INTO techniques (id, name, description, icon, image_urls, synonyms) VALUES ($1, $2, $3, $4, $5, $6)",
+    [id, d.name, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? []]
   );
   await upsertTechniqueTranslations(id, d.translations);
   res.json({ data: { id } });
@@ -74,8 +79,8 @@ techniquesRouter.put("/:id", async (req: Request, res: Response) => {
 
   const d = parsed.data;
   await query(
-    "UPDATE techniques SET name=$1, description=$2, icon=$3, image_urls=$4, updated_at=now() WHERE id=$5",
-    [d.name, d.description || null, d.icon || null, d.imageUrls || [], id]
+    "UPDATE techniques SET name=$1, description=$2, icon=$3, image_urls=$4, synonyms=$5, updated_at=now() WHERE id=$6",
+    [d.name, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? [], id]
   );
   await upsertTechniqueTranslations(id, d.translations);
   res.json({ success: true });

@@ -121,7 +121,6 @@ export async function generateShoppingList(
     [listId, menuId ?? null, listName, ownerId]
   );
 
-  const items: ShoppingListItem[] = [];
   for (const [, agg] of aggregated) {
     const itemId = uuidv4();
     await query(
@@ -139,38 +138,16 @@ export async function generateShoppingList(
         JSON.stringify(agg.sources),
       ]
     );
-
-    items.push({
-      id: itemId,
-      shoppingListId: listId,
-      ingredientId: agg.ingredientId,
-      ingredientName: agg.ingredientName,
-      totalQuantity: agg.totalQuantity,
-      quantityText: agg.quantityText,
-      unitId: agg.unitId,
-      unit: { id: agg.unitId, name: agg.unitSymbol, symbol: agg.unitSymbol, unitType: "weight" },
-      isChecked: false,
-      sourceDetails: agg.sources,
-    });
   }
 
-  // Ordina per nome ingrediente
-  items.sort((a, b) => {
-    const na = a.ingredientName ?? "";
-    const nb = b.ingredientName ?? "";
-    return na.localeCompare(nb);
-  });
-
-  return {
-    id: listId,
-    menuId,
-    name: listName,
-    items,
-    crdtClock: {},
-    syncStatus: "local",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  // Read the list back instead of returning the in-memory `items`: only the
+  // reload joins ingredient_categories, so a freshly generated list would
+  // otherwise arrive with no aisle data and render ungrouped until the user
+  // navigated away and back. Reading back also guarantees this response is
+  // identical to a later GET /shopping/:id of the same list.
+  const saved = await loadShoppingList(listId, ownerId);
+  if (!saved) throw new Error("Shopping list could not be saved");
+  return saved;
 }
 
 /**
@@ -185,16 +162,28 @@ export async function loadShoppingList(listId: UUID, ownerId: UUID): Promise<Sho
 
   // Postgres NUMERIC columns come back from the pg driver as strings (to
   // avoid float precision loss), so total_quantity needs an explicit parse.
+  // The category join is what makes the list shoppable: items are grouped by
+  // it (an aisle), ordered by the category's own sort_order, instead of
+  // alphabetically by ingredient name — basil, beef, bread is not the order
+  // anyone walks a shop in.
   const itemRows = await query<{
     id: UUID; ingredient_id: UUID | null; total_quantity: string | null;
     quantity_text: string | null; unit_id: UUID | null; is_checked: boolean;
     source_details: ShoppingListItemSource[]; ingredient_name: string | null;
+    ingredient_plural_name: string | null;
     unit_symbol: string | null; unit_name: string | null;
+    category_id: UUID | null; category_name: string | null;
+    category_color: string | null; category_icon: string | null;
+    category_sort_order: number | null;
   }>(
-    `SELECT sli.*, i.name AS ingredient_name, u.symbol AS unit_symbol, u.name AS unit_name
+    `SELECT sli.*, i.name AS ingredient_name, i.plural_name AS ingredient_plural_name,
+            u.symbol AS unit_symbol, u.name AS unit_name,
+            ic.id AS category_id, ic.name AS category_name, ic.color AS category_color,
+            ic.icon AS category_icon, ic.sort_order AS category_sort_order
      FROM shopping_list_items sli
      LEFT JOIN ingredients i ON i.id = sli.ingredient_id
      LEFT JOIN units u ON u.id = sli.unit_id
+     LEFT JOIN ingredient_categories ic ON ic.id = i.category_id
      WHERE sli.shopping_list_id = $1`,
     [listId]
   );
@@ -204,15 +193,21 @@ export async function loadShoppingList(listId: UUID, ownerId: UUID): Promise<Sho
     shoppingListId: listId,
     ingredientId: r.ingredient_id ?? undefined,
     ingredientName: r.ingredient_name ?? undefined,
+    ingredientPluralName: r.ingredient_plural_name ?? undefined,
     totalQuantity: r.total_quantity != null ? parseFloat(r.total_quantity) : undefined,
     quantityText: r.quantity_text ?? undefined,
     unitId: r.unit_id ?? undefined,
     unit: r.unit_id ? { id: r.unit_id, name: r.unit_name ?? "", symbol: r.unit_symbol ?? "", unitType: "weight" } : undefined,
     isChecked: r.is_checked,
     sourceDetails: r.source_details ?? [],
+    categoryId: r.category_id ?? undefined,
+    categoryName: r.category_name ?? undefined,
+    categoryColor: r.category_color ?? undefined,
+    categoryIcon: r.category_icon ?? undefined,
+    categorySortOrder: r.category_sort_order ?? undefined,
   }));
 
-  items.sort((a, b) => (a.ingredientName ?? "").localeCompare(b.ingredientName ?? ""));
+  items.sort(compareByAisleThenName);
 
   return {
     id: listRow.id,
@@ -226,6 +221,54 @@ export async function loadShoppingList(listId: UUID, ownerId: UUID): Promise<Sho
   };
 }
 
+/** Aisle order, then name inside the aisle. Uncategorised items sort last —
+ *  they are the ones you have to go looking for anyway. */
+export function compareByAisleThenName(
+  a: { categoryName?: string; categorySortOrder?: number; ingredientName?: string },
+  b: { categoryName?: string; categorySortOrder?: number; ingredientName?: string }
+): number {
+  const aUncat = !a.categoryName;
+  const bUncat = !b.categoryName;
+  if (aUncat !== bUncat) return aUncat ? 1 : -1;
+  const order = (a.categorySortOrder ?? 0) - (b.categorySortOrder ?? 0);
+  if (order !== 0) return order;
+  const byCategory = (a.categoryName ?? "").localeCompare(b.categoryName ?? "");
+  if (byCategory !== 0) return byCategory;
+  return (a.ingredientName ?? "").localeCompare(b.ingredientName ?? "");
+}
+
+/** One bucket per aisle, already in walking order. */
+export function groupByAisle(items: ShoppingListItem[], uncategorisedLabel = "Other"): Array<{
+  categoryId?: string; categoryName: string; categoryColor?: string; categoryIcon?: string;
+  items: ShoppingListItem[];
+}> {
+  const buckets = new Map<string, {
+    categoryId?: string; categoryName: string; categoryColor?: string; categoryIcon?: string;
+    sortOrder: number; items: ShoppingListItem[];
+  }>();
+
+  for (const item of [...items].sort(compareByAisleThenName)) {
+    const key = item.categoryId ?? "__uncategorised__";
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        categoryId: item.categoryId,
+        categoryName: item.categoryName ?? uncategorisedLabel,
+        categoryColor: item.categoryColor,
+        categoryIcon: item.categoryIcon,
+        // Uncategorised sinks below every real aisle regardless of their
+        // sort_order values.
+        sortOrder: item.categoryName ? (item.categorySortOrder ?? 0) : Number.MAX_SAFE_INTEGER,
+        items: [],
+      });
+    }
+    buckets.get(key)!.items.push(item);
+  }
+
+  return [...buckets.values()]
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.categoryName.localeCompare(b.categoryName))
+    .map(({ sortOrder, ...rest }) => rest);
+}
+
 /**
  * Esporta la lista della spesa in formato Markdown gerarchico
  */
@@ -236,18 +279,11 @@ export function exportShoppingListMarkdown(list: ShoppingList): string {
     "",
   ];
 
-  // Raggruppa per lettera iniziale
-  const byLetter = new Map<string, ShoppingListItem[]>();
-  for (const item of list.items) {
-    const ing = item.ingredientName ?? "—";
-    const letter = ing[0].toUpperCase();
-    if (!byLetter.has(letter)) byLetter.set(letter, []);
-    byLetter.get(letter)!.push(item);
-  }
-
-  for (const [letter, items] of [...byLetter.entries()].sort()) {
-    lines.push(`## ${letter}`);
-    for (const item of items) {
+  // Grouped by aisle in walking order — the printed list should match the
+  // on-screen one, and both should match the shop.
+  for (const group of groupByAisle(list.items)) {
+    lines.push(`## ${group.categoryName}`);
+    for (const item of group.items) {
       const ing = item.ingredientName ?? "ingrediente sconosciuto";
       const qty = item.quantityText
         ? item.quantityText

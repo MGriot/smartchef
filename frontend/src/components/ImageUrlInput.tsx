@@ -1,5 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import { isStandaloneMode } from '../lib/standalone';
+import { storeImage } from '../lib/localImages';
+import { useResolvedImageSrc } from '../hooks/useResolvedImageSrc';
 
 interface ImageUrlInputProps {
   value: string;
@@ -24,6 +27,17 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
     setUploading(true);
     setError(null);
     try {
+      // Standalone mode has no server to POST to — store the image locally
+      // instead (content-addressed, see lib/localImages.ts), same idea as
+      // the server-mode path below but resolved to a displayable URL by
+      // useResolvedImageSrc() rather than being a directly-fetchable URL.
+      if (await isStandaloneMode()) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const extHint = file.name.split('.').pop() || file.type.split('/')[1] || '';
+        const relPath = await storeImage(bytes, extHint);
+        onChange(relPath);
+        return;
+      }
       const formData = new FormData();
       formData.append('file', file);
       const res = await apiFetch('/api/uploads', { method: 'POST', body: formData });
@@ -38,15 +52,23 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
     }
   };
 
+  const previewSrc = useResolvedImageSrc(value);
+
   return (
     <div>
       <div className="flex gap-2">
         <input
-          type="url"
+          // Not type="url" on purpose: the browser's built-in URL syntax
+          // check rejects root-relative paths like the bundled avatar
+          // presets' "/assets/chef-5-….jpeg" (no scheme), silently blocking
+          // the whole enclosing form's submit with a native "Please enter a
+          // URL" bubble — for a value this component itself just set via a
+          // preset click, not something the user typed wrong.
+          type="text"
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
-          className={className || 'flex-1 border-none bg-zinc-50 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20'}
+          className={className || 'flex-1 min-w-0 border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20'}
         />
         <input
           ref={fileInputRef}
@@ -66,9 +88,9 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
         </button>
       </div>
       {error && <p className="text-xs text-red-500 font-medium mt-1">{error}</p>}
-      {value && (
-        <div className="mt-3 w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50">
-          <img src={value} alt="" className="w-full h-full object-cover" onError={e => (e.currentTarget.style.opacity = '0.2')} />
+      {value && previewSrc && (
+        <div className="mt-3 w-20 h-20 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900">
+          <img src={previewSrc} alt="" className="w-full h-full object-cover" onError={e => (e.currentTarget.style.opacity = '0.2')} />
         </div>
       )}
     </div>

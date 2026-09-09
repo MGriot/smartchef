@@ -1,77 +1,32 @@
-import React, { useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Tooltip } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import { countryCentroid, countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
+import React, { Suspense, lazy } from 'react';
+import type { ComponentProps } from 'react';
+import type RegionsMapView from './RegionsMapView';
 
-interface RegionCoord { lat: number; lng: number }
+// ════════════════════════════════════════════════════════════════════════
+// Lazy shell around the real map.
+//
+// The map pulls in leaflet plus lib/worldGeo's 739KB of country boundaries,
+// and RecipeDetail imported it eagerly — so opening *any* recipe downloaded
+// and parsed the whole world atlas, whether or not that recipe had a region
+// to show. The maps were already rendered conditionally; only the import
+// was not.
+//
+// Keeping the wrapper under the original filename means no call site
+// changes and none can accidentally reintroduce the eager import.
+// ════════════════════════════════════════════════════════════════════════
 
-interface RegionsMapProps {
-  regions: string[];
-  /** Coords for free-text (non-country) regions, keyed by lowercased label — from RegionPicker's geocoding. */
-  coords?: Record<string, RegionCoord>;
+const View = lazy(() => import('./RegionsMapView'));
+
+/** Reserves the map's height while its chunk loads, so the page does not
+ *  jump when it arrives. */
+function MapSkeleton() {
+  return <div className="w-full h-64 rounded-2xl bg-zinc-100 dark:bg-zinc-800 animate-pulse" />;
 }
 
-// A small colored-dot DivIcon instead of Leaflet's default marker images —
-// avoids the well-known bundler headache of resolving its default PNG icon
-// URLs, and matches the app's flat visual style better than a pin.
-function dotIcon(color: string) {
-  return L.divIcon({
-    className: '',
-    html: `<div style="width:14px;height:14px;border-radius:9999px;background:${color};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3)"></div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-  });
-}
-const countryIcon = dotIcon('#f97316');
-const placeIcon = dotIcon('#3b82f6');
-
-/**
- * Read-only visualization of a recipe's selected regions — one marker per
- * ISO country code (orange, centroid from the static countries.ts list) and
- * one per free-text region that's been successfully geocoded (blue, from
- * `coords`). A free-text region with no geocode result yet (offline, or
- * never resolved) simply gets no pin — it still shows as a chip in
- * RegionPicker, this just can't place it on a map. Selection itself happens
- * in RegionPicker; this never writes back.
- */
-export default function RegionsMap({ regions, coords = {} }: RegionsMapProps) {
-  const points = useMemo(() => {
-    const countryPoints = regions
-      .filter(isCountryCode)
-      .map((code) => {
-        const centroid = countryCentroid(code);
-        return centroid ? { key: code, lat: centroid.lat, lng: centroid.lng, isCountry: true, label: code } : null;
-      });
-    const placePoints = regions
-      .filter((r) => !isCountryCode(r))
-      .map((label) => {
-        const c = coords[label.toLowerCase()];
-        return c ? { key: label, lat: c.lat, lng: c.lng, isCountry: false, label } : null;
-      });
-    return [...countryPoints, ...placePoints].filter((p): p is NonNullable<typeof p> => !!p);
-  }, [regions, coords]);
-
-  if (points.length === 0) return null;
-
-  const center: [number, number] = [
-    points.reduce((s, p) => s + p.lat, 0) / points.length,
-    points.reduce((s, p) => s + p.lng, 0) / points.length,
-  ];
-
+export default function RegionsMap(props: ComponentProps<typeof RegionsMapView>) {
   return (
-    <div className="rounded-2xl overflow-hidden h-56 relative z-0">
-      <MapContainer center={center} zoom={points.length === 1 ? 5 : 2} scrollWheelZoom={false} className="w-full h-full">
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {points.map((p) => (
-          <Marker key={p.key} position={[p.lat, p.lng]} icon={p.isCountry ? countryIcon : placeIcon}>
-            <Tooltip>{p.isCountry ? `${flagEmoji(p.label)} ${countryDisplayName(p.label, navigator.language)}` : p.label}</Tooltip>
-          </Marker>
-        ))}
-      </MapContainer>
-    </div>
+    <Suspense fallback={<MapSkeleton />}>
+      <View {...props} />
+    </Suspense>
   );
 }

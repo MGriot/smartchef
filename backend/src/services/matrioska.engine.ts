@@ -259,6 +259,7 @@ async function resolveIngredients(
           quantityText: row.quantity_text,
           unitSymbol: row.unit_symbol ?? "—",
           unitId: row.unit_id ?? "",
+          isOptional: !!row.is_optional,
           sourceChain: [...chain],
         });
         warnings.push(
@@ -274,6 +275,7 @@ async function resolveIngredients(
         quantityText: row.quantity_text ?? undefined,
         unitSymbol: row.unit_symbol ?? "—",
         unitId: row.unit_id ?? "",
+        isOptional: !!row.is_optional,
         sourceChain: [...chain],
       });
       continue;
@@ -355,6 +357,9 @@ function aggregateIngredients(
     if (map.has(key)) {
       const existing = map.get(key)!;
       existing.quantity += item.quantity;
+      // One required use makes the whole line required: an ingredient that
+      // is optional in a garnish but essential in the base is essential.
+      existing.isOptional = existing.isOptional && item.isOptional;
       existing.sourceChain = [...new Set([...existing.sourceChain, ...item.sourceChain])];
     } else {
       map.set(key, { ...item, sourceChain: [...item.sourceChain] });

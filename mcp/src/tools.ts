@@ -20,6 +20,7 @@ const RecipeIngredientShape = z.object({
   unitId: z.string().uuid().optional(),
   notes: z.string().optional(),
   isOptional: z.boolean().default(false),
+  groupName: z.string().nullable().optional().describe("Optional short header this ingredient belongs under, e.g. 'For the sauce'"),
 });
 
 const TranslationShape = z.object({
@@ -44,6 +45,7 @@ const RecipeStepShape = z.object({
   description: z.string().min(1),
   durationMin: z.number().int().positive().optional(),
   toolIds: z.array(z.string().uuid()).optional(),
+  techniqueIds: z.array(z.string().uuid()).optional(),
   notes: z.string().optional(),
   imageUrl: z.string().nullable().optional(),
   translations: z.array(TranslationShape).optional(),
@@ -71,6 +73,8 @@ const recipeInputShape = {
   sources: z.array(RecipeSourceShape).default([]).describe("One or more references — a link, a book citation, a video, etc"),
   isComponent: z.boolean().default(false).describe("Mark true if this recipe is only meant to be used as a sub-recipe component of other recipes"),
   languageCode: z.string().optional().describe("Language the base title/description/steps are authored in, e.g. 'en'"),
+  storageInstructions: z.string().nullable().optional().describe("How to store leftovers, e.g. 'Keeps refrigerated for up to 3 days'"),
+  tips: z.string().nullable().optional().describe("General tips/notes distinct from the recipe's own short description"),
   ingredients: z.array(RecipeIngredientShape).default([]),
   steps: z.array(RecipeStepShape).default([]),
   toolIds: z.array(z.string().uuid()).default([]),

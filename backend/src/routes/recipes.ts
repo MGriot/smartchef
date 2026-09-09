@@ -9,8 +9,9 @@ import { query, queryOne, withTransaction } from "../db/pool";
 import { calculatePortions, resolveCookSequence } from "../services/matrioska.engine";
 import { calculateRecipeNutrition } from "../services/nutrition.service";
 import { computeAutoTagNames, unionTagNames } from "../services/tags.service";
-import { parseRecipeWithLLM, translateRecipeContent } from "../services/llm.parser";
-import { matchLLMResultToDB } from "../services/ingredient.matcher";
+import { parseRecipeWithLLM, translateRecipeContent, fetchUrlHtml } from "../services/llm.parser";
+import { filterByPantry } from "../services/pantry.service";
+import { proposeIngredientMatches, proposeToolMatches, proposeTechniqueMatches } from "../services/ingredient.matcher";
 import { v4 as uuidv4 } from "uuid";
 
 export const recipeRouter = Router();
@@ -32,6 +33,7 @@ const RecipeIngredientSchema = z.object({
   unitId: z.string().uuid().optional(),
   notes: z.string().optional(),
   isOptional: z.boolean().default(false),
+  groupName: z.string().optional().nullable(),
   translations: z.array(IngredientNoteTranslationSchema).optional(),
 }).refine(d => d.ingredientId || d.subRecipeId, {
   message: "Deve essere presente ingredientId o subRecipeId",
@@ -68,6 +70,7 @@ const RecipeStepSchema = z.object({
   description: z.string().min(1),
   durationMin: z.number().int().positive().optional().nullable(),
   toolIds: z.array(z.string().uuid()).optional(),
+  techniqueIds: z.array(z.string().uuid()).optional(),
   notes: z.string().optional().nullable(),
   imageUrl: z.string().nullable().optional(),
   translations: z.array(TranslationSchema).optional(),
@@ -101,6 +104,8 @@ const CreateRecipeSchema = z.object({
   sources: z.array(RecipeSourceSchema).default([]),
   isComponent: z.boolean().default(false),
   languageCode: z.string().optional().describe("Language the base title/description/steps were authored in, e.g. 'en'"),
+  storageInstructions: z.string().optional().nullable(),
+  tips: z.string().optional().nullable(),
   ingredients: z.array(RecipeIngredientSchema).default([]),
   steps: z.array(RecipeStepSchema).default([]),
   toolIds: z.array(z.string().uuid()).default([]),
@@ -151,7 +156,7 @@ const SORT_OPTIONS: Record<string, string> = {
 };
 
 recipeRouter.get("/", async (req: Request, res: Response) => {
-  const { q, tag, tags, ingredientCategories, regions, difficulty, component, lang, sort } = req.query;
+  const { q, tag, tags, ingredientCategories, regions, difficulty, component, lang, sort, seasonalOnly, seasonalMonth } = req.query;
 
   const params: unknown[] = [];
   let langJoin = "";
@@ -237,6 +242,21 @@ recipeRouter.get("/", async (req: Request, res: Response) => {
     params.push(component === "true");
     sql += ` AND r.is_component = $${params.length}`;
   }
+  if (seasonalOnly === "true") {
+    // In season = none of this recipe's seasonal-tagged ingredients falls
+    // outside the target month. An ingredient with no seasonality data
+    // (NULL or empty array) never excludes a recipe — see
+    // db/migrations/034_ingredient_seasonality.sql.
+    const month = seasonalMonth ? Number(seasonalMonth) : new Date().getMonth() + 1;
+    params.push(month);
+    sql += ` AND NOT EXISTS (
+      SELECT 1 FROM recipe_ingredients sri
+      JOIN ingredients si ON si.id = sri.ingredient_id
+      WHERE sri.recipe_id = r.id
+        AND si.seasonal_months IS NOT NULL AND array_length(si.seasonal_months, 1) > 0
+        AND NOT (si.seasonal_months @> ARRAY[$${params.length}]::int[])
+    )`;
+  }
 
   const orderBy = sort === "alphabetical" && langParamIndex
     ? "COALESCE(rt.title, r.title) ASC"
@@ -266,16 +286,18 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
   let stepTranslatedNotes = "NULL";
   let toolTranslatedName = "NULL";
   let ingredientNameCol = "i.name";
+  let ingredientPluralNameCol = "i.plural_name";
   let ingredientTranslatedNotes = "NULL";
   if (lang) {
     params.push(lang);
-    langJoin = `LEFT JOIN recipe_translations rct ON rct.recipe_id = r.id AND rct.language_code = $2`;
+    langJoin = `LEFT JOIN recipe_translations rct ON rct.recipe_id = r.id AND LOWER(rct.language_code) = LOWER($2)`;
     translatedCols = "rct.title AS translated_title, rct.description AS translated_description";
     stepTranslatedTitle = "rst.title";
     stepTranslatedDescription = "rst.description";
     stepTranslatedNotes = "rst.notes";
     toolTranslatedName = "tt.name";
     ingredientNameCol = "COALESCE(it_lang.translated_name, i.name)";
+    ingredientPluralNameCol = "COALESCE(it_lang.plural_translation, i.plural_name)";
     ingredientTranslatedNotes = "rit_lang.notes";
   }
 
@@ -290,7 +312,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
                ))
                FROM unnest(r.tags) AS tag_name
                LEFT JOIN tags t ON lower(t.name) = lower(tag_name)
-               ${lang ? "LEFT JOIN tag_translations tt_tag ON tt_tag.tag_id = t.id AND tt_tag.language_code = $2" : ""}
+               ${lang ? "LEFT JOIN tag_translations tt_tag ON tt_tag.tag_id = t.id AND LOWER(tt_tag.language_code) = LOWER($2)" : ""}
               ), '[]'::json
             ) AS tags_display,
             COALESCE(
@@ -302,6 +324,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'id', ri.id, 'sortOrder', ri.sort_order,
               'ingredientId', ri.ingredient_id,
               'ingredientName', ${ingredientNameCol},
+              'ingredientPluralName', ${ingredientPluralNameCol},
               'subRecipeId', ri.sub_recipe_id,
               'subRecipeTitle', sr.title,
               'quantity', ri.quantity,
@@ -309,6 +332,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'unitSymbol', u.symbol, 'unitId', ri.unit_id,
               'isOptional', ri.is_optional,
               'notes', ri.notes,
+              'groupName', ri.group_name,
               'translatedNotes', ${ingredientTranslatedNotes},
               'translations', COALESCE(
                 (SELECT json_agg(json_build_object('lang', rit2.language_code, 'notes', rit2.notes))
@@ -324,6 +348,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'translatedNotes', ${stepTranslatedNotes},
               'durationMin', rs.duration_min,
               'toolIds', rs.tool_ids,
+              'techniqueIds', rs.technique_ids,
               'notes', rs.notes,
               'imageUrl', rs.image_url,
               'stepIngredients', rs.step_ingredients,
@@ -341,15 +366,15 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
      LEFT JOIN account acc ON acc.id = r.creator_id
      LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id
      LEFT JOIN ingredients i ON i.id = ri.ingredient_id
-     ${lang ? "LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND it_lang.language_code = $2" : ""}
-     ${lang ? "LEFT JOIN recipe_ingredient_translations rit_lang ON rit_lang.recipe_ingredient_id = ri.id AND rit_lang.language_code = $2" : ""}
+     ${lang ? "LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND LOWER(it_lang.language_code) = LOWER($2)" : ""}
+     ${lang ? "LEFT JOIN recipe_ingredient_translations rit_lang ON rit_lang.recipe_ingredient_id = ri.id AND LOWER(rit_lang.language_code) = LOWER($2)" : ""}
      LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
      LEFT JOIN units u ON u.id = ri.unit_id
      LEFT JOIN recipe_steps rs ON rs.recipe_id = r.id
-     ${lang ? "LEFT JOIN recipe_step_translations rst ON rst.step_id = rs.id AND rst.language_code = $2" : ""}
+     ${lang ? "LEFT JOIN recipe_step_translations rst ON rst.step_id = rs.id AND LOWER(rst.language_code) = LOWER($2)" : ""}
      LEFT JOIN recipe_tools rtl ON rtl.recipe_id = r.id
      LEFT JOIN tools t ON t.id = rtl.tool_id
-     ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND tt.language_code = $2" : ""}
+     ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND LOWER(tt.language_code) = LOWER($2)" : ""}
      ${langJoin}
      WHERE r.id = $1
      GROUP BY r.id, acc.name, acc.avatar_url${lang ? ", rct.title, rct.description" : ""}`,
@@ -376,10 +401,11 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
     await withTransaction(async (client) => {
       await client.query(
         `INSERT INTO recipes (id,title,description,difficulty,servings,prep_time_min,
-           cook_time_min,rest_time_min,rating,yield_amount,yield_unit_id,tags,regions,region_coords,cover_image_url,source_url,sources,is_component,language_code,creator_id,crdt_clock)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'{}')`,
+           cook_time_min,rest_time_min,rating,yield_amount,yield_unit_id,tags,regions,region_coords,cover_image_url,source_url,sources,is_component,language_code,creator_id,crdt_clock,storage_instructions,tips)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'{}',$21,$22)`,
         [recipeId,d.title,d.description,d.difficulty,d.servings,d.prepTimeMin,
-         d.cookTimeMin,d.restTimeMin,d.rating??null,d.yieldAmount??null,d.yieldUnitId??null,d.tags,d.regions,JSON.stringify(d.regionCoords),d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null,req.userId??null]
+         d.cookTimeMin,d.restTimeMin,d.rating??null,d.yieldAmount??null,d.yieldUnitId??null,d.tags,d.regions,JSON.stringify(d.regionCoords),d.coverImageUrl,d.sourceUrl,JSON.stringify(d.sources),d.isComponent,d.languageCode??null,req.userId??null,
+         d.storageInstructions??null,d.tips??null]
       );
 
       // Inserisci ingredienti
@@ -388,11 +414,11 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
         await client.query(
           `INSERT INTO recipe_ingredients
              (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
-              quantity,quantity_text,unit_id,notes,is_optional)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+              quantity,quantity_text,unit_id,notes,is_optional,group_name)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
           [recipeIngredientId,recipeId,ing.sortOrder,ing.ingredientId??null,
            ing.subtypeId??null,ing.subRecipeId??null,ing.quantity??null,
-           ing.quantityText??null,ing.unitId??null,ing.notes??null,ing.isOptional]
+           ing.quantityText??null,ing.unitId??null,ing.notes??null,ing.isOptional,ing.groupName??null]
         );
         await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
       }
@@ -402,11 +428,11 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
         const stepId = uuidv4();
         await client.query(
           `INSERT INTO recipe_steps
-             (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+             (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients,technique_ids)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
           [stepId,recipeId,step.stepNumber,step.title??null,
            step.description,step.durationMin??null,step.toolIds??[],step.notes??null,
-           step.imageUrl??null,JSON.stringify(step.stepIngredients)]
+           step.imageUrl??null,JSON.stringify(step.stepIngredients),step.techniqueIds??[]]
         );
         await insertStepTranslations(client, stepId, step.translations);
       }
@@ -550,6 +576,29 @@ recipeRouter.get("/:id/nutrition", async (req: Request, res: Response) => {
   res.json({ data: result });
 });
 
+// ── POST /recipes/fetch-page ──────────────────────────────────────────
+//
+// Hands the raw HTML of a recipe URL back to the client, which then reads
+// its schema.org JSON-LD locally (frontend/src/services/recipeStructuredData.ts)
+// and only falls back to POST /parse below when the page carries none.
+//
+// The fetch stays server-side for two reasons that both still apply: the
+// browser cannot fetch arbitrary recipe sites cross-origin, and the SSRF
+// guard (assertSafeImportUrl) belongs where the request actually
+// originates. The extractor is client-side because it has to be shared with
+// standalone mode, which has no backend at all — see that file's header.
+recipeRouter.post("/fetch-page", async (req: Request, res: Response) => {
+  const parsed = z.object({ url: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  try {
+    const html = await fetchUrlHtml(parsed.data.url);
+    res.json({ data: { html } });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : "Could not fetch that page" });
+  }
+});
+
 // ── POST /recipes/parse (LLM) ─────────────────────────────────────────
 
 recipeRouter.post("/parse", async (req: Request, res: Response) => {
@@ -564,12 +613,81 @@ recipeRouter.post("/parse", async (req: Request, res: Response) => {
   }
 
   try {
+    // Returns the raw LLM result unmatched — matching now happens via the
+    // Review Matches step (POST /recipes/match-suggestions below), the same
+    // pipeline the local/non-AI parser path uses, so a recipe never gets a
+    // new ingredient/tool/technique silently created without the user
+    // seeing it first.
     const llmResult = await parseRecipeWithLLM(parsed.data);
-    const matched = await matchLLMResultToDB(llmResult);
-    res.json({ data: matched });
+    res.json({ data: llmResult });
   } catch (err) {
     console.error("Recipe parse failed:", err);
     res.status(502).json({ error: err instanceof Error ? err.message : "Impossibile analizzare la ricetta" });
+  }
+});
+
+// ── POST /recipes/match-suggestions ───────────────────────────────────
+// Read-only fuzzy-match suggestions for a parsed-but-not-yet-matched
+// recipe's ingredient/tool/technique names — used by the Import screen's
+// Review Matches step after either the AI path (POST /parse above) or the
+// frontend's local template/JSON parser. Never writes to the DB; the
+// frontend commits chosen/created items itself via the existing
+// POST /ingredients, /tools, /techniques endpoints.
+recipeRouter.post("/match-suggestions", async (req: Request, res: Response) => {
+  const schema = z.object({
+    ingredientNames: z.array(z.string()).default([]),
+    toolNames: z.array(z.string()).default([]),
+    techniqueNames: z.array(z.string()).default([]),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const [ingredients, tools, techniques] = await Promise.all([
+    proposeIngredientMatches(parsed.data.ingredientNames),
+    proposeToolMatches(parsed.data.toolNames),
+    proposeTechniqueMatches(parsed.data.techniqueNames),
+  ]);
+  res.json({ data: { ingredients, tools, techniques } });
+});
+
+// Deliberately unimplemented — the future integration point for a planned
+// separate pantry/household-inventory app: given the ingredients (and
+// quantities) someone actually has on hand, return recipes they can make.
+// The request/response shape is fixed now (and validated) so that future
+// app has a stable contract to build against even though the matching
+// logic itself doesn't exist yet. Kept in this router (not a separate
+// file) since it's still fundamentally a recipes query, same as GET /.
+const FilterByPantrySchema = z.object({
+  ingredients: z.array(z.object({
+    ingredientId: z.string().uuid(),
+    // Omitted quantity/unit = "I have some, don't check amounts" — a
+    // future implementation should treat this the same as "quantity
+    // sufficient", not reject/require it.
+    quantity: z.number().positive().optional(),
+    unit: z.string().optional(),
+  })).min(1),
+  // Loosen ingredient-vs-recipe matching: 1.0 = every non-optional
+  // ingredient must be on hand in sufficient quantity; lower values allow
+  // recipes missing a few things. Left to a future implementation to
+  // define precisely — reserved here so the request shape doesn't need to
+  // change later.
+  minMatchRatio: z.number().min(0).max(1).optional(),
+});
+
+recipeRouter.post("/filter-by-pantry", async (req: Request, res: Response) => {
+  const parsed = FilterByPantrySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  // Implemented at last, against the contract that was reserved for it —
+  // see services/pantry.service.ts.
+  const { ingredients, minMatchRatio } = parsed.data;
+  try {
+    const results = await filterByPantry(ingredients, minMatchRatio ?? 1);
+    res.json({ data: results });
+  } catch (err) {
+    console.error("Pantry match failed:", err);
+    res.status(500).json({ error: "Could not work out what you can cook." });
   }
 });
 
@@ -592,11 +710,11 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
            title=$2, description=$3, difficulty=$4, servings=$5,
            prep_time_min=$6, cook_time_min=$7, rest_time_min=$8, rating=$9,
            yield_amount=$10, yield_unit_id=$11, tags=$12, regions=$13, region_coords=$14, cover_image_url=$15, source_url=$16, sources=$17, is_component=$18,
-           language_code=$19, updated_at=now()
+           language_code=$19, storage_instructions=$20, tips=$21, updated_at=now()
          WHERE id=$1`,
         [id, d.title, d.description, d.difficulty, d.servings, d.prepTimeMin,
          d.cookTimeMin, d.restTimeMin, d.rating ?? null, d.yieldAmount ?? null, d.yieldUnitId ?? null, d.tags, d.regions, JSON.stringify(d.regionCoords), d.coverImageUrl, d.sourceUrl, JSON.stringify(d.sources), d.isComponent,
-         d.languageCode ?? null]
+         d.languageCode ?? null, d.storageInstructions ?? null, d.tips ?? null]
       );
 
       // Rimpiazza ingredienti (drop + reinsert; recipe_ingredient_translations cascade with them)
@@ -606,11 +724,11 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
         await client.query(
           `INSERT INTO recipe_ingredients
              (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
-              quantity,quantity_text,unit_id,notes,is_optional)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+              quantity,quantity_text,unit_id,notes,is_optional,group_name)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
           [recipeIngredientId, id, ing.sortOrder, ing.ingredientId??null,
            ing.subtypeId??null, ing.subRecipeId??null, ing.quantity??null,
-           ing.quantityText??null, ing.unitId??null, ing.notes??null, ing.isOptional]
+           ing.quantityText??null, ing.unitId??null, ing.notes??null, ing.isOptional, ing.groupName??null]
         );
         await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
       }
@@ -621,11 +739,11 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
         const stepId = uuidv4();
         await client.query(
           `INSERT INTO recipe_steps
-             (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+             (id,recipe_id,step_number,title,description,duration_min,tool_ids,notes,image_url,step_ingredients,technique_ids)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
           [stepId, id, step.stepNumber, step.title??null,
            step.description, step.durationMin??null, step.toolIds??[], step.notes??null,
-           step.imageUrl??null, JSON.stringify(step.stepIngredients)]
+           step.imageUrl??null, JSON.stringify(step.stepIngredients), step.techniqueIds??[]]
         );
         await insertStepTranslations(client, stepId, step.translations);
       }

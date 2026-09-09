@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
 import { SUPPORTED_LANGUAGES } from '../i18n';
 import OfflineBanner from './OfflineBanner';
+import CoverImage from './CoverImage';
 
-type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags';
+type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags' | 'seasonality';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -17,16 +18,26 @@ interface AppLayoutProps {
   headerActions?: React.ReactNode;
 }
 
+// Ordered by what you're doing, not by when each page was built.
+//
+// Browsing first — Gallery and Atlas are the same recipes, one as a grid
+// and one on a map, so they belong next to each other rather than at
+// opposite ends. Then the week in the order it actually happens: plan it,
+// shop for it, log what you cooked. The two maintenance surfaces come last,
+// since Import is occasional (the header's Create Recipe covers the common
+// case) and Library is upkeep rather than daily use.
 const NAV_LINKS: { to: string; labelKey: string }[] = [
   { to: '/', labelKey: 'nav.gallery' },
+  { to: '/atlas', labelKey: 'nav.atlas' },
   { to: '/planner', labelKey: 'nav.planner' },
+  { to: '/pantry', labelKey: 'nav.pantry' },
   { to: '/shopping', labelKey: 'nav.shoppingList' },
+  { to: '/history', labelKey: 'nav.history' },
   { to: '/import', labelKey: 'nav.import' },
   { to: '/library/ingredients', labelKey: 'nav.library' },
-  { to: '/history', labelKey: 'nav.history' },
 ];
 
-const IDLE_LINK = "flex items-center gap-3 px-4 py-3 text-zinc-500 hover:bg-zinc-50 rounded-xl font-semibold text-sm transition-all group";
+const IDLE_LINK = "flex items-center gap-3 px-4 py-3 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl font-semibold text-sm transition-all group";
 const ACTIVE_LINK = "flex items-center gap-3 px-4 py-3 bg-primary/5 text-primary rounded-xl font-bold text-sm transition-all shadow-sm shadow-primary/5 border border-primary/10";
 
 function LibraryLink({ to, icon, label, active }: { to: string; icon: string; label: string; active: boolean }) {
@@ -38,13 +49,23 @@ function LibraryLink({ to, icon, label, active }: { to: string; icon: string; la
   );
 }
 
-const DEFAULT_AVATAR = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
+// Bundled locally (not a remote fetch) so it always renders offline/native.
+const DEFAULT_AVATAR = '/chef.svg';
 
 export default function AppLayout({ children, librarySection, sidebarExtra, headerActions }: AppLayoutProps) {
   const { t, i18n } = useTranslation();
   const setContentLang = useStore((s) => s.setContentLang);
   const account = useStore((s) => s.account);
   const location = useLocation();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Below the `lg` breakpoint the header's own nav links are hidden (no
+  // room for them) — this dropdown is their only way to reach anything
+  // other than Home/Planner/Account on a phone, so it must close itself
+  // whenever a link inside it is actually followed.
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
 
   const handleLanguageChange = (code: string) => {
     i18n.changeLanguage(code);
@@ -60,13 +81,22 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
       : location.pathname === to;
 
   return (
-    <div className="min-h-screen bg-[#fafaf5] text-zinc-900 font-outfit">
+    <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-outfit">
       <OfflineBanner />
       <header
-        className="min-h-[65px] bg-white border-b border-zinc-100 flex items-center justify-between px-8 sticky top-0 z-50"
+        className="min-h-[65px] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between px-8 sticky top-0 z-50"
         style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'max(2rem, env(safe-area-inset-left))', paddingRight: 'max(2rem, env(safe-area-inset-right))' }}
       >
-        <div className="flex items-center gap-12">
+        <div className="flex items-center gap-4 lg:gap-12">
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+            aria-label={t('common.menu')}
+            aria-expanded={mobileMenuOpen}
+            className="lg:hidden w-9 h-9 -ml-1.5 flex items-center justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 active:scale-95 transition-all shrink-0"
+          >
+            <span className="material-symbols-outlined">{mobileMenuOpen ? 'close' : 'menu'}</span>
+          </button>
           <Link to="/" className="text-2xl font-black text-primary tracking-tight">SmartChef</Link>
           <nav className="hidden lg:flex items-center gap-8">
             {NAV_LINKS.map((link) => (
@@ -76,7 +106,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
                 className={
                   isActive(link.to)
                     ? "text-primary font-bold text-sm border-b-2 border-primary pb-0.5 transition-colors"
-                    : "text-zinc-400 font-medium text-sm hover:text-primary transition-colors"
+                    : "text-zinc-400 dark:text-zinc-500 font-medium text-sm hover:text-primary transition-colors"
                 }
               >
                 {t(link.labelKey)}
@@ -97,7 +127,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             value={i18n.language}
             onChange={(e) => handleLanguageChange(e.target.value)}
             aria-label={t('common.language')}
-            className="text-xs font-bold text-zinc-500 bg-zinc-50 rounded-full px-3 py-1.5 border border-zinc-200 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+            className="text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-3 pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
           >
             {SUPPORTED_LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>{l.label}</option>
@@ -106,19 +136,47 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           <Link
             to="/account"
             title={account?.name ?? t('common.account')}
-            className="w-8 h-8 rounded-full bg-zinc-200 border-2 border-white shadow-sm overflow-hidden shrink-0 hover:ring-2 hover:ring-primary/30 transition-all"
+            className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 border-2 border-white shadow-sm overflow-hidden shrink-0 hover:ring-2 hover:ring-primary/30 transition-all"
           >
-            <img src={account?.avatarUrl || DEFAULT_AVATAR} alt={account?.name ?? t('common.account')} className="w-full h-full object-cover" />
+            <CoverImage src={account?.avatarUrl} alt={account?.name ?? t('common.account')} className="w-full h-full object-cover" fallbackSrc={DEFAULT_AVATAR} />
           </Link>
         </div>
       </header>
 
+      {mobileMenuOpen && (
+        <nav className="lg:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm">
+          <Link
+            to="/recipe/new"
+            className="flex items-center gap-3 px-4 py-3 bg-primary text-white rounded-xl font-bold text-sm mb-2"
+          >
+            <span className="material-symbols-outlined text-[20px]">add</span>
+            {t('nav.createRecipe')}
+          </Link>
+          {NAV_LINKS.map((link) => (
+            <Link key={link.to} to={link.to} className={isActive(link.to) ? ACTIVE_LINK : IDLE_LINK}>
+              {t(link.labelKey)}
+            </Link>
+          ))}
+          {librarySection && (
+            <>
+              <p className="px-4 pt-3 pb-1 text-[10px] font-black text-zinc-400 dark:text-zinc-500 tracking-[0.2em] uppercase">{t('library.management')}</p>
+              <LibraryLink to="/library/ingredients" icon="restaurant" label={t('nav.ingredients')} active={librarySection === 'ingredients'} />
+              <LibraryLink to="/library/tools" icon="construction" label={t('nav.tools')} active={librarySection === 'tools'} />
+              <LibraryLink to="/library/units" icon="straighten" label={t('nav.units')} active={librarySection === 'units'} />
+              <LibraryLink to="/library/techniques" icon="whatshot" label={t('nav.techniques')} active={librarySection === 'techniques'} />
+              <LibraryLink to="/library/tags" icon="sell" label={t('nav.tags')} active={librarySection === 'tags'} />
+              <LibraryLink to="/library/seasonality" icon="calendar_month" label={t('nav.seasonality')} active={librarySection === 'seasonality'} />
+            </>
+          )}
+        </nav>
+      )}
+
       <div className="flex min-h-[calc(100vh-65px)]">
         {librarySection && (
-          <aside className="w-[280px] bg-white border-r border-zinc-100 flex flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
+          <aside className="hidden lg:flex w-[280px] shrink-0 bg-white dark:bg-zinc-900 border-r border-zinc-100 dark:border-zinc-800 flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
             <div className="mb-8 p-2">
               <h2 className="text-lg font-black text-primary leading-tight">{t('library.management')}</h2>
-              <p className="text-[10px] font-bold text-zinc-400 tracking-[0.2em] uppercase">{t('library.kitchenEssentials')}</p>
+              <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 tracking-[0.2em] uppercase">{t('library.kitchenEssentials')}</p>
             </div>
             <nav className="space-y-1">
               <LibraryLink to="/library/ingredients" icon="restaurant" label={t('nav.ingredients')} active={librarySection === 'ingredients'} />
@@ -126,11 +184,12 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
               <LibraryLink to="/library/units" icon="straighten" label={t('nav.units')} active={librarySection === 'units'} />
               <LibraryLink to="/library/techniques" icon="whatshot" label={t('nav.techniques')} active={librarySection === 'techniques'} />
               <LibraryLink to="/library/tags" icon="sell" label={t('nav.tags')} active={librarySection === 'tags'} />
+              <LibraryLink to="/library/seasonality" icon="calendar_month" label={t('nav.seasonality')} active={librarySection === 'seasonality'} />
               {sidebarExtra}
             </nav>
           </aside>
         )}
-        <main className={librarySection ? "flex-grow p-10 max-w-7xl mx-auto" : "flex-grow"}>
+        <main className={librarySection ? "flex-grow min-w-0 p-4 sm:p-10 max-w-7xl mx-auto" : "flex-grow min-w-0"}>
           {children}
         </main>
       </div>

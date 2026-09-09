@@ -20,6 +20,14 @@ setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3";
 
+/** account.ollama_url overrides the server-wide default above when set —
+ *  lets a user point at an Ollama instance on a different host/port (e.g.
+ *  a beefier machine on the LAN) from Account settings, no server restart
+ *  needed. Falls back to the env-var default when null/blank. */
+function resolveOllamaUrl(accountOverride?: string | null): string {
+  return accountOverride?.trim() || OLLAMA_URL;
+}
+
 const SYSTEM_PROMPT = `Sei un assistente specializzato nell'analisi di ricette culinarie.
 Il tuo compito è estrarre informazioni strutturate da testi o pagine web di ricette.
 Rispondi ESCLUSIVAMENTE con un oggetto JSON valido, senza testo aggiuntivo.
@@ -36,13 +44,16 @@ Il JSON deve avere questa struttura:
   "difficulty": "easy | medium | hard | expert | null",
   "tags": ["string"],
   "tools": ["string"],
+  "storageInstructions": "string | null",
+  "tips": "string | null",
   "ingredients": [
     {
       "name": "string",
       "quantity": "number | null",
       "quantityText": "string | null",
       "unit": "string | null",
-      "notes": "string | null"
+      "notes": "string | null",
+      "groupName": "string | null"
     }
   ],
   "steps": [
@@ -50,7 +61,8 @@ Il JSON deve avere questa struttura:
       "stepNumber": "number",
       "title": "string | null",
       "description": "string",
-      "durationMin": "number | null"
+      "durationMin": "number | null",
+      "techniques": ["string"]
     }
   ],
   "confidence": "number (0-1)",
@@ -60,6 +72,9 @@ Il JSON deve avere questa struttura:
 Regole:
 - restTimeMin è il tempo di attesa/riposo (lievitazione, marinatura, raffreddamento) separato dal tempo di preparazione attiva
 - tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari (es. "forno", "planetaria", "frullatore"), nomi brevi e generici
+- storageInstructions è come conservare gli avanzi ("Come conservare"), tips sono consigli generali distinti dalla description — entrambi null se non menzionati
+- groupName (negli ingredienti) è un'intestazione breve e opzionale sotto cui questo ingrediente è raggruppato, es. "Per il condimento" — impostalo SOLO quando la ricetta originale raggruppa visivamente gli ingredienti in sezioni etichettate; altrimenti lascialo null. Non inventare raggruppamenti assenti nella fonte
+- techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step (es. "Rosolare", "Brasare"), nomi brevi, stesso criterio di "tools"
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
@@ -73,7 +88,7 @@ Regole:
  * questo controllo chiunque potrebbe usare l'import ricette per far
  * interrogare al backend la propria rete interna (SSRF).
  */
-function assertSafeImportUrl(rawUrl: string): URL {
+export function assertSafeImportUrl(rawUrl: string): URL {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -107,6 +122,33 @@ function assertSafeImportUrl(rawUrl: string): URL {
 /**
  * Fetcha il contenuto di una URL per il parsing
  */
+/** The page as-is, for the structured-data extractor to read. Same request
+ *  headers and SSRF guard as fetchUrlContent() below, but without the
+ *  tag-stripping and the 6 000-character truncation — schema.org JSON-LD is
+ *  frequently past that cutoff, which is one of the reasons the LLM path
+ *  used to lose it. Capped at 4 MB so a hostile or broken URL can't stream
+ *  unbounded into memory. */
+export async function fetchUrlHtml(url: string): Promise<string> {
+  assertSafeImportUrl(url);
+  const response = await fetch(url, { headers: IMPORT_FETCH_HEADERS, signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
+  const html = await response.text();
+  return html.length > 4_000_000 ? html.slice(0, 4_000_000) : html;
+}
+
+const IMPORT_FETCH_HEADERS: Record<string, string> = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+  "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
+  "Cache-Control": "no-cache",
+  "Pragma": "no-cache",
+  "Upgrade-Insecure-Requests": "1",
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+};
+
 async function fetchUrlContent(url: string): Promise<string> {
   assertSafeImportUrl(url);
   // Aggiungiamo header più completi per bypassare firewall basici
@@ -145,8 +187,8 @@ async function fetchUrlContent(url: string): Promise<string> {
  * Chiama Ollama con un system prompt arbitrario — usato sia per il parsing
  * ricette (SYSTEM_PROMPT) sia per la traduzione contenuti ricetta.
  */
-async function callOllama(content: string, systemPrompt: string): Promise<string> {
-  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+async function callOllama(content: string, systemPrompt: string, ollamaUrl: string = OLLAMA_URL): Promise<string> {
+  const response = await fetch(`${ollamaUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -183,6 +225,7 @@ interface LLMAccountConfig {
   anthropic_api_key_encrypted: string | null;
   gemini_api_key_encrypted: string | null;
   openai_api_key_encrypted: string | null;
+  ollama_url: string | null;
 }
 
 /**
@@ -196,7 +239,7 @@ interface LLMAccountConfig {
  */
 export async function callConfiguredProvider(content: string, systemPrompt: string): Promise<string> {
   const account = await queryOne<LLMAccountConfig>(
-    `SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted FROM account LIMIT 1`
+    `SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted, ollama_url FROM account LIMIT 1`
   );
   const provider = account?.llm_provider ?? "ollama";
 
@@ -218,7 +261,7 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
     }
     return callOpenAI(content, decrypt(account.openai_api_key_encrypted), systemPrompt);
   }
-  return callOllama(content, systemPrompt);
+  return callOllama(content, systemPrompt, resolveOllamaUrl(account?.ollama_url));
 }
 
 /**
@@ -310,6 +353,8 @@ function parseJsonResponse(raw: string): LLMParseResult {
       : "medium",
     tags: Array.isArray(parsed.tags) ? parsed.tags : [],
     tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t: unknown) => typeof t === "string") : [],
+    storageInstructions: typeof parsed.storageInstructions === "string" ? parsed.storageInstructions : null,
+    tips: typeof parsed.tips === "string" ? parsed.tips : null,
     ingredients: Array.isArray(parsed.ingredients)
       ? parsed.ingredients.map((ing: any, i: number) => ({
           name: ing.name ?? `Ingrediente ${i + 1}`,
@@ -317,6 +362,7 @@ function parseJsonResponse(raw: string): LLMParseResult {
           quantityText: ing.quantityText ?? undefined,
           unit: ing.unit ?? undefined,
           notes: ing.notes ?? undefined,
+          groupName: typeof ing.groupName === "string" ? ing.groupName : null,
         }))
       : [],
     steps: Array.isArray(parsed.steps)
@@ -325,6 +371,7 @@ function parseJsonResponse(raw: string): LLMParseResult {
           title: step.title ?? undefined,
           description: step.description ?? "",
           durationMin: typeof step.durationMin === "number" ? step.durationMin : undefined,
+          techniques: Array.isArray(step.techniques) ? step.techniques.filter((t: unknown) => typeof t === "string") : [],
         }))
       : [],
     sourceUrl: undefined,
@@ -558,9 +605,9 @@ export async function translateRecipeContent(
 /**
  * Verifica che Ollama sia raggiungibile
  */
-export async function checkOllamaHealth(): Promise<{ ok: boolean; models: string[] }> {
+export async function checkOllamaHealth(ollamaUrl: string = OLLAMA_URL): Promise<{ ok: boolean; models: string[] }> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`, {
+    const res = await fetch(`${ollamaUrl}/api/tags`, {
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) return { ok: false, models: [] };

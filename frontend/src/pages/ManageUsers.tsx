@@ -26,6 +26,8 @@ export default function ManageUsers() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [roleChangingId, setRoleChangingId] = useState<string | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
 
   const fetchUsers = () => {
     apiFetch('/api/auth/users')
@@ -49,6 +51,25 @@ export default function ManageUsers() {
       setDeleteError(err instanceof Error ? err.message : 'Failed to delete user');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleRoleChange = async (user: User, role: 'admin' | 'user') => {
+    setRoleChangingId(user.id);
+    setRoleError(null);
+    try {
+      const res = await apiFetch(`/api/auth/users/${user.id}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Failed to change role');
+      setUsers((prev) => (prev ? prev.map((u) => (u.id === user.id ? { ...u, role } : u)) : prev));
+    } catch (err) {
+      setRoleError(err instanceof Error ? err.message : 'Failed to change role');
+    } finally {
+      setRoleChangingId(null);
     }
   };
 
@@ -90,37 +111,48 @@ export default function ManageUsers() {
         <div className="mb-10">
           <button
             onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-600 text-sm font-bold mb-6 transition-colors"
+            className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-sm font-bold mb-6 transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             Back
           </button>
-          <h1 className="text-4xl font-black text-zinc-900 tracking-tighter">Manage Users</h1>
+          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">Manage Users</h1>
         </div>
 
-        <div className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 mb-8">
+        <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mb-8">
           <div className="mb-6">
-            <h2 className="text-lg font-black text-zinc-900">Users</h2>
-            <p className="text-sm text-zinc-400 font-medium mt-1">Everyone who can log into this instance.</p>
+            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Users</h2>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Everyone who can log into this instance.</p>
           </div>
           {users === null ? (
-            <p className="text-sm text-zinc-400">Loading…</p>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading…</p>
           ) : (
             <div className="space-y-2">
               {users.map((u) => (
-                <div key={u.id} className="flex items-center gap-3 px-4 py-3 bg-zinc-50 rounded-xl">
+                <div key={u.id} className="flex items-center gap-3 px-4 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
                   <img
                     src={u.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.username}`}
                     alt={u.name}
                     className="w-8 h-8 rounded-full object-cover shrink-0"
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-zinc-900 truncate">{u.name}</p>
-                    <p className="text-xs text-zinc-400">@{u.username}</p>
+                    <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">{u.name}</p>
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500">@{u.username}</p>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shrink-0 ${u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-zinc-200 text-zinc-500'}`}>
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shrink-0 ${u.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'}`}>
                     {u.role}
                   </span>
+                  {u.id !== account?.id && (
+                    <button
+                      type="button"
+                      onClick={() => handleRoleChange(u, u.role === 'admin' ? 'user' : 'admin')}
+                      disabled={roleChangingId === u.id}
+                      className="px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0 disabled:opacity-50"
+                      title={u.role === 'admin' ? `Demote ${u.name} to user` : `Promote ${u.name} to admin`}
+                    >
+                      {roleChangingId === u.id ? '…' : u.role === 'admin' ? 'Demote' : 'Promote'}
+                    </button>
+                  )}
                   {u.id !== account?.id && (
                     <button
                       type="button"
@@ -138,50 +170,51 @@ export default function ManageUsers() {
               ))}
             </div>
           )}
+          {roleError && <p className="mt-4 text-sm text-red-600 font-medium">{roleError}</p>}
           {deleteError && <p className="mt-4 text-sm text-red-600 font-medium">{deleteError}</p>}
         </div>
 
-        <form onSubmit={handleCreate} className="bg-white rounded-[40px] p-10 shadow-sm border border-zinc-100 space-y-6">
+        <form onSubmit={handleCreate} className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
           <div>
-            <h2 className="text-lg font-black text-zinc-900">Add a User</h2>
-            <p className="text-sm text-zinc-400 font-medium mt-1">They'll use this username and password to log in.</p>
+            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Add a User</h2>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">They'll use this username and password to log in.</p>
           </div>
           <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Name</label>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Name</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+              className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
             />
           </div>
           <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Username</label>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Username</label>
             <input
               type="text"
               autoCapitalize="none"
               value={username}
               onChange={(e) => setUsername(e.target.value.toLowerCase())}
               placeholder="e.g. sara"
-              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+              className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
             />
           </div>
           <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Password</label>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="At least 4 characters"
-              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4"
+              className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
             />
           </div>
           <div>
-            <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Role</label>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Role</label>
             <select
               value={role}
               onChange={(e) => setRole(e.target.value as 'admin' | 'user')}
-              className="w-full bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-medium p-4 appearance-none cursor-pointer"
+              className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4 appearance-none cursor-pointer"
             >
               <option value="user">User</option>
               <option value="admin">Admin</option>

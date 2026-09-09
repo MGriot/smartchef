@@ -96,6 +96,40 @@ menuRouter.post("/:id/items", async (req: Request, res: Response) => {
   res.status(201).json({ data: { id } });
 });
 
+// PATCH /menus/:menuId/items/:itemId — move a planned recipe.
+//
+// Exists for drag-and-drop: dropping a meal on another day is a move, and
+// delete-then-recreate would lose the item's identity (and its servings and
+// notes) for what the user experiences as dragging one card.
+menuRouter.patch("/:menuId/items/:itemId", async (req: Request, res: Response) => {
+  const schema = z.object({
+    dayOfWeek: z.number().int().min(0).max(6).optional(),
+    mealType: z.enum(["breakfast","lunch","dinner","snack"]).optional(),
+    servings: z.number().int().positive().optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  const owned = await queryOne(
+    "SELECT id FROM menus WHERE id=$1 AND owner_id=$2",
+    [req.params.menuId, req.userId]
+  );
+  if (!owned) return res.status(404).json({ error: "Menù non trovato" });
+
+  const d = parsed.data;
+  const updated = await queryOne(
+    `UPDATE menu_items
+        SET day_of_week = COALESCE($1, day_of_week),
+            meal_type   = COALESCE($2, meal_type),
+            servings    = COALESCE($3, servings)
+      WHERE id=$4 AND menu_id=$5
+      RETURNING id`,
+    [d.dayOfWeek ?? null, d.mealType ?? null, d.servings ?? null, req.params.itemId, req.params.menuId]
+  );
+  if (!updated) return res.status(404).json({ error: "Item non trovato" });
+  res.json({ success: true });
+});
+
 // DELETE /menus/:menuId/items/:itemId
 menuRouter.delete("/:menuId/items/:itemId", async (req: Request, res: Response) => {
   await query(

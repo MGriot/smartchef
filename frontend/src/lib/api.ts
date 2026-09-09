@@ -19,6 +19,14 @@ import { Preferences } from '@capacitor/preferences';
 
 const SERVER_URL_KEY = 'smartchef.serverUrl';
 const ACCOUNT_CACHE_KEY = 'smartchef.cachedAccount';
+// Set the first time anyone actually gets *in* on this device. Gates the
+// "change where this device keeps your library" escape hatch on the
+// login/profile screens: offering it is right while someone is still
+// setting the device up and may have picked the wrong option, and wrong
+// afterward — past first run, moving the library is an admin decision made
+// in Settings (Account.tsx's StorageModeCard), not a question every
+// sign-out re-opens.
+const DEVICE_ONBOARDED_KEY = 'smartchef.deviceOnboarded';
 
 let cachedServerUrl: string | null | undefined; // undefined = not loaded yet
 
@@ -42,6 +50,25 @@ export async function setServerUrl(url: string): Promise<void> {
 export async function clearServerUrl(): Promise<void> {
   cachedServerUrl = null;
   await Preferences.remove({ key: SERVER_URL_KEY });
+}
+
+export async function isDeviceOnboarded(): Promise<boolean> {
+  const { value } = await Preferences.get({ key: DEVICE_ONBOARDED_KEY });
+  return value === 'true';
+}
+
+export async function markDeviceOnboarded(): Promise<void> {
+  await Preferences.set({ key: DEVICE_ONBOARDED_KEY, value: 'true' });
+}
+
+/** Back to the first-run "server or offline?" chooser, WITHOUT deleting
+ *  anything: the local SQLite library, any Sync Folder wiring and the
+ *  server's own data all stay exactly as they are, so picking the same
+ *  option again lands back on the same library. */
+export async function resetDeviceStorageChoice(): Promise<void> {
+  await clearServerUrl();
+  const { clearStandaloneProfile } = await import('./standalone');
+  await clearStandaloneProfile();
 }
 
 // Persisted alongside the server URL so a previously-logged-in user isn't
@@ -75,9 +102,19 @@ async function tryServeFromCache(path: string): Promise<Response | null> {
     return jsonResponse({ data: { hasAccount: true, authenticated: true, id: account.id, username: account.username, name: account.name, role: account.role, avatarUrl: account.avatarUrl } });
   }
 
-  const { getCachedEntities } = await import('./offlineStore');
+  const { getCachedEntities, getDownloadedRecipe } = await import('./offlineStore');
 
   if (segments[0] === 'recipes') {
+    if (segments[1] && !segments[2]) {
+      // A specific recipe's detail page: prefer the full ingredients/steps/
+      // tools bundle from an explicit offline download (see
+      // downloadRecipeOffline()) over the whole-library snapshot cache,
+      // which only ever holds list-view summary fields for a recipe, not
+      // its full detail — falling back to that would render an empty/broken
+      // detail page for a recipe that was never individually downloaded.
+      const downloaded = await getDownloadedRecipe(segments[1]);
+      if (downloaded) return jsonResponse({ data: downloaded });
+    }
     const recipes = await getCachedEntities('recipes');
     if (segments[1]) {
       const recipe = recipes.find((r: any) => r.id === segments[1]);
@@ -154,6 +191,19 @@ const OFFLINE_CREATABLE_ENTITIES: Record<string, { entityType: import('./offline
  *  larger value for slow endpoints (e.g. LLM recipe parsing, which the
  *  backend itself allows up to 10 minutes for). */
 export async function apiFetch(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
+  if (isNative()) {
+    const { isStandaloneMode } = await import('./standalone');
+    if (await isStandaloneMode()) {
+      const { dispatchLocal } = await import('../services/localRouter');
+      const result = await dispatchLocal(path, init);
+      if (result) {
+        return jsonResponse(result.error ? { error: result.error } : { data: result.data }, result.status);
+      }
+      // Not a path this stage's local router owns (e.g. /api/tags) — falls
+      // through to the pre-existing native/offline logic below, unaffected.
+    }
+  }
+
   if (!isNative()) {
     return fetch(path, init);
   }

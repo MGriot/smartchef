@@ -1,8 +1,16 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
+  useDraggable, useDroppable, DragOverlay,
+  type DragEndEvent, type DragStartEvent,
+} from '@dnd-kit/core';
 import AppLayout from '../components/AppLayout';
 import Autocomplete from '../components/Autocomplete';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
+import { Field } from '../components/Form';
 
 interface MenuSummary {
   id: string;
@@ -53,6 +61,79 @@ const DAYS = [
 
 const MEAL_TYPES: MenuItem['mealType'][] = ['breakfast', 'lunch', 'dinner', 'snack'];
 
+/** A planned meal you can pick up.
+ *
+ *  Dragging is an addition, never the only way: the card stays a normal
+ *  element with its own remove button, and each day keeps its "+" button.
+ *  dnd-kit's KeyboardSensor makes the drag itself reachable from the
+ *  keyboard (space to lift, arrows to move, space to drop), which
+ *  drag-and-drop libraries that hijack mousedown do not give you. */
+function DraggableMeal({
+  item, onRemove, t,
+}: {
+  item: MenuItem;
+  onRemove: (id: string) => void;
+  t: (k: string, o?: Record<string, unknown>) => string;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: item.id });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`group bg-zinc-50 dark:bg-zinc-800/60 rounded-xl p-3 relative transition-opacity ${
+        isDragging ? 'opacity-30' : ''
+      }`}
+    >
+      {/* The grip is the drag handle rather than the whole card: making the
+          card itself draggable swallows the click that opens it and fights
+          text selection. */}
+      <button
+        type="button"
+        ref={setNodeRef as unknown as React.Ref<HTMLButtonElement>}
+        {...listeners}
+        {...attributes}
+        aria-label={t('planner.dragHandle', { title: item.recipe_title })}
+        className="absolute top-2 left-2 w-5 h-5 rounded flex items-center justify-center text-zinc-300 dark:text-zinc-600 hover:text-primary cursor-grab active:cursor-grabbing touch-none"
+      >
+        <span className="material-symbols-outlined text-[15px]">drag_indicator</span>
+      </button>
+
+      <div className="pl-5">
+        <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase mb-1 ${MEAL_TYPE_STYLE[item.mealType]}`}>
+          {item.mealType}
+        </span>
+        <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 leading-tight pr-6">{item.recipe_title}</p>
+        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium mt-0.5">
+          {t('planner.servingsCount', { count: item.servings })}
+        </p>
+      </div>
+
+      <button
+        onClick={() => onRemove(item.id)}
+        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity flex items-center justify-center"
+        aria-label={t('planner.removeMeal', { title: item.recipe_title })}
+      >
+        <span className="material-symbols-outlined text-sm">close</span>
+      </button>
+    </div>
+  );
+}
+
+/** One day column. Highlights while something hovers over it so the drop
+ *  target is never ambiguous. */
+function DayColumn({ dayIdx, children }: { dayIdx: number; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `day-${dayIdx}` });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`space-y-2 flex-1 rounded-2xl transition-colors ${
+        isOver ? 'bg-primary/5 ring-2 ring-primary/30 ring-inset' : ''
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
 const MEAL_TYPE_STYLE: Record<MenuItem['mealType'], string> = {
   breakfast: 'bg-amber-100 text-amber-700',
   lunch: 'bg-sky-100 text-sky-700',
@@ -69,6 +150,7 @@ function todayMonday(): string {
 }
 
 export default function Planner() {
+  const { t } = useTranslation();
   const contentLang = useStore((s) => s.contentLang);
   const [menus, setMenus] = useState<MenuSummary[]>([]);
   const [loadingMenus, setLoadingMenus] = useState(true);
@@ -167,7 +249,11 @@ export default function Planner() {
         window.alert(`Failed to create menu: ${JSON.stringify(json.error || json)}`);
       }
     } catch (err) {
+      // Not just console.error: a failure here (before menus.local.ts, an
+      // apiFetch against a server that isn't configured) made "New Menu"
+      // look like a dead button rather than a broken one.
       console.error('Create menu failed:', err);
+      window.alert(err instanceof Error ? err.message : 'Could not create the menu.');
     } finally {
       setCreating(false);
     }
@@ -205,6 +291,7 @@ export default function Planner() {
       }
     } catch (err) {
       console.error('Add item failed:', err);
+      window.alert(err instanceof Error ? err.message : 'Could not add that recipe.');
     } finally {
       setSavingItem(false);
     }
@@ -239,13 +326,56 @@ export default function Planner() {
 
   const itemsForDay = (dayIdx: number) => (menu?.items || []).filter(it => it.dayOfWeek === dayIdx);
 
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const draggingItem = (menu?.items || []).find(it => it.id === draggingId) ?? null;
+
+  const sensors = useSensors(
+    // A small distance threshold before a drag starts, so a tap on the
+    // handle can still be a click rather than a one-pixel drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  const handleDragStart = (e: DragStartEvent) => setDraggingId(String(e.active.id));
+
+  /** Optimistic: the card moves immediately and the write follows. A failure
+   *  re-fetches rather than trying to reverse the move by hand — the server
+   *  is the truth and re-reading it is both simpler and correct. */
+  const handleDragEnd = async (e: DragEndEvent) => {
+    setDraggingId(null);
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!menu || !overId?.startsWith('day-')) return;
+
+    const itemId = String(e.active.id);
+    const dayOfWeek = Number(overId.slice(4));
+    const items = menu.items ?? [];
+    const item = items.find(it => it.id === itemId);
+    if (!item || item.dayOfWeek === dayOfWeek) return;
+
+    // Optimistic move, then persist.
+    setMenu({ ...menu, items: items.map(it => (it.id === itemId ? { ...it, dayOfWeek } : it)) });
+
+    try {
+      const res = await apiFetch(`/api/menus/${menu.id}/items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dayOfWeek }),
+      });
+      if (!res.ok) throw new Error('move failed');
+      await fetchMenus();
+    } catch (err) {
+      console.error('Move failed:', err);
+      await fetchMenuDetail(menu.id);
+    }
+  };
+
   return (
     <AppLayout>
       <div className="px-8 lg:px-12 py-10 max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div>
-            <h1 className="text-5xl font-black text-zinc-900 tracking-tight leading-none mb-2">Meal Planner</h1>
-            <p className="text-zinc-500 max-w-md">Organize your recipes into a weekly culinary schedule.</p>
+            <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">Meal Planner</h1>
+            <p className="text-zinc-500 dark:text-zinc-400 max-w-md">Organize your recipes into a weekly culinary schedule.</p>
           </div>
           <div className="flex items-center gap-3">
             {menus.length > 0 && (
@@ -253,7 +383,7 @@ export default function Planner() {
                 <select
                   value={selectedMenuId || ''}
                   onChange={e => setSelectedMenuId(e.target.value)}
-                  className="px-4 py-3 bg-white rounded-xl border border-zinc-200 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                  className="px-4 py-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 text-sm font-bold focus:ring-2 focus:ring-primary/20"
                 >
                   {menus.map(m => (
                     <option key={m.id} value={m.id}>{m.name} ({new Date(m.week_start).toLocaleDateString()})</option>
@@ -262,7 +392,7 @@ export default function Planner() {
                 {menu && (
                   <button
                     onClick={handleDeleteMenu}
-                    className="w-11 h-11 rounded-xl bg-white border border-zinc-200 text-zinc-400 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
+                    className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
                     aria-label="Delete menu"
                   >
                     <span className="material-symbols-outlined text-lg">delete</span>
@@ -289,8 +419,8 @@ export default function Planner() {
             <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mb-6">
               <span className="material-symbols-outlined text-4xl text-primary">calendar_month</span>
             </div>
-            <h2 className="text-2xl font-bold text-zinc-800 mb-2">No menu yet</h2>
-            <p className="text-zinc-500 max-w-md mx-auto mb-8">
+            <h2 className="text-2xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">No menu yet</h2>
+            <p className="text-zinc-500 dark:text-zinc-400 max-w-md mx-auto mb-8">
               Create a weekly menu, then assign recipes to each day — prep times and portions come straight from the recipe.
             </p>
             <button
@@ -302,47 +432,50 @@ export default function Planner() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-            {DAYS.map(day => (
-              <div key={day.idx} className="bg-white rounded-3xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 flex flex-col">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-headline font-bold text-zinc-800">{day.label}</h3>
-                  <button
-                    onClick={() => openAddModal(day.idx)}
-                    className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center hover:bg-primary/20 transition-colors"
-                    aria-label={`Add recipe for ${day.label}`}
-                  >
-                    <span className="material-symbols-outlined text-lg">add</span>
-                  </button>
+          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+              {DAYS.map(day => (
+                <div key={day.idx} className="bg-white dark:bg-zinc-900 rounded-3xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 flex flex-col">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-headline font-bold text-zinc-800 dark:text-zinc-200">{day.label}</h3>
+                    <button
+                      onClick={() => openAddModal(day.idx)}
+                      className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center hover:bg-primary/20 transition-colors"
+                      aria-label={t('planner.addRecipeFor', { day: day.label })}
+                    >
+                      <span className="material-symbols-outlined text-lg">add</span>
+                    </button>
+                  </div>
+                  <DayColumn dayIdx={day.idx}>
+                    {itemsForDay(day.idx).length === 0 && (
+                      <p className="text-xs text-zinc-300 dark:text-zinc-600 italic py-4 text-center">{t('planner.noMeals')}</p>
+                    )}
+                    {itemsForDay(day.idx).map(item => (
+                      <DraggableMeal key={item.id} item={item} onRemove={handleRemoveItem} t={t as never} />
+                    ))}
+                  </DayColumn>
                 </div>
-                <div className="space-y-2 flex-1">
-                  {itemsForDay(day.idx).length === 0 && (
-                    <p className="text-xs text-zinc-300 italic py-4 text-center">No meals planned</p>
-                  )}
-                  {itemsForDay(day.idx).map(item => (
-                    <div key={item.id} className="group bg-zinc-50 rounded-xl p-3 relative">
-                      <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase mb-1 ${MEAL_TYPE_STYLE[item.mealType]}`}>
-                        {item.mealType}
-                      </span>
-                      <p className="text-sm font-bold text-zinc-800 leading-tight pr-6">{item.recipe_title}</p>
-                      <p className="text-[11px] text-zinc-400 font-medium mt-0.5">{item.servings} servings</p>
-                      <button
-                        onClick={() => handleRemoveItem(item.id)}
-                        className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-                      >
-                        <span className="material-symbols-outlined text-sm">close</span>
-                      </button>
-                    </div>
-                  ))}
+              ))}
+            </div>
+
+            {/* Follows the cursor while dragging, so the card is visible
+                over every column rather than clipped inside its own. */}
+            <DragOverlay dropAnimation={null}>
+              {draggingItem && (
+                <div className="bg-white dark:bg-zinc-800 rounded-xl p-3 shadow-2xl border border-primary/40 rotate-2">
+                  <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase mb-1 ${MEAL_TYPE_STYLE[draggingItem.mealType]}`}>
+                    {draggingItem.mealType}
+                  </span>
+                  <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 leading-tight">{draggingItem.recipe_title}</p>
                 </div>
-              </div>
-            ))}
-          </div>
+              )}
+            </DragOverlay>
+          </DndContext>
         )}
 
         {/* Weekly nutrition summary */}
         {menu && menuNutrition && menuNutrition.weekly.caloriesKcal > 0 && (
-          <div className="mt-8 bg-white rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100">
+          <div className="mt-8 bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
             <h3 className="font-headline font-bold text-lg mb-4">Weekly Nutrition</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-4">
               {[
@@ -354,15 +487,15 @@ export default function Planner() {
                 { key: 'sugarG', label: 'Sugar', unit: 'g' },
                 { key: 'sodiumMg', label: 'Sodium', unit: 'mg' },
               ].map(f => (
-                <div key={f.key} className="text-center py-3 rounded-2xl bg-zinc-50">
-                  <p className="text-[9px] uppercase tracking-wider text-zinc-400 font-bold mb-1">{f.label}</p>
-                  <p className="text-sm font-bold text-zinc-800 tabular-nums">
+                <div key={f.key} className="text-center py-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900">
+                  <p className="text-[9px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-1">{f.label}</p>
+                  <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 tabular-nums">
                     {Math.round((menuNutrition.weekly as any)[f.key])} {f.unit}
                   </p>
                 </div>
               ))}
             </div>
-            <p className="text-[11px] text-zinc-400">
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
               Daily average: ≈{Math.round(menuNutrition.weekly.caloriesKcal / 7)} kcal/day
             </p>
             {menuNutrition.unresolved.length > 0 && (
@@ -375,89 +508,87 @@ export default function Planner() {
       </div>
 
       {/* ─── Create Menu Modal ─────────────────────────────────────── */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowCreateModal(false)} />
-          <div className="relative bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-3xl font-black text-zinc-900 mb-8">New Menu</h2>
-            <form onSubmit={handleCreateMenu} className="space-y-6">
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Menu Name</label>
-                <input
-                  type="text" required autoFocus value={newMenuName}
-                  onChange={e => setNewMenuName(e.target.value)}
-                  placeholder="e.g. Week of Aug 10"
-                  className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Week Starting (Monday)</label>
-                <input
-                  type="date" required value={newMenuWeekStart}
-                  onChange={e => setNewMenuWeekStart(e.target.value)}
-                  className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all"
-                />
-              </div>
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">Cancel</button>
-                <button type="submit" disabled={creating} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50">
-                  {creating ? 'Creating…' : 'Create Menu'}
-                </button>
-              </div>
-            </form>
-          </div>
+      <Modal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSubmit={handleCreateMenu}
+        size="sm"
+        title="New Menu"
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setShowCreateModal(false)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton disabled={creating}>{creating ? 'Creating…' : 'Create Menu'}</ModalSubmitButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Menu Name">
+            <input
+              type="text" required value={newMenuName}
+              onChange={e => setNewMenuName(e.target.value)}
+              placeholder="e.g. Week of Aug 10"
+              className="sc-field"
+            />
+          </Field>
+          <Field label="Week Starting (Monday)">
+            <input
+              type="date" required value={newMenuWeekStart}
+              onChange={e => setNewMenuWeekStart(e.target.value)}
+              className="sc-field"
+            />
+          </Field>
         </div>
-      )}
+      </Modal>
 
       {/* ─── Add Recipe Modal ──────────────────────────────────────── */}
-      {addingForDay !== null && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setAddingForDay(null)} />
-          <div className="relative bg-white w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-3xl font-black text-zinc-900 mb-1">Add Recipe</h2>
-            <p className="text-sm text-zinc-400 font-medium mb-8">{DAYS.find(d => d.idx === addingForDay)?.label}</p>
-            <form onSubmit={handleAddItem} className="space-y-6">
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Recipe</label>
-                <Autocomplete
-                  value={addRecipeId}
-                  options={allRecipes.map(r => ({ id: r.id, label: r.translated_title || r.title }))}
-                  onSelect={(id) => setAddRecipeId(id)}
-                  onClear={() => setAddRecipeId('')}
-                  placeholder="Type to search recipes…"
-                  className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Meal</label>
-                  <select
-                    value={addMealType}
-                    onChange={e => setAddMealType(e.target.value as MenuItem['mealType'])}
-                    className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all appearance-none"
-                  >
-                    {MEAL_TYPES.map(mt => <option key={mt} value={mt}>{mt[0].toUpperCase() + mt.slice(1)}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2 px-1">Servings</label>
-                  <input
-                    type="number" min={1} required value={addServings}
-                    onChange={e => setAddServings(parseInt(e.target.value) || 1)}
-                    className="w-full px-6 py-4 bg-zinc-50 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 font-bold transition-all"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setAddingForDay(null)} className="flex-1 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black hover:bg-zinc-200 transition-all">Cancel</button>
-                <button type="submit" disabled={savingItem || !addRecipeId} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50">
-                  {savingItem ? 'Adding…' : 'Add to Plan'}
-                </button>
-              </div>
-            </form>
+      <Modal
+        open={addingForDay !== null}
+        onClose={() => setAddingForDay(null)}
+        onSubmit={handleAddItem}
+        size="sm"
+        title="Add Recipe"
+        subtitle={DAYS.find(d => d.idx === addingForDay)?.label}
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setAddingForDay(null)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton disabled={savingItem || !addRecipeId}>
+              {savingItem ? 'Adding…' : 'Add to Plan'}
+            </ModalSubmitButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Recipe">
+            <Autocomplete
+              value={addRecipeId}
+              options={allRecipes.map(r => ({ id: r.id, label: r.translated_title || r.title }))}
+              onSelect={(id) => setAddRecipeId(id)}
+              onClear={() => setAddRecipeId('')}
+              placeholder="Type to search recipes…"
+              className="sc-field"
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Meal">
+              <select
+                value={addMealType}
+                onChange={e => setAddMealType(e.target.value as MenuItem['mealType'])}
+                className="sc-field cursor-pointer"
+              >
+                {MEAL_TYPES.map(mt => <option key={mt} value={mt}>{mt[0].toUpperCase() + mt.slice(1)}</option>)}
+              </select>
+            </Field>
+            <Field label="Servings">
+              <input
+                type="number" min={1} required value={addServings}
+                onChange={e => setAddServings(parseInt(e.target.value) || 1)}
+                className="sc-field"
+              />
+            </Field>
           </div>
         </div>
-      )}
+      </Modal>
+
     </AppLayout>
   );
 }

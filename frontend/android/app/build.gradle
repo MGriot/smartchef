@@ -35,6 +35,9 @@ dependencies {
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    // SafMirrorPlugin (custom, app-specific — see SafMirrorPlugin.java)
+    // resolves SAF tree entries via DocumentFile.
+    implementation "androidx.documentfile:documentfile:1.0.1"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

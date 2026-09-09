@@ -46,6 +46,23 @@ function saveShoppingCart(key: string, items: ShoppingCartItem[]) {
   localStorage.setItem(key, JSON.stringify(items));
 }
 
+export type ThemeMode = "light" | "dark" | "system";
+
+const THEME_KEY = "smartchef.themeMode";
+
+function loadThemeMode(): ThemeMode {
+  const stored = localStorage.getItem(THEME_KEY);
+  return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+}
+
+// Not per-account (unlike contentLang) — the login/server-connect screens
+// render before any account is known and still need a resolved theme.
+function applyThemeMode(mode: ThemeMode) {
+  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  const dark = mode === "dark" || (mode === "system" && prefersDark);
+  document.documentElement.classList.toggle("dark", dark);
+}
+
 export interface Account {
   id: string;
   username: string;
@@ -88,6 +105,12 @@ interface AppStore {
   removeFromShoppingCart: (recipeId: string) => void;
   updateShoppingCartServings: (recipeId: string, servings: number) => void;
   clearShoppingCart: () => void;
+
+  // Appearance: "system" follows the OS/browser prefers-color-scheme;
+  // "light"/"dark" pin it explicitly. Applied to <html class="dark"> so
+  // Tailwind's `dark:` variant (darkMode: "class") picks it up everywhere.
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
 }
 
 export const useStore = create<AppStore>((set, get) => ({
@@ -154,4 +177,19 @@ export const useStore = create<AppStore>((set, get) => ({
     saveShoppingCart(shoppingCartKey(get().account?.id), []);
     set({ shoppingCart: [] });
   },
+
+  themeMode: loadThemeMode(),
+  setThemeMode: (mode) => {
+    localStorage.setItem(THEME_KEY, mode);
+    applyThemeMode(mode);
+    set({ themeMode: mode });
+  },
 }));
+
+// Resolve immediately on module load (before React mounts) so there's no
+// light-mode flash for users who already chose dark, and keep it in sync
+// with OS-level changes while "system" is selected.
+applyThemeMode(useStore.getState().themeMode);
+window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
+  if (useStore.getState().themeMode === "system") applyThemeMode("system");
+});
