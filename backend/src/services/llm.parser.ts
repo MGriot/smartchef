@@ -88,7 +88,7 @@ Regole:
  * questo controllo chiunque potrebbe usare l'import ricette per far
  * interrogare al backend la propria rete interna (SSRF).
  */
-function assertSafeImportUrl(rawUrl: string): URL {
+export function assertSafeImportUrl(rawUrl: string): URL {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -122,6 +122,33 @@ function assertSafeImportUrl(rawUrl: string): URL {
 /**
  * Fetcha il contenuto di una URL per il parsing
  */
+/** The page as-is, for the structured-data extractor to read. Same request
+ *  headers and SSRF guard as fetchUrlContent() below, but without the
+ *  tag-stripping and the 6 000-character truncation — schema.org JSON-LD is
+ *  frequently past that cutoff, which is one of the reasons the LLM path
+ *  used to lose it. Capped at 4 MB so a hostile or broken URL can't stream
+ *  unbounded into memory. */
+export async function fetchUrlHtml(url: string): Promise<string> {
+  assertSafeImportUrl(url);
+  const response = await fetch(url, { headers: IMPORT_FETCH_HEADERS, signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
+  const html = await response.text();
+  return html.length > 4_000_000 ? html.slice(0, 4_000_000) : html;
+}
+
+const IMPORT_FETCH_HEADERS: Record<string, string> = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+  "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
+  "Cache-Control": "no-cache",
+  "Pragma": "no-cache",
+  "Upgrade-Insecure-Requests": "1",
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Sec-Fetch-User": "?1",
+};
+
 async function fetchUrlContent(url: string): Promise<string> {
   assertSafeImportUrl(url);
   // Aggiungiamo header più completi per bypassare firewall basici

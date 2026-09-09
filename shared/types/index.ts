@@ -153,6 +153,10 @@ export interface ResolvedIngredient {
   quantityText?: string;
   unitSymbol: string;
   unitId: UUID;
+  /** Whether the recipe marks this ingredient optional. Carried through so
+   *  pantry matching can ignore a missing garnish — it was read from the
+   *  row all along and simply never propagated. */
+  isOptional: boolean;
   // Traccia il percorso della matrioska: ["Cena di Gala", "Salsa Madre"]
   sourceChain: string[];
 }
@@ -213,6 +217,14 @@ export interface ShoppingListItem {
   isChecked: boolean;
   sourceDetails: ShoppingListItemSource[];
   notes?: string;
+  // Denormalised from the item's ingredient so a shopping list can be
+  // grouped into aisles without a second round of lookups. sortOrder is the
+  // category's own, which is what puts the aisles in walking order.
+  categoryId?: UUID;
+  categoryName?: string;
+  categoryColor?: string;
+  categoryIcon?: string;
+  categorySortOrder?: number;
 }
 
 export interface ShoppingList {

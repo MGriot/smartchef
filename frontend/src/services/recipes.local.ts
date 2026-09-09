@@ -27,7 +27,7 @@
 // route here at all.
 // ════════════════════════════════════════════════════════════════════════
 
-import { query, queryOne, withTransaction, inPlaceholders, type LocalClient } from "../db/local";
+import { query, queryOne, withTransaction, inPlaceholders, chunk, type LocalClient } from "../db/local";
 import { calculatePortions, resolveCookSequence } from "./matrioska.local";
 import { computeAutoTagNames, unionTagNames } from "./tags.local";
 
@@ -362,6 +362,14 @@ export async function listRecipes(params: ListRecipesParams) {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The batched lookups above fetch every language at once, so the
+ *  current-language row is picked in JS. SQL did the comparison with
+ *  LOWER(a) = LOWER(b); this keeps that exact rule so a stored "IT" still
+ *  matches a requested "it". */
+function matchesLang(stored: string, wanted: string): boolean {
+  return stored.toLowerCase() === wanted.toLowerCase();
+}
+
 export async function getRecipe(id: string, lang?: string) {
   if (!UUID_RE.test(id)) return null;
 
@@ -403,30 +411,62 @@ export async function getRecipe(id: string, lang?: string) {
      ORDER BY ri.sort_order`,
     [id]
   );
+  // Every translation this recipe needs, read in a fixed handful of queries
+  // rather than three per ingredient, two per step and one per tool. Opening
+  // a 15-ingredient, 10-step recipe used to cost around seventy sequential
+  // reads; in standalone mode each of those is a Capacitor bridge
+  // round-trip, which is the N+1 shape
+  // docs/plans/2026-08-22-android-performance-plan.md exists to stamp out
+  // (listIngredients() above was the first pass at it). Batched the same
+  // way, via chunk() + inPlaceholders().
+  const ingredientTranslationById = new Map<string, { translated_name: string; plural_translation: string | null }>();
+  const ingredientIds = [...new Set(ingredientRows.map(r => r.ingredient_id).filter(Boolean))] as string[];
+  if (lang && ingredientIds.length > 0) {
+    for (const batch of chunk(ingredientIds)) {
+      const p: unknown[] = [];
+      const placeholders = inPlaceholders(p, batch);
+      p.push(lang);
+      const rows = await query<{ ingredient_id: string; translated_name: string; plural_translation: string | null }>(
+        `SELECT ingredient_id, translated_name, plural_translation FROM ingredient_translations
+         WHERE ingredient_id IN (${placeholders}) AND LOWER(language_code) = LOWER($${p.length})`,
+        p
+      );
+      for (const r of rows) ingredientTranslationById.set(r.ingredient_id, r);
+    }
+  }
+
+  // Fetched for every language at once: the same rows serve both the
+  // `translations` array the editor round-trips and the single translated
+  // note the current language renders.
+  const riTranslationsByRowId = new Map<string, Array<{ language_code: string; notes: string | null }>>();
+  for (const batch of chunk(ingredientRows.map(r => r.id as string))) {
+    const p: unknown[] = [];
+    const rows = await query<{ recipe_ingredient_id: string; language_code: string; notes: string | null }>(
+      `SELECT recipe_ingredient_id, language_code, notes FROM recipe_ingredient_translations
+       WHERE recipe_ingredient_id IN (${inPlaceholders(p, batch)})`,
+      p
+    );
+    for (const r of rows) {
+      const list = riTranslationsByRowId.get(r.recipe_ingredient_id);
+      if (list) list.push(r);
+      else riTranslationsByRowId.set(r.recipe_ingredient_id, [r]);
+    }
+  }
+
   const ingredients = [];
   for (const row of ingredientRows) {
     let ingredientName = row.ingredient_name as string | null;
     let ingredientPluralName = row.ingredient_plural_name as string | null;
+    const rowTranslations = riTranslationsByRowId.get(row.id as string) ?? [];
     let translatedNotes: string | null = null;
     if (lang) {
       if (row.ingredient_id) {
-        const it = await queryOne<{ translated_name: string; plural_translation: string | null }>(
-          `SELECT translated_name, plural_translation FROM ingredient_translations WHERE ingredient_id = $1 AND LOWER(language_code) = LOWER($2)`,
-          [row.ingredient_id, lang]
-        );
+        const it = ingredientTranslationById.get(row.ingredient_id as string);
         ingredientName = it?.translated_name ?? ingredientName;
         ingredientPluralName = it?.plural_translation ?? ingredientPluralName;
       }
-      const rit = await queryOne<{ notes: string }>(
-        `SELECT notes FROM recipe_ingredient_translations WHERE recipe_ingredient_id = $1 AND LOWER(language_code) = LOWER($2)`,
-        [row.id, lang]
-      );
-      translatedNotes = rit?.notes ?? null;
+      translatedNotes = rowTranslations.find(t => matchesLang(t.language_code, lang))?.notes ?? null;
     }
-    const rowTranslations = await query<{ language_code: string; notes: string | null }>(
-      `SELECT language_code, notes FROM recipe_ingredient_translations WHERE recipe_ingredient_id = $1`,
-      [row.id]
-    );
     ingredients.push({
       id: row.id,
       sortOrder: row.sort_order,
@@ -458,24 +498,28 @@ export async function getRecipe(id: string, lang?: string) {
     `SELECT * FROM recipe_steps WHERE recipe_id = $1 ORDER BY step_number`,
     [id]
   );
+  const stepTranslationsByStepId = new Map<string, Array<{ language_code: string; title: string | null; description: string | null; notes: string | null }>>();
+  for (const batch of chunk(stepRows.map(r => r.id as string))) {
+    const p: unknown[] = [];
+    const rows = await query<{ step_id: string; language_code: string; title: string | null; description: string | null; notes: string | null }>(
+      `SELECT step_id, language_code, title, description, notes FROM recipe_step_translations
+       WHERE step_id IN (${inPlaceholders(p, batch)})`,
+      p
+    );
+    for (const r of rows) {
+      const list = stepTranslationsByStepId.get(r.step_id);
+      if (list) list.push(r);
+      else stepTranslationsByStepId.set(r.step_id, [r]);
+    }
+  }
+
   const steps = [];
   for (const row of stepRows) {
-    let translatedTitle: string | null = null;
-    let translatedDescription: string | null = null;
-    let translatedNotes: string | null = null;
-    if (lang) {
-      const rst = await queryOne<{ title: string | null; description: string | null; notes: string | null }>(
-        `SELECT title, description, notes FROM recipe_step_translations WHERE step_id = $1 AND LOWER(language_code) = LOWER($2)`,
-        [row.id, lang]
-      );
-      translatedTitle = rst?.title ?? null;
-      translatedDescription = rst?.description ?? null;
-      translatedNotes = rst?.notes ?? null;
-    }
-    const rowTranslations = await query<{ language_code: string; title: string | null; description: string | null; notes: string | null }>(
-      `SELECT language_code, title, description, notes FROM recipe_step_translations WHERE step_id = $1`,
-      [row.id]
-    );
+    const rowTranslations = stepTranslationsByStepId.get(row.id as string) ?? [];
+    const rst = lang ? rowTranslations.find(t => matchesLang(t.language_code, lang)) : undefined;
+    const translatedTitle = rst?.title ?? null;
+    const translatedDescription = rst?.description ?? null;
+    const translatedNotes = rst?.notes ?? null;
     steps.push({
       id: row.id,
       stepNumber: row.step_number,
@@ -499,13 +543,24 @@ export async function getRecipe(id: string, lang?: string) {
     `SELECT t.id, t.name, t.icon FROM recipe_tools rt JOIN tools t ON t.id = rt.tool_id WHERE rt.recipe_id = $1`,
     [id]
   );
-  const tools = [];
-  for (const t of toolRows) {
-    const translatedName = lang
-      ? (await queryOne<{ name: string }>(`SELECT name FROM tool_translations WHERE tool_id = $1 AND LOWER(language_code) = LOWER($2)`, [t.id, lang]))?.name ?? null
-      : null;
-    tools.push({ id: t.id, name: t.name, icon: t.icon, translated_name: translatedName });
+  const toolNameByToolId = new Map<string, string>();
+  if (lang && toolRows.length > 0) {
+    for (const batch of chunk(toolRows.map(t => t.id))) {
+      const p: unknown[] = [];
+      const placeholders = inPlaceholders(p, batch);
+      p.push(lang);
+      const rows = await query<{ tool_id: string; name: string }>(
+        `SELECT tool_id, name FROM tool_translations
+         WHERE tool_id IN (${placeholders}) AND LOWER(language_code) = LOWER($${p.length})`,
+        p
+      );
+      for (const r of rows) toolNameByToolId.set(r.tool_id, r.name);
+    }
   }
+  const tools = toolRows.map(t => ({
+    id: t.id, name: t.name, icon: t.icon,
+    translated_name: toolNameByToolId.get(t.id) ?? null,
+  }));
 
   // ── Techniques ───────────────────────────────────────────────────────
   // Every technique tagged on any step, resolved once here (not per-step)
@@ -514,18 +569,38 @@ export async function getRecipe(id: string, lang?: string) {
   // sourced from steps[].techniqueIds instead of a recipe_tools join.
   const techniqueIdSet = new Set<string>();
   for (const s of steps) for (const tid of s.techniqueIds as string[]) techniqueIdSet.add(tid);
-  const techniques = [];
-  for (const techniqueId of techniqueIdSet) {
-    const t = await queryOne<{ id: string; name: string; icon: string | null }>(
-      `SELECT id, name, icon FROM techniques WHERE id = $1 AND deleted_at IS NULL`,
-      [techniqueId]
+  const techniqueIds = [...techniqueIdSet];
+  const techniqueById = new Map<string, { id: string; name: string; icon: string | null }>();
+  for (const batch of chunk(techniqueIds)) {
+    const p: unknown[] = [];
+    const rows = await query<{ id: string; name: string; icon: string | null }>(
+      `SELECT id, name, icon FROM techniques
+       WHERE id IN (${inPlaceholders(p, batch)}) AND deleted_at IS NULL`,
+      p
     );
-    if (!t) continue;
-    const translatedName = lang
-      ? (await queryOne<{ name: string }>(`SELECT name FROM technique_translations WHERE technique_id = $1 AND LOWER(language_code) = LOWER($2)`, [t.id, lang]))?.name ?? null
-      : null;
-    techniques.push({ id: t.id, name: t.name, icon: t.icon, translated_name: translatedName });
+    for (const r of rows) techniqueById.set(r.id, r);
   }
+  const techniqueNameById = new Map<string, string>();
+  if (lang && techniqueById.size > 0) {
+    for (const batch of chunk([...techniqueById.keys()])) {
+      const p: unknown[] = [];
+      const placeholders = inPlaceholders(p, batch);
+      p.push(lang);
+      const rows = await query<{ technique_id: string; name: string }>(
+        `SELECT technique_id, name FROM technique_translations
+         WHERE technique_id IN (${placeholders}) AND LOWER(language_code) = LOWER($${p.length})`,
+        p
+      );
+      for (const r of rows) techniqueNameById.set(r.technique_id, r.name);
+    }
+  }
+  // Kept in the order the steps first mention them — `IN (...)` gives no
+  // order of its own, and the chips read as the recipe does.
+  const techniques = techniqueIds.flatMap((techniqueId) => {
+    const t = techniqueById.get(techniqueId);
+    if (!t) return [];
+    return [{ id: t.id, name: t.name, icon: t.icon, translated_name: techniqueNameById.get(t.id) ?? null }];
+  });
 
   return {
     ...recipe,

@@ -6,6 +6,8 @@ import type { StandaloneProfile } from '../lib/standalone';
 
 interface ProfilePickerProps {
   onPicked: () => void;
+  /** Native first-run only — see Login.tsx's prop of the same name. */
+  onChangeStorage?: () => void;
 }
 
 /** "Who's cooking?" — shown whenever this device is standalone-enabled but
@@ -14,7 +16,7 @@ interface ProfilePickerProps {
  *  devices already created. Picking an existing profile or creating a new
  *  one both just call back into App.tsx's checkNativeReady() (onPicked)
  *  to re-derive auth state, same as ServerConnect.tsx's onConnected. */
-export default function ProfilePicker({ onPicked }: ProfilePickerProps) {
+export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePickerProps) {
   const [profiles, setProfiles] = useState<StandaloneProfile[] | null>(null);
   const [activating, setActivating] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -156,6 +158,19 @@ export default function ProfilePicker({ onPicked }: ProfilePickerProps) {
               </button>
             </div>
           </form>
+        )}
+
+        {/* First run on this device only — after that, where the library
+            lives is an admin decision in Settings, not something the
+            "who's cooking?" screen re-asks. */}
+        {onChangeStorage && !creating && (
+          <button
+            type="button"
+            onClick={onChangeStorage}
+            className="mt-6 w-full pt-5 border-t border-zinc-100 dark:border-zinc-800 text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-primary transition-colors"
+          >
+            Change where this device keeps your library
+          </button>
         )}
       </div>
     </div>

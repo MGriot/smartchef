@@ -5,6 +5,8 @@ import Autocomplete from '../components/Autocomplete';
 import CoverImage from '../components/CoverImage';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
+import { Field } from '../components/Form';
 
 interface CollectionRecipe {
   id: string;
@@ -259,28 +261,36 @@ export default function CollectionDetail() {
       </div>
 
       {/* Edit modal */}
-      {editing && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setEditing(false)} />
-          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">Edit Collection</h2>
-            <form onSubmit={handleSaveEdit} className="space-y-6">
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Name</label>
-                <input type="text" required value={editName} onChange={e => setEditName(e.target.value)} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Description</label>
-                <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} className="w-full h-24 px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium transition-all" />
-              </div>
-              <div className="flex gap-4 pt-4">
-                <button type="button" onClick={() => setEditing(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
-                <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">Save</button>
-              </div>
-            </form>
-          </div>
+      <Modal
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSubmit={handleSaveEdit}
+        size="sm"
+        title="Edit Collection"
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setEditing(false)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton>Save</ModalSubmitButton>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Name">
+            <input
+              type="text" required value={editName}
+              onChange={e => setEditName(e.target.value)}
+              className="sc-field"
+            />
+          </Field>
+          <Field label="Description">
+            <textarea
+              value={editDescription}
+              onChange={e => setEditDescription(e.target.value)}
+              className="sc-field h-24 resize-none font-medium"
+            />
+          </Field>
         </div>
-      )}
+      </Modal>
     </AppLayout>
   );
 }

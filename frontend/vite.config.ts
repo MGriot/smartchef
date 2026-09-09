@@ -18,7 +18,38 @@ export default defineConfig({
       // installable on desktop/mobile.
       manifest: false, // we ship a static manifest.webmanifest in public/
       workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
+        // woff2 is in here so the shell renders with its own type and icons
+        // on a first offline load rather than falling back to system faces.
+        globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+        // ...but not the heavy on-demand chunks. Precaching downloads
+        // everything listed here at install time, and these four are only
+        // reached by a specific action: OCR on an imported photo (the
+        // tesseract core and its worker), reading a PDF, drawing the world
+        // map, and talking to a git remote. Together they were 5.5 MB of a
+        // 6.8 MB install for features most sessions never touch. The
+        // runtime rule below still caches each one the first time it is
+        // actually used, so once you have used it, it works offline.
+        globIgnores: [
+          "**/tesseract-core*",
+          "**/worker.min-*",
+          "**/pdf-*.js",
+          "**/pdf.worker*",
+          "**/worldGeo-*",
+          "**/gitRemoteTransport-*",
+        ],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith("/assets/"),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "smartchef-lazy-chunks",
+              // Content-hashed filenames, so a cached entry is never stale
+              // — only ever unreferenced, which cleanupOutdatedCaches and
+              // this ceiling take care of between them.
+              expiration: { maxEntries: 60 },
+            },
+          },
+        ],
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
         // Default 2 MiB limit no longer fits the main bundle now that the

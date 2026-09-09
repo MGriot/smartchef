@@ -15,6 +15,12 @@ import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/reci
 import RegionPicker from '../components/RegionPicker';
 import RegionsMap from '../components/RegionsMap';
 import RenderStepText from '../components/RenderStepText';
+import CookTimerBar from '../components/CookTimerBar';
+import { useWakeLock } from '../hooks/useWakeLock';
+import { startCookTimer, requestTimerNotifications } from '../lib/cookTimers';
+import { toSystem, type MeasurementSystem } from '../lib/unitConvert';
+import ConverterPanel from '../components/ConverterPanel';
+import ShareLinkModal from '../components/ShareLinkModal';
 import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
 import CoverImage, { ResolvedImage } from '../components/CoverImage';
@@ -267,10 +273,59 @@ const RecipeDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [servings, setServings] = useState(4);
+
+  // Display only — the recipe still stores exactly what its author wrote.
+  // Remembered per device because it is a preference about the reader, not
+  // a property of the recipe.
+  const [displaySystem, setDisplaySystem] = useState<MeasurementSystem>(() => {
+    try {
+      return (localStorage.getItem('smartchef.displaySystem') as MeasurementSystem) || 'metric';
+    } catch {
+      return 'metric';
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('smartchef.displaySystem', displaySystem); } catch { /* ignore */ }
+  }, [displaySystem]);
+  const [showConverter, setShowConverter] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<Set<string>>(new Set());
+
+  // Kitchen mode is read hands-free across a whole cook, so the screen must
+  // not dim. Only requested while actually in cook mode — holding a wake
+  // lock on the ordinary recipe page would be rude.
+  const wakeLockState = useWakeLock(mode === 'cook');
+
+  // Ticking a step off used to be component state that reset on every
+  // entry, so stepping out to the shopping list and back lost the lot.
+  // Per-recipe, and deliberately localStorage rather than the database:
+  // "where I am in tonight's cook" is this device's business and should not
+  // sync to anyone else's phone.
+  useEffect(() => {
+    if (mode !== 'cook' || !id) return;
+    try {
+      const saved = localStorage.getItem(`smartchef.cookProgress.${id}`);
+      if (saved) setCompletedSteps(new Set(JSON.parse(saved) as string[]));
+    } catch {
+      /* private mode, cleared storage — start from zero */
+    }
+  }, [mode, id]);
+
+  useEffect(() => {
+    if (mode !== 'cook' || !id) return;
+    try {
+      localStorage.setItem(`smartchef.cookProgress.${id}`, JSON.stringify([...completedSteps]));
+    } catch {
+      /* nothing worth failing a cook over */
+    }
+  }, [mode, id, completedSteps]);
   const [addedToCart, setAddedToCart] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showShareLink, setShowShareLink] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  useEffect(() => {
+    import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setIsStandalone);
+  }, []);
   const [cookidooExport, setCookidooExport] = useState<CookidooExport | null>(null);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [allCollections, setAllCollections] = useState<{ id: string; name: string }[]>([]);
@@ -528,6 +583,22 @@ const RecipeDetail: React.FC = () => {
     return v % 1 === 0 ? String(v) : v.toFixed(1);
   };
 
+  /** Scales to the current portion count AND restates in the chosen system.
+   *
+   *  toSystem() returns null for anything it must not touch — a countable
+   *  unit ("2 pz"), a vague one ("q.b."), a spoon, or a unit already in the
+   *  requested system — and the original is rendered unchanged in every one
+   *  of those cases. A quantityText with no number ("a pinch") never even
+   *  reaches it. */
+  const formatAmount = (qty: number | null, unitSymbol?: string | null, quantityText?: string | null): string => {
+    const v = scaleNum(qty);
+    if (v === null) return quantityText || '';
+    const fallback = `${v % 1 === 0 ? v : v.toFixed(1)}${unitSymbol ? ` ${unitSymbol}` : quantityText ? ` ${quantityText}` : ''}`;
+    if (!unitSymbol) return fallback;
+    const converted = toSystem(v, unitSymbol, displaySystem);
+    return converted ? `${converted.value} ${converted.symbol}` : fallback;
+  };
+
   /* ── Scale nutrition totals (fetched once at base servings) against the current servings slider ── */
   const nutritionAtServings = (): NutritionTotals | null => {
     if (!nutrition || !recipe) return null;
@@ -543,7 +614,7 @@ const RecipeDetail: React.FC = () => {
   const stepTextIngredients = (recipe?.ingredients || []).map(ing => ({
     sortOrder: ing.sortOrder,
     name: ing.ingredientName || ing.subRecipeTitle || 'ingredient',
-    quantity: ing.quantity !== null ? `${scale(ing.quantity)}${ing.unitSymbol ? ' ' + ing.unitSymbol : ''}` : '',
+    quantity: ing.quantity !== null ? formatAmount(ing.quantity, ing.unitSymbol, ing.quantityText) : '',
   }));
   const stepTextTools = (recipe?.tools || []).map(t => ({ id: t.id, name: t.translated_name || t.name }));
   const stepTextTechniques = allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }));
@@ -851,10 +922,25 @@ const RecipeDetail: React.FC = () => {
                       )}
 
                       {step.durationMin && (
-                        <div className="flex items-center gap-2 text-sm text-zinc-400 dark:text-zinc-500 mb-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            requestTimerNotifications();
+                            startCookTimer({
+                              // Step numbers restart inside each sub-recipe,
+                              // so the section has to be part of the id or
+                              // two timers would collide.
+                              id: `${section.recipeId}:${step.stepNumber}`,
+                              label: `${section.recipeTitle} · ${step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}`,
+                              minutes: step.durationMin!,
+                            });
+                          }}
+                          className="flex items-center gap-2 mb-4 px-3 py-1.5 rounded-full border border-zinc-600/60 text-sm text-zinc-300 hover:border-primary hover:text-primary transition-colors"
+                        >
                           <span className="material-symbols-outlined text-sm">timer</span>
                           {t('recipeDetail.durationMinutes', { count: step.durationMin })}
-                        </div>
+                          <span className="text-[10px] font-black uppercase tracking-wider opacity-70">{t('cookTimer.start')}</span>
+                        </button>
                       )}
 
                       {step.notes && (
@@ -894,6 +980,11 @@ const RecipeDetail: React.FC = () => {
             </div>
           )}
         </main>
+
+        {/* Fixed to the bottom of the viewport; the padding keeps the last
+            step's controls clear of it. */}
+        <div className="h-24" />
+        <CookTimerBar />
       </div>
     );
   }
@@ -911,7 +1002,15 @@ const RecipeDetail: React.FC = () => {
             <span className="text-sm font-bold">{t('recipeDetail.exitKitchen')}</span>
           </button>
           <h2 className="text-lg font-headline font-bold text-white truncate max-w-md">{recipe.translated_title || recipe.title}</h2>
-          <div className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('recipeDetail.stepsProgress', { done: completedSteps.size, total: recipe.steps.length })}</div>
+          <div className="flex items-center gap-3">
+            {wakeLockState === 'active' && (
+              <span title={t('cookTimer.screenStaysOn')} className="flex items-center gap-1 text-[11px] font-bold text-primary">
+                <span className="material-symbols-outlined text-[15px]">visibility</span>
+                {t('cookTimer.screenOn')}
+              </span>
+            )}
+            <span className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('recipeDetail.stepsProgress', { done: completedSteps.size, total: recipe.steps.length })}</span>
+          </div>
         </header>
 
         {/* Progress bar */}
@@ -992,10 +1091,22 @@ const RecipeDetail: React.FC = () => {
                     )}
 
                     {step.durationMin && (
-                      <div className="flex items-center gap-2 text-sm text-zinc-400 dark:text-zinc-500 mb-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          requestTimerNotifications();
+                          startCookTimer({
+                            id: `${recipe.id}:${step.stepNumber}`,
+                            label: step.translatedTitle || step.title || t('recipeDetail.stepNumber', { number: step.stepNumber }),
+                            minutes: step.durationMin!,
+                          });
+                        }}
+                        className="flex items-center gap-2 mb-4 px-3 py-1.5 rounded-full border border-zinc-600/60 text-sm text-zinc-300 hover:border-primary hover:text-primary transition-colors"
+                      >
                         <span className="material-symbols-outlined text-sm">timer</span>
                         {t('recipeDetail.durationMinutes', { count: step.durationMin })}
-                      </div>
+                        <span className="text-[10px] font-black uppercase tracking-wider opacity-70">{t('cookTimer.start')}</span>
+                      </button>
                     )}
 
                     {/* Step Note */}
@@ -1038,6 +1149,11 @@ const RecipeDetail: React.FC = () => {
             </div>
           )}
         </main>
+
+        {/* Fixed to the bottom of the viewport; the padding keeps the last
+            step's controls clear of it. */}
+        <div className="h-24" />
+        <CookTimerBar />
       </div>
     );
   }
@@ -1474,32 +1590,42 @@ const RecipeDetail: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {(draft.ingredients || []).map((ing, idx) => (
-                    <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group border border-zinc-100 dark:border-zinc-800">
-                      <button
-                        onClick={() => removeIngredient(idx)}
-                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
-                      >
-                        <span className="material-symbols-outlined text-sm">delete</span>
-                      </button>
-                      <div className="grid grid-cols-12 gap-4">
-                        <div className="col-span-6">
-                          <div className="flex items-center justify-between mb-1">
-                            <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">{t('recipeDetail.ingredient')}</label>
-                            <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
-                              {(['ingredient', 'recipe'] as const).map((type) => (
-                                <button
-                                  key={type}
-                                  type="button"
-                                  onClick={() => setEntryType(idx, type)}
-                                  className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase transition-colors ${
-                                    getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
-                                  }`}
-                                >
-                                  {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                    /* @container: the fields inside lay themselves out from the CARD's
+                       width rather than the viewport's. Two of these sit side by side in
+                       an 8-of-12 column, so the old viewport-wide `xl:` 6/3/3 grid left
+                       the ingredient name about 170px - name, type toggle, QTY and UNIT
+                       all printing over each other. */
+                    <div key={idx} className="@container bg-zinc-50 dark:bg-zinc-800/40 rounded-2xl p-4 border border-zinc-100 dark:border-zinc-800">
+                      {/* Type toggle and delete get their own row. The toggle used to share
+                          a line with the "Ingredient" label and ran straight through it,
+                          and delete was an absolutely-positioned button lying on top of
+                          the name field, invisible until hover. */}
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
+                          {(['ingredient', 'recipe'] as const).map((type) => (
+                            <button
+                              key={type}
+                              type="button"
+                              onClick={() => setEntryType(idx, type)}
+                              className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                                getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
+                              }`}
+                            >
+                              {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => removeIngredient(idx)}
+                          title={t('common.delete')}
+                          className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-12 gap-3">
+                        <div className="col-span-12 @lg:col-span-6">
+                          <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredient')}</label>
                           {getEntryType(idx, ing) === 'recipe' ? (
                             <Autocomplete
                               value={subRecipeDangling(ing) ? '' : (ing.subRecipeId || '')}
@@ -1615,7 +1741,7 @@ const RecipeDetail: React.FC = () => {
                             </div>
                           )}
                         </div>
-                        <div className="col-span-3">
+                        <div className="col-span-5 @lg:col-span-3">
                           <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.qty')}</label>
                           <input
                             type="number" step="any" value={ing.quantity || ''}
@@ -1623,7 +1749,7 @@ const RecipeDetail: React.FC = () => {
                             className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
                           />
                         </div>
-                        <div className="col-span-3">
+                        <div className="col-span-7 @lg:col-span-3">
                           <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.unit')}</label>
                           <select
                             value={ing.unitId || ''}
@@ -1638,7 +1764,7 @@ const RecipeDetail: React.FC = () => {
                             {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
                           </select>
                         </div>
-                        <div className="col-span-6">
+                        <div className="col-span-12 @lg:col-span-6">
                           <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.groupOptional')}</label>
                           <input
                             type="text" value={ing.groupName || ''}
@@ -1647,7 +1773,7 @@ const RecipeDetail: React.FC = () => {
                             placeholder={t('recipeDetail.groupPlaceholder')}
                           />
                         </div>
-                        <div className="col-span-6">
+                        <div className="col-span-12 @lg:col-span-6">
                           <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.chefsNoteOptional')}</label>
                           <input
                             type="text" value={ing.notes || ''}
@@ -1905,7 +2031,14 @@ const RecipeDetail: React.FC = () => {
               </div>
             </div>
 
-            <aside className="xl:col-span-4 space-y-6 min-w-0 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto xl:pr-1">
+            {/* Plain column, not a sticky scroll pane. Capping the rail at
+                viewport height and giving it its OWN overflow-y put a second
+                scrollbar on the edit screen next to the page's — two bars,
+                and whichever one the wheel happened to be over is the one
+                that moved. The rail is taller than the viewport anyway (cover,
+                numbers, yield, tags, regions, tools, sources, translations),
+                so pinning it only ever meant part of it was unreachable. */}
+            <aside className="xl:col-span-4 space-y-6 min-w-0">
               {/* Cover image - metadata, so it belongs in the rail rather than
                   at the bottom of the text card. */}
               <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
@@ -2266,6 +2399,13 @@ const RecipeDetail: React.FC = () => {
           <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
           <div className="absolute right-0 top-8 z-50 w-64 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-2">
             <button
+              onClick={() => { setShowExportMenu(false); setShowShareLink(true); }}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[18px]">link</span>
+              {t('share.menuItem')}
+            </button>
+            <button
               onClick={handleExportRecipe}
               className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
             >
@@ -2517,6 +2657,17 @@ const RecipeDetail: React.FC = () => {
         </div>
       </div>
 
+      <ConverterPanel open={showConverter} onClose={() => setShowConverter(false)} />
+      {id && (
+        <ShareLinkModal
+          open={showShareLink}
+          onClose={() => setShowShareLink(false)}
+          recipeId={id}
+          standalone={isStandalone}
+          onExportFile={handleExportRecipe}
+        />
+      )}
+
       {/* ── Two-column layout ──────────────────────────────────── */}
       <div className="max-w-7xl mx-auto px-6 mt-10 pb-24">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
@@ -2555,7 +2706,37 @@ const RecipeDetail: React.FC = () => {
 
             {/* Ingredients card */}
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-              <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.ingredients')}</h3>
+              <div className="flex items-center justify-between gap-3 mb-5">
+                <h3 className="font-headline font-bold text-lg">{t('recipeDetail.ingredients')}</h3>
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Display only — the recipe keeps what its author wrote. */}
+                  <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5">
+                    {(['metric', 'imperial'] as const).map((sys) => (
+                      <button
+                        key={sys}
+                        type="button"
+                        onClick={() => setDisplaySystem(sys)}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition-colors ${
+                          displaySystem === sys
+                            ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                            : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'
+                        }`}
+                      >
+                        {t(`converter.${sys}`)}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowConverter(true)}
+                    title={t('converter.title')}
+                    aria-label={t('converter.title')}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-primary transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[19px]">swap_horiz</span>
+                  </button>
+                </div>
+              </div>
               <div className="space-y-1">
                 {sortedIngredients.map((ing, idx) => {
                   const prevGroupName = idx > 0 ? sortedIngredients[idx - 1].groupName : null;
@@ -2577,7 +2758,7 @@ const RecipeDetail: React.FC = () => {
                         </span>
                       </div>
                       <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">
-                        {scale(ing.quantity)} {ing.unitSymbol || ing.quantityText || ''}
+                        {formatAmount(ing.quantity, ing.unitSymbol, ing.quantityText)}
                       </span>
                     </div>
                     {(ing.translatedNotes || ing.notes) && (

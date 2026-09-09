@@ -18,14 +18,23 @@ interface AppLayoutProps {
   headerActions?: React.ReactNode;
 }
 
+// Ordered by what you're doing, not by when each page was built.
+//
+// Browsing first — Gallery and Atlas are the same recipes, one as a grid
+// and one on a map, so they belong next to each other rather than at
+// opposite ends. Then the week in the order it actually happens: plan it,
+// shop for it, log what you cooked. The two maintenance surfaces come last,
+// since Import is occasional (the header's Create Recipe covers the common
+// case) and Library is upkeep rather than daily use.
 const NAV_LINKS: { to: string; labelKey: string }[] = [
   { to: '/', labelKey: 'nav.gallery' },
+  { to: '/atlas', labelKey: 'nav.atlas' },
   { to: '/planner', labelKey: 'nav.planner' },
+  { to: '/pantry', labelKey: 'nav.pantry' },
   { to: '/shopping', labelKey: 'nav.shoppingList' },
+  { to: '/history', labelKey: 'nav.history' },
   { to: '/import', labelKey: 'nav.import' },
   { to: '/library/ingredients', labelKey: 'nav.library' },
-  { to: '/history', labelKey: 'nav.history' },
-  { to: '/atlas', labelKey: 'nav.atlas' },
 ];
 
 const IDLE_LINK = "flex items-center gap-3 px-4 py-3 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl font-semibold text-sm transition-all group";

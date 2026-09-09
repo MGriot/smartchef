@@ -552,6 +552,97 @@ CREATE TABLE IF NOT EXISTS cook_log (
 );
 CREATE INDEX IF NOT EXISTS idx_cook_log_recipe ON cook_log(recipe_id);
 
+-- What is actually in the house. Local-only like the shopping list and the
+-- planner: a cupboard is this household's, not library content other
+-- devices need.
+--
+-- quantity and unit are nullable on purpose - "I have flour" is worth
+-- recording without weighing the bag, and a row with no quantity counts as
+-- "enough" when matching a recipe. One row per ingredient, so topping up
+-- edits rather than adding a second line the matcher would have to sum.
+CREATE TABLE IF NOT EXISTS pantry_items (
+  id            TEXT PRIMARY KEY,
+  ingredient_id TEXT NOT NULL,
+  quantity      REAL,
+  unit_id       TEXT,
+  expires_at    TEXT,
+  note          TEXT,
+  created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (ingredient_id)
+);
+
+-- Free-form recipe collections (the Gallery's "Collections" sub-tab).
+-- Local-only like menus and shopping lists below: the server keeps these
+-- per-user rather than shared, and the sync snapshot carries library
+-- content, not one person's groupings.
+CREATE TABLE IF NOT EXISTS collections (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  deleted_at  TEXT,
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS collection_recipes (
+  collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  recipe_id     TEXT NOT NULL,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (collection_id, recipe_id)
+);
+
+-- Weekly menus (the Planner). Local-only for the same reason as shopping
+-- lists below: a week's plan is personal and short-lived, and the sync
+-- snapshot carries library content, not scheduling.
+CREATE TABLE IF NOT EXISTS menus (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  week_start  TEXT NOT NULL,
+  notes       TEXT,
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS menu_items (
+  id           TEXT PRIMARY KEY,
+  menu_id      TEXT NOT NULL REFERENCES menus(id) ON DELETE CASCADE,
+  recipe_id    TEXT NOT NULL,
+  day_of_week  INTEGER NOT NULL,
+  meal_type    TEXT NOT NULL DEFAULT 'dinner',
+  servings     INTEGER NOT NULL DEFAULT 4,
+  notes        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_menu_items_menu ON menu_items(menu_id);
+
+-- Shopping lists. Local-only, deliberately outside the sync snapshot
+-- (backup.local.ts's Snapshot has no shopping section, and the server keeps
+-- these owner-scoped rather than shared) — a shopping list is a throwaway
+-- artefact of "what am I buying this week", not part of the library other
+-- devices need. source_details is the JSON array of {recipeId, recipeTitle,
+-- servings, quantity, unitSymbol} that drives the by-recipe view, same
+-- shape the server stores.
+CREATE TABLE IF NOT EXISTS shopping_lists (
+  id          TEXT PRIMARY KEY,
+  menu_id     TEXT,
+  name        TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS shopping_list_items (
+  id               TEXT PRIMARY KEY,
+  shopping_list_id TEXT NOT NULL REFERENCES shopping_lists(id) ON DELETE CASCADE,
+  ingredient_id    TEXT,
+  total_quantity   REAL,
+  quantity_text    TEXT,
+  unit_id          TEXT,
+  is_checked       INTEGER NOT NULL DEFAULT 0,
+  source_details   TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list ON shopping_list_items(shopping_list_id);
+
 -- wayfinder ticket 04 (standalone-storage-sync map): one row per pending
 -- Structured Merge conflict on a single (entity, field) pair. base/local/
 -- remote_value are JSON-encoded so both scalar fields and the whole-array

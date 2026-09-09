@@ -873,32 +873,42 @@ const RecipeCreate: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {(draft.ingredients || []).map((ing, idx) => (
-              <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group border border-zinc-100 dark:border-zinc-800">
-                <button
-                  onClick={() => removeIngredient(idx)}
-                  className="absolute top-3 right-3 w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
-                >
-                  <span className="material-symbols-outlined text-sm">delete</span>
-                </button>
-                <div className="grid grid-cols-12 gap-4">
-                  <div className="col-span-6">
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">{t('recipeDetail.ingredient')}</label>
-                      <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
-                        {(['ingredient', 'recipe'] as const).map((type) => (
-                          <button
-                            key={type}
-                            type="button"
-                            onClick={() => setEntryType(idx, type)}
-                            className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase transition-colors ${
-                              getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
-                            }`}
-                          >
-                            {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+              /* @container: the fields inside lay themselves out from the CARD's
+                 width rather than the viewport's. Two of these sit side by side in
+                 an 8-of-12 column, so the old viewport-wide `xl:` 6/3/3 grid left
+                 the ingredient name about 170px - name, type toggle, QTY and UNIT
+                 all printing over each other. */
+              <div key={idx} className="@container bg-zinc-50 dark:bg-zinc-800/40 rounded-2xl p-4 border border-zinc-100 dark:border-zinc-800">
+                {/* Type toggle and delete get their own row. The toggle used to share
+                    a line with the "Ingredient" label and ran straight through it,
+                    and delete was an absolutely-positioned button lying on top of
+                    the name field, invisible until hover. */}
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
+                    {(['ingredient', 'recipe'] as const).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setEntryType(idx, type)}
+                        className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                          getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
+                        }`}
+                      >
+                        {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => removeIngredient(idx)}
+                    title={t('common.delete')}
+                    className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">delete</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-12 gap-3">
+                  <div className="col-span-12 @lg:col-span-6">
+                    <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredient')}</label>
                     {getEntryType(idx, ing) === 'recipe' ? (
                       <Autocomplete
                         value={subRecipeDangling(ing) ? '' : (ing.subRecipeId || '')}
@@ -1014,7 +1024,7 @@ const RecipeCreate: React.FC = () => {
                       </div>
                     )}
                   </div>
-                  <div className="col-span-3">
+                  <div className="col-span-5 @lg:col-span-3">
                     <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.qty')}</label>
                     <input
                       type="number" step="any" value={ing.quantity || ''}
@@ -1022,7 +1032,7 @@ const RecipeCreate: React.FC = () => {
                       className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
-                  <div className="col-span-3">
+                  <div className="col-span-7 @lg:col-span-3">
                     <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.unit')}</label>
                     <select
                       value={ing.unitId || ''}
@@ -1037,7 +1047,7 @@ const RecipeCreate: React.FC = () => {
                       {allUnits.map(u => <option key={u.id} value={u.id}>{u.symbol} ({u.translated_name || u.name})</option>)}
                     </select>
                   </div>
-                  <div className="col-span-6">
+                  <div className="col-span-12 @lg:col-span-6">
                     <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.groupOptional')}</label>
                     <input
                       type="text" value={ing.groupName || ''}
@@ -1046,7 +1056,7 @@ const RecipeCreate: React.FC = () => {
                       placeholder={t('recipeDetail.groupPlaceholder')}
                     />
                   </div>
-                  <div className="col-span-6">
+                  <div className="col-span-12 @lg:col-span-6">
                     <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.chefsNoteOptional')}</label>
                     <input
                       type="text" value={ing.notes || ''}

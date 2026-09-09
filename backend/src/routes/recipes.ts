@@ -9,7 +9,8 @@ import { query, queryOne, withTransaction } from "../db/pool";
 import { calculatePortions, resolveCookSequence } from "../services/matrioska.engine";
 import { calculateRecipeNutrition } from "../services/nutrition.service";
 import { computeAutoTagNames, unionTagNames } from "../services/tags.service";
-import { parseRecipeWithLLM, translateRecipeContent } from "../services/llm.parser";
+import { parseRecipeWithLLM, translateRecipeContent, fetchUrlHtml } from "../services/llm.parser";
+import { filterByPantry } from "../services/pantry.service";
 import { proposeIngredientMatches, proposeToolMatches, proposeTechniqueMatches } from "../services/ingredient.matcher";
 import { v4 as uuidv4 } from "uuid";
 
@@ -575,6 +576,29 @@ recipeRouter.get("/:id/nutrition", async (req: Request, res: Response) => {
   res.json({ data: result });
 });
 
+// ── POST /recipes/fetch-page ──────────────────────────────────────────
+//
+// Hands the raw HTML of a recipe URL back to the client, which then reads
+// its schema.org JSON-LD locally (frontend/src/services/recipeStructuredData.ts)
+// and only falls back to POST /parse below when the page carries none.
+//
+// The fetch stays server-side for two reasons that both still apply: the
+// browser cannot fetch arbitrary recipe sites cross-origin, and the SSRF
+// guard (assertSafeImportUrl) belongs where the request actually
+// originates. The extractor is client-side because it has to be shared with
+// standalone mode, which has no backend at all — see that file's header.
+recipeRouter.post("/fetch-page", async (req: Request, res: Response) => {
+  const parsed = z.object({ url: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  try {
+    const html = await fetchUrlHtml(parsed.data.url);
+    res.json({ data: { html } });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : "Could not fetch that page" });
+  }
+});
+
 // ── POST /recipes/parse (LLM) ─────────────────────────────────────────
 
 recipeRouter.post("/parse", async (req: Request, res: Response) => {
@@ -655,9 +679,16 @@ recipeRouter.post("/filter-by-pantry", async (req: Request, res: Response) => {
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
-  res.status(501).json({
-    error: "Filtering recipes by pantry contents isn't implemented yet — this endpoint's request contract is stable and ready for a future client to build against.",
-  });
+  // Implemented at last, against the contract that was reserved for it —
+  // see services/pantry.service.ts.
+  const { ingredients, minMatchRatio } = parsed.data;
+  try {
+    const results = await filterByPantry(ingredients, minMatchRatio ?? 1);
+    res.json({ data: results });
+  } catch (err) {
+    console.error("Pantry match failed:", err);
+    res.status(500).json({ error: "Could not work out what you can cook." });
+  }
 });
 
 // ── PUT /recipes/:id ──────────────────────────────────────────────────

@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { tryParseStructuredText, TemplateParseResult } from '../services/recipeTemplateParser';
+import { extractRecipeFromHtml } from '../services/recipeStructuredData';
+import { fetchPageHtml } from '../services/pageFetcher';
+import { readMigrationFile, MIGRATION_SOURCE_LABELS, type MigrationResult } from '../services/migration/adapters';
+import { planBulkImport, runBulkImport, type BulkPlan, type BulkProgress, type BulkImportSummary } from '../services/migration/bulkImport';
+import { extractPdfText } from '../services/migration/pdfText';
+import { readImageText, ocrLanguageFor, OCR_MODEL_MB, type OcrProgress } from '../services/migration/ocr';
 import { proposeMatches, ProposedMatches } from '../services/matchSuggestions';
 import { matchUnitId, type MatchSuggestion } from '../lib/fuzzyMatch';
 import { repairIngredientAmount } from '../lib/ingredientAmount';
@@ -61,18 +67,34 @@ export default function RecipeImport() {
   const navigate = useNavigate();
   const contentLang = useStore((s) => s.contentLang);
   const RAW_TEXT_TEMPLATE = t('import.rawTextTemplate');
-  const [sourceType, setSourceType] = useState<'url' | 'text' | 'file'>('url');
+  const JSON_TEMPLATE = t('import.rawTextTemplateJson');
+  const [sourceType, setSourceType] = useState<'url' | 'text' | 'file' | 'scan'>('url');
   const [inputVal, setInputVal] = useState('');
   const [parsing, setParsing] = useState(false);
   const [matching, setMatching] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templateCopied, setTemplateCopied] = useState(false);
+  const [templateFormat, setTemplateFormat] = useState<'text' | 'json'>('text');
+  const [fetchingPage, setFetchingPage] = useState(false);
+  const rawTextRef = React.useRef<HTMLTextAreaElement>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importingFile, setImportingFile] = useState(false);
   const [fileResult, setFileResult] = useState<BundleImportResult | null>(null);
+
+  // Migration from another app: detected on file selection, so the button
+  // can say what it is about to do before it does it.
+  const [migration, setMigration] = useState<MigrationResult | null>(null);
+  const [bulkPlan, setBulkPlan] = useState<BulkPlan | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
+  const [bulkSummary, setBulkSummary] = useState<BulkImportSummary | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [scanFile, setScanFile] = useState<File | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanStage, setScanStage] = useState<string | null>(null);
+  const [planning, setPlanning] = useState(false);
 
   // ── Parsed-but-not-yet-matched draft (from AI or the local parser), plus
   // the interactive Review Matches step's state ─────────────────────────
@@ -117,13 +139,41 @@ export default function RecipeImport() {
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   };
 
+  // Grow the box to its content, in JS rather than CSS.
+  //
+  // The obvious `field-sizing: content` is inert in the desktop build —
+  // Electron 25 is Chromium 114 and that property landed in 123 — which is
+  // exactly where this was reported: a 25-line template opening in a fixed
+  // 20rem box, showing about half of itself and reading as a partial
+  // template rather than a scrolled one. Capped at 65vh, after which it
+  // scrolls (with the themed scrollbar).
+  useEffect(() => {
+    const el = rawTextRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.65))}px`;
+  }, [inputVal, sourceType]);
+
+  const activeTemplate = templateFormat === 'json' ? JSON_TEMPLATE : RAW_TEXT_TEMPLATE;
+
+  // Exactly the check handleStartImport() makes before deciding whether to
+  // call the server at all (tryParseStructuredText → local parse, or the
+  // LLM). Running it here as the user types is what lets the button below
+  // stop calling itself an "AI transformation" for input the app parses
+  // itself — the old label promised an LLM round-trip for pasted template
+  // text that never touched one.
+  const parsesLocally = useMemo(
+    () => (sourceType === 'text' && inputVal.trim() ? tryParseStructuredText(inputVal) !== null : false),
+    [sourceType, inputVal],
+  );
+
   const useTemplate = () => {
     setSourceType('text');
-    setInputVal(RAW_TEXT_TEMPLATE);
+    setInputVal(activeTemplate);
   };
   const copyTemplate = async () => {
     try {
-      await navigator.clipboard.writeText(RAW_TEXT_TEMPLATE);
+      await navigator.clipboard.writeText(activeTemplate);
       setTemplateCopied(true);
       setTimeout(() => setTemplateCopied(false), 2000);
     } catch {
@@ -212,6 +262,31 @@ export default function RecipeImport() {
         return;
       }
     }
+
+    // Most recipe sites publish the recipe as schema.org JSON-LD for
+    // Google's rich results. Reading that is instant and exact, so it runs
+    // before the model — the LLM path below is for pages that carry none.
+    //
+    // Failures here are deliberately NOT fatal: an unreachable page, a bot
+    // wall or a site with no structured data all just fall through to the
+    // existing behaviour rather than turning a working import into an error.
+    if (sourceType === 'url' && inputVal.trim()) {
+      setFetchingPage(true);
+      try {
+        const html = await fetchPageHtml(inputVal.trim());
+        const structured = extractRecipeFromHtml(html, inputVal.trim());
+        if (structured) {
+          setFetchingPage(false);
+          await beginReview(structured);
+          return;
+        }
+      } catch (err) {
+        console.warn('Structured-data import unavailable, falling back to AI:', err);
+      } finally {
+        setFetchingPage(false);
+      }
+    }
+
     setParsing(true);
     try {
       const res = await apiFetch('/api/recipes/parse', {
@@ -336,6 +411,9 @@ export default function RecipeImport() {
         cookTimeMin: draft.cookTimeMin || undefined,
         restTimeMin: draft.restTimeMin || undefined,
         tags: draft.tags || [],
+        // Only the structured-data path knows a cover image (schema.org
+        // publishes one); the LLM path leaves it undefined.
+        coverImageUrl: (draft as { imageUrl?: string }).imageUrl || undefined,
         sourceUrl: draft.sourceUrl || undefined,
         sources: draft.sourceUrl ? [{ type: 'url', label: t('import.originalRecipe'), url: draft.sourceUrl }] : [],
         isComponent: false,
@@ -378,6 +456,100 @@ export default function RecipeImport() {
       setError(err instanceof Error ? err.message : t('import.failedToCreateRecipe'));
     } finally {
       setCreating(false);
+    }
+  };
+
+  /** Reads the file just far enough to say which app it came from and how
+   *  many recipes are in it. Silent on failure — an unrecognised file is
+   *  simply not a migration, and the existing bundle importer still gets
+   *  its turn when the button is pressed. */
+  const detectMigration = async (file: File) => {
+    setDetecting(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const result = await readMigrationFile(file.name, bytes);
+      setMigration(result);
+      if (result) {
+        setPlanning(true);
+        try {
+          setBulkPlan(await planBulkImport(result.recipes));
+        } finally {
+          setPlanning(false);
+        }
+      }
+    } catch (err) {
+      console.warn('Migration detection failed:', err);
+      setMigration(null);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  /** A PDF's own text layer first, OCR only when there isn't one.
+   *
+   *  That order matters: a printed recipe saved as a PDF reads exactly and
+   *  instantly, while OCR is slow, needs a model download and is markedly
+   *  less accurate. Either way the extracted text lands in the raw-text box
+   *  rather than importing straight off — OCR output always wants a human
+   *  eye before it becomes a recipe. */
+  const handleScan = async () => {
+    if (!scanFile) return;
+    setScanning(true);
+    setError(null);
+    setScanStage(null);
+    try {
+      const isPdf = scanFile.type === 'application/pdf' || /\.pdf$/i.test(scanFile.name);
+      let extracted = '';
+
+      if (isPdf) {
+        setScanStage(t('import.scanReadingPdf'));
+        const pdf = await extractPdfText(new Uint8Array(await scanFile.arrayBuffer()));
+        if (pdf.hasTextLayer) {
+          extracted = pdf.text;
+        } else {
+          // A scanned cookbook page is a PDF full of images: there is
+          // nothing to read, and saying so beats importing an empty recipe.
+          throw new Error(t('import.scanPdfNoText'));
+        }
+      } else {
+        const onProgress = (p: OcrProgress) => {
+          const pct = p.ratio === null ? '' : ` ${Math.round(p.ratio * 100)}%`;
+          setScanStage((p.stage === 'loading' ? t('import.scanLoadingModel') : t('import.scanReading')) + pct);
+        };
+        extracted = await readImageText(scanFile, ocrLanguageFor(contentLang), onProgress);
+      }
+
+      if (!extracted.trim()) throw new Error(t('import.scanNothingFound'));
+
+      // Hand it to the raw-text tab, which already knows how to turn prose
+      // into a recipe (template parse first, then the model).
+      setSourceType('text');
+      setInputVal(extracted);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('import.importFailed'));
+    } finally {
+      setScanning(false);
+      setScanStage(null);
+    }
+  };
+
+  const handleBulkImport = async () => {
+    if (!bulkPlan) return;
+    setImportingFile(true);
+    setError(null);
+    setBulkSummary(null);
+    try {
+      const categoryId = await loadCategoriesOnce().then((cats) => cats?.[0]?.id);
+      if (!categoryId) throw new Error(t('import.noCategory'));
+      const unitsRes = await apiFetch('/api/units');
+      const units = (await unitsRes.json()).data || [];
+      const summary = await runBulkImport(bulkPlan, categoryId, units, setBulkProgress);
+      setBulkSummary(summary);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('import.importFailed'));
+    } finally {
+      setImportingFile(false);
+      setBulkProgress(null);
     }
   };
 
@@ -535,10 +707,47 @@ export default function RecipeImport() {
                          onClick={() => setSourceType('file')}
                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'file' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
                       >{t('import.importFileTab')}</button>
+                      <button
+                         onClick={() => setSourceType('scan')}
+                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'scan' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
+                      >{t('import.scanTab')}</button>
                    </div>
                 </div>
                 <div className="p-10">
-                  {sourceType === 'file' ? (
+                  {sourceType === 'scan' ? (
+                    <>
+                      <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mb-4">
+                        {t('import.scanHint')}
+                      </p>
+                      <label className="flex flex-col items-center justify-center gap-3 w-full h-48 bg-zinc-50/50 dark:bg-zinc-900/50 rounded-3xl border-2 border-dashed border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-primary/40 transition-colors">
+                        <span className="material-symbols-outlined text-3xl text-zinc-300 dark:text-zinc-600">document_scanner</span>
+                        <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400">
+                          {scanFile ? scanFile.name : t('import.chooseScan')}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf,.pdf"
+                          className="hidden"
+                          onChange={(e) => { setScanFile(e.target.files?.[0] ?? null); setError(null); }}
+                        />
+                      </label>
+
+                      <p className="sc-hint mt-3">
+                        {t('import.scanOcrCaveat', { mb: OCR_MODEL_MB })}
+                      </p>
+
+                      <button
+                        onClick={handleScan}
+                        disabled={scanning || !scanFile}
+                        className="mt-8 w-full py-5 bg-primary text-white rounded-3xl font-black text-lg shadow-xl shadow-primary/20 flex items-center justify-center gap-3 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:scale-100"
+                      >
+                        <span className={`material-symbols-outlined ${scanning ? 'animate-spin' : ''}`}>
+                          {scanning ? 'settings' : 'document_scanner'}
+                        </span>
+                        {scanStage ?? (scanning ? t('import.scanning') : t('import.scanStart'))}
+                      </button>
+                    </>
+                  ) : sourceType === 'file' ? (
                     <>
                       <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mb-4">
                         {t('import.fileHintPrefix')} <code className="bg-zinc-100 dark:bg-zinc-800 rounded px-1.5 py-0.5">.smartchef.json</code> {t('import.fileHintSuffix')}
@@ -550,14 +759,141 @@ export default function RecipeImport() {
                         </span>
                         <input
                           type="file"
-                          accept=".json,application/json"
+                          accept=".json,.paprikarecipes,.paprikarecipe,.melarecipes,.crumb,.zip,.html,application/json"
                           className="hidden"
-                          onChange={(e) => { setSelectedFile(e.target.files?.[0] ?? null); setFileResult(null); setError(null); }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] ?? null;
+                            setSelectedFile(file);
+                            setFileResult(null);
+                            setError(null);
+                            setMigration(null);
+                            setBulkPlan(null);
+                            setBulkSummary(null);
+                            if (file) void detectMigration(file);
+                          }}
                         />
                       </label>
+                      {/* ── Migration from another app ───────────────── */}
+                      {detecting && (
+                        <p className="mt-6 text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('import.detecting')}</p>
+                      )}
+
+                      {migration && bulkPlan && !bulkSummary && (
+                        <div className="mt-6 sc-panel p-5 space-y-4">
+                          <div className="flex items-start gap-3">
+                            <span className="material-symbols-outlined text-primary">move_down</span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                                {t('import.migrationDetected', {
+                                  app: MIGRATION_SOURCE_LABELS[migration.source],
+                                  count: migration.recipes.length,
+                                })}
+                              </p>
+                              <p className="sc-hint mt-1">
+                                {t('import.migrationMatched', {
+                                  matched: bulkPlan.ingredients.filter((d) => d.matchedId).length,
+                                  total: bulkPlan.uniqueIngredientCount,
+                                })}
+                              </p>
+                              {migration.skipped.length > 0 && (
+                                <p className="sc-hint mt-1">
+                                  {t('import.migrationSkipped', { count: migration.skipped.length })}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Only names the matcher was unsure about: a
+                              confident match needs no decision, and a name
+                              with no candidates at all is unambiguously new. */}
+                          {bulkPlan.needsReview.length > 0 && (
+                            <details className="rounded-xl bg-white dark:bg-zinc-900 p-3">
+                              <summary className="cursor-pointer text-xs font-bold text-zinc-600 dark:text-zinc-300">
+                                {t('import.migrationReview', { count: bulkPlan.needsReview.length })}
+                              </summary>
+                              <div className="mt-3 space-y-2 max-h-56 overflow-y-auto">
+                                {bulkPlan.needsReview.map((d) => (
+                                  <div key={d.name} className="flex items-center gap-2 text-xs">
+                                    <span className="flex-1 min-w-0 truncate font-bold text-zinc-700 dark:text-zinc-300">{d.name}</span>
+                                    <select
+                                      value={d.matchedId ?? ''}
+                                      onChange={(e) => {
+                                        const id = e.target.value || null;
+                                        const match = d.suggestions.find((sg) => sg.id === id);
+                                        setBulkPlan({
+                                          ...bulkPlan,
+                                          ingredients: bulkPlan.ingredients.map((x) =>
+                                            x.name === d.name ? { ...x, matchedId: id, matchedName: match?.name } : x,
+                                          ),
+                                          needsReview: bulkPlan.needsReview.map((x) =>
+                                            x.name === d.name ? { ...x, matchedId: id, matchedName: match?.name } : x,
+                                          ),
+                                        });
+                                      }}
+                                      className="sc-field-inset w-48 shrink-0 text-xs"
+                                    >
+                                      <option value="">{t('import.migrationCreateNew')}</option>
+                                      {d.suggestions.slice(0, 5).map((sg) => (
+                                        <option key={sg.id} value={sg.id}>
+                                          {sg.name} ({Math.round(sg.score * 100)}%)
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+
+                          <button
+                            onClick={handleBulkImport}
+                            disabled={importingFile || planning}
+                            className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
+                          >
+                            {bulkProgress
+                              ? t('import.migrationProgress', { done: bulkProgress.done, total: bulkProgress.total })
+                              : t('import.migrationImport', { count: migration.recipes.length })}
+                          </button>
+                          {bulkProgress && (
+                            <div className="h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
+                              <div
+                                className="h-full bg-primary transition-all duration-200"
+                                style={{ width: `${bulkProgress.total ? (bulkProgress.done / bulkProgress.total) * 100 : 0}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {bulkSummary && (
+                        <div className="mt-6 sc-panel p-5 space-y-3">
+                          <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                            {t('import.migrationDone', { created: bulkSummary.created, ingredients: bulkSummary.newIngredients })}
+                          </p>
+                          {bulkSummary.failed.length > 0 && (
+                            <details>
+                              <summary className="cursor-pointer text-xs font-bold text-amber-600 dark:text-amber-500">
+                                {t('import.migrationFailed', { count: bulkSummary.failed.length })}
+                              </summary>
+                              <ul className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                                {bulkSummary.failed.map((f, i) => (
+                                  <li key={i} className="sc-hint">{f.title} - {f.reason}</li>
+                                ))}
+                              </ul>
+                            </details>
+                          )}
+                          <button
+                            onClick={() => navigate('/')}
+                            className="w-full py-3 bg-primary text-white rounded-2xl font-black hover:bg-primary/90 transition-all"
+                          >
+                            {t('import.goToGallery')}
+                          </button>
+                        </div>
+                      )}
+
                       <button
                         onClick={handleImportFile}
-                        disabled={importingFile || !selectedFile}
+                        disabled={importingFile || !selectedFile || !!migration}
                         className="mt-8 w-full py-5 bg-gradient-to-r from-primary to-primary-container text-white rounded-3xl font-black text-lg shadow-xl shadow-primary/20 flex items-center justify-center gap-3 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:scale-100"
                       >
                         <span className={`material-symbols-outlined ${importingFile ? 'animate-spin' : ''}`}>
@@ -642,11 +978,37 @@ export default function RecipeImport() {
                     />
                   ) : (
                     <>
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">
-                          {t('import.notSureFormat')}
-                        </p>
-                        <div className="flex gap-2 shrink-0 ml-4">
+                      {/* Stacked, not side-by-side: this card is ~700px at
+                          its widest and the toolbar eats ~370px of it, which
+                          left the explanation wrapping in a 300px ribbon. */}
+                      <div className="flex flex-col gap-3 mb-3">
+                        <div className="min-w-0">
+                          <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">
+                            {t('import.notSureFormat')}
+                          </p>
+                          {templateFormat === 'json' && (
+                            <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-1">
+                              {t('import.jsonTemplateHint')}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5">
+                            {(['text', 'json'] as const).map((fmt) => (
+                              <button
+                                key={fmt}
+                                type="button"
+                                onClick={() => setTemplateFormat(fmt)}
+                                className={`px-3 py-1 rounded-md text-[11px] font-bold transition-colors ${
+                                  templateFormat === fmt
+                                    ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                                    : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'
+                                }`}
+                              >
+                                {fmt === 'json' ? t('import.templateFormatJson') : t('import.templateFormatText')}
+                              </button>
+                            ))}
+                          </div>
                           <button
                             type="button"
                             onClick={copyTemplate}
@@ -669,21 +1031,37 @@ export default function RecipeImport() {
                         value={inputVal}
                         onChange={(e) => setInputVal(e.target.value)}
                         placeholder={t('import.rawTextPlaceholder')}
-                        className="w-full h-80 bg-zinc-50/50 dark:bg-zinc-900/50 rounded-3xl border-none focus:ring-2 focus:ring-primary/10 text-zinc-700 dark:text-zinc-300 font-medium leading-relaxed resize-none p-6 hide-scrollbar"
+                        ref={rawTextRef}
+                        spellCheck={false}
+                        className="w-full min-h-[20rem] max-h-[65vh] overflow-y-auto bg-zinc-50/50 dark:bg-zinc-900/50 rounded-3xl border-none focus:ring-2 focus:ring-primary/10 text-zinc-700 dark:text-zinc-300 font-medium leading-relaxed resize-y p-6"
                       />
                     </>
                   )}
                   {sourceType !== 'file' && (
                     <>
+                      {parsesLocally && (
+                        <p className="mt-6 flex items-center justify-center gap-1.5 text-xs font-bold text-primary">
+                          <span className="material-symbols-outlined text-[16px]">bolt</span>
+                          {t('import.noAiNeeded')}
+                        </p>
+                      )}
                       <button
                         onClick={handleStartImport}
-                        disabled={parsing || matching || !inputVal}
-                        className="mt-8 w-full py-5 bg-gradient-to-r from-primary to-primary-container text-white rounded-3xl font-black text-lg shadow-xl shadow-primary/20 flex items-center justify-center gap-3 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:scale-100"
+                        disabled={parsing || matching || fetchingPage || !inputVal}
+                        className={`w-full py-5 rounded-3xl font-black text-lg text-white shadow-xl shadow-primary/20 flex items-center justify-center gap-3 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:scale-100 ${
+                          parsesLocally ? 'mt-3 bg-primary' : 'mt-8 bg-gradient-to-r from-primary to-primary-container'
+                        }`}
                       >
-                        <span className={`material-symbols-outlined ${parsing ? 'animate-spin' : ''}`}>
-                          {parsing ? 'settings' : 'auto_fix_high'}
+                        <span className={`material-symbols-outlined ${parsing || fetchingPage ? 'animate-spin' : ''}`}>
+                          {parsing || fetchingPage ? 'settings' : parsesLocally ? 'bolt' : 'auto_fix_high'}
                         </span>
-                        {parsing ? t('import.analyzingRecipe') : t('import.startAiTransformation')}
+                        {fetchingPage
+                          ? t('import.readingPage')
+                          : parsing
+                            ? t('import.analyzingRecipe')
+                            : parsesLocally
+                              ? t('import.importRecipe')
+                              : t('import.startAiTransformation')}
                       </button>
                       {error && (
                         <div className="mt-4 px-5 py-4 bg-red-50 border border-red-100 rounded-2xl text-sm text-red-600 font-medium">

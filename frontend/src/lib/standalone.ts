@@ -142,6 +142,23 @@ export async function initStandaloneProfile(name: string, avatarUrl?: string | n
   return { id: profile.id, name: profile.name, avatarUrl: profile.avatar_url ?? undefined };
 }
 
+/** Turns standalone mode on WITHOUT choosing a profile — the landing state
+ *  for an admin moving the library off a server (Account.tsx's
+ *  StorageModeCard): the local schema exists, the imported data is there,
+ *  and the app comes back up on "who's cooking?" so whoever is holding the
+ *  device picks an existing profile or creates one. Deliberately does not
+ *  mint a profile from the server account: profiles.local.ts makes the
+ *  first profile in a library the admin, and guessing which local profile
+ *  a server user corresponds to is exactly the kind of thing the picker
+ *  already asks properly. */
+export async function enableStandaloneMode(): Promise<void> {
+  await initLocalSchema();
+  await Preferences.set({ key: ENABLED_KEY, value: 'true' });
+  cachedEnabled = true;
+  cachedActiveId = null;
+  await Preferences.remove({ key: ACTIVE_PROFILE_KEY });
+}
+
 /** Switches this device to an already-existing profile — the profile
  *  picker's "that's me" action, and ServerConnect.tsx's path when a
  *  freshly-chosen Sync Folder already has profiles synced in from other
@@ -165,6 +182,25 @@ export async function createAndActivateProfile(name: string, avatarUrl?: string 
   const profile = await createProfile(name, avatarUrl ?? null);
   await activateStandaloneProfile(profile.id);
   return { id: profile.id, name: profile.name, avatarUrl: profile.avatar_url ?? undefined };
+}
+
+/** Adds a profile to the shared library WITHOUT switching this device to
+ *  it — the admin's "add someone" action on the Account page's profile
+ *  list, the offline-mode counterpart to server mode's POST /auth/users.
+ *
+ *  Distinct from createAndActivateProfile() above, which is the picker's
+ *  "this is me, start cooking" path: an admin setting up a profile for
+ *  someone else must not be signed out of their own in the process. The
+ *  new profile is a plain user (profiles.local.ts only ever mints an admin
+ *  for the very first profile in a library) — promote it afterward from
+ *  the same list if it should be one.
+ *
+ *  Synced like any other profile row, so it shows up in every device's
+ *  picker after the next Folder Sync. */
+export async function createLibraryProfile(name: string, avatarUrl?: string | null): Promise<StandaloneProfile> {
+  const { createProfile } = await import('../services/profiles.local');
+  const profile = await createProfile(name, avatarUrl ?? null);
+  return { id: profile.id, name: profile.name, avatarUrl: profile.avatar_url ?? undefined, role: profile.role };
 }
 
 /** Clears which profile this device is using, without leaving standalone

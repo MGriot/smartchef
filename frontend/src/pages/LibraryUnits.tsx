@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import AppLayout from '../components/AppLayout';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
+import { AddLangButton, Field, FieldRow, FormSection, TranslationRows } from '../components/Form';
 
 export default function LibraryUnits() {
   const [units, setUnits] = useState<any[]>([]);
@@ -51,13 +53,7 @@ export default function LibraryUnits() {
   };
 
   // Translation helpers
-  const handleTranslationChange = (idx: number, field: 'lang' | 'name', value: string) => {
-    const newT = [...translations];
-    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
-    setTranslations(newT);
-  };
   const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);
-  const removeTranslation = (idx: number) => setTranslations(translations.filter((_, i) => i !== idx));
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,81 +154,95 @@ export default function LibraryUnits() {
           </section>
       </AppLayout>
 
-      {showModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
-           <div className="relative bg-white dark:bg-zinc-900 w-full max-w-xl rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-              <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{editingUnit ? 'Edit Unit' : 'Define New Scale'}</h2>
-              <form onSubmit={handleSave} className="space-y-6">
-                 <div className="grid grid-cols-3 gap-6">
-                    <div className="col-span-2">
-                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Full Name</label>
-                       <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Milliliter" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                    </div>
-                    <div>
-                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Symbol</label>
-                       <input type="text" required value={form.symbol} onChange={e => setForm({...form, symbol: e.target.value})} placeholder="ml" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                    </div>
-                 </div>
-                 <div className="grid grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Type</label>
-                      <select value={form.unitType} onChange={e => setForm({...form, unitType: e.target.value})} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all appearance-none">
-                         <option value="volume">Volume</option>
-                         <option value="weight">Weight</option>
-                         <option value="length">Length</option>
-                         <option value="temperature">Temperature</option>
-                         <option value="count">Count / Each</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Measurement System</label>
-                      <select value={form.system} onChange={e => setForm({...form, system: e.target.value})} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all appearance-none">
-                         <option value="metric">Metric (SI)</option>
-                         <option value="imperial">Imperial / US</option>
-                         <option value="custom">Artisanal / Custom</option>
-                      </select>
-                    </div>
-                 </div>
+      <Modal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        onSubmit={handleSave}
+        size="md"
+        title={editingUnit ? 'Edit Unit' : 'Define New Scale'}
+        subtitle="Units convert against a base unit of the same type."
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton>{editingUnit ? 'Update System' : 'Apply Scale'}</ModalSubmitButton>
+          </>
+        }
+      >
+        <div className="space-y-8">
+          <FormSection title="Identity">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Field label="Full Name" className="sm:col-span-2">
+                <input
+                  type="text" required value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="e.g. Milliliter"
+                  className="sc-field"
+                />
+              </Field>
+              <Field label="Symbol">
+                <input
+                  type="text" required value={form.symbol}
+                  onChange={e => setForm({ ...form, symbol: e.target.value })}
+                  placeholder="ml"
+                  className="sc-field"
+                />
+              </Field>
+            </div>
+          </FormSection>
 
-                 {/* Translations Section */}
-                 <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
-                    <div className="flex justify-between items-center mb-4">
-                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">Translations</label>
-                       <button type="button" onClick={addTranslation} className="text-[10px] font-black text-primary uppercase flex items-center gap-1 hover:underline">
-                          <span className="material-symbols-outlined text-[14px]">add</span> Add Lang
-                       </button>
-                    </div>
-                    <div className="space-y-3">
-                       {translations.map((t, i) => (
-                          <div key={i} className="flex gap-2 items-center">
-                             <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold text-center uppercase" />
-                             <input type="text" placeholder="Translated name" value={t.name} onChange={(e) => handleTranslationChange(i, 'name', e.target.value)} className="flex-1 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium" />
-                             <button type="button" onClick={() => removeTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-colors">
-                                <span className="material-symbols-outlined">close</span>
-                             </button>
-                          </div>
-                       ))}
-                       {translations.length === 0 && (
-                          <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-2">No translations added.</p>
-                       )}
-                    </div>
-                 </div>
+          <FormSection title="Measurement">
+            <FieldRow>
+              <Field label="Type">
+                <select
+                  value={form.unitType}
+                  onChange={e => setForm({ ...form, unitType: e.target.value })}
+                  className="sc-field cursor-pointer"
+                >
+                  <option value="volume">Volume</option>
+                  <option value="weight">Weight</option>
+                  <option value="length">Length</option>
+                  <option value="temperature">Temperature</option>
+                  <option value="count">Count / Each</option>
+                </select>
+              </Field>
+              <Field label="Measurement System">
+                <select
+                  value={form.system}
+                  onChange={e => setForm({ ...form, system: e.target.value })}
+                  className="sc-field cursor-pointer"
+                >
+                  <option value="metric">Metric (SI)</option>
+                  <option value="imperial">Imperial / US</option>
+                  <option value="custom">Artisanal / Custom</option>
+                </select>
+              </Field>
+            </FieldRow>
+            <Field
+              label="Conversion Factor (to base)"
+              hint="How many base units of this type one of this unit is worth — 1 for the base unit itself."
+            >
+              <input
+                type="number" step="any" value={form.toBaseFactor}
+                onChange={e => setForm({ ...form, toBaseFactor: Number(e.target.value) })}
+                className="sc-field"
+              />
+            </Field>
+          </FormSection>
 
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Conversion Factor (to base)</label>
-                    <input type="number" step="any" value={form.toBaseFactor} onChange={e => setForm({...form, toBaseFactor: Number(e.target.value)})} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                 </div>
-                 <div className="flex gap-4 pt-4">
-                    <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
-                    <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">
-                      {editingUnit ? 'Update System' : 'Apply Scale'}
-                    </button>
-                 </div>
-              </form>
-           </div>
+          <FormSection
+            title="Translations"
+            description="A name per language; the symbol stays the same everywhere."
+            action={<AddLangButton onClick={addTranslation} label="Add Lang" />}
+          >
+            <TranslationRows
+              value={translations}
+              onChange={setTranslations}
+              emptyLabel="No translations added."
+              textPlaceholder="Translated name"
+            />
+          </FormSection>
         </div>
-      )}
+      </Modal>
     </>
   );
 }

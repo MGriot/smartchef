@@ -1,29 +1,40 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Home from "./pages/Home";
-import RecipeDetail from "./pages/RecipeDetail";
-import RecipeCreate from "./pages/RecipeCreate";
-import RecipeImport from "./pages/RecipeImport";
-import LibraryTools from "./pages/LibraryTools";
-import LibraryIngredients from "./pages/LibraryIngredients";
-import LibraryUnits from "./pages/LibraryUnits";
-import LibraryTechniques from "./pages/LibraryTechniques";
-import LibraryTags from "./pages/LibraryTags";
-import LibrarySeasonality from "./pages/LibrarySeasonality";
-import CollectionDetail from "./pages/CollectionDetail";
-import Planner from "./pages/Planner";
-import CookHistory from "./pages/CookHistory";
-import ShoppingList from "./pages/ShoppingList";
-import Account from "./pages/Account";
-import ManageUsers from "./pages/ManageUsers";
-import SyncHistory from "./pages/SyncHistory";
-import Downloads from "./pages/Downloads";
-import Atlas from "./pages/Atlas";
 import Login from "./pages/Login";
 import ServerConnect from "./pages/ServerConnect";
 import ProfilePicker from "./pages/ProfilePicker";
+// ── Routes are code-split ────────────────────────────────────────────────
+// Every page used to be a static import, so the main bundle carried all of
+// them plus everything they pull in — most expensively lib/worldGeo.ts,
+// whose 739KB of country boundaries were parsed at startup whether or not a
+// map was ever opened.
+//
+// The three screens below stay eager: they are what renders before anything
+// else, and lazy-loading them would only add a blank frame to the first
+// paint.
+const Home = lazy(() => import("./pages/Home"));
+const RecipeDetail = lazy(() => import("./pages/RecipeDetail"));
+const RecipeCreate = lazy(() => import("./pages/RecipeCreate"));
+const RecipeImport = lazy(() => import("./pages/RecipeImport"));
+const LibraryTools = lazy(() => import("./pages/LibraryTools"));
+const LibraryIngredients = lazy(() => import("./pages/LibraryIngredients"));
+const LibraryUnits = lazy(() => import("./pages/LibraryUnits"));
+const LibraryTechniques = lazy(() => import("./pages/LibraryTechniques"));
+const LibraryTags = lazy(() => import("./pages/LibraryTags"));
+const LibrarySeasonality = lazy(() => import("./pages/LibrarySeasonality"));
+const CollectionDetail = lazy(() => import("./pages/CollectionDetail"));
+const Planner = lazy(() => import("./pages/Planner"));
+const CookHistory = lazy(() => import("./pages/CookHistory"));
+const ShoppingList = lazy(() => import("./pages/ShoppingList"));
+const Account = lazy(() => import("./pages/Account"));
+const ManageUsers = lazy(() => import("./pages/ManageUsers"));
+const SyncHistory = lazy(() => import("./pages/SyncHistory"));
+const Downloads = lazy(() => import("./pages/Downloads"));
+const Atlas = lazy(() => import("./pages/Atlas"));
+const Pantry = lazy(() => import("./pages/Pantry"));
+
 import { useStore } from "./store/app.store";
-import { apiFetch, isNative, getServerUrl, cacheAccountOffline } from './lib/api';
+import { apiFetch, isNative, getServerUrl, cacheAccountOffline, isDeviceOnboarded, markDeviceOnboarded, resetDeviceStorageChoice } from './lib/api';
 import { isStandaloneMode, getActiveProfile } from './lib/standalone';
 import { initLocalSchema } from './db/local';
 import { startOfflineSyncWatcher } from './lib/offlineSync';
@@ -33,6 +44,17 @@ type AuthState =
   | { status: "needs-auth"; hasAccount: boolean }
   | { status: "needs-profile" }
   | { status: "authenticated" };
+
+/** Shown while a route's chunk loads. Deliberately the same spinner as the
+ *  boot state, so a cold navigation looks like the app starting rather than
+ *  like something broke. */
+function RouteFallback() {
+  return (
+    <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center">
+      <span className="material-symbols-outlined text-4xl text-primary animate-spin">progress_activity</span>
+    </div>
+  );
+}
 
 export default function App() {
   const setAccount = useStore((s) => s.setAccount);
@@ -46,6 +68,10 @@ export default function App() {
   // local profile, so the auth-status network call below is skipped
   // entirely rather than failing against a server that doesn't exist.
   const [standalone, setStandalone] = useState(false);
+  // Whether anyone has ever signed in on this device. While false, the
+  // login/profile screens offer a way back to the storage chooser — see
+  // isDeviceOnboarded() in lib/api.ts for why it stops after that.
+  const [onboarded, setOnboarded] = useState(true);
 
   const checkNativeReady = () => {
     isStandaloneMode().then((standaloneEnabled) => {
@@ -83,8 +109,25 @@ export default function App() {
 
   useEffect(() => {
     if (!isNative()) return;
+    isDeviceOnboarded().then(setOnboarded);
     checkNativeReady();
   }, []);
+
+  // Latched, never un-latched: reaching an authenticated state once is what
+  // "this device is set up" means.
+  useEffect(() => {
+    if (auth.status !== 'authenticated' || !isNative()) return;
+    markDeviceOnboarded().then(() => setOnboarded(true));
+  }, [auth.status]);
+
+  /** First-run escape hatch on the login/profile screens: forget this
+   *  device's storage choice (not its data) and show the chooser again. */
+  const handleChangeStorage = async () => {
+    await resetDeviceStorageChoice();
+    setStandalone(false);
+    setAuth({ status: 'loading' });
+    setServerReady(false);
+  };
 
   useEffect(() => {
     if (!serverReady || standalone) return;
@@ -131,7 +174,12 @@ export default function App() {
   }
 
   if (auth.status === "needs-profile") {
-    return <ProfilePicker onPicked={checkNativeReady} />;
+    return (
+      <ProfilePicker
+        onPicked={checkNativeReady}
+        onChangeStorage={isNative() && !onboarded ? handleChangeStorage : undefined}
+      />
+    );
   }
 
   if (auth.status === "needs-auth") {
@@ -139,12 +187,14 @@ export default function App() {
       <Login
         hasAccount={auth.hasAccount}
         onAuthenticated={() => setAuth({ status: "authenticated" })}
+        onChangeStorage={isNative() && !onboarded ? handleChangeStorage : undefined}
       />
     );
   }
 
   return (
     <BrowserRouter>
+      <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/recipe/new" element={<RecipeCreate />} />
@@ -165,7 +215,9 @@ export default function App() {
         <Route path="/sync-history" element={<SyncHistory />} />
         <Route path="/downloads" element={<Downloads />} />
         <Route path="/atlas" element={<Atlas />} />
+        <Route path="/pantry" element={<Pantry />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

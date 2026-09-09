@@ -7,6 +7,8 @@ import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { translateTagGroup } from '../lib/tagGroups';
 import { TAG_ICONS } from '../lib/icons';
+import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
+import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
 
 
 const DEFAULT_COLOR = '#3f3f46';
@@ -163,13 +165,7 @@ export default function LibraryTags() {
     setShowModal(true);
   };
 
-  const handleTranslationChange = (idx: number, field: 'lang' | 'name', value: string) => {
-    const newT = [...translations];
-    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
-    setTranslations(newT);
-  };
   const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);
-  const removeTranslation = (idx: number) => setTranslations(translations.filter((_, i) => i !== idx));
 
   const toggleExclude = (id: string) => {
     setForm(f => ({
@@ -348,68 +344,57 @@ export default function LibraryTags() {
         )}
       </AppLayout>
 
-      {/* ─── Merge Tag ─────────────────────────────────────────────────── */}
-      {mergeSource && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setMergeSource(null)} />
-          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[32px] p-8 shadow-2xl">
-            <h2 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 mb-2">Merge Tag</h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">
-              Fold <strong className="text-zinc-700 dark:text-zinc-300">{mergeSource.name}</strong> into an existing catalog tag.
-              Every recipe carrying it is repointed automatically — nothing is lost.
-            </p>
-            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Merge into</label>
-            <div className="relative mb-6">
-              <input
-                type="text"
-                value={mergeQuery}
-                onChange={e => { setMergeQuery(e.target.value); setMergeTargetId(''); }}
-                placeholder="Search for a tag…"
-                autoComplete="off"
-                className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold"
-              />
-              {mergeQuery.trim() && !mergeTargetId && (
-                <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white dark:bg-zinc-900 rounded-2xl shadow-lg border border-zinc-100 dark:border-zinc-800">
-                  {tags
-                    .filter(t => t.id !== mergeSource.id)
-                    .filter(t => (t.translated_name || t.name).toLowerCase().includes(mergeQuery.trim().toLowerCase()))
-                    .slice(0, 30)
-                    .map(t => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => { setMergeTargetId(t.id); setMergeQuery(t.translated_name || t.name); }}
-                        className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900 first:rounded-t-2xl last:rounded-b-2xl"
-                      >
-                        {t.translated_name || t.name}
-                      </button>
-                    ))}
-                  {tags.filter(t => t.id !== mergeSource.id).filter(t => (t.translated_name || t.name).toLowerCase().includes(mergeQuery.trim().toLowerCase())).length === 0 && (
-                    <p className="px-5 py-3 text-sm text-zinc-400 dark:text-zinc-500 italic">No matching tags.</p>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setMergeSource(null)}
-                className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleMerge}
-                disabled={!mergeTargetId || merging}
-                className="flex-1 py-3 rounded-2xl bg-primary text-white font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
-              >
-                {merging ? 'Merging…' : 'Merge'}
-              </button>
-            </div>
+      {/* ─── Merge Tag ───────────────────────────────────── */}
+      <Modal
+        open={!!mergeSource}
+        onClose={() => setMergeSource(null)}
+        size="sm"
+        zIndex={120}
+        title="Merge Tag"
+        subtitle={mergeSource ? `Fold "${mergeSource.name}" into an existing catalog tag. Every recipe carrying it is repointed automatically — nothing is lost.` : undefined}
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setMergeSource(null)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
+              {merging ? 'Merging…' : 'Merge'}
+            </ModalSubmitButton>
+          </>
+        }
+      >
+        <Field label="Merge into">
+          <div className="relative">
+            <input
+              type="text"
+              value={mergeQuery}
+              onChange={e => { setMergeQuery(e.target.value); setMergeTargetId(''); }}
+              placeholder="Search for a tag…"
+              autoComplete="off"
+              className="sc-field"
+            />
+            {mergeQuery.trim() && !mergeTargetId && (
+              <div className="absolute z-10 mt-2 max-h-56 w-full overflow-y-auto rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg">
+                {tags
+                  .filter(t => t.id !== mergeSource?.id)
+                  .filter(t => (t.translated_name || t.name).toLowerCase().includes(mergeQuery.trim().toLowerCase()))
+                  .slice(0, 30)
+                  .map(t => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { setMergeTargetId(t.id); setMergeQuery(t.translated_name || t.name); }}
+                      className="w-full px-5 py-3 text-left text-sm font-bold text-zinc-700 dark:text-zinc-300 first:rounded-t-2xl last:rounded-b-2xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                    >
+                      {t.translated_name || t.name}
+                    </button>
+                  ))}
+                {tags.filter(t => t.id !== mergeSource?.id).filter(t => (t.translated_name || t.name).toLowerCase().includes(mergeQuery.trim().toLowerCase())).length === 0 && (
+                  <p className="sc-hint px-5 py-3 italic">No matching tags.</p>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        </Field>
+      </Modal>
 
       {/* ─── Rename / Merge Group ──────────────────────────────────────── */}
       {mergingGroup && (
@@ -422,112 +407,110 @@ export default function LibraryTags() {
         />
       )}
 
-      {/* ─── Modal ─────────────────────────────────────────────── */}
-      {showModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
-          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-xl rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
-            <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{editingTag ? 'Edit Tag' : 'New Tag'}</h2>
-            <form onSubmit={handleSave} className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Name</label>
-                  <input type="text" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Vegetariano" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Group</label>
-                  <input type="text" list="tag-groups" value={form.groupName} onChange={e => setForm({ ...form, groupName: e.target.value })} placeholder="e.g. Dieta" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                  <datalist id="tag-groups">
-                    {Object.keys(groups).map(g => <option key={g} value={g} />)}
-                  </datalist>
-                  <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1.5 px-1">Type a new name to create a new group, or pick an existing one from the suggestions.</p>
-                </div>
-              </div>
+      <Modal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        onSubmit={handleSave}
+        size="md"
+        title={editingTag ? 'Edit Tag' : 'New Tag'}
+        subtitle="Tags group recipes and drive the gallery's filters."
+        footer={
+          <>
+            {editingTag && <ModalDeleteButton onClick={() => handleDelete(editingTag.id)} label="Delete tag" />}
+            <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton>{editingTag ? 'Update Tag' : 'Add Tag'}</ModalSubmitButton>
+          </>
+        }
+      >
+        <div className="space-y-8">
+          <FormSection title="Identity">
+            <FieldRow>
+              <Field label="Name">
+                <input
+                  type="text" required value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="e.g. Vegetariano"
+                  className="sc-field"
+                />
+              </Field>
+              <Field label="Group" hint="Type a new name to create a group, or pick an existing one from the suggestions.">
+                <input
+                  type="text" list="tag-groups" value={form.groupName}
+                  onChange={e => setForm({ ...form, groupName: e.target.value })}
+                  placeholder="e.g. Dieta"
+                  className="sc-field"
+                />
+                <datalist id="tag-groups">
+                  {Object.keys(groups).map(g => <option key={g} value={g} />)}
+                </datalist>
+              </Field>
+            </FieldRow>
+          </FormSection>
 
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Color</label>
-                <div className="flex items-center gap-3">
-                  <input type="color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} className="w-14 h-14 rounded-2xl border-none cursor-pointer bg-zinc-50 dark:bg-zinc-900" />
-                  <span className="text-sm font-mono text-zinc-500 dark:text-zinc-400">{form.color}</span>
-                </div>
+          <FormSection title="Appearance">
+            <Field label="Color">
+              <div className="flex items-center gap-3">
+                <input
+                  type="color" value={form.color}
+                  onChange={e => setForm({ ...form, color: e.target.value })}
+                  className="h-12 w-16 shrink-0 cursor-pointer rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent p-1"
+                />
+                <span className="font-mono text-sm text-zinc-500 dark:text-zinc-400">{form.color}</span>
               </div>
+            </Field>
+            <Field label="Choose Icon">
+              <IconPicker icons={TAG_ICONS} value={form.icon} onChange={icon => setForm({ ...form, icon })} />
+            </Field>
+          </FormSection>
 
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-4 px-1">Choose Icon</label>
-                <div className="grid grid-cols-6 gap-3 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-3xl">
-                  {TAG_ICONS.map(ic => (
-                    <button key={ic} type="button" onClick={() => setForm({ ...form, icon: ic })} className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${form.icon === ic ? 'bg-primary text-white shadow-lg scale-110' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 hover:text-primary'}`}>
-                      <RenderFaIcon name={ic} className="text-lg" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1 px-1">Auto-apply (diet tag)</label>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4 px-1">If any are checked, this tag is added automatically to a recipe unless it contains an ingredient carrying one of these.</p>
-                <div className="flex flex-wrap gap-2">
-                  {tags.filter(t => t.id !== editingTag?.id).map(t => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => toggleExclude(t.id)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${form.excludeTagIds.includes(t.id) ? 'text-white border-transparent' : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'}`}
-                      style={form.excludeTagIds.includes(t.id) ? { backgroundColor: t.color || DEFAULT_COLOR } : undefined}
-                    >
-                      {t.translated_name || t.name}
-                    </button>
-                  ))}
-                  {tags.filter(t => t.id !== editingTag?.id).length === 0 && (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500 italic">No other tags yet.</p>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Synonyms</label>
-                <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
-              </div>
-
-              {/* Translations Section */}
-              <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
-                <div className="flex justify-between items-center mb-4">
-                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">Translations</label>
-                  <button type="button" onClick={addTranslation} className="text-[10px] font-black text-primary uppercase flex items-center gap-1 hover:underline">
-                    <span className="material-symbols-outlined text-[14px]">add</span> Add Lang
+          <FormSection
+            title="Auto-apply"
+            description="If any are checked, this tag is added automatically to a recipe unless it contains an ingredient carrying one of these."
+          >
+            <div className="sc-panel flex flex-wrap gap-2 p-4">
+              {tags.filter(t => t.id !== editingTag?.id).map(t => {
+                const on = form.excludeTagIds.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggleExclude(t.id)}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-all ${
+                      on
+                        ? 'border-transparent text-white'
+                        : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600'
+                    }`}
+                    style={on ? { backgroundColor: t.color || DEFAULT_COLOR } : undefined}
+                  >
+                    {t.translated_name || t.name}
                   </button>
-                </div>
-                <div className="space-y-3">
-                  {translations.map((t, i) => (
-                    <div key={i} className="flex gap-2 items-center">
-                      <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold text-center uppercase" />
-                      <input type="text" placeholder="Translated name" value={t.name} onChange={(e) => handleTranslationChange(i, 'name', e.target.value)} className="flex-1 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium" />
-                      <button type="button" onClick={() => removeTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-colors">
-                        <span className="material-symbols-outlined">close</span>
-                      </button>
-                    </div>
-                  ))}
-                  {translations.length === 0 && (
-                    <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-2">No translations added.</p>
-                  )}
-                </div>
-              </div>
+                );
+              })}
+              {tags.filter(t => t.id !== editingTag?.id).length === 0 && (
+                <p className="sc-hint italic">No other tags yet.</p>
+              )}
+            </div>
+          </FormSection>
 
-              <div className="flex gap-4 pt-4 sticky bottom-0 bg-white dark:bg-zinc-900 pb-2">
-                {editingTag && (
-                  <button type="button" onClick={() => handleDelete(editingTag.id)} className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl hover:bg-red-100 hover:text-red-700 transition-all flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-[24px]">delete</span>
-                  </button>
-                )}
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
-                <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">
-                  {editingTag ? 'Update Tag' : 'Add Tag'}
-                </button>
-              </div>
-            </form>
-          </div>
+          <FormSection
+            title="Naming"
+            description="Alternate names make the tag findable; translations give it a name per language."
+            action={<AddLangButton onClick={addTranslation} label="Add Lang" />}
+          >
+            <Field label="Synonyms">
+              <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
+            </Field>
+            <Field label="Translations">
+              <TranslationRows
+                value={translations}
+                onChange={setTranslations}
+                emptyLabel="No translations added."
+                textPlaceholder="Translated name"
+              />
+            </Field>
+          </FormSection>
         </div>
-      )}
+      </Modal>
     </>
   );
 }
@@ -545,45 +528,35 @@ function RenameGroupModal({
 }) {
   const [name, setName] = useState(currentGroup);
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
-      <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={onCancel} />
-      <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[32px] p-8 shadow-2xl">
-        <h2 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 mb-2">Rename or Merge Group</h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">
-          Every tag currently under <strong className="text-zinc-700 dark:text-zinc-300">{currentGroup}</strong> moves to whatever
-          you type here. Type a brand-new name to rename the group, or pick an existing one from the
-          suggestions to merge the two groups together.
-        </p>
-        <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Group name</label>
+    <Modal
+      open
+      onClose={onCancel}
+      size="sm"
+      zIndex={120}
+      title="Rename or Merge Group"
+      subtitle={`Every tag currently under "${currentGroup}" moves to whatever you type here. Type a brand-new name to rename the group, or pick an existing one to merge the two together.`}
+      footer={
+        <>
+          <ModalCancelButton onClick={onCancel}>Cancel</ModalCancelButton>
+          <ModalSubmitButton type="button" onClick={() => onConfirm(name)} disabled={!name.trim() || busy}>
+            {busy ? 'Saving…' : existingGroups.includes(name.trim()) ? 'Merge' : 'Rename'}
+          </ModalSubmitButton>
+        </>
+      }
+    >
+      <Field label="Group name">
         <input
           type="text"
           list="rename-group-suggestions"
           value={name}
           onChange={e => setName(e.target.value)}
           autoFocus
-          className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold mb-6"
+          className="sc-field"
         />
         <datalist id="rename-group-suggestions">
           {existingGroups.map(g => <option key={g} value={g} />)}
         </datalist>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => onConfirm(name)}
-            disabled={!name.trim() || busy}
-            className="flex-1 py-3 rounded-2xl bg-primary text-white font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
-          >
-            {busy ? 'Saving…' : existingGroups.includes(name.trim()) ? 'Merge' : 'Rename'}
-          </button>
-        </div>
-      </div>
-    </div>
+      </Field>
+    </Modal>
   );
 }

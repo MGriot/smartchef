@@ -14,6 +14,10 @@ import * as tags from './tags.local';
 import * as techniques from './techniques.local';
 import * as share from './share.local';
 import { importSnapshot, exportSnapshot } from './backup.local';
+import * as shopping from './shopping.local';
+import * as menus from './menus.local';
+import * as collections from './collections.local';
+import * as pantry from './pantry.local';
 import { getStandaloneProfile } from '../lib/standalone';
 import { electronGeocode, isElectron } from '../lib/electronBridge';
 import { androidGeocode } from '../lib/gitHttpBridge';
@@ -39,6 +43,23 @@ function segmentsAndQuery(path: string): { segments: string[]; searchParams: URL
 
 async function dispatchRecipes(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const [, id, sub, sub2] = segments; // segments[0] === 'recipes'
+
+  // Collection endpoints, which are a verb in the id position rather than a
+  // recipe id. These MUST be matched before the id-based branches below:
+  // /api/recipes/filter-by-pantry has only two segments, so `sub` is
+  // undefined and the `if (!sub)` block claims it first. The `parse` case
+  // was already sitting below that block and had been unreachable —
+  // callers got the generic "not available offline" message instead of the
+  // specific one explaining that Smart Import needs a server-side LLM.
+  if (id === 'filter-by-pantry' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    const items = Array.isArray(body.ingredients) ? body.ingredients : [];
+    if (items.length === 0) return { status: 400, error: 'Add something to the pantry first.' };
+    return { status: 200, data: await pantry.filterByPantry(items, body.minMatchRatio ?? 1) };
+  }
+  if (id === 'parse') {
+    return { status: 501, error: `Smart Import needs a server-configured LLM provider — not available in offline mode yet.` };
+  }
 
   if (!id) {
     if (method === 'GET') {
@@ -91,12 +112,6 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
   if (sub === 'nutrition' || sub === 'translate' || sub === 'collections') {
     return { status: 501, error: `"${sub}" isn't available in offline mode yet — connect to a server to use it.` };
   }
-  if (segments[1] === 'parse') {
-    return { status: 501, error: `Smart Import needs a server-configured LLM provider — not available in offline mode yet.` };
-  }
-  if (segments[1] === 'filter-by-pantry') {
-    return { status: 501, error: `Filtering recipes by pantry contents isn't implemented yet — this is a stable, reserved endpoint for a future feature, not an offline-mode gap.` };
-  }
   void sub2;
   return NOT_HANDLED;
 }
@@ -108,6 +123,11 @@ async function dispatchIngredients(segments: string[], method: string, sp: URLSe
     if (!second) {
       if (method === 'GET') return { status: 200, data: await ingredients.listCategories({ lang: sp.get('lang') ?? undefined }) };
       if (method === 'POST') return { status: 200, data: await ingredients.createCategory(parseBody(init)) };
+    } else if (second === 'reorder' && method === 'PUT') {
+      const ids: string[] = Array.isArray(parseBody(init)?.ids) ? parseBody(init).ids : [];
+      if (ids.length === 0) return { status: 400, error: 'ids is required' };
+      await ingredients.reorderCategories(ids);
+      return { status: 200, data: { success: true } };
     } else {
       if (method === 'PUT') { await ingredients.updateCategory(second, parseBody(init)); return { status: 200, data: { success: true } }; }
       if (method === 'DELETE') { await ingredients.deleteCategory(second); return { status: 200, data: { success: true } }; }
@@ -252,6 +272,185 @@ async function dispatchShare(segments: string[], method: string, init?: RequestI
   return NOT_HANDLED;
 }
 
+/** The pantry — see pantry.local.ts. */
+async function dispatchPantry(segments: string[], method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  const [, id] = segments; // segments[0] === 'pantry'
+
+  if (!id) {
+    if (method === 'GET') return { status: 200, data: await pantry.listPantry() };
+    if (method === 'PUT') {
+      const body = parseBody(init) ?? {};
+      if (!body.ingredientId) return { status: 400, error: 'An ingredient is required.' };
+      return { status: 200, data: await pantry.putPantryItem(body) };
+    }
+    return NOT_HANDLED;
+  }
+  if (method === 'DELETE') {
+    await pantry.deletePantryItem(id);
+    return { status: 200, data: { success: true } };
+  }
+  return NOT_HANDLED;
+}
+
+/** Recipe collections — see collections.local.ts. */
+async function dispatchCollections(segments: string[], method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  const [, id, sub, recipeId] = segments; // segments[0] === 'collections'
+
+  if (!id) {
+    if (method === 'GET') return { status: 200, data: await collections.listCollections() };
+    if (method === 'POST') {
+      const body = parseBody(init) ?? {};
+      if (!body.name) return { status: 400, error: 'A name is required.' };
+      return { status: 201, data: await collections.createCollection(body) };
+    }
+    return NOT_HANDLED;
+  }
+
+  if (!sub) {
+    if (method === 'GET') {
+      const found = await collections.getCollection(id);
+      return found ? { status: 200, data: found } : { status: 404, error: 'Collection not found' };
+    }
+    if (method === 'PUT') {
+      const body = parseBody(init) ?? {};
+      if (!body.name) return { status: 400, error: 'A name is required.' };
+      const ok = await collections.updateCollection(id, body);
+      return ok ? { status: 200, data: { success: true } } : { status: 404, error: 'Collection not found' };
+    }
+    if (method === 'DELETE') {
+      const ok = await collections.deleteCollection(id);
+      return ok ? { status: 200, data: { success: true } } : { status: 404, error: 'Collection not found' };
+    }
+    return NOT_HANDLED;
+  }
+
+  if (sub === 'recipes') {
+    if (!recipeId && method === 'POST') {
+      const body = parseBody(init) ?? {};
+      if (!body.recipeId) return { status: 400, error: 'A recipe is required.' };
+      const ok = await collections.addRecipeToCollection(id, body.recipeId);
+      return ok ? { status: 201, data: { success: true } } : { status: 404, error: 'Collection not found' };
+    }
+    if (recipeId && method === 'DELETE') {
+      await collections.removeRecipeFromCollection(id, recipeId);
+      return { status: 200, data: { success: true } };
+    }
+  }
+
+  return NOT_HANDLED;
+}
+
+/** Cook history read side — see collections.local.ts's listCookLog(). */
+async function dispatchCookLog(method: string, sp: URLSearchParams): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  if (method !== 'GET') return NOT_HANDLED;
+  return { status: 200, data: await collections.listCookLog(sp.get('from'), sp.get('to')) };
+}
+
+/** Weekly menus / the Planner — see menus.local.ts. */
+async function dispatchMenus(segments: string[], method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  const [, menuId, sub, itemId] = segments; // segments[0] === 'menus'
+
+  if (!menuId) {
+    if (method === 'GET') return { status: 200, data: await menus.listMenus() };
+    if (method === 'POST') {
+      const body = parseBody(init) ?? {};
+      if (!body.name || !body.weekStart) return { status: 400, error: 'A name and a week start are required.' };
+      return { status: 201, data: await menus.createMenu(body) };
+    }
+    return NOT_HANDLED;
+  }
+
+  if (!sub) {
+    if (method === 'GET') {
+      const menu = await menus.getMenu(menuId);
+      return menu ? { status: 200, data: menu } : { status: 404, error: 'Menu not found' };
+    }
+    if (method === 'DELETE') { await menus.deleteMenu(menuId); return { status: 200, data: { success: true } }; }
+    return NOT_HANDLED;
+  }
+
+  if (sub === 'nutrition' && method === 'GET') {
+    return { status: 200, data: await menus.menuNutrition(menuId) };
+  }
+
+  if (sub === 'items') {
+    if (!itemId && method === 'POST') {
+      const body = parseBody(init) ?? {};
+      if (!body.recipeId || typeof body.dayOfWeek !== 'number') {
+        return { status: 400, error: 'A recipe and a day are required.' };
+      }
+      const created = await menus.addMenuItem(menuId, body);
+      return created ? { status: 201, data: created } : { status: 404, error: 'Menu not found' };
+    }
+    if (itemId && method === 'PATCH') {
+      const ok = await menus.updateMenuItem(menuId, itemId, parseBody(init) ?? {});
+      return ok ? { status: 200, data: { success: true } } : { status: 404, error: 'Item not found' };
+    }
+    if (itemId && method === 'DELETE') {
+      await menus.removeMenuItem(menuId, itemId);
+      return { status: 200, data: { success: true } };
+    }
+  }
+
+  return NOT_HANDLED;
+}
+
+/** Shopping lists — see shopping.local.ts.
+ *
+ *  The menu-backed half of the server's POST /shopping/generate is
+ *  deliberately not ported: menus live in /api/menus, which has no local
+ *  implementation, so there are never any menus to generate from in
+ *  standalone mode. A menuId body reaches the explicit 501 below rather
+ *  than silently producing an empty list. */
+async function dispatchShopping(segments: string[], method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  const [, first, second, itemId, action] = segments; // segments[0] === 'shopping'
+
+  if (!first) {
+    if (method === 'GET') return { status: 200, data: await shopping.listShoppingLists() };
+    return NOT_HANDLED;
+  }
+
+  if (first === 'generate' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    // Either source resolves to the same {recipeId, servings}[] the
+    // aggregator takes — a menu is just a saved set of those.
+    const recipes: Array<{ recipeId: string; servings: number }> = body.menuId
+      ? await menus.menuRecipesForShopping(body.menuId)
+      : Array.isArray(body.recipes) ? body.recipes : [];
+    if (recipes.length === 0) {
+      return { status: 400, error: body.menuId ? 'That menu has no recipes planned yet.' : 'Pick at least one recipe first.' };
+    }
+    const listName = typeof body.listName === 'string' && body.listName.trim() ? body.listName.trim() : 'Shopping List';
+    return { status: 201, data: await shopping.generateShoppingList(recipes, listName, body.menuId ?? null) };
+  }
+
+  // /shopping/:listId/items/:itemId/check
+  if (second === 'items' && itemId && action === 'check' && method === 'PATCH') {
+    const body = parseBody(init) ?? {};
+    const ok = await shopping.setItemChecked(first, itemId, !!body.checked);
+    return ok ? { status: 200, data: { ok: true } } : { status: 404, error: 'Item not found' };
+  }
+
+  if (second === 'export' && method === 'GET') {
+    const list = await shopping.loadShoppingList(first);
+    if (!list) return { status: 404, error: 'Shopping list not found' };
+    return { status: 200, data: { markdown: shopping.exportShoppingListMarkdown(list) } };
+  }
+
+  if (!second && method === 'GET') {
+    const list = await shopping.loadShoppingList(first);
+    if (!list) return { status: 404, error: 'Shopping list not found' };
+    return { status: 200, data: list };
+  }
+
+  if (!second && method === 'DELETE') {
+    const ok = await shopping.deleteShoppingList(first);
+    return ok ? { status: 200, data: { success: true } } : { status: 404, error: 'Shopping list not found' };
+  }
+
+  return NOT_HANDLED;
+}
+
 async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const q = sp.get('q');
   if (!q) return { status: 400, error: 'Missing q' };
@@ -272,7 +471,7 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
   const { segments, searchParams } = segmentsAndQuery(path);
   const method = (init?.method ?? 'GET').toUpperCase();
 
-  if (!['recipes', 'ingredients', 'units', 'tools', 'tags', 'techniques', 'backup', 'geocode', 'share'].includes(segments[0])) {
+  if (!['recipes', 'ingredients', 'units', 'tools', 'tags', 'techniques', 'backup', 'geocode', 'share', 'shopping', 'menus', 'collections', 'cook-log', 'pantry'].includes(segments[0])) {
     return null;
   }
 
@@ -288,6 +487,11 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
     else if (segments[0] === 'units') result = await dispatchUnits(segments, method, searchParams, init);
     else if (segments[0] === 'tools') result = await dispatchTools(segments, method, searchParams, init);
     else if (segments[0] === 'tags') result = await dispatchTags(segments, method, searchParams, init);
+    else if (segments[0] === 'shopping') result = await dispatchShopping(segments, method, init);
+    else if (segments[0] === 'menus') result = await dispatchMenus(segments, method, init);
+    else if (segments[0] === 'collections') result = await dispatchCollections(segments, method, init);
+    else if (segments[0] === 'cook-log') result = await dispatchCookLog(method, searchParams);
+    else if (segments[0] === 'pantry') result = await dispatchPantry(segments, method, init);
     else if (segments[0] === 'techniques') result = await dispatchTechniques(segments, method, searchParams, init);
     else if (segments[0] === 'geocode') result = await dispatchGeocode(searchParams);
     else if (segments[0] === 'share') result = await dispatchShare(segments, method, init);

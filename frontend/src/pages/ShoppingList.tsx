@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
+import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
@@ -35,6 +37,11 @@ interface ShoppingListItem {
   unit?: { symbol: string; name: string };
   isChecked: boolean;
   sourceDetails: ShoppingListSource[];
+  categoryId?: string;
+  categoryName?: string;
+  categoryColor?: string;
+  categoryIcon?: string;
+  categorySortOrder?: number;
 }
 
 interface ShoppingListDetail {
@@ -53,6 +60,40 @@ interface ShoppingListSummary {
   created_at: string;
 }
 
+/** Aisles in walking order, uncategorised last. Mirrors groupByAisle() in
+ *  services/shopping.local.ts and shopping.service.ts — the three have to
+ *  agree or the screen, the offline screen and the Markdown export show the
+ *  same list in three different orders. */
+function groupByAisle(items: ShoppingListItem[], otherLabel: string) {
+  const buckets = new Map<string, {
+    key: string; name: string; color?: string; icon?: string;
+    sortOrder: number; items: ShoppingListItem[];
+  }>();
+
+  for (const item of items) {
+    const key = item.categoryId ?? '__other__';
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        key,
+        name: item.categoryName ?? otherLabel,
+        color: item.categoryColor,
+        icon: item.categoryIcon,
+        sortOrder: item.categoryName ? (item.categorySortOrder ?? 0) : Number.MAX_SAFE_INTEGER,
+        items: [],
+      });
+    }
+    buckets.get(key)!.items.push(item);
+  }
+
+  for (const bucket of buckets.values()) {
+    bucket.items.sort((a, b) => (a.ingredientName ?? '').localeCompare(b.ingredientName ?? ''));
+  }
+
+  return [...buckets.values()].sort(
+    (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+  );
+}
+
 function displayName(item: ShoppingListItem): string {
   if (!item.ingredientName) return 'Ingredient';
   return pickIngredientName(item.ingredientName, item.ingredientPluralName, item.totalQuantity ?? null);
@@ -68,6 +109,7 @@ function formatQty(item: ShoppingListItem): string {
 }
 
 export default function ShoppingList() {
+  const { t } = useTranslation();
   const cart = useStore((s) => s.shoppingCart);
   const removeFromCart = useStore((s) => s.removeFromShoppingCart);
   const updateCartServings = useStore((s) => s.updateShoppingCartServings);
@@ -86,6 +128,10 @@ export default function ShoppingList() {
   const [viewMode, setViewMode] = useState<'ingredient' | 'recipe'>('ingredient');
   const [generating, setGenerating] = useState(false);
   const [listName, setListName] = useState('');
+  // Generation used to fail entirely into console.error, which is how a
+  // missing offline route read as "the button does nothing" instead of as
+  // an error. Anything that stops a list being generated says so here.
+  const [error, setError] = useState<string | null>(null);
 
   const fetchMenus = async () => {
     try {
@@ -130,6 +176,7 @@ export default function ShoppingList() {
   const handleGenerateFromMenu = async () => {
     if (!selectedMenuId) return;
     setGenerating(true);
+    setError(null);
     try {
       const menuName = menus.find(m => m.id === selectedMenuId)?.name || 'Menu';
       const res = await apiFetch('/api/shopping/generate', {
@@ -143,10 +190,11 @@ export default function ShoppingList() {
         setViewMode('ingredient');
         await fetchPastLists();
       } else {
-        window.alert(`Failed to generate list: ${JSON.stringify(json.error || json)}`);
+        setError(typeof json.error === 'string' ? json.error : JSON.stringify(json.error || json));
       }
     } catch (err) {
       console.error('Generate from menu failed:', err);
+      setError(err instanceof Error ? err.message : 'Could not generate the list.');
     } finally {
       setGenerating(false);
     }
@@ -155,6 +203,7 @@ export default function ShoppingList() {
   const handleGenerateFromCart = async () => {
     if (cart.length === 0) return;
     setGenerating(true);
+    setError(null);
     try {
       const res = await apiFetch('/api/shopping/generate', {
         method: 'POST',
@@ -171,10 +220,11 @@ export default function ShoppingList() {
         clearCart();
         await fetchPastLists();
       } else {
-        window.alert(`Failed to generate list: ${JSON.stringify(json.error || json)}`);
+        setError(typeof json.error === 'string' ? json.error : JSON.stringify(json.error || json));
       }
     } catch (err) {
       console.error('Generate from cart failed:', err);
+      setError(err instanceof Error ? err.message : 'Could not generate the list.');
     } finally {
       setGenerating(false);
     }
@@ -334,6 +384,12 @@ export default function ShoppingList() {
               </div>
             </div>
 
+            {error && (
+              <p className="px-5 py-4 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/50 rounded-2xl text-sm font-medium text-red-600 dark:text-red-400">
+                {error}
+              </p>
+            )}
+
             {/* Past lists */}
             {pastLists.length > 0 && (
               <div>
@@ -403,25 +459,51 @@ export default function ShoppingList() {
             </div>
 
             {viewMode === 'ingredient' ? (
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-50 dark:divide-zinc-800">
-                {activeList.items.map(item => (
-                  <label key={item.id} className={`flex items-center gap-4 py-3.5 px-2 cursor-pointer transition-opacity ${item.isChecked ? 'opacity-40' : ''}`}>
-                    <input
-                      type="checkbox" checked={item.isChecked}
-                      onChange={e => handleToggleCheck(item.id, e.target.checked)}
-                      className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item)}</p>
-                      {item.sourceDetails.length > 0 && (
-                        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium truncate">
-                          Used in: {item.sourceDetails.map(s => s.recipeTitle).join(', ')}
-                        </p>
-                      )}
+              <div className="space-y-4">
+                {groupByAisle(activeList.items, t('shopping.otherAisle')).map(group => {
+                  const remaining = group.items.filter(i => !i.isChecked).length;
+                  return (
+                    <div key={group.key} className="bg-white dark:bg-zinc-900 rounded-3xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+                      {/* The aisle header carries the category's own colour and
+                          icon, so the list reads the same way the Library and
+                          the ingredient cards already do. */}
+                      <div className="flex items-center gap-2.5 px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/40">
+                        <span
+                          className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[11px] shrink-0"
+                          style={{ backgroundColor: group.color || '#71717a' }}
+                        >
+                          <RenderFaIcon name={group.icon || 'TbCarrot'} />
+                        </span>
+                        <h3 className="text-[11px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400 flex-1 min-w-0 truncate">
+                          {group.name}
+                        </h3>
+                        <span className="text-[11px] font-bold text-zinc-400 dark:text-zinc-500 tabular-nums shrink-0">
+                          {remaining > 0 ? `${remaining}/${group.items.length}` : '✓'}
+                        </span>
+                      </div>
+                      <div className="px-6 py-1 divide-y divide-zinc-50 dark:divide-zinc-800">
+                        {group.items.map(item => (
+                          <label key={item.id} className={`flex items-center gap-4 py-3.5 px-2 cursor-pointer transition-opacity ${item.isChecked ? 'opacity-40' : ''}`}>
+                            <input
+                              type="checkbox" checked={item.isChecked}
+                              onChange={e => handleToggleCheck(item.id, e.target.checked)}
+                              className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item)}</p>
+                              {item.sourceDetails.length > 0 && (
+                                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium truncate">
+                                  {t('shopping.usedIn')} {item.sourceDetails.map(s => s.recipeTitle).join(', ')}
+                                </p>
+                              )}
+                            </div>
+                            <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums shrink-0">{formatQty(item)}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums shrink-0">{formatQty(item)}</span>
-                  </label>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="space-y-5">

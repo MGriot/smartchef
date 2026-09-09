@@ -10,6 +10,8 @@ import TagPicker from '../components/TagPicker';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { INGREDIENT_ICONS } from '../lib/icons';
+import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
+import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
 
 /** Short month names in the UI language. LibrarySeasonality.tsx already
  *  derives its own month labels this way; doing the same here avoids
@@ -226,21 +228,39 @@ export default function LibraryIngredients() {
     }
   };
 
-  // Translation helpers
-  const handleTranslationChange = (idx: number, field: 'lang'|'text', value: string) => {
-    const newT = [...translations];
-    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
-    setTranslations(newT);
-  };
+  // Translation helpers — <TranslationRows> owns the per-row edit/remove.
   const addTranslation = () => {
     setTranslations([...translations, { lang: '', text: '' }]);
-  };
-  const removeTranslation = (idx: number) => {
-    setTranslations(translations.filter((_, i) => i !== idx));
   };
 
 
   /* ─── CATEGORY ACTIONS ───────────────────── */
+  const [reorderingCats, setReorderingCats] = useState(false);
+
+  // Optimistic: the rail reorders immediately and the write follows. A
+  // failure re-fetches rather than trying to undo the swap by hand.
+  const moveCategory = async (idx: number, delta: number) => {
+    const target = idx + delta;
+    if (target < 0 || target >= categories.length) return;
+    const next = [...categories];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    setCategories(next);
+    setReorderingCats(true);
+    try {
+      const res = await apiFetch('/api/ingredients/categories/reorder', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: next.map((c) => c.id) }),
+      });
+      if (!res.ok) throw new Error('reorder failed');
+    } catch (err) {
+      console.error('Category reorder failed:', err);
+      fetchData();
+    } finally {
+      setReorderingCats(false);
+    }
+  };
+
   const handleOpenCatModal = (cat: any = null) => {
     if (cat) {
       setEditingCat(cat);
@@ -255,13 +275,7 @@ export default function LibraryIngredients() {
   };
 
   // Category translation helpers
-  const handleCatTranslationChange = (idx: number, field: 'lang' | 'name', value: string) => {
-    const newT = [...catTranslations];
-    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
-    setCatTranslations(newT);
-  };
   const addCatTranslation = () => setCatTranslations([...catTranslations, { lang: '', name: '' }]);
-  const removeCatTranslation = (idx: number) => setCatTranslations(catTranslations.filter((_, i) => i !== idx));
 
   const handleDeleteCat = async (id: string) => {
     if (!window.confirm(t('library.ingredients.confirmDeleteCategory'))) return;
@@ -309,18 +323,44 @@ export default function LibraryIngredients() {
       <div className="pt-8 mb-2">
          <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 tracking-[0.2em] uppercase px-4">{t('library.ingredients.categories')}</p>
       </div>
-      {categories.map((c) => (
-          <button
-             key={c.id}
-             onClick={() => handleOpenCatModal(c)}
-             className="w-full flex items-center justify-between gap-3 px-4 py-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl font-medium text-xs transition-all group"
-          >
-             <div className="flex items-center gap-2 truncate">
-                <RenderFaIcon name={c.icon || 'TbTag'} className="text-[16px]" color={c.color} />
+      {/* This order is the shopping list's aisle order — the list groups by
+          category and walks them in sort_order — so it is worth being able
+          to set. Up/down rather than drag-and-drop: this rail is narrow, the
+          arrows work by keyboard, and dragging here would pull in a
+          dependency for one control. */}
+      {categories.map((c, idx) => (
+          <div key={c.id} className="w-full flex items-center gap-1 pr-1 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-all group">
+             <button
+                onClick={() => handleOpenCatModal(c)}
+                className="flex-1 min-w-0 flex items-center gap-2 px-4 py-2 text-zinc-500 dark:text-zinc-400 font-medium text-xs text-left"
+             >
+                <RenderFaIcon name={c.icon || 'TbTag'} className="text-[16px] shrink-0" color={c.color} />
                 <span className="truncate">{c.translated_name || c.name}</span>
-             </div>
-             <span className="material-symbols-outlined text-[14px] opacity-0 group-hover:opacity-100 transition-opacity">edit</span>
-          </button>
+                <span className="material-symbols-outlined text-[14px] ml-auto opacity-0 group-hover:opacity-100 transition-opacity shrink-0">edit</span>
+             </button>
+             <span className="flex shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                <button
+                   type="button"
+                   onClick={() => moveCategory(idx, -1)}
+                   disabled={idx === 0 || reorderingCats}
+                   title={t('library.ingredients.moveUp')}
+                   aria-label={t('library.ingredients.moveUp')}
+                   className="w-5 h-6 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary disabled:opacity-25 disabled:hover:text-zinc-400"
+                >
+                   <span className="material-symbols-outlined text-[15px]">keyboard_arrow_up</span>
+                </button>
+                <button
+                   type="button"
+                   onClick={() => moveCategory(idx, 1)}
+                   disabled={idx === categories.length - 1 || reorderingCats}
+                   title={t('library.ingredients.moveDown')}
+                   aria-label={t('library.ingredients.moveDown')}
+                   className="w-5 h-6 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary disabled:opacity-25 disabled:hover:text-zinc-400"
+                >
+                   <span className="material-symbols-outlined text-[15px]">keyboard_arrow_down</span>
+                </button>
+             </span>
+          </div>
       ))}
       <button
          onClick={() => handleOpenCatModal()}
@@ -600,282 +640,289 @@ export default function LibraryIngredients() {
           </section>
       </AppLayout>
 
-      {/* ─── Ingredient Modal ─────────────────────────────────────────────── */}
-      {showModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
-           <div className="relative bg-white dark:bg-zinc-900 w-full max-w-2xl rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
-              <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{editingIng ? t('library.ingredients.editIngredient') : t('library.ingredients.newIngredient')}</h2>
-              <form onSubmit={handleSave} className="space-y-6">
-                 <div>
-                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.nameNative')}</label>
-                   <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder={t('library.ingredients.namePlaceholder')} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                 </div>
+      {/* ─── Ingredient Modal ───────────────────────────────────────────── */}
+      <Modal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        onSubmit={handleSave}
+        size="lg"
+        title={editingIng ? t('library.ingredients.editIngredient') : t('library.ingredients.newIngredient')}
+        subtitle={t('library.ingredients.modalSubtitle')}
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setShowModal(false)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton>
+              {editingIng ? t('library.ingredients.updateCatalog') : t('library.ingredients.addToCatalog')}
+            </ModalSubmitButton>
+          </>
+        }
+      >
+        <div className="space-y-8">
+          <FormSection title={t('library.ingredients.sectionIdentity')}>
+            <FieldRow>
+              <Field label={t('library.ingredients.nameNative')}>
+                <input
+                  type="text" required value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder={t('library.ingredients.namePlaceholder')}
+                  className="sc-field"
+                />
+              </Field>
+              {/* Not `required` — a stored categoryId that no longer matches any
+                  currently-loaded category (a deleted/merged category, or this
+                  modal opening before categories finish loading) makes a required
+                  <select> fail the browser's OWN native validation, which blocks
+                  the submit event before handleSave ever runs — silently, no
+                  error, the button just appears to do nothing. handleSave already
+                  has a fallback for a missing categoryId (defaults to the first
+                  loaded category, or alerts clearly); that fallback can only run
+                  if the browser lets the submit through in the first place. */}
+              <Field label={t('library.ingredients.category')}>
+                <select
+                  value={form.categoryId}
+                  onChange={e => setForm({ ...form, categoryId: e.target.value })}
+                  className="sc-field cursor-pointer"
+                >
+                  {!categories.some(c => c.id === form.categoryId) && (
+                    <option value={form.categoryId}>{t('library.ingredients.loadingOption')}</option>
+                  )}
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.translated_name || c.name}</option>)}
+                </select>
+              </Field>
+            </FieldRow>
+            <Field label={t('library.ingredients.notesLabel')}>
+              <textarea
+                value={form.description}
+                onChange={e => setForm({ ...form, description: e.target.value })}
+                placeholder={t('library.ingredients.notesPlaceholder')}
+                className="sc-field h-24 resize-none font-medium"
+              />
+            </Field>
+          </FormSection>
 
-                 {/* Translations Section */}
-                 <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
-                    <div className="flex justify-between items-center mb-4">
-                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">{t('library.ingredients.globalTranslations')}</label>
-                       <button type="button" onClick={addTranslation} className="text-[10px] font-black text-primary uppercase flex items-center gap-1 hover:underline">
-                          <span className="material-symbols-outlined text-[14px]">add</span> {t('library.ingredients.addLang')}
-                       </button>
-                    </div>
-                    
-                    <div className="space-y-3">
-                       {translations.map((tr, i) => (
-                          <div key={i} className="flex gap-2 items-center">
-                             <input type="text" placeholder={t('library.ingredients.langCodePlaceholder')} maxLength={3} value={tr.lang} onChange={(e) => handleTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold text-center uppercase" />
-                             <input type="text" placeholder={t('library.ingredients.translatedNamePlaceholder')} value={tr.text} onChange={(e) => handleTranslationChange(i, 'text', e.target.value)} className="flex-1 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium" />
-                             <button type="button" onClick={() => removeTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-colors">
-                                <span className="material-symbols-outlined">close</span>
-                             </button>
-                          </div>
-                       ))}
-                       {translations.length === 0 && (
-                          <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-2">{t('library.ingredients.noTranslationsLong')}</p>
-                       )}
-                    </div>
-                 </div>
+          <FormSection title={t('library.ingredients.sectionAppearance')}>
+            <Field label={t('library.ingredients.selectIcon')}>
+              <IconPicker icons={INGREDIENT_ICONS} value={form.icon} onChange={icon => setForm({ ...form, icon })} />
+            </Field>
+            <Field label={t('library.ingredients.referencePhotos')}>
+              <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({ ...form, imageUrls: urls })} />
+            </Field>
+          </FormSection>
 
-                 <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.category')}</label>
-                      {/* Not `required` — a stored categoryId that no longer matches any
-                          currently-loaded category (a deleted/merged category, or this
-                          modal opening before categories finish loading) makes a required
-                          <select> fail the browser's OWN native validation, which blocks
-                          the submit event before handleSave ever runs — silently, no
-                          error, the button just appears to do nothing. handleSave already
-                          has a fallback for a missing categoryId (defaults to the first
-                          loaded category, or alerts clearly); that fallback can only run
-                          if the browser lets the submit through in the first place. */}
-                      <select value={form.categoryId} onChange={e => setForm({...form, categoryId: e.target.value})} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all appearance-none cursor-pointer">
-                        {!categories.some(c => c.id === form.categoryId) && <option value={form.categoryId}>{t('library.ingredients.loadingOption')}</option>}
-                        {categories.map(c => <option key={c.id} value={c.id}>{c.translated_name || c.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="col-span-2">
-                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.selectIcon')}</label>
-                       <div className="grid grid-cols-8 gap-2 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
-                          {INGREDIENT_ICONS.map(ic => (
-                            <button
-                              key={ic}
-                              type="button"
-                              title={ic}
-                              onClick={() => setForm({...form, icon: ic})}
-                              className={`w-full aspect-square rounded-xl flex items-center justify-center transition-all ${form.icon === ic ? 'bg-primary text-white shadow-md shadow-primary/30 scale-105' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'}`}
-                            >
-                              <RenderFaIcon name={ic} className="text-[20px]" />
-                            </button>
-                          ))}
-                       </div>
-                    </div>
-                 </div>
-
-                 <div>
-                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.notesLabel')}</label>
-                   <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder={t('library.ingredients.notesPlaceholder')} className="w-full h-24 px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium transition-all" />
-                 </div>
-
-                 <div>
-                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.nutritionPer100g')}</label>
-                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
-                     {[
-                       { key: 'caloriesKcal', label: t('library.ingredients.kcal') },
-                       { key: 'proteinG', label: t('library.ingredients.proteinG') },
-                       { key: 'carbsG', label: t('library.ingredients.carbsG') },
-                       { key: 'fatG', label: t('library.ingredients.fatG') },
-                       { key: 'fiberG', label: t('library.ingredients.fiberG') },
-                       { key: 'sugarG', label: t('library.ingredients.sugarG') },
-                       { key: 'sodiumMg', label: t('library.ingredients.sodiumMg') },
-                     ].map(f => (
-                       <label key={f.key}>
-                         <span className="block text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase mb-1">{f.label}</span>
-                         <input
-                           type="number" step="any" min="0"
-                           value={(form.nutrition as any)[f.key]}
-                           onChange={e => setForm({ ...form, nutrition: { ...form.nutrition, [f.key]: e.target.value } })}
-                           className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
-                         />
-                       </label>
-                     ))}
-                   </div>
-                 </div>
-
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.referencePhotos')}</label>
-                    <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({...form, imageUrls: urls})} />
-                 </div>
-
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">
-                      {t('library.ingredients.seasonality')} {form.seasonalMonths.length === 0 && <span className="normal-case font-medium text-zinc-300 dark:text-zinc-600">{t('library.ingredients.seasonalityNoData')}</span>}
-                    </label>
-                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
-                      {monthLabels.map((label, i) => {
-                        const month = i + 1;
-                        const active = form.seasonalMonths.includes(month);
-                        return (
-                          <button
-                            key={month}
-                            type="button"
-                            onClick={() => setForm({
-                              ...form,
-                              seasonalMonths: active
-                                ? form.seasonalMonths.filter(m => m !== month)
-                                : [...form.seasonalMonths, month].sort((a, b) => a - b),
-                            })}
-                            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                              active ? 'bg-primary text-white shadow-md shadow-primary/30' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                 </div>
-
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.synonyms')}</label>
-                    <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
-                 </div>
-
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">
-                      {t('library.ingredients.varietyOfLabel')} {!form.parentIngredientId && <span className="normal-case font-medium text-zinc-300 dark:text-zinc-600">{t('library.ingredients.varietyOfHint')}</span>}
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={parentQuery}
-                        onChange={e => { setParentQuery(e.target.value); setForm({ ...form, parentIngredientId: null }); }}
-                        placeholder={t('library.ingredients.searchBaseIngredient')}
-                        autoComplete="off"
-                        className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold"
-                      />
-                      {parentQuery.trim() && !form.parentIngredientId && (
-                        <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white dark:bg-zinc-900 rounded-2xl shadow-lg border border-zinc-100 dark:border-zinc-800">
-                          {ingredients
-                            .filter(i => i.id !== editingIng?.id)
-                            .filter(i => (i.translated_name || i.name).toLowerCase().includes(parentQuery.trim().toLowerCase()))
-                            .slice(0, 30)
-                            .map(i => (
-                              <button
-                                key={i.id}
-                                type="button"
-                                onClick={() => { setForm({ ...form, parentIngredientId: i.id }); setParentQuery(i.translated_name || i.name); }}
-                                className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900 first:rounded-t-2xl last:rounded-b-2xl"
-                              >
-                                {i.translated_name || i.name}
-                              </button>
-                            ))}
-                        </div>
-                      )}
-                      {form.parentIngredientId && (
+          <FormSection
+            title={t('library.ingredients.sectionClassification')}
+            description={t('library.ingredients.sectionClassificationHint')}
+          >
+            <Field label={t('library.ingredients.tags')}>
+              <TagPicker by="id" value={form.tagIds} onChange={tagIds => setForm({ ...form, tagIds })} />
+            </Field>
+            <Field
+              label={t('library.ingredients.varietyOfLabel')}
+              hint={!form.parentIngredientId ? t('library.ingredients.varietyOfHint') : undefined}
+            >
+              <div className="relative">
+                <input
+                  type="text"
+                  value={parentQuery}
+                  onChange={e => { setParentQuery(e.target.value); setForm({ ...form, parentIngredientId: null }); }}
+                  placeholder={t('library.ingredients.searchBaseIngredient')}
+                  autoComplete="off"
+                  className="sc-field"
+                />
+                {parentQuery.trim() && !form.parentIngredientId && (
+                  <div className="absolute z-10 mt-2 max-h-56 w-full overflow-y-auto rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg">
+                    {ingredients
+                      .filter(i => i.id !== editingIng?.id)
+                      .filter(i => (i.translated_name || i.name).toLowerCase().includes(parentQuery.trim().toLowerCase()))
+                      .slice(0, 30)
+                      .map(i => (
                         <button
+                          key={i.id}
                           type="button"
-                          onClick={() => { setForm({ ...form, parentIngredientId: null }); setParentQuery(''); }}
-                          className="mt-2 flex items-center gap-1 text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-red-500"
+                          onClick={() => { setForm({ ...form, parentIngredientId: i.id }); setParentQuery(i.translated_name || i.name); }}
+                          className="w-full px-5 py-3 text-left text-sm font-bold text-zinc-700 dark:text-zinc-300 first:rounded-t-2xl last:rounded-b-2xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
                         >
-                          <span className="material-symbols-outlined text-sm">close</span>
-                          {t('library.ingredients.clear')}
-                        </button>
-                      )}
-                    </div>
-                 </div>
-
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.tags')}</label>
-                    <TagPicker by="id" value={form.tagIds} onChange={tagIds => setForm({...form, tagIds})} />
-                 </div>
-
-                 <div className="flex gap-4 pt-4 sticky bottom-0 bg-white dark:bg-zinc-900 pb-2">
-                    <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">{t('common.cancel')}</button>
-                    <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">
-                      {editingIng ? t('library.ingredients.updateCatalog') : t('library.ingredients.addToCatalog')}
-                    </button>
-                 </div>
-              </form>
-           </div>
-        </div>
-      )}
-
-      {/* ─── Category Modal ─────────────────────────────────────────────── */}
-      {showCategoryModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
-           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowCategoryModal(false)} />
-           <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200">
-              <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{editingCat ? t('library.ingredients.editCategory') : t('library.ingredients.newCategory')}</h2>
-              <form onSubmit={handleSaveCat} className="space-y-6">
-                 <div>
-                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.categoryName')}</label>
-                   <input type="text" required value={catForm.name} onChange={e => setCatForm({...catForm, name: e.target.value})} placeholder={t('library.ingredients.categoryNamePlaceholder')} className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                 </div>
-                 <div>
-                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.color')}</label>
-                   <div className="flex items-center gap-3">
-                     <input type="color" value={catForm.color} onChange={e => setCatForm({...catForm, color: e.target.value})} className="w-14 h-14 rounded-2xl border-none cursor-pointer bg-zinc-50 dark:bg-zinc-900" />
-                     <span className="text-sm font-mono text-zinc-500 dark:text-zinc-400">{catForm.color}</span>
-                   </div>
-                 </div>
-                 <div>
-                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">{t('library.ingredients.visualIcon')}</label>
-                   <div className="grid grid-cols-8 gap-2 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
-                      {INGREDIENT_ICONS.map(ic => (
-                        <button
-                          key={ic}
-                          type="button"
-                          title={ic}
-                          onClick={() => setCatForm({...catForm, icon: ic})}
-                          className={`w-full aspect-square rounded-xl flex items-center justify-center transition-all ${catForm.icon === ic ? 'text-white shadow-md scale-105' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'}`}
-                          style={catForm.icon === ic ? { backgroundColor: catForm.color } : undefined}
-                        >
-                          <RenderFaIcon name={ic} className="text-[20px]" />
+                          {i.translated_name || i.name}
                         </button>
                       ))}
-                   </div>
-                 </div>
-
-                 {/* Translations Section */}
-                 <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
-                    <div className="flex justify-between items-center mb-4">
-                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">{t('library.ingredients.translations')}</label>
-                       <button type="button" onClick={addCatTranslation} className="text-[10px] font-black text-primary uppercase flex items-center gap-1 hover:underline">
-                          <span className="material-symbols-outlined text-[14px]">add</span> {t('library.ingredients.addLang')}
-                       </button>
-                    </div>
-                    <div className="space-y-3">
-                       {catTranslations.map((tr, i) => (
-                          <div key={i} className="flex gap-2 items-center">
-                             <input type="text" placeholder={t('library.ingredients.langCodePlaceholder')} maxLength={3} value={tr.lang} onChange={(e) => handleCatTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold text-center uppercase" />
-                             <input type="text" placeholder={t('library.ingredients.translatedNamePlaceholder')} value={tr.name} onChange={(e) => handleCatTranslationChange(i, 'name', e.target.value)} className="flex-1 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium" />
-                             <button type="button" onClick={() => removeCatTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-colors">
-                                <span className="material-symbols-outlined">close</span>
-                             </button>
-                          </div>
-                       ))}
-                       {catTranslations.length === 0 && (
-                          <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-2">{t('library.ingredients.noTranslations')}</p>
-                       )}
-                    </div>
-                 </div>
-
-                 <div className="flex gap-4 pt-4">
-                    {editingCat && (
-                        <button type="button" onClick={() => handleDeleteCat(editingCat.id)} className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl hover:bg-red-100 hover:text-red-700 transition-all flex items-center justify-center shrink-0">
-                           <span className="material-symbols-outlined text-[24px]">delete</span>
-                        </button>
-                    )}
-                    <button type="button" onClick={() => setShowCategoryModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">{t('common.cancel')}</button>
-                    <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">
-                      {editingCat ? t('library.ingredients.update') : t('library.ingredients.create')}
+                  </div>
+                )}
+                {form.parentIngredientId && (
+                  <button
+                    type="button"
+                    onClick={() => { setForm({ ...form, parentIngredientId: null }); setParentQuery(''); }}
+                    className="mt-2 flex items-center gap-1 text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-red-500"
+                  >
+                    <span className="material-symbols-outlined text-sm">close</span>
+                    {t('library.ingredients.clear')}
+                  </button>
+                )}
+              </div>
+            </Field>
+            <Field
+              label={t('library.ingredients.seasonality')}
+              hint={form.seasonalMonths.length === 0 ? t('library.ingredients.seasonalityNoData') : undefined}
+            >
+              <div className="sc-panel grid grid-cols-4 gap-2 p-3 sm:grid-cols-6">
+                {monthLabels.map((label, i) => {
+                  const month = i + 1;
+                  const active = form.seasonalMonths.includes(month);
+                  return (
+                    <button
+                      key={month}
+                      type="button"
+                      onClick={() => setForm({
+                        ...form,
+                        seasonalMonths: active
+                          ? form.seasonalMonths.filter(m => m !== month)
+                          : [...form.seasonalMonths, month].sort((a, b) => a - b),
+                      })}
+                      className={`rounded-xl border px-3 py-2 text-xs font-bold transition-all ${
+                        active
+                          ? 'border-transparent bg-primary text-white shadow-md shadow-primary/30'
+                          : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:border-primary/40 hover:text-primary'
+                      }`}
+                    >
+                      {label}
                     </button>
-                 </div>
-              </form>
-           </div>
+                  );
+                })}
+              </div>
+            </Field>
+          </FormSection>
+
+          <FormSection title={t('library.ingredients.nutritionPer100g')}>
+            <div className="sc-panel grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
+              {[
+                { key: 'caloriesKcal', label: t('library.ingredients.kcal') },
+                { key: 'proteinG', label: t('library.ingredients.proteinG') },
+                { key: 'carbsG', label: t('library.ingredients.carbsG') },
+                { key: 'fatG', label: t('library.ingredients.fatG') },
+                { key: 'fiberG', label: t('library.ingredients.fiberG') },
+                { key: 'sugarG', label: t('library.ingredients.sugarG') },
+                { key: 'sodiumMg', label: t('library.ingredients.sodiumMg') },
+              ].map(f => (
+                <label key={f.key} className="min-w-0">
+                  <span className="sc-label mb-1 truncate">{f.label}</span>
+                  <input
+                    type="number" step="any" min="0"
+                    value={(form.nutrition as any)[f.key]}
+                    onChange={e => setForm({ ...form, nutrition: { ...form.nutrition, [f.key]: e.target.value } })}
+                    className="sc-field-inset"
+                  />
+                </label>
+              ))}
+            </div>
+          </FormSection>
+
+          <FormSection
+            title={t('library.ingredients.sectionNaming')}
+            description={t('library.ingredients.sectionNamingHint')}
+            action={<AddLangButton onClick={addTranslation} label={t('library.ingredients.addLang')} />}
+          >
+            <Field label={t('library.ingredients.synonyms')}>
+              <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
+            </Field>
+            <Field label={t('library.ingredients.globalTranslations')}>
+              <TranslationRows
+                value={translations}
+                onChange={setTranslations}
+                textKey="text"
+                emptyLabel={t('library.ingredients.noTranslationsLong')}
+                langPlaceholder={t('library.ingredients.langCodePlaceholder')}
+                textPlaceholder={t('library.ingredients.translatedNamePlaceholder')}
+              />
+            </Field>
+          </FormSection>
         </div>
-      )}
+      </Modal>
+
+      {/* ─── Category Modal ─────────────────────────────────────────────── */}
+      <Modal
+        open={showCategoryModal}
+        onClose={() => setShowCategoryModal(false)}
+        onSubmit={handleSaveCat}
+        size="sm"
+        zIndex={110}
+        title={editingCat ? t('library.ingredients.editCategory') : t('library.ingredients.newCategory')}
+        subtitle={t('library.ingredients.categoryModalSubtitle')}
+        footer={
+          <>
+            {editingCat && (
+              <ModalDeleteButton onClick={() => handleDeleteCat(editingCat.id)} label={t('library.ingredients.editCategory')} />
+            )}
+            <ModalCancelButton onClick={() => setShowCategoryModal(false)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton>
+              {editingCat ? t('library.ingredients.update') : t('library.ingredients.create')}
+            </ModalSubmitButton>
+          </>
+        }
+      >
+        <div className="space-y-8">
+          <FormSection title={t('library.ingredients.sectionIdentity')}>
+            <Field label={t('library.ingredients.categoryName')}>
+              <input
+                type="text" required value={catForm.name}
+                onChange={e => setCatForm({ ...catForm, name: e.target.value })}
+                placeholder={t('library.ingredients.categoryNamePlaceholder')}
+                className="sc-field"
+              />
+            </Field>
+          </FormSection>
+
+          <FormSection title={t('library.ingredients.sectionAppearance')}>
+            <Field label={t('library.ingredients.color')}>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color" value={catForm.color}
+                  onChange={e => setCatForm({ ...catForm, color: e.target.value })}
+                  className="h-12 w-16 shrink-0 cursor-pointer rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-transparent p-1"
+                />
+                <span className="font-mono text-sm text-zinc-500 dark:text-zinc-400">{catForm.color}</span>
+              </div>
+            </Field>
+            <Field label={t('library.ingredients.visualIcon')}>
+              {/* Selected tile is painted in the category's own colour, so this
+                  one can't use the shared <IconPicker>. */}
+              <div className="sc-panel grid grid-cols-8 gap-2 max-h-52 overflow-y-auto p-3">
+                {INGREDIENT_ICONS.map(ic => {
+                  const selected = catForm.icon === ic;
+                  return (
+                    <button
+                      key={ic}
+                      type="button"
+                      title={ic}
+                      aria-pressed={selected}
+                      onClick={() => setCatForm({ ...catForm, icon: ic })}
+                      className={`flex aspect-square w-full items-center justify-center rounded-xl border transition-all ${
+                        selected
+                          ? 'border-transparent text-white shadow-md'
+                          : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:border-primary/40 hover:text-primary'
+                      }`}
+                      style={selected ? { backgroundColor: catForm.color } : undefined}
+                    >
+                      <RenderFaIcon name={ic} className="text-[19px]" />
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+          </FormSection>
+
+          <FormSection
+            title={t('library.ingredients.translations')}
+            action={<AddLangButton onClick={addCatTranslation} label={t('library.ingredients.addLang')} />}
+          >
+            <TranslationRows
+              value={catTranslations}
+              onChange={setCatTranslations}
+              emptyLabel={t('library.ingredients.noTranslations')}
+              langPlaceholder={t('library.ingredients.langCodePlaceholder')}
+              textPlaceholder={t('library.ingredients.translatedNamePlaceholder')}
+            />
+          </FormSection>
+        </div>
+      </Modal>
 
       {/* ─── Photo Lightbox ─────────────────────────────────────────────── */}
       {previewImage && (
@@ -895,68 +942,58 @@ export default function LibraryIngredients() {
       )}
 
       {/* ─── Merge Ingredient ───────────────────────────────────────────── */}
-      {mergingIng && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setMergingIng(null)} />
-          <div className="relative bg-white dark:bg-zinc-900 w-full max-w-md rounded-[32px] p-8 shadow-2xl">
-            <h2 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 mb-2">{t('library.ingredients.mergeTitle')}</h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">
-              {t('library.ingredients.mergeDescription', { name: mergingIng.translated_name || mergingIng.name })}
-            </p>
-            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('library.ingredients.mergeIntoLabel')}</label>
-            <div className="relative mb-6">
-              <input
-                type="text"
-                value={mergeQuery}
-                onChange={e => { setMergeQuery(e.target.value); setMergeTargetId(''); }}
-                placeholder={t('library.ingredients.searchIngredient')}
-                autoComplete="off"
-                className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold"
-              />
-              {mergeQuery.trim() && !mergeTargetId && (
-                <div className="absolute z-10 mt-2 w-full max-h-56 overflow-y-auto bg-white dark:bg-zinc-900 rounded-2xl shadow-lg border border-zinc-100 dark:border-zinc-800">
-                  {ingredients
-                    .filter(i => i.id !== mergingIng.id)
-                    .filter(i => (i.translated_name || i.name).toLowerCase().includes(mergeQuery.trim().toLowerCase()))
-                    .slice(0, 30)
-                    .map(i => (
-                      <button
-                        key={i.id}
-                        type="button"
-                        onClick={() => { setMergeTargetId(i.id); setMergeQuery(i.translated_name || i.name); }}
-                        className="w-full text-left px-5 py-3 text-sm font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900 first:rounded-t-2xl last:rounded-b-2xl"
-                      >
-                        {i.translated_name || i.name}
-                      </button>
-                    ))}
-                  {ingredients
-                    .filter(i => i.id !== mergingIng.id)
-                    .filter(i => (i.translated_name || i.name).toLowerCase().includes(mergeQuery.trim().toLowerCase())).length === 0 && (
-                    <p className="px-5 py-3 text-sm text-zinc-400 dark:text-zinc-500 italic">{t('library.ingredients.noMatchingIngredients')}</p>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setMergingIng(null)}
-                className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                onClick={handleMerge}
-                disabled={!mergeTargetId || merging}
-                className="flex-1 py-3 rounded-2xl bg-primary text-white font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
-              >
-                {merging ? t('library.ingredients.merging') : t('library.ingredients.merge')}
-              </button>
-            </div>
+      <Modal
+        open={!!mergingIng}
+        onClose={() => setMergingIng(null)}
+        size="sm"
+        zIndex={120}
+        title={t('library.ingredients.mergeTitle')}
+        subtitle={mergingIng ? t('library.ingredients.mergeDescription', { name: mergingIng.translated_name || mergingIng.name }) : undefined}
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setMergingIng(null)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
+              {merging ? t('library.ingredients.merging') : t('library.ingredients.merge')}
+            </ModalSubmitButton>
+          </>
+        }
+      >
+        <Field label={t('library.ingredients.mergeIntoLabel')}>
+          <div className="relative">
+            <input
+              type="text"
+              value={mergeQuery}
+              onChange={e => { setMergeQuery(e.target.value); setMergeTargetId(''); }}
+              placeholder={t('library.ingredients.searchIngredient')}
+              autoComplete="off"
+              className="sc-field"
+            />
+            {mergeQuery.trim() && !mergeTargetId && (
+              <div className="absolute z-10 mt-2 max-h-56 w-full overflow-y-auto rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg">
+                {ingredients
+                  .filter(i => i.id !== mergingIng?.id)
+                  .filter(i => (i.translated_name || i.name).toLowerCase().includes(mergeQuery.trim().toLowerCase()))
+                  .slice(0, 30)
+                  .map(i => (
+                    <button
+                      key={i.id}
+                      type="button"
+                      onClick={() => { setMergeTargetId(i.id); setMergeQuery(i.translated_name || i.name); }}
+                      className="w-full px-5 py-3 text-left text-sm font-bold text-zinc-700 dark:text-zinc-300 first:rounded-t-2xl last:rounded-b-2xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                    >
+                      {i.translated_name || i.name}
+                    </button>
+                  ))}
+                {ingredients
+                  .filter(i => i.id !== mergingIng?.id)
+                  .filter(i => (i.translated_name || i.name).toLowerCase().includes(mergeQuery.trim().toLowerCase())).length === 0 && (
+                  <p className="sc-hint px-5 py-3 italic">{t('library.ingredients.noMatchingIngredients')}</p>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        </Field>
+      </Modal>
 
       {/* ─── Ingredient Detail (read-only) ─────────────────────────────── */}
       {viewingIng && (
@@ -1002,137 +1039,172 @@ function IngredientDetailModal({
   ].filter(([, v]) => v !== null && v !== undefined) as Array<[string, unknown, string]>;
 
   return (
-    <div className="fixed inset-0 z-[115] flex items-center justify-center p-6">
-      <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white dark:bg-zinc-900 w-full max-w-2xl rounded-[40px] shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
-        <div className="relative w-full aspect-[16/9] bg-zinc-100 dark:bg-zinc-800">
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      zIndex={115}
+      title={displayName}
+      subtitle={ing.translated_category_name || ing.category_name || t('library.ingredients.uncategorized')}
+      hero={
+        <div className="relative aspect-[21/9] w-full shrink-0 bg-zinc-100 dark:bg-zinc-800">
           {ing.image_urls?.[0] ? (
             <ResolvedImage
               src={ing.image_urls[0]}
               onClick={() => onViewImage(ing.image_urls[0], displayName)}
-              className="w-full h-full object-cover cursor-zoom-in"
+              className="h-full w-full cursor-zoom-in object-cover"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-[64px] text-white" style={{ backgroundColor: ing.category_color || '#71717a' }}>
+            <div
+              className="flex h-full w-full items-center justify-center text-[56px] text-white"
+              style={{ backgroundColor: ing.category_color || '#71717a' }}
+            >
               <RenderFaIcon name={ing.icon || 'TbCarrot'} />
             </div>
           )}
-          <button onClick={onClose} className="absolute top-4 right-4 w-10 h-10 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-sm rounded-full shadow-lg flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100">
-            <span className="material-symbols-outlined">close</span>
-          </button>
           {ing.image_urls?.length > 1 && (
-            <div className="absolute bottom-4 right-4 flex gap-1.5">
+            <div className="absolute bottom-3 right-3 flex gap-1.5">
               {ing.image_urls.slice(1, 5).map((url: string, i: number) => (
-                <ResolvedImage key={i} src={url} onClick={() => onViewImage(url, displayName)} className="w-10 h-10 rounded-lg object-cover border-2 border-white shadow cursor-zoom-in" />
+                <ResolvedImage
+                  key={i}
+                  src={url}
+                  onClick={() => onViewImage(url, displayName)}
+                  className="h-10 w-10 cursor-zoom-in rounded-lg border-2 border-white object-cover shadow"
+                />
               ))}
             </div>
           )}
         </div>
-
-        <div className="p-10 space-y-6">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="w-6 h-6 rounded-lg flex items-center justify-center text-white text-[11px] shrink-0" style={{ backgroundColor: ing.category_color || '#71717a' }}>
-                <RenderFaIcon name={ing.icon || 'TbCarrot'} />
-              </span>
-              <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{ing.translated_category_name || ing.category_name || t('library.ingredients.uncategorized')}</span>
-            </div>
-            <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100">{displayName}</h2>
+      }
+      footer={
+        <>
+          <Link
+            to={`/?q=${encodeURIComponent(ing.name)}`}
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 py-3.5 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          >
+            <span className="material-symbols-outlined text-lg">search</span>
+            {t('library.ingredients.recipes')}
+          </Link>
+          <button
+            type="button"
+            onClick={onMerge}
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 py-3.5 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          >
+            <span className="material-symbols-outlined text-lg">call_merge</span>
+            {t('library.ingredients.merge')}
+          </button>
+          <ModalDeleteButton onClick={onDelete} label={t('common.delete')} />
+          <ModalSubmitButton type="button" onClick={onEdit}>
+            <span className="material-symbols-outlined mr-1.5 align-middle text-lg">edit</span>
+            {t('common.edit')}
+          </ModalSubmitButton>
+        </>
+      }
+    >
+      <div className="space-y-7">
+        {(ing.parent_name || ing.description) && (
+          <div className="space-y-2">
             {ing.parent_name && (
-              <button onClick={() => onOpenVariety(ing.parent_ingredient_id)} className="text-sm font-bold text-primary hover:underline mt-1">
+              <button
+                onClick={() => onOpenVariety(ing.parent_ingredient_id)}
+                className="text-sm font-bold text-primary hover:underline"
+              >
                 ↳ {t('library.ingredients.varietyOf', { name: ing.parent_name })}
               </button>
             )}
-            {ing.description && <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-3 leading-relaxed">{ing.description}</p>}
+            {ing.description && (
+              <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">{ing.description}</p>
+            )}
           </div>
+        )}
 
-          {nutritionRows.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('library.ingredients.nutritionPer100g')}</p>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-2xl">
-                {nutritionRows.map(([label, value, unit]) => (
-                  <div key={label}>
-                    <p className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase">{label}</p>
-                    <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{String(value)}<span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 ml-0.5">{unit}</span></p>
+        {nutritionRows.length > 0 && (
+          <FormSection title={t('library.ingredients.nutritionPer100g')}>
+            <div className="sc-panel grid grid-cols-3 gap-3 p-4 sm:grid-cols-4">
+              {nutritionRows.map(([label, value, unit]) => (
+                <div key={label} className="min-w-0">
+                  <p className="sc-label truncate">{label}</p>
+                  <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                    {String(value)}
+                    <span className="ml-0.5 text-[10px] font-bold text-zinc-400 dark:text-zinc-500">{unit}</span>
+                  </p>
+                </div>
+              ))}
+            </div>
+          </FormSection>
+        )}
+
+        {ing.seasonal_months?.length > 0 && (
+          <FormSection title={t('library.ingredients.seasonality')}>
+            <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-12">
+              {monthLabels.map((label, i) => {
+                const active = ing.seasonal_months.includes(i + 1);
+                return (
+                  <div
+                    key={label}
+                    className={`rounded-lg py-2 text-center text-[10px] font-bold ${
+                      active
+                        ? 'bg-primary text-white'
+                        : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-300 dark:text-zinc-600'
+                    }`}
+                  >
+                    {label}
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          )}
+          </FormSection>
+        )}
 
-          {ing.seasonal_months?.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('library.ingredients.seasonality')}</p>
-              <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
-                {monthLabels.map((label, i) => {
-                  const active = ing.seasonal_months.includes(i + 1);
-                  return (
-                    <div key={label} className={`text-center py-2 rounded-lg text-[10px] font-bold ${active ? 'bg-primary text-white' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-300 dark:text-zinc-600'}`}>
-                      {label}
-                    </div>
-                  );
-                })}
-              </div>
+        {ing.tags?.length > 0 && (
+          <FormSection title={t('library.ingredients.tags')}>
+            <div className="flex flex-wrap gap-1.5">
+              {ing.tags.map((tg: any) => (
+                <span
+                  key={tg.id}
+                  className="rounded-full px-3 py-1.5 text-xs font-bold text-white"
+                  style={{ backgroundColor: tg.color || '#3f3f46' }}
+                >
+                  {tg.translated_name || tg.name}
+                </span>
+              ))}
             </div>
-          )}
+          </FormSection>
+        )}
 
-          {ing.synonyms?.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('library.ingredients.synonyms')}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {ing.synonyms.map((s: string, i: number) => (
-                  <span key={i} className="px-3 py-1.5 rounded-full text-xs font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">{s}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {ing.translations?.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('library.ingredients.translations')}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {ing.translations.map((tr: any, i: number) => (
-                  <span key={i} className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[9px] font-black uppercase rounded border border-zinc-200 dark:border-zinc-700">{tr.lang}: {tr.text}</span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {ing.tags?.length > 0 && (
-            <div>
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('library.ingredients.tags')}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {ing.tags.map((tg: any) => (
-                  <span key={tg.id} className="px-3 py-1.5 text-white text-xs font-bold rounded-full" style={{ backgroundColor: tg.color || '#3f3f46' }}>
-                    {tg.translated_name || tg.name}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-3 pt-4">
-            <Link
-              to={`/?q=${encodeURIComponent(ing.name)}`}
-              className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-2"
-            >
-              <span className="material-symbols-outlined text-lg">search</span>
-              {t('library.ingredients.recipes')}
-            </Link>
-            <button type="button" onClick={onMerge} className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-2">
-              <span className="material-symbols-outlined text-lg">call_merge</span>
-              {t('library.ingredients.merge')}
-            </button>
-            <button type="button" onClick={onDelete} className="w-14 py-3 rounded-2xl bg-red-50 text-red-500 font-bold hover:bg-red-100 transition-all flex items-center justify-center shrink-0">
-              <span className="material-symbols-outlined text-lg">delete</span>
-            </button>
-            <button type="button" onClick={onEdit} className="flex-[2] py-3 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all flex items-center justify-center gap-2">
-              <span className="material-symbols-outlined text-lg">edit</span>
-              {t('common.edit')}
-            </button>
-          </div>
-        </div>
+        {(ing.synonyms?.length > 0 || ing.translations?.length > 0) && (
+          <FormSection title={t('library.ingredients.sectionNaming')}>
+            {ing.synonyms?.length > 0 && (
+              <Field label={t('library.ingredients.synonyms')}>
+                <div className="flex flex-wrap gap-1.5">
+                  {ing.synonyms.map((sy: string, i: number) => (
+                    <span
+                      key={i}
+                      className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-400"
+                    >
+                      {sy}
+                    </span>
+                  ))}
+                </div>
+              </Field>
+            )}
+            {ing.translations?.length > 0 && (
+              <Field label={t('library.ingredients.translations')}>
+                <div className="flex flex-wrap gap-1.5">
+                  {ing.translations.map((tr: any, i: number) => (
+                    <span
+                      key={i}
+                      className="rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400"
+                    >
+                      {tr.lang}: {tr.text}
+                    </span>
+                  ))}
+                </div>
+              </Field>
+            )}
+          </FormSection>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

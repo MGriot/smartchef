@@ -360,6 +360,14 @@ export async function mergeIngredients(sourceId: string, targetId: string): Prom
 
 // ── Categories ─────────────────────────────────────────────────────────
 
+/** The aisle order — see the server's PUT /ingredients/categories/reorder
+ *  for why this takes the whole sequence rather than one moved item. */
+export async function reorderCategories(ids: string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i++) {
+    await query('UPDATE ingredient_categories SET sort_order=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2', [i, ids[i]]);
+  }
+}
+
 export async function listCategories({ lang }: { lang?: string }) {
   const rows = await query<Record<string, unknown>>(
     `SELECT * FROM ingredient_categories WHERE deleted_at IS NULL ORDER BY sort_order, name`

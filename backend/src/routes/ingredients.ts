@@ -119,6 +119,25 @@ ingredientsRouter.post("/categories", async (req: Request, res: Response) => {
   res.json({ data: { id } });
 });
 
+// PUT /ingredients/categories/reorder — the aisle order.
+//
+// Takes the whole ordered list of ids rather than one category's new
+// position: the shopping list groups by category and walks them in
+// sort_order, so the meaningful unit of change is the sequence itself, and
+// sending it whole makes the write idempotent and free of the gaps and ties
+// that per-item nudges accumulate.
+ingredientsRouter.put("/categories/reorder", async (req: Request, res: Response) => {
+  const parsed = z.object({ ids: z.array(z.string().uuid()).min(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+  await Promise.all(
+    parsed.data.ids.map((id, index) =>
+      query("UPDATE ingredient_categories SET sort_order=$1, updated_at=now() WHERE id=$2", [index, id])
+    )
+  );
+  res.json({ success: true });
+});
+
 ingredientsRouter.put("/categories/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
   const parsed = CategorySchema.safeParse(req.body);

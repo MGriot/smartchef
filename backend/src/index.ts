@@ -21,6 +21,8 @@ import { authRouter }       from "./routes/auth";
 import { shareRouter }      from "./routes/share";
 import { syncFolderRouter } from "./routes/sync-folder";
 import { backupRouter }     from "./routes/backup";
+import { pantryRouter }     from "./routes/pantry";
+import { shareLinkRouter, publicRouter } from "./routes/publicShare";
 import { cookLogRouter }    from "./routes/cook-log";
 import { geocodeRouter }    from "./routes/geocode";
 import { requireAuth }      from "./middleware/requireAuth";
@@ -57,6 +59,9 @@ app.use("/api/auth", authRouter);
 // browser traffic — it carries no session cookie, so it stays outside
 // the auth gate. Excluded before the blanket requireAuth below.
 app.use("/api/sync", syncRouter);
+// The only unauthenticated read path in the app: a recipe someone chose to
+// share by link. Mounted before the gate below, like /api/auth is.
+app.use("/api/public", publicRouter);
 app.use("/api", requireAuth);
 app.use("/api/recipes",     recipeRouter);
 app.use("/api/shopping",    shoppingRouter);
@@ -69,10 +74,12 @@ app.use("/api/techniques",  techniquesRouter);
 app.use("/api/tags",        tagsRouter);
 app.use("/api/collections", collectionsRouter);
 app.use("/api/share",       shareRouter);
+app.use("/api/share",       shareLinkRouter);
 app.use("/api/sync-folder", syncFolderRouter);
 app.use("/api/backup",      backupRouter);
 app.use("/api/uploads",     uploadsRouter);
 app.use("/api/cook-log",    cookLogRouter);
+app.use("/api/pantry",      pantryRouter);
 app.use("/api/geocode",     geocodeRouter);
 app.use("/uploads",         express.static(UPLOAD_DIR));
 

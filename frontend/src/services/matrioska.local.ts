@@ -7,7 +7,7 @@
 // results otherwise — no Postgres-specific SQL in this file to translate.
 // ════════════════════════════════════════════════════════════════════════
 
-import { query } from "../db/local";
+import { query, inPlaceholders, chunk } from "../db/local";
 
 export type UUID = string;
 
@@ -19,6 +19,10 @@ export interface ResolvedIngredient {
   unitSymbol: string;
   unitId: UUID;
   sourceChain: string[];
+  /** Whether the recipe marks this ingredient optional. Carried through so
+   *  "can I cook this?" can ignore a missing garnish — it was read from the
+   *  row all along and simply never propagated. */
+  isOptional: boolean;
 }
 
 export interface PortionCalculationResult {
@@ -132,15 +136,24 @@ async function loadRecipeSteps(recipeId: UUID): Promise<CookSequenceStep[]> {
 async function loadSectionTechniques(steps: CookSequenceStep[]): Promise<CookSequenceTechniqueRef[]> {
   const ids = new Set<UUID>();
   for (const step of steps) for (const id of step.techniqueIds) ids.add(id);
-  const refs: CookSequenceTechniqueRef[] = [];
-  for (const id of ids) {
-    const rows = await query<{ id: string; name: string; icon: string | null }>(
-      `SELECT id, name, icon FROM techniques WHERE id = $1 AND deleted_at IS NULL`,
-      [id]
+  if (ids.size === 0) return [];
+
+  // One read for the section rather than one per technique — cook mode
+  // resolves this for every sub-recipe as well as the main one, so a query
+  // per chip multiplies down the whole matrioska tree.
+  const byId = new Map<UUID, CookSequenceTechniqueRef>();
+  for (const batch of chunk([...ids])) {
+    const p: unknown[] = [];
+    const rows = await query<CookSequenceTechniqueRef>(
+      `SELECT id, name, icon FROM techniques
+       WHERE id IN (${inPlaceholders(p, batch)}) AND deleted_at IS NULL`,
+      p
     );
-    if (rows[0]) refs.push(rows[0]);
+    for (const r of rows) byId.set(r.id, r);
   }
-  return refs;
+  // Kept in the order the steps mention them, which `IN (...)` does not
+  // preserve on its own.
+  return [...ids].flatMap((id) => { const r = byId.get(id); return r ? [r] : []; });
 }
 
 async function loadSectionIngredients(recipeId: UUID): Promise<CookSequenceIngredientRef[]> {
@@ -249,10 +262,79 @@ interface RawRecipeIngredient {
   is_optional: number;
 }
 
+/** Every recipe's rows, read once.
+ *
+ *  Resolving a single recipe costs one query per node of its sub-recipe
+ *  tree, which is right for a recipe page and ruinous for anything that
+ *  resolves the whole library: the pantry matcher was issuing well over a
+ *  hundred sequential queries on a 49-recipe library, and on Android every
+ *  one of them is a native bridge round-trip. Hand this to
+ *  calculatePortions() and the same recursion reads from memory instead —
+ *  two queries for the entire library, with no second copy of the
+ *  resolution rules to drift out of step. */
+export interface MatrioskaPreload {
+  /** recipe id → its direct rows, in sort order. */
+  ingredients: Map<UUID, RawRecipeIngredient[]>;
+  /** recipe id → the title and base servings calculatePortions() starts from. */
+  recipes: Map<UUID, { title: string; servings: number }>;
+}
+
+export async function preloadMatrioska(): Promise<MatrioskaPreload> {
+  // Sub-recipes are resolved through here too, so neither query filters on
+  // is_component or sync_status — a row the recursion asks for and does not
+  // find would silently resolve to nothing.
+  const [rows, recipes] = await Promise.all([
+    query<RawRecipeIngredient & { recipe_id: UUID }>(
+      `SELECT
+         ri.recipe_id,
+         ri.id, ri.sort_order,
+         ri.ingredient_id,
+         i.name  AS ingredient_name,
+         ri.sub_recipe_id,
+         sr.title AS sub_recipe_title,
+         sr.servings AS sub_recipe_servings,
+         sr.yield_amount AS sub_recipe_yield_amount,
+         yu.unit_type AS sub_recipe_yield_unit_type,
+         yu.to_base_factor AS sub_recipe_yield_to_base_factor,
+         ri.quantity, ri.quantity_text,
+         ri.unit_id, u.symbol AS unit_symbol, u.unit_type AS unit_type, u.to_base_factor AS to_base_factor,
+         ri.notes, ri.is_optional
+       FROM recipe_ingredients ri
+       LEFT JOIN ingredients i    ON i.id = ri.ingredient_id
+       LEFT JOIN recipes sr       ON sr.id = ri.sub_recipe_id
+       LEFT JOIN units u          ON u.id = ri.unit_id
+       LEFT JOIN units yu         ON yu.id = sr.yield_unit_id
+       ORDER BY ri.recipe_id, ri.sort_order`
+    ),
+    query<{ id: UUID; title: string; servings: number }>(
+      `SELECT id, title, servings FROM recipes`
+    ),
+  ]);
+
+  const byRecipe = new Map<UUID, RawRecipeIngredient[]>();
+  for (const row of rows) {
+    const list = byRecipe.get(row.recipe_id);
+    if (list) list.push(row);
+    else byRecipe.set(row.recipe_id, [row]);
+  }
+
+  return {
+    ingredients: byRecipe,
+    recipes: new Map(recipes.map((r) => [r.id, { title: r.title, servings: r.servings }])),
+  };
+}
+
 /**
  * Carica gli ingredienti diretti di una ricetta dal DB
  */
-async function loadRecipeIngredients(recipeId: UUID): Promise<RawRecipeIngredient[]> {
+async function loadRecipeIngredients(
+  recipeId: UUID,
+  preload?: MatrioskaPreload
+): Promise<RawRecipeIngredient[]> {
+  // A preload is authoritative: a recipe with no ingredients is simply
+  // absent from the map, and must read as "no rows" rather than fall back
+  // to the query the preload exists to avoid.
+  if (preload) return preload.ingredients.get(recipeId) ?? [];
   return query<RawRecipeIngredient>(
     `SELECT
        ri.id, ri.sort_order,
@@ -288,7 +370,8 @@ async function resolveIngredients(
   baseServings: number,
   chain: string[],
   depth: number,
-  visited: Set<UUID>
+  visited: Set<UUID>,
+  preload?: MatrioskaPreload
 ): Promise<{ ingredients: ResolvedIngredient[]; warnings: string[] }> {
   if (depth > MAX_DEPTH) {
     return {
@@ -306,7 +389,7 @@ async function resolveIngredients(
   visited.add(recipeId);
 
   const scaleFactor = requestedServings / baseServings;
-  const rows = await loadRecipeIngredients(recipeId);
+  const rows = await loadRecipeIngredients(recipeId, preload);
 
   const resolved: ResolvedIngredient[] = [];
   const warnings: string[] = [];
@@ -328,6 +411,7 @@ async function resolveIngredients(
           quantityText: row.quantity_text,
           unitSymbol: row.unit_symbol ?? "—",
           unitId: row.unit_id ?? "",
+          isOptional: !!row.is_optional,
           sourceChain: [...chain],
         });
         warnings.push(
@@ -343,6 +427,7 @@ async function resolveIngredients(
         quantityText: row.quantity_text ?? undefined,
         unitSymbol: row.unit_symbol ?? "—",
         unitId: row.unit_id ?? "",
+        isOptional: !!row.is_optional,
         sourceChain: [...chain],
       });
       continue;
@@ -388,7 +473,8 @@ async function resolveIngredients(
         subBaseServings,
         [...chain, subTitle],
         depth + 1,
-        new Set(visited)
+        new Set(visited),
+        preload
       );
 
       resolved.push(...sub.ingredients);
@@ -413,6 +499,9 @@ function aggregateIngredients(
     if (map.has(key)) {
       const existing = map.get(key)!;
       existing.quantity += item.quantity;
+      // One required use makes the whole line required: an ingredient that
+      // is optional in a garnish but essential in the base is essential.
+      existing.isOptional = existing.isOptional && item.isOptional;
       existing.sourceChain = [...new Set([...existing.sourceChain, ...item.sourceChain])];
     } else {
       map.set(key, { ...item, sourceChain: [...item.sourceChain] });
@@ -429,18 +518,23 @@ function aggregateIngredients(
  */
 export async function calculatePortions(
   recipeId: UUID,
-  requestedServings: number
+  requestedServings: number,
+  /** Optional rows for the whole library — see preloadMatrioska(). Omit it
+   *  when resolving one recipe; pass it when resolving many. */
+  preload?: MatrioskaPreload
 ): Promise<PortionCalculationResult> {
-  const recipeRows = await query<{ title: string; servings: number }>(
-    "SELECT title, servings FROM recipes WHERE id = $1",
-    [recipeId]
-  );
+  const recipeRow = preload
+    ? preload.recipes.get(recipeId)
+    : (await query<{ title: string; servings: number }>(
+        "SELECT title, servings FROM recipes WHERE id = $1",
+        [recipeId]
+      ))[0];
 
-  if (!recipeRows.length) {
+  if (!recipeRow) {
     throw new Error(`Ricetta ${recipeId} non trovata`);
   }
 
-  const { title, servings: baseServings } = recipeRows[0];
+  const { title, servings: baseServings } = recipeRow;
 
   const { ingredients, warnings } = await resolveIngredients(
     recipeId,
@@ -448,7 +542,8 @@ export async function calculatePortions(
     baseServings,
     [title],
     0,
-    new Set()
+    new Set(),
+    preload
   );
 
   const scaleFactor = baseServings > 0 ? requestedServings / baseServings : 1;

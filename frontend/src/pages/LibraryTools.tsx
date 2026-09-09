@@ -7,6 +7,8 @@ import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { TOOL_ICONS } from '../lib/icons';
+import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
+import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
 
 
 export default function LibraryTools() {
@@ -52,13 +54,7 @@ export default function LibraryTools() {
     setShowModal(true);
   };
 
-  const handleTranslationChange = (idx: number, field: 'lang' | 'name', value: string) => {
-    const newT = [...translations];
-    newT[idx][field] = field === 'lang' ? value.toLowerCase() : value;
-    setTranslations(newT);
-  };
   const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);
-  const removeTranslation = (idx: number) => setTranslations(translations.filter((_, i) => i !== idx));
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,88 +159,82 @@ export default function LibraryTools() {
           </section>
       </AppLayout>
 
-      {/* ─── Modal ─────────────────────────────────────────────── */}
-      {showModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-           <div className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
-           <div className="relative bg-white dark:bg-zinc-900 w-full max-w-xl rounded-[40px] p-10 shadow-2xl animate-in fade-in zoom-in duration-200 overflow-y-auto max-h-[90vh] hide-scrollbar">
-              <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100 mb-8">{editingTool ? 'Edit Tool' : 'New Culinary Tool'}</h2>
-              <form onSubmit={handleSave} className="space-y-6">
-                 <div>
-                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Tool Name</label>
-                   <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Mandoline Slicer" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                 </div>
+      <Modal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        onSubmit={handleSave}
+        size="md"
+        title={editingTool ? 'Edit Tool' : 'New Culinary Tool'}
+        subtitle={editingTool ? 'Changes apply everywhere this tool is used.' : 'Register a piece of equipment recipes can reference.'}
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton>{editingTool ? 'Update Asset' : 'Register Asset'}</ModalSubmitButton>
+          </>
+        }
+      >
+        <div className="space-y-8">
+          <FormSection title="Identity">
+            <FieldRow>
+              <Field label="Tool Name">
+                <input
+                  type="text" required value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  placeholder="e.g. Mandoline Slicer"
+                  className="sc-field"
+                />
+              </Field>
+              <Field label="Category" hint="Free text — e.g. Prep, Baking, Cooking.">
+                <input
+                  type="text" value={form.category}
+                  onChange={e => setForm({ ...form, category: e.target.value })}
+                  placeholder="e.g. Prep"
+                  className="sc-field"
+                />
+              </Field>
+            </FieldRow>
+            <Field label="Technical Specs / Description">
+              <textarea
+                value={form.description}
+                onChange={e => setForm({ ...form, description: e.target.value })}
+                placeholder="Maintenance requirements, serial numbers..."
+                className="sc-field h-24 resize-none font-medium"
+              />
+            </Field>
+          </FormSection>
 
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Reference Photos</label>
-                    <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({...form, imageUrls: urls})} />
-                 </div>
+          <FormSection title="Appearance" description="The icon shows wherever the tool appears without a photo.">
+            <Field label="Choose Icon">
+              <IconPicker icons={TOOL_ICONS} value={form.icon} onChange={icon => setForm({ ...form, icon })} />
+            </Field>
+            <Field label="Reference Photos">
+              <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({ ...form, imageUrls: urls })} />
+            </Field>
+          </FormSection>
 
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-4 px-1">Choose Icon</label>
-                    <div className="grid grid-cols-6 gap-3 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-3xl">
-                       {TOOL_ICONS.map(ic => (
-                          <button key={ic} type="button" onClick={() => setForm({...form, icon: ic})} className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all ${form.icon === ic ? 'bg-primary text-white shadow-lg scale-110' : 'bg-white dark:bg-zinc-900 text-zinc-400 dark:text-zinc-500 hover:text-primary'}`}>
-                             <RenderFaIcon name={ic} className="text-lg" />
-                          </button>
-                       ))}
-                    </div>
-                 </div>
+          <FormSection
+            title="Naming"
+            description="Alternate names make the tool findable; translations give it a name per language."
+            action={<AddLangButton onClick={addTranslation} label="Add Lang" />}
+          >
+            <Field label="Synonyms">
+              <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
+            </Field>
+            <Field label="Translations">
+              <TranslationRows
+                value={translations}
+                onChange={setTranslations}
+                emptyLabel="No translations added."
+                textPlaceholder="Translated name"
+              />
+            </Field>
+          </FormSection>
 
-                 <div className="grid grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Category</label>
-                      <input type="text" value={form.category} onChange={e => setForm({...form, category: e.target.value})} placeholder="e.g. Prep" className="w-full px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold transition-all" />
-                    </div>
-                    <div className="opacity-50">
-                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">ID (Read Only)</label>
-                       <div className="w-full px-6 py-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-[10px] font-mono truncate">{editingTool?.id || 'NEW'}</div>
-                    </div>
-                 </div>
-                 <div>
-                   <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Technical Specs / Description</label>
-                   <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Maintenance requirements, serial numbers..." className="w-full h-24 px-6 py-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium transition-all" />
-                 </div>
-
-                 <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2 px-1">Synonyms</label>
-                    <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
-                 </div>
-
-                 {/* Translations Section */}
-                 <div className="bg-zinc-50/50 dark:bg-zinc-900/50 p-6 rounded-3xl border border-zinc-100 dark:border-zinc-800">
-                    <div className="flex justify-between items-center mb-4">
-                       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-1">Translations</label>
-                       <button type="button" onClick={addTranslation} className="text-[10px] font-black text-primary uppercase flex items-center gap-1 hover:underline">
-                          <span className="material-symbols-outlined text-[14px]">add</span> Add Lang
-                       </button>
-                    </div>
-                    <div className="space-y-3">
-                       {translations.map((t, i) => (
-                          <div key={i} className="flex gap-2 items-center">
-                             <input type="text" placeholder="EN" maxLength={3} value={t.lang} onChange={(e) => handleTranslationChange(i, 'lang', e.target.value)} className="w-20 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold text-center uppercase" />
-                             <input type="text" placeholder="Translated name" value={t.name} onChange={(e) => handleTranslationChange(i, 'name', e.target.value)} className="flex-1 px-4 py-2 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium" />
-                             <button type="button" onClick={() => removeTranslation(i)} className="w-10 h-10 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-colors">
-                                <span className="material-symbols-outlined">close</span>
-                             </button>
-                          </div>
-                       ))}
-                       {translations.length === 0 && (
-                          <p className="text-center text-xs text-zinc-400 dark:text-zinc-500 py-2">No translations added.</p>
-                       )}
-                    </div>
-                 </div>
-
-                 <div className="flex gap-4 pt-4 sticky bottom-0 bg-white dark:bg-zinc-900 pb-2">
-                    <button type="button" onClick={() => setShowModal(false)} className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">Cancel</button>
-                    <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]">
-                      {editingTool ? 'Update Asset' : 'Register Asset'}
-                    </button>
-                 </div>
-              </form>
-           </div>
+          {editingTool && (
+            <p className="sc-hint font-mono">ID {editingTool.id}</p>
+          )}
         </div>
-      )}
+      </Modal>
     </>
   );
 }

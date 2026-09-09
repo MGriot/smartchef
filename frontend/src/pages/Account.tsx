@@ -4,10 +4,11 @@ import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
 import type { ThemeMode } from '../store/app.store';
-import { apiFetch, isNative } from '../lib/api';
-import { AVATAR_PRESETS } from '../lib/avatarPresets';
+import { apiFetch, isNative, getServerUrl } from '../lib/api';
+import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
 import { ResolvedImage } from '../components/CoverImage';
 import type { StandaloneProfile } from '../lib/standalone';
+import type { MigrationSummary } from '../lib/storageMigration';
 import type { SyncResult } from '../lib/sync/gitSync';
 import type { TransferProgress } from '../lib/sync/gitObjectTransport';
 import type { SyncInterval, SyncIntervalUnit } from '../lib/sync/syncSettings';
@@ -1572,19 +1573,18 @@ function StandaloneProfileCard() {
     }
   };
 
+  // Signing out drops to the "who's cooking?" picker (ProfilePicker.tsx),
+  // where you pick another profile or make a new one — it keeps standalone
+  // mode, the local library and the Sync Folder exactly as they are, and
+  // only clears which profile *this device* is currently using.
+  //
+  // This used to call clearStandaloneProfile(), which also forgets that the
+  // device is in offline mode at all — so signing out threw you back to
+  // first-run's "Connect to a server / Use offline on this device" screen
+  // and made every sign-out look like a decision about where your library
+  // lives. That decision is now an admin one, made once, in StorageModeCard
+  // below.
   const handleLogout = async () => {
-    const { clearStandaloneProfile } = await import('../lib/standalone');
-    await clearStandaloneProfile();
-    window.location.href = '/';
-  };
-
-  // Distinct from Log Out: this keeps standalone mode, the local library,
-  // and the Sync Folder exactly as they are — it only clears which profile
-  // *this device* is currently using, bringing back the "who's cooking?"
-  // picker (ProfilePicker.tsx) so someone else sharing this device (or
-  // this same person switching between two of their own profiles) can
-  // pick who they are without re-entering any setup.
-  const handleSwitchProfile = async () => {
     const { clearActiveProfile } = await import('../lib/standalone');
     await clearActiveProfile();
     window.location.href = '/';
@@ -1635,16 +1635,8 @@ function StandaloneProfileCard() {
         </button>
         <button
           type="button"
-          onClick={handleSwitchProfile}
-          title="Switch to another profile on this device, without leaving offline mode"
-          className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
-        >
-          Switch Profile
-        </button>
-        <button
-          type="button"
           onClick={handleLogout}
-          title="Forget this device's offline setup entirely"
+          title="Back to “who's cooking?” — pick another profile or add a new one"
           className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
         >
           Log Out
@@ -1663,6 +1655,10 @@ function AllProfilesCard() {
   const [profiles, setProfiles] = useState<StandaloneProfile[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newAvatar, setNewAvatar] = useState(DEFAULT_AVATAR);
+  const [creating, setCreating] = useState(false);
 
   const reload = () => {
     import('../lib/standalone').then(async ({ getActiveProfile, listStandaloneProfiles }) => {
@@ -1704,14 +1700,102 @@ function AllProfilesCard() {
     }
   };
 
+  // Adds the profile to the shared library without switching this device
+  // to it — see createLibraryProfile() in lib/standalone.ts.
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const { createLibraryProfile } = await import('../lib/standalone');
+      await createLibraryProfile(trimmed, newAvatar || null);
+      setNewName('');
+      setNewAvatar(DEFAULT_AVATAR);
+      setAdding(false);
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create profile');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const otherAdmins = (profiles ?? []).filter((p) => p.role === 'admin').length;
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
-      <div className="mb-6">
-        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Profiles</h2>
-        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Everyone who's set up a profile on this shared library.</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Profiles</h2>
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Everyone who's set up a profile on this shared library.</p>
+        </div>
+        {!adding && (
+          <button
+            type="button"
+            onClick={() => { setError(null); setAdding(true); }}
+            className="flex items-center gap-1.5 shrink-0 px-4 py-2 bg-primary text-white rounded-full text-xs font-black hover:bg-primary/90 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[16px]">person_add</span>
+            Add Profile
+          </button>
+        )}
       </div>
+      {adding && (
+        <form onSubmit={handleCreate} className="sc-panel p-5 mb-4 space-y-4">
+          <div>
+            <label className="sc-label mb-2">Name</label>
+            <input
+              type="text"
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="e.g. Sara"
+              className="sc-field-inset"
+            />
+            <p className="sc-hint mt-2">
+              Added as a regular user — promote them below afterward if they should be an admin.
+              They pick this profile from “who's cooking?” on any device sharing this library.
+            </p>
+          </div>
+          <div>
+            <label className="sc-label mb-2">Avatar</label>
+            {AVATAR_PRESETS.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {AVATAR_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setNewAvatar(preset)}
+                    className={`w-10 h-10 rounded-full overflow-hidden shrink-0 transition-all ${newAvatar === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200 dark:hover:ring-zinc-700'}`}
+                  >
+                    <img src={preset} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
+            <ImageUrlInput value={newAvatar} onChange={setNewAvatar} />
+          </div>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => { setAdding(false); setNewName(''); setError(null); }}
+              className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={creating || !newName.trim()}
+              className="flex-[2] py-3 rounded-2xl bg-primary text-white font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
+            >
+              {creating ? 'Adding…' : 'Add Profile'}
+            </button>
+          </div>
+        </form>
+      )}
+
       {profiles === null ? (
         <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading…</p>
       ) : (
@@ -1761,6 +1845,210 @@ function AllProfilesCard() {
           })}
         </div>
       )}
+      {error && <p className="mt-4 text-sm text-red-600 font-medium">{error}</p>}
+    </div>
+  );
+}
+
+
+/** Where this device keeps the library — offline SQLite, or a SmartChef
+ *  server — and the only place that choice can be changed after first run.
+ *
+ *  Admin-only and native-only. It used to be re-asked implicitly, by
+ *  signing out: standalone's Log Out cleared the "this device is offline"
+ *  flag and dropped everyone back on the first-run chooser, so a decision
+ *  about where a household's whole library lives sat behind a button any
+ *  user pressed to hand the tablet to someone else. Sign-out now just
+ *  returns to the profile picker; moving the library is this card, and it
+ *  copies the data across instead of silently leaving it behind. */
+function StorageModeCard() {
+  const account = useStore((s) => s.account);
+  const [standalone, setStandalone] = useState<boolean | null>(null);
+  const [serverUrl, setServerUrlState] = useState<string | null>(null);
+
+  const [mode, setMode] = useState<'idle' | 'toServer' | 'toOffline' | 'done'>('idle');
+  const [url, setUrl] = useState('https://');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [stage, setStage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<SyncSummary | null>(null);
+
+  useEffect(() => {
+    import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setStandalone);
+    getServerUrl().then(setServerUrlState);
+  }, []);
+
+  // Web has neither a local SQLite library nor a configurable server URL,
+  // so there is nothing to move between.
+  if (!isNative() || standalone === null) return null;
+  if (account?.role !== 'admin') return null;
+
+  const reset = () => {
+    setMode('idle');
+    setError(null);
+    setStage(null);
+    setPassword('');
+    setSummary(null);
+  };
+
+  // Full reload rather than a state update: which backend apiFetch talks to
+  // is decided once at App.tsx boot, and every page still mounted is
+  // holding data from the old one. Deliberately NOT automatic — the switch
+  // has already happened by this point, and the summary of what moved is
+  // worth reading before the app restarts underneath it.
+  const finish = () => { window.location.href = '/'; };
+
+  const run = async (migrate: () => Promise<MigrationSummary>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setSummary((await migrate()) as SyncSummary);
+      setMode('done');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not move the library');
+    } finally {
+      setStage(null);
+      setBusy(false);
+    }
+  };
+
+  const handleToServer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { migrateOfflineToServer } = await import('../lib/storageMigration');
+    await run(() => migrateOfflineToServer({ url, username, password, onStage: setStage }));
+  };
+
+  const handleToOffline = async () => {
+    const { migrateServerToOffline } = await import('../lib/storageMigration');
+    await run(() => migrateServerToOffline({ onStage: setStage }));
+  };
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+      <div className="mb-6">
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Where your library lives</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
+          Admin only. Moving it <strong className="text-zinc-600 dark:text-zinc-300">copies</strong> everything
+          across and merges it in — the side you are leaving is never emptied, so you can always switch back.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 mb-6">
+        <span className="material-symbols-outlined text-primary">{standalone ? 'smartphone' : 'dns'}</span>
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+            {standalone ? 'Offline on this device' : 'Connected to a server'}
+          </p>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">
+            {standalone ? 'Local storage, optionally mirrored through a Sync Folder' : (serverUrl || 'this origin')}
+          </p>
+        </div>
+      </div>
+
+      {mode === 'idle' && (
+        <button
+          type="button"
+          onClick={() => { setError(null); setMode(standalone ? 'toServer' : 'toOffline'); }}
+          className="flex items-center gap-2 px-6 py-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-2xl font-black text-sm hover:opacity-90 transition-all active:scale-[0.98]"
+        >
+          <span className="material-symbols-outlined text-lg">swap_horiz</span>
+          {standalone ? 'Move to a server' : 'Move to offline storage'}
+        </button>
+      )}
+
+      {mode === 'toServer' && (
+        <form onSubmit={handleToServer} className="sc-panel p-5 space-y-4">
+          <p className="sc-hint">
+            Sign in as an admin on the destination server. This device&apos;s library is copied up and merged in,
+            then this device starts using the server. Its offline copy stays on disk untouched.
+          </p>
+          <div>
+            <label className="sc-label mb-2">Server address</label>
+            <input
+              type="url" value={url} onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://smartchef.your-tailnet.ts.net"
+              autoCapitalize="none" className="sc-field-inset"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="sc-label mb-2">Username</label>
+              <input
+                type="text" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                autoCapitalize="none" className="sc-field-inset"
+              />
+            </div>
+            <div>
+              <label className="sc-label mb-2">Password</label>
+              <input
+                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                className="sc-field-inset"
+              />
+            </div>
+          </div>
+          <p className="sc-hint">
+            Photos stored as files on this device are referenced by path, so they will not follow the recipes
+            up. Everything else — recipes, ingredients, tools, techniques, tags, categories — does.
+          </p>
+          <div className="flex gap-3">
+            <button
+              type="button" onClick={reset} disabled={busy}
+              className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit" disabled={busy || !url.trim() || !username.trim() || !password}
+              className="flex-[2] py-3 rounded-2xl bg-primary text-white font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
+            >
+              {busy ? (stage ?? 'Moving…') : 'Copy library and switch'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {mode === 'toOffline' && (
+        <div className="sc-panel p-5 space-y-4">
+          <p className="sc-hint">
+            The server&apos;s whole library is downloaded onto this device and this device switches to offline
+            storage. Nothing is removed from the server — other devices keep using it exactly as before.
+            You will be asked who you are (&ldquo;who&apos;s cooking?&rdquo;) once it is done.
+          </p>
+          <div className="flex gap-3">
+            <button
+              type="button" onClick={reset} disabled={busy}
+              className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button" onClick={handleToOffline} disabled={busy}
+              className="flex-[2] py-3 rounded-2xl bg-primary text-white font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
+            >
+              {busy ? (stage ?? 'Moving…') : 'Copy library and switch'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mode === 'done' && (
+        <div className="sc-panel p-5 space-y-4">
+          <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+            Done — this device now keeps your library {standalone ? 'on the server' : 'offline'}.
+          </p>
+          {summary && <SyncSummaryPanel summary={summary} />}
+          <button
+            type="button"
+            onClick={finish}
+            className="w-full py-3 rounded-2xl bg-primary text-white font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]"
+          >
+            Restart SmartChef
+          </button>
+        </div>
+      )}
+
       {error && <p className="mt-4 text-sm text-red-600 font-medium">{error}</p>}
     </div>
   );
@@ -1964,6 +2252,7 @@ export default function Account() {
           <LlmProviderCard />
           <BackupCard />
           {standalone && <AllProfilesCard />}
+          <StorageModeCard />
         </div>
       </div>
       </div>

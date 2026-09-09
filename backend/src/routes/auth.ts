@@ -52,6 +52,16 @@ async function requireAdminFromCookie(req: Request): Promise<{ id: string } | nu
 // requires `secure: true` per spec, so the two are turned on together.
 const COOKIE_SAME_SITE = (process.env.COOKIE_SAME_SITE ?? "lax") as "lax" | "strict" | "none";
 
+// Gate for the two PUBLIC (uncookied) auth routes below — the login
+// screen's account list and self-signup. On by default: the product is a
+// household server on a LAN/Tailnet where letting people add themselves is
+// the point. Set SELF_SERVICE_AUTH=false to require an admin to create
+// every account instead (POST /auth/users), which is what an
+// internet-exposed instance should do.
+function selfServiceAuthEnabled(): boolean {
+  return process.env.SELF_SERVICE_AUTH !== "false";
+}
+
 function issueSession(res: Response, accountId: string) {
   const token = jwt.sign({ sub: accountId }, SESSION_SECRET, { expiresIn: "90d" });
   res.cookie(COOKIE_NAME, token, {
@@ -141,6 +151,63 @@ authRouter.post("/login", async (req: Request, res: Response) => {
 
   issueSession(res, account.id);
   res.json({ data: { id: account.id, name: account.name, username: account.username, role: account.role, avatarUrl: account.avatar_url } });
+});
+
+// GET /auth/profiles — PUBLIC (no cookie). Name + avatar of every account,
+// so the login screen can offer "who's cooking?" faces to pick instead of a
+// blank username box.
+//
+// This deliberately exposes the account list to anyone who can reach the
+// server. That is a real widening: a SmartChef box on a LAN or Tailnet is
+// the assumed deployment, and the same screen also offers self-registration
+// below, so the list is not the weakest link — but an instance published to
+// the open internet should turn both off with SELF_SERVICE_AUTH=false.
+// Password hashes and roles are never included.
+authRouter.get("/profiles", async (_req: Request, res: Response) => {
+  if (!selfServiceAuthEnabled()) return res.json({ data: [] });
+  const users = await query(
+    `SELECT id, username, name, avatar_url AS "avatarUrl" FROM account ORDER BY created_at ASC`
+  );
+  res.json({ data: users });
+});
+
+const RegisterSchema = z.object({
+  name: z.string().min(1),
+  username: z.string().min(3).max(50).regex(/^[a-z0-9_.-]+$/, "Lowercase letters, numbers, - _ . only"),
+  password: z.string().min(4),
+  avatarUrl: z.string().optional().nullable(),
+});
+
+// POST /auth/register — PUBLIC self-signup, always role "user".
+//
+// Only valid once the instance HAS an account: the very first one goes
+// through /setup, which is what mints the admin. Never lets a caller pick
+// its own role — promotion stays admin-only (PATCH /users/:id/role), so
+// self-registering can't be an escalation path.
+authRouter.post("/register", async (req: Request, res: Response) => {
+  if (!selfServiceAuthEnabled()) {
+    return res.status(403).json({ error: "Self sign-up is turned off on this instance. Ask an admin to create your account." });
+  }
+  const existing = await queryOne<Account>("SELECT id FROM account LIMIT 1");
+  if (!existing) return res.status(409).json({ error: "This instance has no admin yet — finish setup first." });
+
+  const parsed = RegisterSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const d = parsed.data;
+  const username = d.username.toLowerCase();
+
+  const taken = await queryOne("SELECT id FROM account WHERE username=$1", [username]);
+  if (taken) return res.status(409).json({ error: "Username already taken" });
+
+  const id = uuidv4();
+  const passwordHash = await bcrypt.hash(d.password, 10);
+  await query(
+    `INSERT INTO account (id, name, username, password_hash, avatar_url, role) VALUES ($1,$2,$3,$4,$5,'user')`,
+    [id, d.name, username, passwordHash, d.avatarUrl || null]
+  );
+
+  issueSession(res, id);
+  res.status(201).json({ data: { id, name: d.name, username, role: "user", avatarUrl: d.avatarUrl || null } });
 });
 
 // POST /auth/logout

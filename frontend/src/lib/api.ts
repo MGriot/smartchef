@@ -19,6 +19,14 @@ import { Preferences } from '@capacitor/preferences';
 
 const SERVER_URL_KEY = 'smartchef.serverUrl';
 const ACCOUNT_CACHE_KEY = 'smartchef.cachedAccount';
+// Set the first time anyone actually gets *in* on this device. Gates the
+// "change where this device keeps your library" escape hatch on the
+// login/profile screens: offering it is right while someone is still
+// setting the device up and may have picked the wrong option, and wrong
+// afterward — past first run, moving the library is an admin decision made
+// in Settings (Account.tsx's StorageModeCard), not a question every
+// sign-out re-opens.
+const DEVICE_ONBOARDED_KEY = 'smartchef.deviceOnboarded';
 
 let cachedServerUrl: string | null | undefined; // undefined = not loaded yet
 
@@ -42,6 +50,25 @@ export async function setServerUrl(url: string): Promise<void> {
 export async function clearServerUrl(): Promise<void> {
   cachedServerUrl = null;
   await Preferences.remove({ key: SERVER_URL_KEY });
+}
+
+export async function isDeviceOnboarded(): Promise<boolean> {
+  const { value } = await Preferences.get({ key: DEVICE_ONBOARDED_KEY });
+  return value === 'true';
+}
+
+export async function markDeviceOnboarded(): Promise<void> {
+  await Preferences.set({ key: DEVICE_ONBOARDED_KEY, value: 'true' });
+}
+
+/** Back to the first-run "server or offline?" chooser, WITHOUT deleting
+ *  anything: the local SQLite library, any Sync Folder wiring and the
+ *  server's own data all stay exactly as they are, so picking the same
+ *  option again lands back on the same library. */
+export async function resetDeviceStorageChoice(): Promise<void> {
+  await clearServerUrl();
+  const { clearStandaloneProfile } = await import('./standalone');
+  await clearStandaloneProfile();
 }
 
 // Persisted alongside the server URL so a previously-logged-in user isn't
