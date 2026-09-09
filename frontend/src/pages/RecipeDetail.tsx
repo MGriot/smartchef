@@ -212,6 +212,7 @@ const formatDate = (iso: string | null | undefined): string => {
 const SubIngredientList: React.FC<{
   subRecipeId: string; servings: number; baseServings: number;
 }> = ({ subRecipeId, servings, baseServings }) => {
+  const { t } = useTranslation();
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [open, setOpen] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -227,7 +228,7 @@ const SubIngredientList: React.FC<{
     })();
   }, [subRecipeId]);
 
-  if (loading) return <div className="pl-6 py-2 text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">Loading…</div>;
+  if (loading) return <div className="pl-6 py-2 text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">{t('common.loading')}</div>;
   if (!ingredients.length) return null;
 
   return (

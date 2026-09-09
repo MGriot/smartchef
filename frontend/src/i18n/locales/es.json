@@ -50,7 +50,9 @@
     "menu": "Menú",
     "title": "Título",
     "addTranslation": "Añadir traducción",
-    "languageCodeHint": "Código de idioma, p.ej. it"
+    "languageCodeHint": "Código de idioma, p.ej. it",
+    "close": "Cerrar",
+    "removeTranslation": "Quitar traducción"
   },
   "library": {
     "management": "Gestión",
@@ -637,5 +639,8 @@
     "readyToCook": "Lista para cocinar",
     "haveOf": "{{have}} de {{total}} ingredientes",
     "missing": "Faltan:"
+  },
+  "tagPicker": {
+    "emptyCatalog": "Todavía no hay etiquetas en el catálogo — gestiónalas en Biblioteca > Etiquetas."
   }
 }

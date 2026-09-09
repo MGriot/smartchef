@@ -172,120 +172,134 @@ async function resolveUnitId(symbol?: string | null): Promise<string | undefined
  *  checks above), so a tombstone would just be dead weight in the file —
  *  Folder Sync, not this file, is what actually propagates deletions
  *  between devices. */
+/** Every row of a child table, grouped by the foreign key that ties it to
+ *  its parent, in a single query.
+ *
+ *  The export takes the whole library, so there is nothing to filter and no
+ *  parent ids to pass — which makes the per-parent loop this replaces pure
+ *  cost. It used to issue one query per category, tag, ingredient, tool and
+ *  technique, then per recipe another for its ingredients, its steps, its
+ *  tools and its translations, plus one per ingredient row for that row's
+ *  own translations and one more for its unit. On a 49-recipe library that
+ *  is several hundred sequential reads, each one a Capacitor bridge
+ *  round-trip in standalone mode, for a button the user is already waiting
+ *  on. */
+async function groupByKey<T extends Record<string, unknown>>(
+  sql: string,
+  key: string,
+): Promise<Map<string, T[]>> {
+  const grouped = new Map<string, T[]>();
+  for (const row of await query<T>(sql)) {
+    const id = row[key] as string;
+    const list = grouped.get(id);
+    if (list) list.push(row);
+    else grouped.set(id, [row]);
+  }
+  return grouped;
+}
+
 export async function exportSnapshot(): Promise<Snapshot> {
-  const categories: NonNullable<Snapshot['categories']> = [];
-  for (const c of await query<Record<string, unknown>>('SELECT * FROM ingredient_categories WHERE deleted_at IS NULL')) {
-    const translations = await query<{ language_code: string; name: string | null; description: string | null }>(
-      'SELECT language_code, name, description FROM ingredient_category_translations WHERE category_id=$1', [c.id]
-    );
-    categories.push({
-      id: c.id as string, name: c.name as string, description: c.description as string | null, icon: c.icon as string | null, color: c.color as string | null,
-      translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
-    });
-  }
+  // Parents and children together, all batched. Each child SELECT orders by
+  // parent then position, so the grouped lists come out in the order the
+  // Snapshot wants without re-sorting.
+  const [
+    categoryRows, tagRows, ingredientRows, toolRows, techniqueRows, recipeRows,
+    categoryTranslations, tagTranslations, ingredientTranslations, ingredientTagRows,
+    toolTranslations, techniqueTranslations,
+    recipeIngredientRows, riTranslations, unitRows,
+    stepRows, stepTranslations, recipeToolRows, recipeTranslations,
+  ] = await Promise.all([
+    query<Record<string, unknown>>('SELECT * FROM ingredient_categories WHERE deleted_at IS NULL'),
+    query<Record<string, unknown>>('SELECT * FROM tags WHERE deleted_at IS NULL'),
+    query<Record<string, unknown>>("SELECT * FROM ingredients WHERE sync_status != 'deleted'"),
+    query<Record<string, unknown>>('SELECT * FROM tools WHERE deleted_at IS NULL'),
+    query<Record<string, unknown>>('SELECT * FROM techniques WHERE deleted_at IS NULL'),
+    query<Record<string, unknown>>("SELECT * FROM recipes WHERE sync_status != 'deleted'"),
+    groupByKey<{ category_id: string; language_code: string; name: string | null; description: string | null }>(
+      'SELECT category_id, language_code, name, description FROM ingredient_category_translations', 'category_id'),
+    groupByKey<{ tag_id: string; language_code: string; name: string | null }>(
+      'SELECT tag_id, language_code, name FROM tag_translations', 'tag_id'),
+    groupByKey<{ ingredient_id: string; language_code: string; translated_name: string }>(
+      'SELECT ingredient_id, language_code, translated_name FROM ingredient_translations', 'ingredient_id'),
+    groupByKey<{ ingredient_id: string; tag_id: string }>(
+      'SELECT ingredient_id, tag_id FROM ingredient_tags', 'ingredient_id'),
+    groupByKey<{ tool_id: string; language_code: string; name: string | null; description: string | null }>(
+      'SELECT tool_id, language_code, name, description FROM tool_translations', 'tool_id'),
+    groupByKey<{ technique_id: string; language_code: string; name: string | null; description: string | null }>(
+      'SELECT technique_id, language_code, name, description FROM technique_translations', 'technique_id'),
+    groupByKey<Record<string, unknown>>(
+      'SELECT * FROM recipe_ingredients ORDER BY recipe_id, sort_order', 'recipe_id'),
+    groupByKey<{ recipe_ingredient_id: string; language_code: string; notes: string | null }>(
+      'SELECT recipe_ingredient_id, language_code, notes FROM recipe_ingredient_translations', 'recipe_ingredient_id'),
+    query<{ id: string; symbol: string }>('SELECT id, symbol FROM units'),
+    groupByKey<Record<string, unknown>>(
+      'SELECT * FROM recipe_steps ORDER BY recipe_id, step_number', 'recipe_id'),
+    groupByKey<{ step_id: string; language_code: string; title: string | null; description: string | null }>(
+      'SELECT step_id, language_code, title, description FROM recipe_step_translations', 'step_id'),
+    groupByKey<{ recipe_id: string; tool_id: string }>(
+      'SELECT recipe_id, tool_id FROM recipe_tools', 'recipe_id'),
+    groupByKey<{ recipe_id: string; language_code: string; title: string | null; description: string | null }>(
+      'SELECT recipe_id, language_code, title, description FROM recipe_translations', 'recipe_id'),
+  ]);
 
-  const tags: NonNullable<Snapshot['tags']> = [];
-  for (const t of await query<Record<string, unknown>>('SELECT * FROM tags WHERE deleted_at IS NULL')) {
-    const translations = await query<{ language_code: string; name: string | null }>(
-      'SELECT language_code, name FROM tag_translations WHERE tag_id=$1', [t.id]
-    );
-    tags.push({
-      id: t.id as string, name: t.name as string, groupName: t.group_name as string, color: t.color as string | null, icon: t.icon as string | null,
-      excludeTagIds: JSON.parse((t.exclude_tag_ids as string) ?? '[]'), sortOrder: t.sort_order as number,
-      translations: translations.map(tr => ({ lang: tr.language_code, name: tr.name })),
-    });
-  }
+  const unitSymbolById = new Map(unitRows.map(u => [u.id, u.symbol]));
 
-  const ingredients: NonNullable<Snapshot['ingredients']> = [];
-  for (const i of await query<Record<string, unknown>>("SELECT * FROM ingredients WHERE sync_status != 'deleted'")) {
-    const translations = await query<{ language_code: string; translated_name: string }>(
-      'SELECT language_code, translated_name FROM ingredient_translations WHERE ingredient_id=$1', [i.id]
-    );
-    const tagRows = await query<{ tag_id: string }>('SELECT tag_id FROM ingredient_tags WHERE ingredient_id=$1', [i.id]);
-    ingredients.push({
-      id: i.id as string, name: i.name as string, categoryId: i.category_id as string, description: i.description as string | null, icon: i.icon as string | null,
-      imageUrls: JSON.parse((i.image_urls as string) ?? '[]'), tagIds: tagRows.map(r => r.tag_id),
-      caloriesKcal: i.calories_kcal as number | null, proteinG: i.protein_g as number | null, carbsG: i.carbs_g as number | null, fatG: i.fat_g as number | null,
-      fiberG: i.fiber_g as number | null, sugarG: i.sugar_g as number | null, sodiumMg: i.sodium_mg as number | null,
-      seasonalMonths: JSON.parse((i.seasonal_months as string) ?? '[]'),
-      translations: translations.map(t => ({ lang: t.language_code, text: t.translated_name })),
-    });
-  }
+  const categories: NonNullable<Snapshot['categories']> = categoryRows.map(c => ({
+    id: c.id as string, name: c.name as string, description: c.description as string | null, icon: c.icon as string | null, color: c.color as string | null,
+    translations: (categoryTranslations.get(c.id as string) ?? []).map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
+  }));
 
-  const tools: NonNullable<Snapshot['tools']> = [];
-  for (const tool of await query<Record<string, unknown>>('SELECT * FROM tools WHERE deleted_at IS NULL')) {
-    const translations = await query<{ language_code: string; name: string | null; description: string | null }>(
-      'SELECT language_code, name, description FROM tool_translations WHERE tool_id=$1', [tool.id]
-    );
-    tools.push({
-      id: tool.id as string, name: tool.name as string, category: tool.category as string | null, description: tool.description as string | null, icon: tool.icon as string | null,
-      imageUrls: JSON.parse((tool.image_urls as string) ?? '[]'),
-      translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
-    });
-  }
+  const tags: NonNullable<Snapshot['tags']> = tagRows.map(t => ({
+    id: t.id as string, name: t.name as string, groupName: t.group_name as string, color: t.color as string | null, icon: t.icon as string | null,
+    excludeTagIds: JSON.parse((t.exclude_tag_ids as string) ?? '[]'), sortOrder: t.sort_order as number,
+    translations: (tagTranslations.get(t.id as string) ?? []).map(tr => ({ lang: tr.language_code, name: tr.name })),
+  }));
 
-  const techniques: NonNullable<Snapshot['techniques']> = [];
-  for (const tech of await query<Record<string, unknown>>('SELECT * FROM techniques WHERE deleted_at IS NULL')) {
-    const translations = await query<{ language_code: string; name: string | null; description: string | null }>(
-      'SELECT language_code, name, description FROM technique_translations WHERE technique_id=$1', [tech.id]
-    );
-    techniques.push({
-      id: tech.id as string, name: tech.name as string, description: tech.description as string | null, icon: tech.icon as string | null,
-      imageUrls: JSON.parse((tech.image_urls as string) ?? '[]'),
-      translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
-    });
-  }
+  const ingredients: NonNullable<Snapshot['ingredients']> = ingredientRows.map(i => ({
+    id: i.id as string, name: i.name as string, categoryId: i.category_id as string, description: i.description as string | null, icon: i.icon as string | null,
+    imageUrls: JSON.parse((i.image_urls as string) ?? '[]'),
+    tagIds: (ingredientTagRows.get(i.id as string) ?? []).map(r => r.tag_id),
+    caloriesKcal: i.calories_kcal as number | null, proteinG: i.protein_g as number | null, carbsG: i.carbs_g as number | null, fatG: i.fat_g as number | null,
+    fiberG: i.fiber_g as number | null, sugarG: i.sugar_g as number | null, sodiumMg: i.sodium_mg as number | null,
+    seasonalMonths: JSON.parse((i.seasonal_months as string) ?? '[]'),
+    translations: (ingredientTranslations.get(i.id as string) ?? []).map(t => ({ lang: t.language_code, text: t.translated_name })),
+  }));
 
-  const recipes: NonNullable<Snapshot['recipes']> = [];
-  for (const r of await query<Record<string, unknown>>("SELECT * FROM recipes WHERE sync_status != 'deleted'")) {
-    const ingredientRows = await query<Record<string, unknown>>('SELECT * FROM recipe_ingredients WHERE recipe_id=$1 ORDER BY sort_order', [r.id]);
-    const recipeIngredients = [];
-    for (const ri of ingredientRows) {
-      const riTranslations = await query<{ language_code: string; notes: string | null }>(
-        'SELECT language_code, notes FROM recipe_ingredient_translations WHERE recipe_ingredient_id=$1', [ri.id]
-      );
-      let unitSymbol: string | null = null;
-      if (ri.unit_id) {
-        const u = await queryOne<{ symbol: string }>('SELECT symbol FROM units WHERE id=$1', [ri.unit_id]);
-        unitSymbol = u?.symbol ?? null;
-      }
-      recipeIngredients.push({
-        sortOrder: ri.sort_order as number, ingredientId: (ri.ingredient_id as string) ?? undefined, subRecipeId: (ri.sub_recipe_id as string) ?? undefined,
-        quantity: ri.quantity as number | null, quantityText: ri.quantity_text as string | null, unitSymbol,
-        notes: ri.notes as string | null, isOptional: !!ri.is_optional, groupName: ri.group_name as string | null,
-        translations: riTranslations.map(t => ({ lang: t.language_code, notes: t.notes })),
-      });
-    }
+  const tools: NonNullable<Snapshot['tools']> = toolRows.map(tool => ({
+    id: tool.id as string, name: tool.name as string, category: tool.category as string | null, description: tool.description as string | null, icon: tool.icon as string | null,
+    imageUrls: JSON.parse((tool.image_urls as string) ?? '[]'),
+    translations: (toolTranslations.get(tool.id as string) ?? []).map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
+  }));
 
-    const stepRows = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number', [r.id]);
-    const steps = [];
-    for (const s of stepRows) {
-      const sTranslations = await query<{ language_code: string; title: string | null; description: string | null }>(
-        'SELECT language_code, title, description FROM recipe_step_translations WHERE step_id=$1', [s.id]
-      );
-      steps.push({
-        stepNumber: s.step_number as number, title: s.title as string | null, description: s.description as string, durationMin: s.duration_min as number | null,
-        toolIds: JSON.parse((s.tool_ids as string) ?? '[]'), techniqueIds: JSON.parse((s.technique_ids as string) ?? '[]'),
-        notes: s.notes as string | null, imageUrl: s.image_url as string | null,
-        stepIngredients: JSON.parse((s.step_ingredients as string) ?? '[]'),
-        translations: sTranslations.map(t => ({ lang: t.language_code, title: t.title, description: t.description })),
-      });
-    }
+  const techniques: NonNullable<Snapshot['techniques']> = techniqueRows.map(tech => ({
+    id: tech.id as string, name: tech.name as string, description: tech.description as string | null, icon: tech.icon as string | null,
+    imageUrls: JSON.parse((tech.image_urls as string) ?? '[]'),
+    translations: (techniqueTranslations.get(tech.id as string) ?? []).map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
+  }));
 
-    const toolRows = await query<{ tool_id: string }>('SELECT tool_id FROM recipe_tools WHERE recipe_id=$1', [r.id]);
-    const rTranslations = await query<{ language_code: string; title: string | null; description: string | null }>(
-      'SELECT language_code, title, description FROM recipe_translations WHERE recipe_id=$1', [r.id]
-    );
-    recipes.push({
-      id: r.id as string, title: r.title as string, description: r.description as string | null, difficulty: r.difficulty as string, servings: r.servings as number,
-      prepTimeMin: r.prep_time_min as number | null, cookTimeMin: r.cook_time_min as number | null, restTimeMin: r.rest_time_min as number | null, rating: r.rating as number | null,
-      tags: JSON.parse((r.tags as string) ?? '[]'), coverImageUrl: r.cover_image_url as string | null, sourceUrl: r.source_url as string | null,
-      sources: JSON.parse((r.sources as string) ?? '[]'), isComponent: !!r.is_component, languageCode: r.language_code as string | null,
-      storageInstructions: r.storage_instructions as string | null, tips: r.tips as string | null,
-      ingredients: recipeIngredients, steps, toolIds: toolRows.map(t => t.tool_id),
-      translations: rTranslations.map(t => ({ lang: t.language_code, title: t.title, description: t.description })),
-    });
-  }
+  const recipes: NonNullable<Snapshot['recipes']> = recipeRows.map(r => ({
+    id: r.id as string, title: r.title as string, description: r.description as string | null, difficulty: r.difficulty as string, servings: r.servings as number,
+    prepTimeMin: r.prep_time_min as number | null, cookTimeMin: r.cook_time_min as number | null, restTimeMin: r.rest_time_min as number | null, rating: r.rating as number | null,
+    tags: JSON.parse((r.tags as string) ?? '[]'), coverImageUrl: r.cover_image_url as string | null, sourceUrl: r.source_url as string | null,
+    sources: JSON.parse((r.sources as string) ?? '[]'), isComponent: !!r.is_component, languageCode: r.language_code as string | null,
+    storageInstructions: r.storage_instructions as string | null, tips: r.tips as string | null,
+    ingredients: (recipeIngredientRows.get(r.id as string) ?? []).map(ri => ({
+      sortOrder: ri.sort_order as number, ingredientId: (ri.ingredient_id as string) ?? undefined, subRecipeId: (ri.sub_recipe_id as string) ?? undefined,
+      quantity: ri.quantity as number | null, quantityText: ri.quantity_text as string | null,
+      unitSymbol: ri.unit_id ? unitSymbolById.get(ri.unit_id as string) ?? null : null,
+      notes: ri.notes as string | null, isOptional: !!ri.is_optional, groupName: ri.group_name as string | null,
+      translations: (riTranslations.get(ri.id as string) ?? []).map(t => ({ lang: t.language_code, notes: t.notes })),
+    })),
+    steps: (stepRows.get(r.id as string) ?? []).map(st => ({
+      stepNumber: st.step_number as number, title: st.title as string | null, description: st.description as string, durationMin: st.duration_min as number | null,
+      toolIds: JSON.parse((st.tool_ids as string) ?? '[]'), techniqueIds: JSON.parse((st.technique_ids as string) ?? '[]'),
+      notes: st.notes as string | null, imageUrl: st.image_url as string | null,
+      stepIngredients: JSON.parse((st.step_ingredients as string) ?? '[]'),
+      translations: (stepTranslations.get(st.id as string) ?? []).map(t => ({ lang: t.language_code, title: t.title, description: t.description })),
+    })),
+    toolIds: (recipeToolRows.get(r.id as string) ?? []).map(t => t.tool_id),
+    translations: (recipeTranslations.get(r.id as string) ?? []).map(t => ({ lang: t.language_code, title: t.title, description: t.description })),
+  }));
 
   return { formatVersion: 1, categories, tags, ingredients, tools, techniques, recipes };
 }

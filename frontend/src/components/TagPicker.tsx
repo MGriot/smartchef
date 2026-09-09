@@ -106,7 +106,7 @@ export default function TagPicker({ value, onChange, by = 'name' }: TagPickerPro
         </div>
       )}
       {catalog.length === 0 && customValues.length === 0 && (
-        <p className="text-xs text-zinc-400 dark:text-zinc-500 italic">No tags in the catalog yet — manage them under Library &gt; Tags.</p>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 italic">{t('tagPicker.emptyCatalog')}</p>
       )}
     </div>
   );

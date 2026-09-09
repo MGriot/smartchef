@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -64,6 +65,7 @@ export default function Modal({
   bodyClassName?: string;
   closeOnBackdrop?: boolean;
 }) {
+  const { t } = useTranslation();
   const id = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusTo = useRef<HTMLElement | null>(null);
@@ -166,7 +168,7 @@ export default function Modal({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('common.close')}
             className="-mr-2 -mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full
                        text-zinc-400 dark:text-zinc-500 transition-colors
                        hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-300"

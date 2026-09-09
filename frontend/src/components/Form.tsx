@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import RenderFaIcon from './RenderFaIcon';
 
 /** A titled band of related fields inside a dialog body.
@@ -143,6 +144,7 @@ export function TranslationRows<T extends LangEntry>({
   langPlaceholder?: string;
   textPlaceholder: string;
 }) {
+  const { t } = useTranslation();
   const update = (idx: number, field: string, raw: string) => {
     const next = value.map((row, i) =>
       i === idx ? { ...row, [field]: field === 'lang' ? raw.toLowerCase() : raw } : row,
@@ -176,7 +178,7 @@ export function TranslationRows<T extends LangEntry>({
           <button
             type="button"
             onClick={() => onChange(value.filter((_, j) => j !== i))}
-            aria-label="Remove translation"
+            aria-label={t('common.removeTranslation')}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-zinc-400 dark:text-zinc-500 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
           >
             <span className="material-symbols-outlined text-[20px]">close</span>

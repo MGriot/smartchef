@@ -36,7 +36,7 @@ is translated into all four locales.
   - `services/migration/bulkImport.ts` — matches every distinct name **once for the whole batch**, not per recipe: 200 recipes mentioning "olive oil" a hundred times ask once. Creation is sequential on purpose — concurrent creates race the same new ingredient into duplicates, the exact failure this exists to prevent. One bad recipe never abandons the other 199.
   - Only names the matcher was *unsure* about reach the user; a confident match needs no decision and a name with no candidates is unambiguously new.
   - 24 tests. Bug caught by them: Mealie's `display` line was being taken as an ingredient *name*, producing ingredients literally called "3 tbsp extra-virgin olive oil".
-- [x] **7. PDF and photo/OCR import** ✅ *2026-09-09* — new "Photo / PDF" tab; extracted text lands in the raw-text box for review rather than importing straight off.
+- [x] **7. PDF and photo/OCR import** ✅ *2026-09-09* — new "Photo / PDF" tab; extracted text lands in the raw-text box for review rather than importing straight off. **Verified end to end 2026-09-09**: driven through a temporary browser harness against a canvas-rendered recipe, tesseract downloaded its model and returned all five lines — title, three quantified ingredients and the step — with quantities and units intact. The `?url` shims for the worker and wasm core resolve to the real emitted assets in `dist/`, which is the failure the pdf.js worker already hit once.
   - `pdfText.ts` uses pdf.js's **legacy** build: 4.x's default bundle targets browsers newer than the Electron 25 shell (Chromium 114). Verifying in the dev browser would have hidden that.
   - pdf.js gives positioned fragments, not lines, so they are regrouped by y-coordinate — without it an ingredient list arrives as one run-on paragraph and every line-based parser downstream has nothing to split on. Tested against **real hand-built PDFs** with a correct xref, not a mocked pdf.js.
   - `hasTextLayer` needs **both** ≥3 lines and ≥40 non-space characters: a line count alone lets a watermark through, and a character threshold high enough to exclude one would reject a genuinely short recipe. A scanned PDF says so instead of importing an empty recipe.
@@ -92,21 +92,27 @@ and the `COOKIE_*` settings the Android app's cross-origin login needs).
   path under `/api/public` falls through to the auth gate and returns 401,
   which is how those two were told apart from a 404.
 
-### Known blocker, not caused by the deploy
+### The 8080 problem, and why the frontend now publishes 8888
 
-`http://localhost:8080` is refused on the Windows host even though the
-container serves 200 inside the podman VM: WinNAT has reserved `7981-8080`
-(among other ranges), so nothing on the host — including WSL's port relay —
-can bind it. `tailscale serve` proxies the tailnet URL to `127.0.0.1:8080`,
-so it is down for the same reason. Check with:
+`http://localhost:8080` was refused on the Windows host even though the
+container served 200 inside the podman VM. WinNAT had reserved `7981-8080`
+(along with `8081-8180`, `8181-8280`, `8281-8380` and `8407-8506`), so
+nothing on the host — including WSL's port relay, which forwarded 3000,
+3002, 5432 and 11434 without trouble — could bind it. `tailscale serve`
+proxies the tailnet URL to that same local port, so it went down with it.
+Inspect the current reservations with:
 
     netsh interface ipv4 show excludedportrange protocol=tcp
 
-Three ways out, all the user's call: reboot (the ranges are dynamic and
-reshuffle), `net stop winnat && net start winnat` as administrator, or
-republish the frontend on a port outside every listed range — 8888, 8390 and
-8600 were all bindable — and repoint `tailscale serve` at it. The API on
-:3000 is unaffected and reachable.
+Resolved by republishing the frontend on `8888:80` and repointing
+`tailscale serve` at 8888. `https://desktop-kk1837d.tailf16a9a.ts.net`
+serves the app and proxies the API again. The alternatives — a reboot, or
+`net stop winnat && net start winnat` as administrator — both change a
+system setting and would only hold until the ranges reshuffle again.
+
+To go back to 8080 if a reboot frees it: change the port in
+`docker/docker-compose.yml`, `podman compose up -d frontend`, then
+`tailscale serve --bg 8080`.
 
 ---
 
@@ -182,15 +188,25 @@ The backend was checked for the same shapes and does not have them: its
 `GET /recipes/:id` resolves every translation in one statement with joins
 and subqueries. Only the standalone port had drifted into per-row loops.
 
-### Not done
+### Follow-up pass
 
-- `backup.local.ts` and `share.local.ts` still walk translations per row on
-  export/import. One-shot operations behind an explicit user action, so the
-  stall is expected rather than surprising — but a 49-recipe export is still
-  several hundred sequential queries and would batch the same way.
+- `exportSnapshot()` in `backup.local.ts` batched: 19 reads flat, where it
+  used to be one query per category, tag, ingredient, tool and technique,
+  four more per recipe, and one per ingredient row for its translations plus
+  another for its unit. Covered by `backup.local.integration.test.ts`, which
+  also pins the grouping — a bug that attaches every child to the first
+  parent is the failure mode of doing this in JS, so the fixture has two of
+  each parent and asserts which child landed where.
+- `share.local.ts` no longer queries step translations per step. Smaller
+  win: a bundle is one recipe and its sub-recipes, not the library.
+
+### Still not done
+
 - The 925 KB `worldGeo` chunk is deferred, not smaller.
   `world-atlas/countries-50m.json` is more precision than a country-level
-  pin map needs; `countries-110m.json` is roughly a fifth the size.
+  pin map needs; `countries-110m.json` is roughly a fifth the size. Left
+  alone because it visibly coarsens the borders, which is a look-and-feel
+  call rather than a free win.
 
 ---
 
@@ -215,7 +231,32 @@ and subqueries. Only the standalone port had drifted into per-row loops.
 - If it is the LIMIT: either raise/remove the cap for this specific listing (the page already fetches everything up front for client-side grouping, so it needs the full set, not a capped page) or add real pagination to `LibraryIngredients.tsx` and both `GET /ingredients` implementations.
 - Apply the same fix to both the server (`backend/src/routes/ingredients.ts`) and standalone (`frontend/src/services/ingredients.local.ts`) code paths — they're independent implementations of the same query.
 
-## 2. Full translation pass on the Windows app's recipe and ingredient screens
+## 2. Full translation pass on the Windows app's recipe and ingredient screens — ✅ SCOPED SCREENS DONE
+
+**The screens this item names are clean.** A scan of `RecipeDetail.tsx`,
+`RecipeCreate.tsx`, `RecipeImport.tsx`, `LibraryIngredients.tsx` and the
+shared components for JSX text nodes and user-visible attributes
+(`placeholder`, `title`, `aria-label`, `alt`) holding literal English turned
+up four real strings, now keyed in all four locales:
+
+- `RecipeDetail.tsx` — the sub-recipe list's "Loading…" (`common.loading`)
+- `Modal.tsx` — the close button's `aria-label` (`common.close`)
+- `Form.tsx` — the remove-translation `aria-label`
+  (`common.removeTranslation`)
+- `TagPicker.tsx` — the empty-catalogue line (`tagPicker.emptyCatalog`)
+
+The three remaining hits on those screens are scanner false positives: a
+`&middot;`, the literal `.smartchef.json`, and a fragment of TypeScript that
+looks like JSX text.
+
+**What the scan also found, outside this item's scope:** roughly 200
+candidate strings elsewhere, concentrated in `Account.tsx` (79),
+`LibraryTags.tsx` (25), `ServerConnect.tsx` (23), `LibraryUnits.tsx` (20)
+and `ManageUsers.tsx` (14). Settings and library-management surfaces rather
+than the cooking ones. Not started — it is a much larger job than this item
+described, and worth deciding on separately.
+
+### Original scope
 
 Audit the recipe list/detail/editor and ingredient library screens for any remaining hardcoded (non-`t()`) English strings, then fill in the corresponding `it`/`en`/`fr`/`es` keys in `frontend/src/i18n/locales/*.json` so those screens are fully translated in all four supported languages.
 

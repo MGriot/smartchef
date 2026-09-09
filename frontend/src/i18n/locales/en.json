@@ -50,7 +50,9 @@
     "menu": "Menu",
     "title": "Title",
     "addTranslation": "Add translation",
-    "languageCodeHint": "Language code, e.g. it"
+    "languageCodeHint": "Language code, e.g. it",
+    "close": "Close",
+    "removeTranslation": "Remove translation"
   },
   "library": {
     "management": "Management",
@@ -637,5 +639,8 @@
     "readyToCook": "Ready to cook",
     "haveOf": "{{have}} of {{total}} ingredients",
     "missing": "Missing:"
+  },
+  "tagPicker": {
+    "emptyCatalog": "No tags in the catalogue yet — manage them under Library > Tags."
   }
 }

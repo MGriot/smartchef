@@ -25,7 +25,7 @@
 // left out: standalone has no collection_recipes table to read.
 // ════════════════════════════════════════════════════════════════════════
 
-import { query, queryOne } from "../db/local";
+import { query, queryOne, inPlaceholders } from "../db/local";
 
 /** Must match backend/src/routes/share.ts's FORMAT_VERSION — a bundle
  *  exported here is meant to import into a server-backed instance and vice
@@ -88,12 +88,30 @@ async function loadBundleRecipe(id: string) {
     [id]
   );
 
+  // One read for the recipe's step translations rather than one per step.
+  // A share bundle is only a recipe and its sub-recipes, so this is a
+  // smaller win than the library-wide batching elsewhere — but export runs
+  // on a button the user is waiting on, and each of these crosses the
+  // Capacitor bridge.
+  const stepTranslationsByStepId = new Map<string, Array<Record<string, any>>>();
+  if (stepRows.length) {
+    const p: unknown[] = [];
+    const rows = await query<Record<string, any>>(
+      `SELECT step_id, language_code AS lang, title, description
+         FROM recipe_step_translations WHERE step_id IN (${inPlaceholders(p, stepRows.map((s) => s.id))})`,
+      p
+    );
+    for (const row of rows) {
+      const { step_id, ...translation } = row;
+      const list = stepTranslationsByStepId.get(step_id);
+      if (list) list.push(translation);
+      else stepTranslationsByStepId.set(step_id, [translation]);
+    }
+  }
+
   const steps = [];
   for (const s of stepRows) {
-    const translations = await query<Record<string, any>>(
-      "SELECT language_code AS lang, title, description FROM recipe_step_translations WHERE step_id=$1",
-      [s.id]
-    );
+    const translations = stepTranslationsByStepId.get(s.id) ?? [];
     steps.push({
       stepNumber: s.step_number,
       title: s.title,
