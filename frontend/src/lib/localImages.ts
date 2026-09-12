@@ -19,6 +19,10 @@ import { bytesToBase64, base64ToBytes } from './gitfs';
 
 const ANDROID_BASE_DIR = Directory.Data;
 const ANDROID_LOCAL_STORAGE_SUBDIR = 'SmartChef-local';
+/** The one folder name every stored image lives under, on both platforms
+ *  and inside the Hidden Clone. Shared with lib/sync/imageSync.ts so the
+ *  two locations can never drift apart. */
+export const IMAGES_SUBDIR = 'images';
 
 /** Minimal fs surface storeImage()/readImage() need — small enough to fake
  *  in tests without touching @capacitor/filesystem or electronBridge at all. */
@@ -26,6 +30,12 @@ export interface ImageFs {
   exists(path: string): Promise<boolean>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array): Promise<void>;
+  /** Every stored image's relative path (`images/<hash>.<ext>`). Returns an
+   *  empty list when the folder doesn't exist yet — "nothing stored" and
+   *  "never created" are the same answer to every caller. Added for
+   *  lib/sync/imageSync.ts, which has to enumerate the store to replicate
+   *  it; storeImage()/readImage() never need it. */
+  list(): Promise<string[]>;
 }
 
 export async function hashBytes(bytes: Uint8Array): Promise<string> {
@@ -42,6 +52,38 @@ export async function hashBytes(bytes: Uint8Array): Promise<string> {
 function sanitizeExtension(hint: string): string {
   const match = hint.match(/[a-zA-Z0-9]+/);
   return match ? match[0].toLowerCase() : 'bin';
+}
+
+/** True for an inline **base64** `data:image/...;base64,...` URI — a whole
+ *  encoded photo sitting in the database column that is supposed to hold a
+ *  *reference* to one. Nothing in the app writes these any more
+ *  (pageFetcher.ts's absoluteImageUrl() turns them away on import), but
+ *  restoring a with-images backup used to put them there, and a device that
+ *  ever did that still carries them: see lib/inlineImageMigration.ts, which
+ *  moves them into the content-addressed store this module owns.
+ *
+ *  Deliberately narrower than "any data: URI". A percent-encoded
+ *  `data:image/svg+xml,%3csvg…` is how the generated profile avatars are
+ *  stored — a few hundred bytes of markup, not a photo, with nothing to gain
+ *  from being moved to a file and no base64 payload to decode. Matching it
+ *  here would mean failing to convert it on every single launch, forever. */
+export function isInlineDataUri(value: string | null | undefined): boolean {
+  return !!value && /^data:image\/[a-z0-9.+-]*;base64,/i.test(value);
+}
+
+/** Splits an inline `data:` URI into the bytes it encodes plus an extension
+ *  hint taken from its declared media type (`image/webp` -> `webp`), ready
+ *  for storeImage(). Throws on anything that is not base64-encoded image
+ *  data, so a malformed value fails loudly at the one call site that
+ *  handles it rather than silently storing garbage. */
+export function decodeDataUri(uri: string): { bytes: Uint8Array; extHint: string } {
+  const match = /^data:(image\/[a-z0-9.+-]+)?;base64,(.*)$/is.exec(uri);
+  if (!match) throw new Error('not a base64 image data: URI');
+  const mime = match[1] ?? 'image/bin';
+  // jpeg/webp/png already read as their own extension; `image/svg+xml`
+  // sanitizes down to "svg" in storeImage()'s own sanitizeExtension().
+  const extHint = mime.slice('image/'.length);
+  return { bytes: base64ToBytes(match[2]), extHint };
 }
 
 /** True for a value storeImage() itself produced (`images/<hash>.<ext>`) —
@@ -62,7 +104,7 @@ export function isLocalImagePath(value: string | null | undefined): boolean {
 export async function storeImage(bytes: Uint8Array, extHint: string, fs: ImageFs = defaultImageFs()): Promise<string> {
   const hash = await hashBytes(bytes);
   const ext = sanitizeExtension(extHint);
-  const relPath = `images/${hash}.${ext}`;
+  const relPath = `${IMAGES_SUBDIR}/${hash}.${ext}`;
   if (!(await fs.exists(relPath))) {
     await fs.writeFile(relPath, bytes);
   }
@@ -93,6 +135,14 @@ function androidImageFs(): ImageFs {
     async writeFile(rel, data) {
       await Filesystem.writeFile({ path: path(rel), directory: ANDROID_BASE_DIR, data: bytesToBase64(data), recursive: true });
     },
+    async list() {
+      try {
+        const { files } = await Filesystem.readdir({ path: path(IMAGES_SUBDIR), directory: ANDROID_BASE_DIR });
+        return files.filter((f) => f.type !== 'directory').map((f) => `${IMAGES_SUBDIR}/${f.name}`);
+      } catch {
+        return [];
+      }
+    },
   };
 }
 
@@ -110,10 +160,21 @@ function electronImageFs(): ImageFs {
     async writeFile(rel, data) {
       await electronFs().writeFile(await path(rel), data);
     },
+    async list() {
+      try {
+        const names = await electronFs().readdir(await path(IMAGES_SUBDIR));
+        return (names as string[]).map((name) => `${IMAGES_SUBDIR}/${name}`);
+      } catch {
+        return [];
+      }
+    },
   };
 }
 
-function defaultImageFs(): ImageFs {
+/** The real per-platform store. Exported for lib/sync/imageSync.ts, which
+ *  needs the same store every screen reads from; everything else should go
+ *  through storeImage()/readImage()/resolveImageSrc() instead. */
+export function defaultImageFs(): ImageFs {
   return isElectron() ? electronImageFs() : androidImageFs();
 }
 
@@ -125,15 +186,89 @@ function defaultImageFs(): ImageFs {
 // the bytes over the same IPC bridge gitfs.ts already uses and hand back an
 // object URL instead.
 
-/** Resolves a stored relative path (as returned by storeImage()) to a URL
- *  usable directly in an <img src>. Caller owns the returned Electron blob
- *  URL's lifecycle (URL.revokeObjectURL when done) — native's convertFileSrc
- *  URL needs no such cleanup. */
-export async function resolveImageSrc(relPath: string): Promise<string> {
-  if (isElectron()) {
-    const bytes = await electronImageFs().readFile(relPath);
-    return URL.createObjectURL(new Blob([Uint8Array.from(bytes)]));
+// Resolving is not free on either platform — Electron reads the whole file
+// over the IPC bridge and allocates a Blob, Android crosses the Capacitor
+// bridge for Filesystem.getUri() — and the same handful of paths get
+// resolved over and over: every gallery mount re-resolves every visible
+// cover, and returning to the gallery from a recipe does it all again. A
+// content-addressed path is immutable by construction (the hash IS the
+// content), so a resolved URL for one can be cached for the life of the
+// session without any staleness risk.
+//
+// Consequence for callers: the returned URL is now owned by this cache, NOT
+// by the caller. Revoking it would break every other component still
+// showing the same image. Eviction below is the only thing that revokes.
+const MAX_CACHED_SRCS = 150;
+const srcCache = new Map<string, string>();
+// Separate from the cache: two components mounting in the same frame for
+// the same cover would otherwise each start their own resolve. They share
+// one.
+const inFlight = new Map<string, Promise<string>>();
+
+function rememberSrc(relPath: string, src: string): void {
+  // Map iterates in insertion order, so the first key is the oldest —
+  // enough of an LRU for a bounded set of images, without a second
+  // structure to keep in step.
+  if (srcCache.size >= MAX_CACHED_SRCS) {
+    const oldest = srcCache.keys().next();
+    if (!oldest.done) {
+      const evicted = srcCache.get(oldest.value);
+      srcCache.delete(oldest.value);
+      // Only Electron's branch allocates one; convertFileSrc URLs are plain
+      // strings with nothing to release.
+      if (evicted?.startsWith('blob:')) URL.revokeObjectURL(evicted);
+    }
   }
-  const { uri } = await Filesystem.getUri({ path: `${ANDROID_LOCAL_STORAGE_SUBDIR}/${relPath}`, directory: ANDROID_BASE_DIR });
-  return Capacitor.convertFileSrc(uri);
+  srcCache.set(relPath, src);
+}
+
+/** Resolves a stored relative path (as returned by storeImage()) to a URL
+ *  usable directly in an <img src>, memoized per session.
+ *
+ *  The returned URL belongs to this module's cache — do NOT revoke it.
+ *  (It used to be the caller's to release, which is why useResolvedImageSrc()
+ *  no longer does.) */
+export async function resolveImageSrc(relPath: string): Promise<string> {
+  const cached = srcCache.get(relPath);
+  if (cached) return cached;
+
+  const pending = inFlight.get(relPath);
+  if (pending) return pending;
+
+  const work = (async () => {
+    if (isElectron()) {
+      const bytes = await electronImageFs().readFile(relPath);
+      return URL.createObjectURL(new Blob([Uint8Array.from(bytes)]));
+    }
+    const { uri } = await Filesystem.getUri({ path: `${ANDROID_LOCAL_STORAGE_SUBDIR}/${relPath}`, directory: ANDROID_BASE_DIR });
+    return Capacitor.convertFileSrc(uri);
+  })();
+
+  inFlight.set(relPath, work);
+  try {
+    const src = await work;
+    rememberSrc(relPath, src);
+    return src;
+  } finally {
+    inFlight.delete(relPath);
+  }
+}
+
+/** The cached URL for a path, or null if it hasn't been resolved yet.
+ *  Synchronous by design: it lets a component render an already-resolved
+ *  image on its very first frame instead of returning null once and
+ *  repainting, which is what made re-entering the gallery flash every
+ *  placeholder. */
+export function peekResolvedImageSrc(relPath: string): string | null {
+  return srcCache.get(relPath) ?? null;
+}
+
+/** Drops a path from the resolve cache — needed only when the bytes behind
+ *  a path could have changed, which for a content-addressed path means
+ *  "the file was deleted or rewritten", not "the image was edited" (an
+ *  edited image gets a different hash and therefore a different path). */
+export function forgetResolvedImageSrc(relPath: string): void {
+  const cached = srcCache.get(relPath);
+  if (cached?.startsWith('blob:')) URL.revokeObjectURL(cached);
+  srcCache.delete(relPath);
 }

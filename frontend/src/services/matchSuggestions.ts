@@ -18,17 +18,24 @@ export interface ProposedMatches {
   techniques: Record<string, MatchSuggestion[]>;
 }
 
+/** `lang` is the app's content language (store.contentLang). Without it
+ *  both modes score and label against each row's base English name, so the
+ *  review step offered "Butter" for "burro" regardless of the language the
+ *  app was set to — see the header of localMatcher.ts. Optional, and
+ *  omitting it keeps the previous base-name behaviour, which is what the
+ *  language-agnostic callers (bulk migration imports) want. */
 export async function proposeMatches(
   ingredientNames: string[],
   toolNames: string[],
-  techniqueNames: string[]
+  techniqueNames: string[],
+  lang?: string
 ): Promise<ProposedMatches> {
   if (await isStandaloneMode()) {
     const { proposeIngredientMatchesLocal, proposeToolMatchesLocal, proposeTechniqueMatchesLocal } = await import('./localMatcher');
     const [ingredients, tools, techniques] = await Promise.all([
-      proposeIngredientMatchesLocal(ingredientNames),
-      proposeToolMatchesLocal(toolNames),
-      proposeTechniqueMatchesLocal(techniqueNames),
+      proposeIngredientMatchesLocal(ingredientNames, lang),
+      proposeToolMatchesLocal(toolNames, lang),
+      proposeTechniqueMatchesLocal(techniqueNames, lang),
     ]);
     return { ingredients, tools, techniques };
   }
@@ -36,7 +43,7 @@ export async function proposeMatches(
   const res = await apiFetch('/api/recipes/match-suggestions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ingredientNames, toolNames, techniqueNames }),
+    body: JSON.stringify({ ingredientNames, toolNames, techniqueNames, lang }),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Could not fetch match suggestions');

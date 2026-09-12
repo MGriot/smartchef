@@ -16,7 +16,7 @@
 // LibraryIngredients.tsx's combined ingredients+categories+tags fetch).
 // ════════════════════════════════════════════════════════════════════════
 
-import { query, queryOne, type LocalClient } from "../db/local";
+import { query, queryOne, chunk, inPlaceholders, type LocalClient } from "../db/local";
 
 function newId(): string {
   return crypto.randomUUID();
@@ -68,22 +68,46 @@ export async function listTags({ lang, q }: { lang?: string; q?: string }) {
   const rows = await query<Record<string, unknown>>(
     `SELECT * FROM tags ${where} ORDER BY sort_order, name`, params
   );
-  const result = [];
-  for (const row of rows) {
-    const translations = await query<{ language_code: string; name: string }>(
-      `SELECT language_code, name FROM tag_translations WHERE tag_id = $1`,
-      [row.id]
-    );
-    const translatedName = lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null;
-    result.push({
+  // Every tag's translations in a fixed handful of queries rather than one
+  // per tag. The gallery fetches /api/tags on mount, so on a library with 53
+  // tags this was 54 sequential Capacitor bridge round-trips before the
+  // recipe grid could even start loading — the N+1 shape
+  // docs/plans/2026-08-22-android-performance-plan.md set out to remove,
+  // batched here the same way recipes.local.ts's buildTagsDisplayBatch() is.
+  const translationsByTagId = await fetchTranslationsByTagId(rows.map(r => r.id as string));
+
+  return rows.map(row => {
+    const translations = translationsByTagId.get(row.id as string) ?? [];
+    return {
       ...row,
       exclude_tag_ids: JSON.parse((row.exclude_tag_ids as string) ?? '[]'),
       synonyms: JSON.parse((row.synonyms as string) ?? '[]'),
-      translated_name: translatedName,
+      translated_name: lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null,
       translations: translations.map(t => ({ lang: t.language_code, name: t.name })),
-    });
+    };
+  });
+}
+
+/** Every language's row for each of `tagIds`, keyed by tag id. Fetching all
+ *  languages at once (rather than filtering to the requested one in SQL) is
+ *  what lets the same read serve both the single translated_name the UI
+ *  renders and the full per-language array the tag editor round-trips. */
+async function fetchTranslationsByTagId(tagIds: string[]): Promise<Map<string, Array<{ language_code: string; name: string }>>> {
+  const byTagId = new Map<string, Array<{ language_code: string; name: string }>>();
+  for (const batch of chunk(tagIds)) {
+    const p: unknown[] = [];
+    const trs = await query<{ tag_id: string; language_code: string; name: string }>(
+      `SELECT tag_id, language_code, name FROM tag_translations
+       WHERE tag_id IN (${inPlaceholders(p, batch)}) ORDER BY rowid`,
+      p
+    );
+    for (const t of trs) {
+      const list = byTagId.get(t.tag_id);
+      if (list) list.push(t);
+      else byTagId.set(t.tag_id, [t]);
+    }
   }
-  return result;
+  return byTagId;
 }
 
 export interface TagInput {
@@ -200,14 +224,80 @@ export async function mergeTags(sourceId: string, targetId: string): Promise<{ r
  *  `targetGroup` instead — group_name is free text with no separate
  *  "groups" table (LibraryTags.tsx's own datalist just suggests existing
  *  values), so "merging" two groups is just a bulk rename of that column
- *  across whichever tags carried the old name. */
+ *  across whichever tags carried the old name.
+ *
+ *  The group's translated labels (below) are keyed by that same free text,
+ *  so they have to travel with it or a rename would strand them behind a
+ *  label nothing carries any more. The target's own translations win where
+ *  both groups have one for a language — same "a merge picks a side" rule
+ *  the entity merges follow. */
 export async function mergeTagGroups(sourceGroup: string, targetGroup: string): Promise<{ tagsUpdated: number }> {
   const rows = await query<{ id: string }>("SELECT id FROM tags WHERE group_name=$1 AND deleted_at IS NULL", [sourceGroup]);
   for (const row of rows) {
     await query("UPDATE tags SET group_name=$1, updated_at=now() WHERE id=$2", [targetGroup, row.id]);
     await syncTag(row.id);
   }
+  if (sourceGroup !== targetGroup) {
+    const existing = new Set(
+      (await query<{ language_code: string }>("SELECT language_code FROM tag_group_translations WHERE group_name=$1", [targetGroup]))
+        .map(t => t.language_code.toLowerCase()),
+    );
+    for (const t of await query<{ id: string; language_code: string }>(
+      "SELECT id, language_code FROM tag_group_translations WHERE group_name=$1", [sourceGroup],
+    )) {
+      if (existing.has(t.language_code.toLowerCase())) {
+        await query("DELETE FROM tag_group_translations WHERE id=$1", [t.id]);
+      } else {
+        await query("UPDATE tag_group_translations SET group_name=$1 WHERE id=$2", [targetGroup, t.id]);
+      }
+    }
+  }
   return { tagsUpdated: rows.length };
+}
+
+// ── Tag group labels ─────────────────────────────────────────────────────
+// A tag group is not an entity — see the table comment in db/local.ts and
+// db/migrations/041_tag_group_translations.sql. These are keyed by the
+// group's own text, and the frontend falls back to lib/tagGroups.ts's
+// static lookup for the four seeded groups when a language has no row here.
+
+export interface TagGroupTranslation { lang: string; name: string }
+
+/** Every group's translations at once, keyed by group name: the tags page
+ *  renders a heading per group, so fetching them one group at a time would
+ *  be a request per heading for data that is a few rows in total. */
+export async function listTagGroupTranslations(): Promise<Record<string, TagGroupTranslation[]>> {
+  const rows = await query<{ group_name: string; language_code: string; name: string }>(
+    "SELECT group_name, language_code, name FROM tag_group_translations ORDER BY group_name, language_code",
+  );
+  const out: Record<string, TagGroupTranslation[]> = {};
+  for (const row of rows) {
+    (out[row.group_name] ||= []).push({ lang: row.language_code, name: row.name });
+  }
+  return out;
+}
+
+/** Replaces the whole set for one group, same semantics as every other
+ *  upsert*Translations() here: what you send is what the group has. */
+export async function setTagGroupTranslations(
+  groupName: string,
+  translations: Array<{ lang: string; name?: string | null }>,
+): Promise<{ groupName: string; translations: TagGroupTranslation[] }> {
+  const group = groupName.trim();
+  if (!group) throw new Error('A group name is required');
+  await query("DELETE FROM tag_group_translations WHERE group_name=$1", [group]);
+  const saved: TagGroupTranslation[] = [];
+  for (const t of translations ?? []) {
+    const lang = t.lang?.trim();
+    const name = t.name?.trim();
+    if (!lang || !name) continue;
+    await query(
+      "INSERT INTO tag_group_translations (id, group_name, language_code, name) VALUES ($1, $2, $3, $4)",
+      [newId(), group, lang, name],
+    );
+    saved.push({ lang, name });
+  }
+  return { groupName: group, translations: saved };
 }
 
 // ── Custom (not-in-catalog) tags ─────────────────────────────────────────

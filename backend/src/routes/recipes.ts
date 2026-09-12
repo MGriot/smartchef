@@ -2,14 +2,14 @@
 // SmartChef — Routes: Ricette
 // ════════════════════════════════════════════════════════════════════════
 
-import { Router, Request, Response } from "express";
+import express, { Router, Request, Response } from "express";
 import { z } from "zod";
 import type { PoolClient } from "pg";
 import { query, queryOne, withTransaction } from "../db/pool";
 import { calculatePortions, resolveCookSequence } from "../services/matrioska.engine";
 import { calculateRecipeNutrition } from "../services/nutrition.service";
 import { computeAutoTagNames, unionTagNames } from "../services/tags.service";
-import { parseRecipeWithLLM, translateRecipeContent, fetchUrlHtml } from "../services/llm.parser";
+import { parseRecipeWithLLM, translateRecipeContent, fetchUrlHtml, MediaNotSupportedError } from "../services/llm.parser";
 import { filterByPantry } from "../services/pantry.service";
 import { proposeIngredientMatches, proposeToolMatches, proposeTechniqueMatches } from "../services/ingredient.matcher";
 import { v4 as uuidv4 } from "uuid";
@@ -601,11 +601,43 @@ recipeRouter.post("/fetch-page", async (req: Request, res: Response) => {
 
 // ── POST /recipes/parse (LLM) ─────────────────────────────────────────
 
-recipeRouter.post("/parse", async (req: Request, res: Response) => {
-  const schema = z.object({
-    input: z.string().min(1),
-    inputType: z.enum(["url", "text"]),
-  });
+// The global express.json() cap is 5 MB (see index.ts), which is right for
+// every other endpoint and far too small here: a file arrives base64-encoded
+// inside the JSON body, inflating ~4/3, so 5 MB of body is under 4 MB of
+// actual file — fine for a photo, nowhere near a voice note or a clip. This
+// route gets its own parser at 25 MB, which leaves room for the 18 MB file
+// ceiling llm.parser.ts enforces plus the encoding overhead. Deliberately
+// route-scoped: raising the global limit would hand every other endpoint
+// the same memory exposure for no reason.
+//
+// Worth knowing if uploads fail at a size below this: a reverse proxy in
+// front of the API has its own limit (nginx's client_max_body_size defaults
+// to 1 MB), and that one rejects the request before Express ever sees it.
+const parseBodyParser = express.json({ limit: "25mb" });
+
+recipeRouter.post("/parse", parseBodyParser, async (req: Request, res: Response) => {
+  const schema = z
+    .object({
+      // Empty for a media parse: the file is the recipe, and `input` only
+      // carries whatever extra context the user typed.
+      input: z.string(),
+      inputType: z.enum(["url", "text", "media"]),
+      media: z
+        .object({
+          mimeType: z.string().min(1),
+          data: z.string().min(1),
+          fileName: z.string().optional(),
+        })
+        .optional(),
+    })
+    .refine((v) => v.inputType === "media" || v.input.trim().length > 0, {
+      message: "Paste a recipe or a link first.",
+      path: ["input"],
+    })
+    .refine((v) => v.inputType !== "media" || !!v.media, {
+      message: "Attach a photo, PDF, audio file or video first.",
+      path: ["media"],
+    });
 
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -621,6 +653,13 @@ recipeRouter.post("/parse", async (req: Request, res: Response) => {
     const llmResult = await parseRecipeWithLLM(parsed.data);
     res.json({ data: llmResult });
   } catch (err) {
+    // A file the configured provider cannot read (or one too large to send)
+    // is the caller's problem and the caller can fix it — answering 502
+    // would present a fixable mistake as a broken server and bury the
+    // sentence that says which provider to switch to.
+    if (err instanceof MediaNotSupportedError) {
+      return res.status(400).json({ error: err.message });
+    }
     console.error("Recipe parse failed:", err);
     res.status(502).json({ error: err instanceof Error ? err.message : "Impossibile analizzare la ricetta" });
   }
@@ -638,14 +677,18 @@ recipeRouter.post("/match-suggestions", async (req: Request, res: Response) => {
     ingredientNames: z.array(z.string()).default([]),
     toolNames: z.array(z.string()).default([]),
     techniqueNames: z.array(z.string()).default([]),
+    // Content language, so suggestions are scored and labelled in the
+    // language the app is showing rather than always in base English.
+    lang: z.string().optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+  const { lang } = parsed.data;
   const [ingredients, tools, techniques] = await Promise.all([
-    proposeIngredientMatches(parsed.data.ingredientNames),
-    proposeToolMatches(parsed.data.toolNames),
-    proposeTechniqueMatches(parsed.data.techniqueNames),
+    proposeIngredientMatches(parsed.data.ingredientNames, lang),
+    proposeToolMatches(parsed.data.toolNames, lang),
+    proposeTechniqueMatches(parsed.data.techniqueNames, lang),
   ]);
   res.json({ data: { ingredients, tools, techniques } });
 });

@@ -156,6 +156,37 @@ export interface RecipeInput {
 
 // ── GET /recipes ───────────────────────────────────────────────────────
 
+// ── The gallery's column list ──────────────────────────────────────────
+// This query used to be `SELECT r.*`, which meant every gallery load, every
+// filter toggle and every search keystroke dragged the whole row of every
+// recipe through the Capacitor bridge — where the result set is
+// JSON-stringified in Java and re-parsed in the WebView. Measured at 689 KB
+// / 18.9 ms against a 47-recipe library versus 25.7 KB / 1.1 ms for the
+// columns that are actually rendered (docs/plans/2026-09-12-android-performance-plan.md).
+//
+// So this is an explicit list, and it is the union of what every consumer of
+// GET /api/recipes reads — Home.tsx's cards, Atlas.tsx's map, the sub-recipe
+// pickers in RecipeCreate/RecipeDetail, CollectionDetail, Planner and
+// ShoppingList. Deliberately absent: tips, storage_instructions, sources,
+// source_url, rest_time_min, yield_amount, yield_unit_id, language_code —
+// all long-text or detail-only fields no list view renders, which getRecipe()
+// still returns in full for the detail page.
+//
+// Columns only needed for filtering or ordering (created_at, updated_at,
+// sync_status) do not need selecting — SQL evaluates WHERE and ORDER BY
+// against the table, not the projection. updated_at is kept anyway because
+// it is cheap and callers treat it as list metadata.
+//
+// Adding a field to a card means adding it here too; recipes.local.test.ts
+// pins this list so that comes up as a failing test rather than as a value
+// that is silently undefined on the screen.
+export const LIST_COLUMNS = [
+  'r.id', 'r.title', 'r.description', 'r.difficulty', 'r.servings',
+  'r.prep_time_min', 'r.cook_time_min', 'r.rating', 'r.tags',
+  'r.regions', 'r.region_coords', 'r.cover_image_url', 'r.is_component',
+  'r.times_cooked', 'r.updated_at',
+].join(', ');
+
 const SORT_OPTIONS: Record<string, string> = {
   "recently-edited": "r.updated_at DESC",
   "newest": "r.created_at DESC",
@@ -242,7 +273,7 @@ export async function listRecipes(params: ListRecipesParams) {
   }
 
   let sql = `
-    SELECT r.*, ${translatedCols},
+    SELECT ${LIST_COLUMNS}, ${translatedCols},
            (SELECT COUNT(*) FROM recipe_ingredients cri2 WHERE cri2.recipe_id = r.id) AS ingredient_count,
            r.creator_name AS creator_name,
            -- Best-effort: creator_name is a plain denormalized string, not a

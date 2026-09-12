@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
-import { translateTagGroup } from '../lib/tagGroups';
+import { useTagGroupLabels } from '../hooks/useTagGroupLabels';
 
 export interface CatalogTag {
   id: string;
@@ -33,6 +33,7 @@ export default function TagPicker({ value, onChange, by = 'name' }: TagPickerPro
   const [catalog, setCatalog] = useState<CatalogTag[]>([]);
   const contentLang = useStore((s) => s.contentLang);
   const { t } = useTranslation();
+  const { label: groupLabel } = useTagGroupLabels();
 
   useEffect(() => {
     apiFetch(`/api/tags${contentLang ? `?lang=${contentLang}` : ''}`)
@@ -67,7 +68,7 @@ export default function TagPicker({ value, onChange, by = 'name' }: TagPickerPro
     <div className="space-y-3">
       {Object.entries(groups).map(([group, tags]) => (
         <div key={group}>
-          <p className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5">{translateTagGroup(group, t)}</p>
+          <p className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1.5">{groupLabel(group)}</p>
           <div className="flex flex-wrap gap-1.5">
             {tags.map(t => {
               const active = isActive(t);

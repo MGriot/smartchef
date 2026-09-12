@@ -52,8 +52,16 @@ export default function Pantry() {
 
   const [cookable, setCookable] = useState<Cookable[] | null>(null);
   const [checking, setChecking] = useState(false);
-  // 1 = only recipes you can cook outright. Lower it to see near misses.
-  const [threshold, setThreshold] = useState(1);
+  // 1 = only recipes you can cook outright, 0 = anything you have at least
+  // one ingredient for. Defaults to 0.5 rather than the original 1: a
+  // pantry with a handful of things in it matches no recipe outright, so
+  // the strictest setting as the default made the feature look broken on
+  // first use — you pressed Check and got "nothing" every time.
+  const [threshold, setThreshold] = useState(0.5);
+  // Set when the chosen strictness found nothing and the partial pass below
+  // answered instead, so the results can say so rather than silently
+  // showing recipes that don't meet the filter that is still highlighted.
+  const [fellBack, setFellBack] = useState(false);
 
   const langQuery = contentLang ? `?lang=${contentLang}` : '';
 
@@ -115,27 +123,48 @@ export default function Pantry() {
     }
   };
 
+  const runMatch = async (ratio: number): Promise<Cookable[]> => {
+    const res = await apiFetch('/api/recipes/filter-by-pantry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ingredients: items!.map((i) => ({
+          ingredientId: i.ingredient_id,
+          ...(i.quantity != null ? { quantity: i.quantity } : {}),
+          ...(i.unit_symbol ? { unit: i.unit_symbol } : {}),
+        })),
+        minMatchRatio: ratio,
+      }),
+      timeoutMs: 60_000,
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('pantry.checkFailed'));
+    return json.data ?? [];
+  };
+
+  /** A strict pass, then — only if it came back empty — a partial one.
+   *
+   *  "Add a few things, press Check, get nothing, with no hint whether the
+   *  pantry is too small or the feature is broken" was the whole complaint.
+   *  An empty answer is technically correct at 100% and useless in
+   *  practice, so rather than leaving the user to work out that the
+   *  strictness control is what to reach for, the near misses are fetched
+   *  and shown labelled as such. Skipped when the user already asked for
+   *  partial matches, since there is nothing looser to fall back to. */
   const check = async (ratio = threshold) => {
     if (!items?.length) return;
     setChecking(true);
     setError(null);
+    setFellBack(false);
     try {
-      const res = await apiFetch('/api/recipes/filter-by-pantry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ingredients: items.map((i) => ({
-            ingredientId: i.ingredient_id,
-            ...(i.quantity != null ? { quantity: i.quantity } : {}),
-            ...(i.unit_symbol ? { unit: i.unit_symbol } : {}),
-          })),
-          minMatchRatio: ratio,
-        }),
-        timeoutMs: 60_000,
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('pantry.checkFailed'));
-      setCookable(json.data ?? []);
+      const strict = await runMatch(ratio);
+      if (strict.length > 0 || ratio <= 0) {
+        setCookable(strict);
+        return;
+      }
+      const partial = await runMatch(0);
+      setCookable(partial);
+      setFellBack(partial.length > 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('pantry.checkFailed'));
     } finally {
@@ -252,6 +281,7 @@ export default function Pantry() {
                   { value: 1, label: t('pantry.exact') },
                   { value: 0.8, label: t('pantry.missingOne') },
                   { value: 0.5, label: t('pantry.halfway') },
+                  { value: 0, label: t('pantry.anyMatch') },
                 ].map((opt) => (
                   <button
                     key={opt.value}
@@ -275,13 +305,23 @@ export default function Pantry() {
               >
                 {checking ? t('pantry.checking') : t('pantry.check')}
               </button>
+              {threshold === 0 && <p className="sc-hint">{t('pantry.anyMatchHint')}</p>}
               {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
             </div>
+
+            {cookable !== null && fellBack && (
+              <div className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 px-5 py-4">
+                <p className="text-[11px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-500">{t('pantry.fellBackTitle')}</p>
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300 mt-1">{t('pantry.fellBackBody')}</p>
+              </div>
+            )}
 
             {cookable !== null && (
               cookable.length === 0 ? (
                 <div className="bg-white dark:bg-zinc-900 rounded-3xl p-10 text-center border border-zinc-100 dark:border-zinc-800">
-                  <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('pantry.noneCookable')}</p>
+                  <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">
+                    {threshold === 0 ? t('pantry.noneCookableAtAll') : t('pantry.noneCookable')}
+                  </p>
                 </div>
               ) : (
                 cookable.map((r) => (

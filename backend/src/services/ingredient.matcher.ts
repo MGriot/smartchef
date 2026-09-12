@@ -308,48 +308,97 @@ export async function matchTechniques(techniqueNames: string[]): Promise<Matched
 
 export interface MatchSuggestion { id: UUID; name: string; score: number; }
 
-export async function proposeIngredientMatches(names: string[]): Promise<Record<string, MatchSuggestion[]>> {
+// ── Localized suggestions ───────────────────────────────────────
+// Mirrors frontend/src/services/localMatcher.ts — keep the two in step.
+// These used to select only the base (English) name, so the Import review
+// step offered "Butter" for a parsed "burro" whatever language the app was
+// set to. Worse than the label: scoring an Italian name against an English
+// catalog is close to noise ("cocco rapè" came back as "Arborio Rice" at
+// 42%). So `lang` picks the translated name for BOTH the score and the
+// label, while the base name stays in the running as a second probe — a
+// recipe may well be parsed in a different language than the UI.
+
+/** Best score across every name a row is known by. `label` is what gets
+ *  shown; all of `probes` are scored and the highest wins. */
+function bestOf(name: string, probes: Array<string | null | undefined>): number {
+  const usable = probes.filter((p): p is string => typeof p === "string" && p.trim().length > 0);
+  return usable.length ? Math.max(...usable.map((p) => similarity(name, p))) : 0;
+}
+
+function rank(
+  name: string,
+  rows: Array<{ id: UUID; label: string; probes: Array<string | null | undefined> }>
+): MatchSuggestion[] {
+  return rows
+    .map((r) => ({ id: r.id, name: r.label, score: bestOf(name, r.probes) }))
+    .filter((s) => s.score > 0.4)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
+type TranslatedRow = { translated_name: string | null };
+
+export async function proposeIngredientMatches(names: string[], lang?: string): Promise<Record<string, MatchSuggestion[]>> {
   if (!names.length) return {};
-  const all = await query<DBIngredient>("SELECT id, name, category_id, plural_name FROM ingredients WHERE sync_status != 'deleted'");
+  const all = await query<DBIngredient & TranslatedRow & { synonyms: string[] | null }>(
+    `SELECT i.id, i.name, i.category_id, i.plural_name, i.synonyms,
+            ${lang ? "tr.translated_name" : "NULL AS translated_name"}
+     FROM ingredients i
+     ${lang ? "LEFT JOIN ingredient_translations tr ON tr.ingredient_id = i.id AND LOWER(tr.language_code) = LOWER($1)" : ""}
+     WHERE i.sync_status != 'deleted'`,
+    lang ? [lang] : []
+  );
+  const rows = all.map((ing) => ({
+    id: ing.id,
+    label: ing.translated_name || ing.name,
+    // Synonyms are exactly the alternate names someone recorded so this
+    // ingredient would be findable by them; leaving them out of the probe
+    // list meant the catalog knew "scalogno" was a Shallot and the review
+    // step still didn't.
+    probes: [ing.translated_name, ing.name, ing.plural_name, ...(ing.synonyms ?? [])],
+  }));
   const out: Record<string, MatchSuggestion[]> = {};
-  for (const name of names) {
-    const scored = all
-      .map((ing) => ({ id: ing.id, name: ing.name, score: bestSimilarity(name, ing) }))
-      .filter((s) => s.score > 0.4)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-    out[name] = scored;
-  }
+  for (const name of names) out[name] = rank(name, rows);
   return out;
 }
 
-export async function proposeToolMatches(names: string[]): Promise<Record<string, MatchSuggestion[]>> {
+export async function proposeToolMatches(names: string[], lang?: string): Promise<Record<string, MatchSuggestion[]>> {
   if (!names.length) return {};
-  const all = await query<DBTool>("SELECT id, name FROM tools WHERE deleted_at IS NULL");
+  const all = await query<DBTool & TranslatedRow & { synonyms: string[] | null }>(
+    `SELECT t.id, t.name, t.synonyms,
+            ${lang ? "tr.name AS translated_name" : "NULL AS translated_name"}
+     FROM tools t
+     ${lang ? "LEFT JOIN tool_translations tr ON tr.tool_id = t.id AND LOWER(tr.language_code) = LOWER($1)" : ""}
+     WHERE t.deleted_at IS NULL`,
+    lang ? [lang] : []
+  );
+  const rows = all.map((t) => ({
+    id: t.id,
+    label: t.translated_name || t.name,
+    probes: [t.translated_name, t.name, ...(t.synonyms ?? [])],
+  }));
   const out: Record<string, MatchSuggestion[]> = {};
-  for (const name of names) {
-    const scored = all
-      .map((t) => ({ id: t.id, name: t.name, score: similarity(name, t.name) }))
-      .filter((s) => s.score > 0.4)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-    out[name] = scored;
-  }
+  for (const name of names) out[name] = rank(name, rows);
   return out;
 }
 
-export async function proposeTechniqueMatches(names: string[]): Promise<Record<string, MatchSuggestion[]>> {
+export async function proposeTechniqueMatches(names: string[], lang?: string): Promise<Record<string, MatchSuggestion[]>> {
   if (!names.length) return {};
-  const all = await query<DBTechnique>("SELECT id, name FROM techniques WHERE deleted_at IS NULL");
+  const all = await query<DBTechnique & TranslatedRow & { synonyms: string[] | null }>(
+    `SELECT t.id, t.name, t.synonyms,
+            ${lang ? "tr.name AS translated_name" : "NULL AS translated_name"}
+     FROM techniques t
+     ${lang ? "LEFT JOIN technique_translations tr ON tr.technique_id = t.id AND LOWER(tr.language_code) = LOWER($1)" : ""}
+     WHERE t.deleted_at IS NULL`,
+    lang ? [lang] : []
+  );
+  const rows = all.map((t) => ({
+    id: t.id,
+    label: t.translated_name || t.name,
+    probes: [t.translated_name, t.name, ...(t.synonyms ?? [])],
+  }));
   const out: Record<string, MatchSuggestion[]> = {};
-  for (const name of names) {
-    const scored = all
-      .map((t) => ({ id: t.id, name: t.name, score: similarity(name, t.name) }))
-      .filter((s) => s.score > 0.4)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-    out[name] = scored;
-  }
+  for (const name of names) out[name] = rank(name, rows);
   return out;
 }
 

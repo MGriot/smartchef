@@ -3,7 +3,23 @@
 // Gemini, OpenAI), as an opt-in alternative to the local Ollama instance
 // in llm.parser.ts. Hand-rolled fetch() calls, matching the existing
 // Ollama integration's style, rather than adding three SDK dependencies.
+//
+// Each call optionally carries ONE piece of media (a photo, a scan, a PDF,
+// a voice note, a clip). The prompt is unchanged either way — only the
+// shape of the user turn differs, and it differs per provider: Anthropic
+// wants base64 in an image/document block, Gemini wants inlineData (the
+// only one of the three that also takes audio and video), OpenAI wants a
+// data URI in an image_url part. Which provider may read which kind is
+// decided by llm.parser.ts's MEDIA_SUPPORT, not here.
+//
+// Mirrors frontend/src/services/llmParser.local.ts's own provider calls,
+// deliberately, on the terms that file's header already states: the two
+// runtimes share no code (no encrypted key columns in a browser, no native
+// HTTP bridge on a server) but MUST NOT drift on the request shape.
+// Change one, change the other.
 // ════════════════════════════════════════════════════════════════════════
+
+import type { LLMParseMedia } from "@shared/types/index";
 
 // Cloud APIs return in seconds, not the ~10 minutes local CPU-only Ollama
 // inference can take — a much shorter ceiling than callOllama's 600_000ms.
@@ -14,10 +30,28 @@ const CLOUD_TIMEOUT_MS = 60_000;
 // reasoning, and the default matters since this is real per-call spend
 // once a user opts in to a cloud provider.
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001";
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+// gemini-2.0-flash was retired mid-2026 (HTTP 404, "no longer available
+// ... use models/gemini-3.6-flash"). Override with GEMINI_MODEL.
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 
-export async function callAnthropic(content: string, apiKey: string, systemPrompt: string): Promise<string> {
+export async function callAnthropic(
+  content: string,
+  apiKey: string,
+  systemPrompt: string,
+  media?: LLMParseMedia
+): Promise<string> {
+  // A media turn is content BLOCKS rather than a bare string; the file goes
+  // first so the text after it reads as an instruction about it, which is
+  // what Anthropic's own guidance asks for.
+  const userContent: unknown = media
+    ? [
+        media.mimeType.toLowerCase().startsWith("application/pdf")
+          ? { type: "document", source: { type: "base64", media_type: media.mimeType, data: media.data } }
+          : { type: "image", source: { type: "base64", media_type: media.mimeType, data: media.data } },
+        { type: "text", text: content },
+      ]
+    : content;
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -29,7 +63,7 @@ export async function callAnthropic(content: string, apiKey: string, systemPromp
       model: ANTHROPIC_MODEL,
       max_tokens: 1500,
       system: systemPrompt,
-      messages: [{ role: "user", content }],
+      messages: [{ role: "user", content: userContent }],
       // No temperature/top_p/top_k — current Claude models return HTTP 400
       // on any non-default sampling param. No thinking config — adaptive
       // default is fine for this structured-extraction task.
@@ -47,15 +81,30 @@ export async function callAnthropic(content: string, apiKey: string, systemPromp
   return data.content?.find((b) => b.type === "text")?.text ?? "";
 }
 
-export async function callGemini(content: string, apiKey: string, systemPrompt: string): Promise<string> {
+export async function callGemini(
+  content: string,
+  apiKey: string,
+  systemPrompt: string,
+  media?: LLMParseMedia
+): Promise<string> {
+  // inlineData covers images, PDFs, audio AND video with one shape — the
+  // reason the capability table steers a voice note or a clip here.
+  const parts: Array<Record<string, unknown>> = media
+    ? [{ inlineData: { mimeType: media.mimeType, data: media.data } }, { text: content }]
+    : [{ text: content }];
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    // The key travels in a header, not the `?key=` query parameter this
+    // used to use: a URL query string is the one place a credential
+    // reliably ends up somewhere it should not be (access logs, proxy
+    // logs, error reports). Same API either way, and the same call the
+    // standalone twin makes.
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: content }] }],
+        contents: [{ role: "user", parts }],
       }),
       signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),
     }
@@ -69,7 +118,20 @@ export async function callGemini(content: string, apiKey: string, systemPrompt: 
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 }
 
-export async function callOpenAI(content: string, apiKey: string, systemPrompt: string): Promise<string> {
+export async function callOpenAI(
+  content: string,
+  apiKey: string,
+  systemPrompt: string,
+  media?: LLMParseMedia
+): Promise<string> {
+  // OpenAI takes an image as a data URI in an image_url part rather than as
+  // raw base64 — the one provider here that does.
+  const userContent: unknown = media
+    ? [
+        { type: "image_url", image_url: { url: `data:${media.mimeType};base64,${media.data}` } },
+        { type: "text", text: content },
+      ]
+    : content;
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -80,7 +142,7 @@ export async function callOpenAI(content: string, apiKey: string, systemPrompt: 
       model: OPENAI_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content },
+        { role: "user", content: userContent },
       ],
     }),
     signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),

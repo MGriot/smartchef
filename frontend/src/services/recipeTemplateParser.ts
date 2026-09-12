@@ -18,6 +18,7 @@ export interface TemplateParseIngredient {
   unit?: string;
   notes?: string;
   groupName?: string | null;
+  isOptional?: boolean;
 }
 
 export interface TemplateParseStep {
@@ -58,6 +59,12 @@ export interface TemplateParseResult {
   // extraction) — the local parser has no equivalent notion, so this stays
   // undefined for a template/JSON-parsed draft.
   confidence?: number;
+  /** Cover image for the recipe, absolute http(s). Set by the structured-
+   *  data extractor (recipeStructuredData.ts) and by the AI path, which
+   *  takes the page's own og:image and lets the model override it — see
+   *  llmParser.local.ts. RecipeImport.tsx passes it through as
+   *  coverImageUrl when it creates the recipe. */
+  imageUrl?: string;
 }
 
 // One row per template field, across every locale's label wording (see the
@@ -115,27 +122,57 @@ function splitCommaList(text: string): string[] {
   return text.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-// Ingredient line: "- [qty] [unit] name (notes)" — quantity/unit/notes are
-// all optional and best-effort, matching the LLM prompt's own "if unclear,
-// just capture the name" philosophy rather than failing outright.
-const INGREDIENT_LINE_RE = /^-\s*(?:([\d.,/]+)\s+)?(?:([a-zA-Zàèéìòùâêîôûäöüñç]+)\s+)?(.+?)(?:\s*\(([^)]+)\))?$/;
+// Ingredient line: "- [qty] [unit] name" — quantity and unit are both
+// optional and best-effort, matching the LLM prompt's own "if unclear, just
+// capture the name" philosophy rather than failing outright. Any trailing
+// "(note)" is taken off by TRAILING_NOTE_RE below before this runs, so it
+// can never be mistaken for the name.
+const INGREDIENT_LINE_RE = /^-\s*(?:([\d.,/]+)\s+)?(?:([a-zA-Zàèéìòùâêîôûäöüñç]+)\s+)?(.+?)$/;
+
+/** "(facoltativo)", "(optional)", "(opcional)", "(facultatif)", "(a
+ *  piacere)", "(to taste)" — the parenthetical everyone already writes for
+ *  an ingredient they mean as optional, in each language the app ships.
+ *  Matched against the notes group so it survives whatever else is in
+ *  there ("(facoltativo, tritato)"). */
+const OPTIONAL_NOTE_RE = /\b(facoltativ[oaie]|opzional[ei]|a\s+piacere|optional|to\s+taste|if\s+desired|opcional|al\s+gusto|facultati(?:f|ve)s?|au\s+goût)\b/i;
+
+/** Trailing "(...)" note, pulled off before the line is parsed.
+ *
+ *  It used to be the last group of INGREDIENT_LINE_RE, which put it in
+ *  competition with the name and unit groups and let the regex engine
+ *  resolve that the wrong way round: "- 2 tomatoes (facoltativo)" matched
+ *  with unit "tomatoes" and name "(facoltativo)", because the lazy name
+ *  group is happy to be the parenthetical when that lets the optional unit
+ *  group match. Taking the note off first leaves the rest of the line
+ *  unambiguous — and is what makes the optional marker visible at all,
+ *  since on those lines there was no note to test. */
+const TRAILING_NOTE_RE = /^(.*?)\s*\(([^)]*)\)\s*$/;
 
 function parseIngredientLine(line: string): TemplateParseIngredient | null {
   const stripped = line.replace(/^-\s*/, '').trim();
   if (!stripped) return null;
-  const m = line.match(INGREDIENT_LINE_RE);
+  const noteMatch = line.match(TRAILING_NOTE_RE);
+  const withoutNote = noteMatch ? noteMatch[1] : line;
+  const notesRaw = noteMatch ? noteMatch[2] : undefined;
+  const m = withoutNote.match(INGREDIENT_LINE_RE);
   if (!m) return { name: stripped };
-  const [, qtyRaw, unitRaw, nameRaw, notesRaw] = m;
+  const [, qtyRaw, unitRaw, nameRaw] = m;
   // parseAmount(), not a bare digit match: INGREDIENT_LINE_RE's amount
   // group already accepts "/" and this line may well read "- 1/2 cipolla",
   // which used to come through as quantity 1.
   const quantity = qtyRaw ? parseAmount(qtyRaw) : undefined;
+  const notes = notesRaw?.trim();
   return {
     name: (nameRaw || stripped).trim(),
     quantity,
     quantityText: qtyRaw?.trim(),
     unit: unitRaw?.trim(),
-    notes: notesRaw?.trim(),
+    notes,
+    // The note itself is kept as written rather than stripped: "facoltativo,
+    // tritato" still has the "tritato" half to say, and a bare
+    // "(facoltativo)" reading back as a note under an OPTIONAL badge is
+    // redundant but not wrong.
+    isOptional: !!notes && OPTIONAL_NOTE_RE.test(notes),
   };
 }
 
@@ -176,6 +213,7 @@ function tryParseAsJson(text: string): TemplateParseResult | null {
       unit: typeof i.unit === 'string' ? i.unit : undefined,
       notes: typeof i.notes === 'string' ? i.notes : undefined,
       groupName: typeof i.groupName === 'string' ? i.groupName : null,
+      isOptional: i.isOptional === true,
     };
   });
   const steps: TemplateParseStep[] = Array.isArray(obj.steps)

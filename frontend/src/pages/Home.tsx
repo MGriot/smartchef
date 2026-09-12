@@ -626,7 +626,14 @@ const Home: React.FC = () => {
                           {badges.map((badge, i) => (
                             <span
                               key={i}
-                              className={`inline-flex items-center gap-1 px-3 py-1 ${badge.bg || ''} ${badge.text || 'text-white'} text-[10px] font-extrabold uppercase tracking-[0.12em] rounded-full shadow-sm backdrop-blur-sm`}
+                              // No backdrop-blur here on purpose. Every badge
+                              // sits on its own opaque colored pill, so the
+                              // blur was invisible — but each one still forced
+                              // its own compositing surface and a readback of
+                              // the photo behind it. A gallery of 47 recipes
+                              // carries ~150 of these, which is a real cost on
+                              // a phone GPU and free on a desktop one.
+                              className={`inline-flex items-center gap-1 px-3 py-1 ${badge.bg || ''} ${badge.text || 'text-white'} text-[10px] font-extrabold uppercase tracking-[0.12em] rounded-full shadow-sm`}
                               style={!badge.bg ? { backgroundColor: badge.color || '#3f3f46' } : undefined}
                             >
                               {badge.label}
@@ -729,7 +736,14 @@ const Home: React.FC = () => {
       </Modal>
 
       {/* ─── Mobile Bottom Nav ──────────────────────────────── */}
-      <footer className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#fafaf5]/90 dark:bg-zinc-950/90 backdrop-blur-xl rounded-t-3xl border-t border-outline-variant/15 shadow-[0_-4px_20px_rgba(0,0,0,0.04)]">
+      {/* Opaque rather than translucent-and-blurred. This bar is `md:hidden`,
+          so it only ever renders on a phone — and a full-width backdrop-filter
+          pinned to the viewport has to re-blur whatever scrolled underneath it
+          on every single frame, which is the most expensive thing on the
+          gallery's scroll path and something the desktop build never pays at
+          all. Solid at the same colors reads nearly identically and costs
+          nothing. */}
+      <footer className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#fafaf5] dark:bg-zinc-950 rounded-t-3xl border-t border-outline-variant/15 shadow-[0_-4px_20px_rgba(0,0,0,0.04)]">
         <Link className="flex flex-col items-center justify-center text-primary" to="/">
           <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
           <span className="text-[11px] font-bold mt-0.5">{t('bottomNav.home')}</span>

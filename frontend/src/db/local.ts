@@ -395,6 +395,21 @@ CREATE TABLE IF NOT EXISTS tag_translations (
   UNIQUE(tag_id, language_code)
 );
 
+-- Translated labels for tags.group_name. Keyed by the group's own text
+-- rather than by an id, because a tag group is not an entity: group_name
+-- is free text on the tag row, with no "groups" table to hang a foreign
+-- key off (see tags.local.ts's mergeTagGroups(), which "merges" two groups
+-- by bulk-renaming that column). Renaming a group therefore has to carry
+-- these rows across by name, which mergeTagGroups() does.
+-- See db/migrations/041_tag_group_translations.sql for the Postgres side.
+CREATE TABLE IF NOT EXISTS tag_group_translations (
+  id            TEXT PRIMARY KEY,
+  group_name    TEXT NOT NULL,
+  language_code TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  UNIQUE(group_name, language_code)
+);
+
 CREATE TABLE IF NOT EXISTS ingredient_tags (
   ingredient_id TEXT NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
   tag_id        TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,

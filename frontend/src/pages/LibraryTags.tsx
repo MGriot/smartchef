@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
+import Autocomplete from '../components/Autocomplete';
 import RenderFaIcon from '../components/RenderFaIcon';
 import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
-import { translateTagGroup } from '../lib/tagGroups';
+import { useTagGroupLabels } from '../hooks/useTagGroupLabels';
 import { TAG_ICONS } from '../lib/icons';
 import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
@@ -22,6 +23,9 @@ export default function LibraryTags() {
   const [form, setForm] = useState({ name: '', groupName: 'Altro', color: DEFAULT_COLOR, icon: 'TbTag', excludeTagIds: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
+  // Group headings: the user's own translation for the group first, then
+  // the static lookup for the seeded groups — see hooks/useTagGroupLabels.
+  const { label: groupLabel, translations: groupTranslations, reload: reloadGroupTranslations } = useTagGroupLabels();
 
   // Free-text recipe tags that were never added to the managed catalog —
   // see tags.local.ts's listCustomTagsInUse() / backend's GET /tags/custom.
@@ -33,7 +37,6 @@ export default function LibraryTags() {
   // "pick a target catalog tag" UI is identical either way.
   const [mergeSource, setMergeSource] = useState<{ id?: string; name: string } | null>(null);
   const [mergeTargetId, setMergeTargetId] = useState('');
-  const [mergeQuery, setMergeQuery] = useState('');
   const [merging, setMerging] = useState(false);
 
   // Merge-groups modal — reassigns every tag in one group to another.
@@ -103,7 +106,6 @@ export default function LibraryTags() {
       if (res.ok) {
         setMergeSource(null);
         setMergeTargetId('');
-        setMergeQuery('');
         fetchTags();
         fetchCustomTags();
       } else {
@@ -116,27 +118,52 @@ export default function LibraryTags() {
     }
   };
 
-  const handleMergeGroup = async (targetGroup: string) => {
-    if (!mergingGroup || !targetGroup.trim() || targetGroup.trim() === mergingGroup) {
+  /** One dialog, two independent changes: the group's name (a bulk rename
+   *  of tags.group_name, which is also how two groups get merged) and its
+   *  translated labels. Either can be left alone — renaming without
+   *  touching the translations, or translating without renaming, both have
+   *  to work — so the rename is skipped when the name came back unchanged
+   *  and the translations are saved against whatever name the group ends
+   *  up with. Order matters: rename first, so the labels land on the new
+   *  name rather than being carried across by the merge and then
+   *  overwritten. */
+  const handleMergeGroup = async (targetGroup: string, translations: { lang: string; name: string }[]) => {
+    const nextGroup = targetGroup.trim();
+    if (!mergingGroup || !nextGroup) {
       setMergingGroup(null);
       return;
     }
     setMergingGroupBusy(true);
     try {
-      const res = await apiFetch('/api/tags/groups/merge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceGroup: mergingGroup, targetGroup: targetGroup.trim() }),
-      });
-      const result = await res.json();
-      if (res.ok) {
-        setMergingGroup(null);
-        fetchTags();
-      } else {
-        alert(`Failed: ${JSON.stringify(result.error || result)}`);
+      if (nextGroup !== mergingGroup) {
+        const res = await apiFetch('/api/tags/groups/merge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceGroup: mergingGroup, targetGroup: nextGroup }),
+        });
+        if (!res.ok) {
+          const result = await res.json();
+          alert(`Failed: ${JSON.stringify(result.error || result)}`);
+          return;
+        }
       }
+      const transRes = await apiFetch('/api/tags/groups/translations', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupName: nextGroup,
+          translations: translations.filter(tr => tr.lang.trim() && tr.name.trim()),
+        }),
+      });
+      if (!transRes.ok) {
+        const result = await transRes.json();
+        alert(`Group renamed, but its translations could not be saved: ${JSON.stringify(result.error || result)}`);
+      }
+      setMergingGroup(null);
+      fetchTags();
+      reloadGroupTranslations();
     } catch {
-      alert('Network error while renaming group.');
+      alert('Network error while saving the group.');
     } finally {
       setMergingGroupBusy(false);
     }
@@ -164,6 +191,16 @@ export default function LibraryTags() {
     }
     setShowModal(true);
   };
+
+  // Memoized rather than built inline in the JSX: Autocomplete re-syncs its
+  // typed text whenever this array's identity changes, so a fresh array on
+  // every render would clear the search box out from under the user.
+  const mergeOptions = useMemo(
+    () => tags
+      .filter(tag => tag.id !== mergeSource?.id)
+      .map(tag => ({ id: tag.id, label: tag.translated_name || tag.name, sublabel: tag.group_name || undefined })),
+    [tags, mergeSource],
+  );
 
   const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);
 
@@ -253,7 +290,7 @@ export default function LibraryTags() {
           ) : Object.entries(groups).map(([group, groupTags]) => (
             <div key={group}>
               <div className="flex items-center gap-1.5 mb-3">
-                <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{translateTagGroup(group, t)}</p>
+                <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{groupLabel(group)}</p>
                 <button
                   type="button"
                   onClick={() => setMergingGroup(group)}
@@ -285,7 +322,7 @@ export default function LibraryTags() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setMergeSource({ id: tag.id, name: tag.translated_name || tag.name }); setMergeTargetId(''); setMergeQuery(''); }}
+                      onClick={() => { setMergeSource({ id: tag.id, name: tag.translated_name || tag.name }); setMergeTargetId(''); }}
                       title="Merge into another tag"
                       className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-300 dark:text-zinc-600 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all shrink-0"
                     >
@@ -323,7 +360,7 @@ export default function LibraryTags() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setMergeSource({ name: ct.name }); setMergeTargetId(''); setMergeQuery(''); }}
+                    onClick={() => { setMergeSource({ name: ct.name }); setMergeTargetId(''); }}
                     title="Merge into an existing tag"
                     className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all"
                   >
@@ -361,38 +398,23 @@ export default function LibraryTags() {
           </>
         }
       >
-        <Field label="Merge into">
-          <div className="relative">
-            <input
-              type="text"
-              value={mergeQuery}
-              onChange={e => { setMergeQuery(e.target.value); setMergeTargetId(''); }}
-              placeholder="Search for a tag…"
-              autoComplete="off"
-              className="sc-field"
-            />
-            {mergeQuery.trim() && !mergeTargetId && (
-              <div className="absolute z-10 mt-2 max-h-56 w-full overflow-y-auto rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg">
-                {tags
-                  .filter(t => t.id !== mergeSource?.id)
-                  .filter(t => (t.translated_name || t.name).toLowerCase().includes(mergeQuery.trim().toLowerCase()))
-                  .slice(0, 30)
-                  .map(t => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => { setMergeTargetId(t.id); setMergeQuery(t.translated_name || t.name); }}
-                      className="w-full px-5 py-3 text-left text-sm font-bold text-zinc-700 dark:text-zinc-300 first:rounded-t-2xl last:rounded-b-2xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                    >
-                      {t.translated_name || t.name}
-                    </button>
-                  ))}
-                {tags.filter(t => t.id !== mergeSource?.id).filter(t => (t.translated_name || t.name).toLowerCase().includes(mergeQuery.trim().toLowerCase())).length === 0 && (
-                  <p className="sc-hint px-5 py-3 italic">No matching tags.</p>
-                )}
-              </div>
-            )}
-          </div>
+        {/* Was a hand-rolled input + filtered list. It kept its typed text in
+            the *page's* state, so every keystroke re-rendered the whole tag
+            catalog behind the dialog — and the list only appeared while no
+            target was picked, so correcting a choice meant clearing the box
+            first. Autocomplete is the same control the rest of the app
+            searches its catalogs with: the text stays inside it (the page
+            no longer re-renders as you type), arrow keys and Enter work,
+            and a suggestion's onMouseDown keeps focus in the field. */}
+        <Field label="Merge into" hint="Type to search the catalog, then pick the tag to keep.">
+          <Autocomplete
+            options={mergeOptions}
+            value={mergeTargetId || null}
+            onSelect={(id) => setMergeTargetId(id)}
+            onClear={() => setMergeTargetId('')}
+            placeholder="Search for a tag…"
+            className="sc-field"
+          />
         </Field>
       </Modal>
 
@@ -401,6 +423,7 @@ export default function LibraryTags() {
         <RenameGroupModal
           currentGroup={mergingGroup}
           existingGroups={Object.keys(groups).filter(g => g !== mergingGroup)}
+          initialTranslations={groupTranslations[mergingGroup] ?? []}
           busy={mergingGroupBusy}
           onCancel={() => setMergingGroup(null)}
           onConfirm={handleMergeGroup}
@@ -515,48 +538,84 @@ export default function LibraryTags() {
   );
 }
 
-/** Renaming a group and merging it into another one are the same
+/** Renaming a group, merging it into another one, and giving it a label
+ *  per language are all one dialog, because the first two are the same
  *  operation (a bulk group_name reassignment — see tags.local.ts's
- *  mergeTagGroups()), so this is one control: type a brand-new name to
- *  rename the group, or pick an existing other group from the suggestions
- *  to fold into it instead. */
+ *  mergeTagGroups()) and the third is keyed by the name the first two
+ *  decide. Type a brand-new name to rename the group, or pick an existing
+ *  other group from the suggestions to fold into it instead; either way
+ *  the translations below are saved against whatever name it ends up with.
+ *
+ *  A tag group has no row of its own to hang translations off — group_name
+ *  is free text on the tag — so before this there was no way to translate
+ *  one at all: the four seeded groups had a static lookup in
+ *  lib/tagGroups.ts and every group anyone typed themselves showed the
+ *  same text in every language. */
 function RenameGroupModal({
-  currentGroup, existingGroups, busy, onCancel, onConfirm,
+  currentGroup, existingGroups, initialTranslations, busy, onCancel, onConfirm,
 }: {
-  currentGroup: string; existingGroups: string[]; busy: boolean;
-  onCancel: () => void; onConfirm: (newName: string) => void;
+  currentGroup: string; existingGroups: string[];
+  initialTranslations: Array<{ lang: string; name: string }>;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (newName: string, translations: Array<{ lang: string; name: string }>) => void;
 }) {
   const [name, setName] = useState(currentGroup);
+  const [translations, setTranslations] = useState(initialTranslations);
+  const renaming = name.trim() !== currentGroup;
+  const merging = existingGroups.includes(name.trim());
   return (
     <Modal
       open
       onClose={onCancel}
       size="sm"
       zIndex={120}
-      title="Rename or Merge Group"
-      subtitle={`Every tag currently under "${currentGroup}" moves to whatever you type here. Type a brand-new name to rename the group, or pick an existing one to merge the two together.`}
+      title="Group"
+      subtitle={`Rename "${currentGroup}", fold it into another group, or give it a name per language.`}
       footer={
         <>
           <ModalCancelButton onClick={onCancel}>Cancel</ModalCancelButton>
-          <ModalSubmitButton type="button" onClick={() => onConfirm(name)} disabled={!name.trim() || busy}>
-            {busy ? 'Saving…' : existingGroups.includes(name.trim()) ? 'Merge' : 'Rename'}
+          <ModalSubmitButton type="button" onClick={() => onConfirm(name, translations)} disabled={!name.trim() || busy}>
+            {busy ? 'Saving…' : merging ? 'Merge' : renaming ? 'Rename' : 'Save'}
           </ModalSubmitButton>
         </>
       }
     >
-      <Field label="Group name">
-        <input
-          type="text"
-          list="rename-group-suggestions"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          autoFocus
-          className="sc-field"
-        />
-        <datalist id="rename-group-suggestions">
-          {existingGroups.map(g => <option key={g} value={g} />)}
-        </datalist>
-      </Field>
+      <div className="space-y-8">
+        <FormSection
+          title="Name"
+          description="Every tag currently under this group moves to whatever you type here. A brand-new name renames the group; an existing one folds the two together."
+        >
+          <Field label="Group name">
+            <input
+              type="text"
+              list="rename-group-suggestions"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              autoFocus
+              className="sc-field"
+            />
+            <datalist id="rename-group-suggestions">
+              {existingGroups.map(g => <option key={g} value={g} />)}
+            </datalist>
+          </Field>
+        </FormSection>
+
+        <FormSection
+          title="Naming"
+          description="What this group's heading reads as in each language, wherever tags are grouped."
+          action={<AddLangButton onClick={() => setTranslations([...translations, { lang: '', name: '' }])} label="Add Lang" />}
+        >
+          <Field label="Translations">
+            <TranslationRows
+              value={translations}
+              onChange={setTranslations}
+              emptyLabel="No translations added — the heading reads the same in every language."
+              textPlaceholder="Translated group name"
+            />
+          </Field>
+        </FormSection>
+      </div>
     </Modal>
   );
 }

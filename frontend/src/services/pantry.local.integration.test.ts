@@ -208,6 +208,23 @@ describe('standalone pantry', () => {
     expect(bruschetta.missing.map((m) => m.name)).toEqual(['Garlic']);
   });
 
+  it('returns partial matches at ratio 0 without dragging in recipes that match nothing', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seed();
+    const { filterByPantry } = await import('./pantry.local');
+
+    // One ingredient in the house. At the old 1.0 default this answers
+    // "nothing", which is what made the screen look broken; at 0 it has to
+    // answer with what that ingredient does get you — and only that, not
+    // the whole library.
+    const partial = await filterByPantry([{ ingredientId: 'ing-tomato' }], 0);
+
+    expect(partial.length).toBeGreaterThan(0);
+    expect(partial.every((r) => r.have > 0)).toBe(true);
+    // Best-covered first, so the top row is the one worth cooking.
+    expect(partial[0].matchRatio).toBeGreaterThanOrEqual(partial[partial.length - 1].matchRatio);
+  });
+
   it('does not issue more queries as the library grows', async () => {
     await (await import('../db/local')).initLocalSchema();
     const { unitId } = await seed();

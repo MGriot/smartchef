@@ -425,6 +425,47 @@ toolsRouter.post("/", async (req: Request, res: Response) => {
   res.json({ data: { id } });
 });
 
+// POST /tools/:id/merge — folds a mistakenly-duplicated tool into another
+// one. Registered before PUT/DELETE /tools/:id so the literal "merge"
+// segment can't be swallowed as an :id. Mirrors POST /ingredients/:id/merge,
+// with the one extra place tools have that ingredients don't:
+// recipe_steps.tool_ids is an array of ids, so a merge that only rewrote
+// recipe_tools would leave the source id dangling inside individual steps.
+// See ingredients.local.ts's mergeTools() for the standalone-mode twin.
+const MergeToolSchema = z.object({ targetId: z.string().uuid() });
+toolsRouter.post("/:id/merge", async (req: Request, res: Response) => {
+  const { id: sourceId } = req.params;
+  const parsed = MergeToolSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const { targetId } = parsed.data;
+  if (sourceId === targetId) return res.status(400).json({ error: "Cannot merge a tool into itself" });
+
+  const source = await queryOne<{ id: string }>("SELECT id FROM tools WHERE id=$1", [sourceId]);
+  const target = await queryOne<{ id: string }>("SELECT id FROM tools WHERE id=$1", [targetId]);
+  if (!source || !target) return res.status(404).json({ error: "Tool not found" });
+
+  const affected = new Set<string>();
+  for (const row of await query<{ recipe_id: string }>("SELECT recipe_id FROM recipe_tools WHERE tool_id=$1", [sourceId])) {
+    affected.add(row.recipe_id);
+  }
+  await query(
+    "INSERT INTO recipe_tools (recipe_id, tool_id) SELECT recipe_id, $1 FROM recipe_tools WHERE tool_id=$2 ON CONFLICT DO NOTHING",
+    [targetId, sourceId]
+  );
+  await query("DELETE FROM recipe_tools WHERE tool_id=$1", [sourceId]);
+
+  for (const step of await query<{ id: string; recipe_id: string; tool_ids: string[] }>(
+    "SELECT id, recipe_id, tool_ids FROM recipe_steps WHERE $1 = ANY(tool_ids)", [sourceId]
+  )) {
+    const replaced = Array.from(new Set((step.tool_ids ?? []).map((tid) => (tid === sourceId ? targetId : tid))));
+    await query("UPDATE recipe_steps SET tool_ids=$1 WHERE id=$2", [replaced, step.id]);
+    affected.add(step.recipe_id);
+  }
+
+  await query("DELETE FROM tools WHERE id=$1", [sourceId]);
+  res.json({ data: { recipesUpdated: affected.size } });
+});
+
 toolsRouter.put("/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
   const parsed = ToolSchema.safeParse(req.body);

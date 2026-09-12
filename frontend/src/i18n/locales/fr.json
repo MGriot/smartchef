@@ -363,7 +363,9 @@
       "minuteShort": "min",
       "storagePrefix": "Conservation",
       "techniquesPrefix": "Techniques"
-    }
+    },
+    "optional": "Facultatif",
+    "optionalHint": "Marquer comme facultatif : il reste dans la recette, mais ne compte jamais contre elle quand le garde-manger calcule ce que vous pouvez cuisiner."
   },
   "recipeCreate": {
     "newRecipe": "Nouvelle recette",
@@ -455,9 +457,9 @@
     "migrationDone": "{{created}} recettes importées et {{ingredients}} nouveaux ingrédients créés.",
     "migrationFailed": "{{count}} recettes non importées",
     "noCategory": "Créez d’abord au moins une catégorie d’ingrédients.",
-    "scanTab": "Photo / PDF",
-    "scanHint": "Une photo d'une page de recette, ou un PDF. Le texte est lu sur cet appareil et placé dans la zone de texte pour que vous puissiez le vérifier avant d'importer.",
-    "chooseScan": "Choisir une photo ou un PDF",
+    "scanTab": "Photo / audio / vidéo",
+    "scanHint": "La photo d'une page de recette, un PDF, un mémo vocal ou une vidéo de cuisine. Lisez le texte sur cet appareil, ou confiez le fichier entier à votre fournisseur d'IA.",
+    "chooseScan": "Choisir une photo, un PDF, un audio ou une vidéo",
     "scanStart": "Lire la recette",
     "scanning": "Lecture…",
     "scanReadingPdf": "Lecture du PDF…",
@@ -465,7 +467,16 @@
     "scanReading": "Lecture de l'image…",
     "scanPdfNoText": "Ce PDF ne contient aucun texte : il s'agit visiblement d'un scan. Exportez la page en image et réessayez.",
     "scanNothingFound": "Aucun texte lisible n'a été trouvé.",
-    "scanOcrCaveat": "Les PDF contenant du vrai texte sont lus immédiatement. Les photos utilisent la reconnaissance de texte sur l'appareil, qui télécharge un modèle d'environ {{mb}} Mo la première fois puis fonctionne hors ligne. Les pages imprimées se lisent bien ; l'écriture manuscrite est aléatoire, vérifiez donc toujours le résultat."
+    "scanOcrCaveat": "Les PDF contenant du vrai texte sont lus immédiatement. Les photos utilisent la reconnaissance de texte sur l'appareil, qui télécharge un modèle d'environ {{mb}} Mo la première fois puis fonctionne hors ligne. Les pages imprimées se lisent bien ; l'écriture manuscrite est aléatoire, vérifiez donc toujours le résultat.",
+    "scanAiStart": "Analyser avec l'IA",
+    "scanAiRunning": "Analyse du fichier…",
+    "scanAiHint": "Envoie le fichier lui-même à votre fournisseur d'IA, qui peut alors écouter un mémo vocal ou regarder une vidéo, pas seulement lire du texte imprimé. Les types acceptés dépendent du fournisseur : Gemini prend images, PDF, audio et vidéo ; Anthropic images et PDF ; OpenAI et Ollama images (Ollama exige un modèle de vision).",
+    "scanOcrOnlyForText": "La lecture sur l'appareil fonctionne avec les photos et les PDF. Pour l'audio ou la vidéo, utilisez « Analyser avec l'IA ».",
+    "matchLanguage": "Langue de la recette",
+    "matchLanguageHint": "Les ingrédients, ustensiles et techniques ci-dessous sont comparés à votre bibliothèque dans cette langue. Changez-la si les suggestions semblent fausses.",
+    "langUnsupported": "Cette recette semble écrite en {{lang}}, une langue pour laquelle SmartChef n'a pas de catalogue. Choisissez la langue de comparaison et d'enregistrement — les noms restent écrits tels quels.",
+    "rematching": "Nouvelle comparaison…",
+    "searchNoResults": "Rien dans votre bibliothèque ne correspond."
   },
   "login": {
     "signingIn": "Connexion…",
@@ -638,7 +649,12 @@
     "noneCookable": "Aucune correspondance : ajoutez au garde-manger ou assouplissez le filtre.",
     "readyToCook": "Prête à cuisiner",
     "haveOf": "{{have}} ingrédients sur {{total}}",
-    "missing": "Manque :"
+    "missing": "Manque :",
+    "anyMatch": "N'importe",
+    "anyMatchHint": "Affiche toutes les recettes dont vous avez au moins un ingrédient, les mieux couvertes d'abord.",
+    "fellBackTitle": "Rien ne correspond à ce niveau",
+    "fellBackBody": "Voici ce dont votre garde-manger se rapproche le plus.",
+    "noneCookableAtAll": "Aucune de vos recettes n'utilise ce que contient le garde-manger."
   },
   "tagPicker": {
     "emptyCatalog": "Aucun tag dans le catalogue — gérez-les dans Bibliothèque > Tags."

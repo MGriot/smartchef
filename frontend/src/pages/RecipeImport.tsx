@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
+import CatalogSearchBox from '../components/CatalogSearchBox';
 import { useStore } from '../store/app.store';
+import { SUPPORTED_LANGUAGES } from '../i18n';
 import { apiFetch } from '../lib/api';
 import { tryParseStructuredText, TemplateParseResult } from '../services/recipeTemplateParser';
 import { extractRecipeFromHtml } from '../services/recipeStructuredData';
@@ -14,6 +16,7 @@ import { readImageText, ocrLanguageFor, OCR_MODEL_MB, type OcrProgress } from '.
 import { proposeMatches, ProposedMatches } from '../services/matchSuggestions';
 import { matchUnitId, type MatchSuggestion } from '../lib/fuzzyMatch';
 import { repairIngredientAmount } from '../lib/ingredientAmount';
+import { checkMediaForProvider } from '../lib/llmMedia';
 
 interface MatchedIngredient {
   ingredientId: string;
@@ -25,6 +28,7 @@ interface MatchedIngredient {
   quantityText?: string;
   notes?: string;
   groupName?: string | null;
+  isOptional?: boolean;
 }
 
 interface MatchedTool {
@@ -62,6 +66,46 @@ function defaultResolution(suggestions: MatchSuggestion[]): Resolution {
   return { choice: 'new' };
 }
 
+/** The file's bytes as bare base64 (no `data:` prefix).
+ *
+ *  FileReader.readAsDataURL rather than a manual walk over an ArrayBuffer:
+ *  btoa() on a big binary string blows the argument limit somewhere north
+ *  of a few hundred kilobytes, and a video is orders of magnitude past
+ *  that. */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.onload = () => {
+      const result = String(reader.result ?? '');
+      const comma = result.indexOf(',');
+      resolve(comma === -1 ? result : result.slice(comma + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Browsers leave `type` empty for plenty of files picked from disk, and
+ *  every provider needs a real MIME type on the content block, so fall back
+ *  to the extension rather than sending an empty string the provider will
+ *  reject.
+ *
+ *  Module scope, not inside the component, and deliberately: the capability
+ *  check that calls this runs inside a useMemo during render, so a `const`
+ *  declared further down the component body would be in its temporal dead
+ *  zone and throw on the first file selection. */
+function mimeTypeOf(file: File): string {
+  if (file.type) return file.type;
+  const ext = file.name.toLowerCase().split('.').pop() ?? '';
+  const byExt: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', heic: 'image/heic',
+    pdf: 'application/pdf',
+    mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/opus', flac: 'audio/flac', aac: 'audio/aac',
+    mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska', avi: 'video/x-msvideo',
+  };
+  return byExt[ext] ?? '';
+}
+
 export default function RecipeImport() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -94,6 +138,8 @@ export default function RecipeImport() {
   const [scanFile, setScanFile] = useState<File | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanStage, setScanStage] = useState<string | null>(null);
+  // Handing the file itself to the model, rather than OCR'ing it first.
+  const [analysing, setAnalysing] = useState(false);
   const [planning, setPlanning] = useState(false);
 
   // ── Parsed-but-not-yet-matched draft (from AI or the local parser), plus
@@ -106,7 +152,47 @@ export default function RecipeImport() {
   const [techniqueRes, setTechniqueRes] = useState<Resolution[]>([]);
   const [categories, setCategories] = useState<Category[] | null>(null);
   const [searchQuery, setSearchQuery] = useState<{ kind: 'ingredient' | 'tool' | 'technique'; index: number; query: string } | null>(null);
-  const [searching, setSearching] = useState(false);
+
+  // Which language the review step matches and searches the catalogs in.
+  //
+  // It used to be the app's content language, full stop — so an Italian
+  // recipe imported by someone browsing in English was scored against the
+  // catalog's base English names, which is how "sale" came back proposing
+  // "Sage" (75%) and "zucchero" proposing "Zucchini" (63%). The parser
+  // already reports the recipe's own language; using it is the difference
+  // between a review step you skim and one you redo by hand.
+  const [matchLang, setMatchLang] = useState<string>(contentLang || 'en');
+  // Set when the parser named a language SmartChef has no catalog language
+  // for at all (say a Portuguese recipe). Nothing sensible can be guessed
+  // there, so the review step asks instead of silently matching against a
+  // language the recipe isn't in.
+  const [detectedUnsupportedLang, setDetectedUnsupportedLang] = useState<string | null>(null);
+  const [rematching, setRematching] = useState(false);
+
+  // Which LLM provider Smart Import will actually use, so the waiting panel
+  // can stop telling a Gemini/Anthropic/OpenAI user that their import "runs
+  // on a local model with no GPU acceleration" and may "take several
+  // minutes" — untrue for a cloud provider, and the opposite of reassuring
+  // when the call in fact takes seconds.
+  //
+  // One endpoint covers both runtimes: /api/auth/llm-config is served by the
+  // backend in server mode and by localRouter.ts's dispatchAuth in
+  // standalone. `null` means "not known" (the request failed, or hasn't
+  // landed yet) and deliberately shows NO note at all — an unproven claim
+  // about how long this takes is worse than silence.
+  const [llmProvider, setLlmProvider] = useState<string | null>(null);
+  const runsLocalModel = llmProvider === 'ollama';
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/auth/llm-config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!cancelled && typeof json?.data?.provider === 'string') setLlmProvider(json.data.provider);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // No real token-level progress signal is available without streaming the
   // LLM response over the wire, so this is honest indeterminate feedback:
@@ -129,9 +215,16 @@ export default function RecipeImport() {
     t('import.status6'),
   ];
   const elapsedSec = elapsedMs / 1000;
-  const parseProgressPct = Math.min(90, 90 * (1 - Math.exp(-elapsedSec / 45)));
+  // Both curves were tuned for CPU-only Ollama, where a parse takes minutes.
+  // A cloud provider answers in seconds, so on those the bar used to still
+  // be showing ~10% and the status text still on its first message when the
+  // recipe was already parsed. Same easing, time constant matched to the
+  // provider — cloud is a guess at "a few seconds", not a promise, which is
+  // why it still eases to 90% rather than claiming completion.
+  const timeConstantSec = runsLocalModel ? 45 : 8;
+  const parseProgressPct = Math.min(90, 90 * (1 - Math.exp(-elapsedSec / timeConstantSec)));
   const parseStatusText = PARSE_STATUS_MESSAGES[Math.min(
-    Math.floor(elapsedSec / 4),
+    Math.floor(elapsedSec / (runsLocalModel ? 4 : 1.5)),
     PARSE_STATUS_MESSAGES.length - 1
   )];
   const formatElapsed = (ms: number) => {
@@ -166,6 +259,22 @@ export default function RecipeImport() {
     () => (sourceType === 'text' && inputVal.trim() ? tryParseStructuredText(inputVal) !== null : false),
     [sourceType, inputVal],
   );
+
+  // Whether on-device reading has anything to work with: OCR reads pixels
+  // and the PDF path reads a text layer, so audio and video have to route
+  // through the model instead.
+  // Whether the configured provider can read the chosen file at all.
+  // null when nothing is selected.
+  const mediaCheck = useMemo(
+    () => (scanFile ? checkMediaForProvider(mimeTypeOf(scanFile), scanFile.size, llmProvider) : null),
+    [scanFile, llmProvider],
+  );
+
+  const scanIsReadable = useMemo(() => {
+    if (!scanFile) return true;
+    const type = scanFile.type || '';
+    return type.startsWith('image/') || type === 'application/pdf' || /\.(pdf|jpe?g|png|webp|gif|heic|bmp|tiff?)$/i.test(scanFile.name);
+  }, [scanFile]);
 
   const useTemplate = () => {
     setSourceType('text');
@@ -229,26 +338,64 @@ export default function RecipeImport() {
       }),
     };
     setDraft(d);
+
+    // The parser reports the recipe's own language; prefer it over the app's
+    // content language, which says what the *reader* browses in, not what
+    // the recipe is written in.
+    const detected = d.language?.trim().toLowerCase() || null;
+    const supported = detected && SUPPORTED_LANGUAGES.some((l) => l.code === detected) ? detected : null;
+    setDetectedUnsupportedLang(detected && !supported ? detected : null);
+    const lang = supported || contentLang || 'en';
+    setMatchLang(lang);
+
     setMatching(true);
     setError(null);
     try {
-      const ingredientNames = d.ingredients.map((i) => i.name);
-      const toolNames = d.tools;
-      const techNames = [...new Set(d.steps.flatMap((s) => s.techniques ?? []))];
-      const matches = await proposeMatches(ingredientNames, toolNames, techNames);
-      setSuggestions(matches);
-      setIngredientRes(ingredientNames.map((n) => defaultResolution(matches.ingredients[n] || [])));
-      setToolRes(toolNames.map((n) => defaultResolution(matches.tools[n] || [])));
-      setTechniqueNames(techNames);
-      setTechniqueRes(techNames.map((n) => defaultResolution(matches.techniques[n] || [])));
-      if (ingredientNames.some((n) => defaultResolution(matches.ingredients[n] || []).choice === 'new')) {
-        loadCategoriesOnce();
-      }
+      await runMatching(d, lang);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('import.importFailed'));
       resetDraft();
     } finally {
       setMatching(false);
+    }
+  };
+
+  /** Scores the draft's names against the catalogs in `lang`. Split out of
+   *  beginReview() so changing the language selector can redo just this
+   *  part, without re-parsing (which for a cloud provider costs money and
+   *  for a local one costs minutes). */
+  const runMatching = async (d: TemplateParseResult, lang: string) => {
+    const ingredientNames = d.ingredients.map((i) => i.name);
+    const toolNames = d.tools;
+    const techNames = [...new Set(d.steps.flatMap((s) => s.techniques ?? []))];
+    const matches = await proposeMatches(ingredientNames, toolNames, techNames, lang || undefined);
+    setSuggestions(matches);
+    setIngredientRes(ingredientNames.map((n) => defaultResolution(matches.ingredients[n] || [])));
+    setToolRes(toolNames.map((n) => defaultResolution(matches.tools[n] || [])));
+    setTechniqueNames(techNames);
+    setTechniqueRes(techNames.map((n) => defaultResolution(matches.techniques[n] || [])));
+    if (ingredientNames.some((n) => defaultResolution(matches.ingredients[n] || []).choice === 'new')) {
+      loadCategoriesOnce();
+    }
+  };
+
+  /** Re-scores everything in a different language. Every resolution is
+   *  rebuilt from the new suggestions, which does discard manual picks —
+   *  intentionally: the picks were made against names in the wrong
+   *  language, so keeping them would be keeping the mistakes the language
+   *  change exists to undo. */
+  const changeMatchLang = async (lang: string) => {
+    if (!draft || lang === matchLang) return;
+    setMatchLang(lang);
+    setSearchQuery(null);
+    setRematching(true);
+    setError(null);
+    try {
+      await runMatching(draft, lang);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('import.importFailed'));
+    } finally {
+      setRematching(false);
     }
   };
 
@@ -311,7 +458,14 @@ export default function RecipeImport() {
   const runSearch = async (kind: 'ingredient' | 'tool' | 'technique', query: string): Promise<MatchSuggestion[]> => {
     if (!query.trim()) return [];
     const path = kind === 'ingredient' ? '/api/ingredients' : kind === 'tool' ? '/api/tools' : '/api/techniques';
-    const res = await apiFetch(`${path}?q=${encodeURIComponent(query)}`);
+    // `lang` does two things here, and the row mapping below only worked
+    // because of one of them: it makes the catalog search the translated
+    // name (so "burro" finds Butter at all), and it makes translated_name
+    // present so the result is LABELLED in the app's language. Without it
+    // the `r.translated_name || r.name` fallback silently always took the
+    // English branch.
+    const langParam = matchLang ? `&lang=${encodeURIComponent(matchLang)}` : '';
+    const res = await apiFetch(`${path}?q=${encodeURIComponent(query)}${langParam}`);
     const json = await res.json();
     const rows: Array<{ id: string; name: string; translated_name?: string | null }> = json.data || [];
     return rows.slice(0, 8).map((r) => ({ id: r.id, name: r.translated_name || r.name, score: 1 }));
@@ -357,6 +511,7 @@ export default function RecipeImport() {
           quantityText: ing.quantityText,
           notes: ing.notes,
           groupName: ing.groupName ?? null,
+          isOptional: ing.isOptional === true,
         });
       }
 
@@ -417,10 +572,12 @@ export default function RecipeImport() {
         sourceUrl: draft.sourceUrl || undefined,
         sources: draft.sourceUrl ? [{ type: 'url', label: t('import.originalRecipe'), url: draft.sourceUrl }] : [],
         isComponent: false,
-        // Prefer the parsed recipe's own language over the current UI
-        // language — someone browsing in English can still paste an
-        // Italian recipe.
-        languageCode: draft.language || contentLang || undefined,
+        // The language the review step actually matched in: the parser's
+        // detection when SmartChef has that language, otherwise whatever
+        // the user picked in the selector above the review. Storing the
+        // detected-but-unsupported code instead would file the recipe
+        // under a language nothing else in the app can read.
+        languageCode: matchLang || draft.language || contentLang || undefined,
         storageInstructions: draft.storageInstructions || undefined,
         tips: draft.tips || undefined,
         ingredients: matchedIngredients.map((ing, i) => ({
@@ -430,7 +587,10 @@ export default function RecipeImport() {
           quantityText: ing.quantityText || undefined,
           unitId: ing.unitId || undefined,
           notes: ing.notes || undefined,
-          isOptional: false,
+          // Was hardcoded false, which made every imported ingredient
+          // mandatory no matter what the source said — so a recipe with a
+          // garnish "(facoltativo)" was hidden from the pantry over it.
+          isOptional: ing.isOptional === true,
           groupName: ing.groupName || undefined,
         })),
         steps: draft.steps.map((s) => ({
@@ -530,6 +690,56 @@ export default function RecipeImport() {
     } finally {
       setScanning(false);
       setScanStage(null);
+    }
+  };
+
+  /** Hands the whole file to the configured provider instead of reducing it
+   *  to text first.
+   *
+   *  This is the path OCR cannot cover: a voice note, a clip, a
+   *  handwritten card, a photo whose two-column layout OCR flattens into
+   *  interleaved nonsense. It goes straight into the same Review Matches
+   *  step as every other import — beginReview() does not care which
+   *  producer it came from, which is the whole reason parsing and matching
+   *  are separate. */
+  const handleAnalyseMedia = async () => {
+    if (!scanFile) return;
+    // Checked here, not only in the parser: encoding a 15 MB clip to base64
+    // and pushing it up a domestic connection takes long enough that
+    // learning afterwards the provider was never going to read it is a
+    // genuinely bad experience. Both runtimes still enforce it server-side
+    // — this is the version that saves the upload.
+    const preflight = checkMediaForProvider(mimeTypeOf(scanFile), scanFile.size, llmProvider);
+    if (!preflight.ok) {
+      setError(preflight.reason ?? t('import.importFailed'));
+      return;
+    }
+    setAnalysing(true);
+    setParsing(true);
+    setError(null);
+    resetDraft();
+    try {
+      const media = {
+        mimeType: mimeTypeOf(scanFile),
+        data: await fileToBase64(scanFile),
+        fileName: scanFile.name,
+      };
+      const res = await apiFetch('/api/recipes/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: '', inputType: 'media', media }),
+        // Same ceiling as the text path: a local vision model on CPU is
+        // slower reading an image than it is reading prose, not faster.
+        timeoutMs: 650_000,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('import.importFailed'));
+      await beginReview(json.data as TemplateParseResult);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('import.importFailed'));
+    } finally {
+      setAnalysing(false);
+      setParsing(false);
     }
   };
 
@@ -640,38 +850,25 @@ export default function RecipeImport() {
             {t('import.searchExisting')}
           </button>
         ) : (
-          <div className="mt-2 flex gap-1.5">
-            <input
-              type="text"
-              autoFocus
-              value={searchQuery.query}
-              onChange={(e) => setSearchQuery({ ...searchQuery, query: e.target.value })}
-              placeholder={t('import.typeToSearchExisting')}
-              className="flex-1 text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
-            />
-            <button
-              type="button"
-              disabled={searching}
-              onClick={async () => {
-                setSearching(true);
-                try {
-                  const results = await runSearch(kind, searchQuery.query);
-                  if (results[0]) setResolution({ choice: 'existing', id: results[0].id, name: results[0].name });
-                  // Merge fresh results to the top of the suggestion list so they're visible/selectable.
-                  if (suggestions) {
-                    const key = kind === 'ingredient' ? 'ingredients' : kind === 'tool' ? 'tools' : 'techniques';
-                    setSuggestions({ ...suggestions, [key]: { ...suggestions[key], [name]: results } });
-                  }
-                } finally {
-                  setSearching(false);
-                  setSearchQuery(null);
+          <CatalogSearchBox
+            query={searchQuery.query}
+            onQueryChange={(query) => setSearchQuery({ kind, index, query })}
+            search={(q) => runSearch(kind, q)}
+            selectedId={resolution?.choice === 'existing' ? resolution.id : undefined}
+            onClose={() => setSearchQuery(null)}
+            onPick={(result) => {
+              setResolution({ choice: 'existing', id: result.id, name: result.name });
+              // Merge the pick into this row's suggestion list so its radio
+              // is there (and stays selected) once the search box closes.
+              if (suggestions) {
+                const key = kind === 'ingredient' ? 'ingredients' : kind === 'tool' ? 'tools' : 'techniques';
+                const existing = suggestions[key][name] ?? [];
+                if (!existing.some((sug) => sug.id === result.id)) {
+                  setSuggestions({ ...suggestions, [key]: { ...suggestions[key], [name]: [result, ...existing] } });
                 }
-              }}
-              className="px-3 py-1.5 rounded-lg bg-zinc-900 text-white text-[11px] font-bold"
-            >
-              {searching ? '…' : t('import.search')}
-            </button>
-          </div>
+              }
+            }}
+          />
         )}
         {extra}
       </div>
@@ -726,7 +923,7 @@ export default function RecipeImport() {
                         </span>
                         <input
                           type="file"
-                          accept="image/*,application/pdf,.pdf"
+                          accept="image/*,application/pdf,.pdf,audio/*,video/*"
                           className="hidden"
                           onChange={(e) => { setScanFile(e.target.files?.[0] ?? null); setError(null); }}
                         />
@@ -736,9 +933,17 @@ export default function RecipeImport() {
                         {t('import.scanOcrCaveat', { mb: OCR_MODEL_MB })}
                       </p>
 
+                      {/* Two genuinely different routes, not a fallback
+                          chain: on-device reading is free, offline and
+                          exact on printed text, while the AI route is the
+                          only one that can hear a voice note, watch a clip
+                          or make sense of handwriting. Which one is right
+                          depends on the file, so both are offered rather
+                          than one being guessed at. */}
                       <button
                         onClick={handleScan}
-                        disabled={scanning || !scanFile}
+                        disabled={scanning || analysing || !scanFile || !scanIsReadable}
+                        title={scanFile && !scanIsReadable ? t('import.scanOcrOnlyForText') : undefined}
                         className="mt-8 w-full py-5 bg-primary text-white rounded-3xl font-black text-lg shadow-xl shadow-primary/20 flex items-center justify-center gap-3 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:scale-100"
                       >
                         <span className={`material-symbols-outlined ${scanning ? 'animate-spin' : ''}`}>
@@ -746,6 +951,30 @@ export default function RecipeImport() {
                         </span>
                         {scanStage ?? (scanning ? t('import.scanning') : t('import.scanStart'))}
                       </button>
+
+                      <button
+                        onClick={handleAnalyseMedia}
+                        disabled={scanning || analysing || !scanFile}
+                        className="mt-3 w-full py-4 rounded-3xl font-black border-2 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 flex items-center justify-center gap-3 hover:border-primary/40 hover:text-primary transition-all disabled:opacity-50"
+                      >
+                        <span className={`material-symbols-outlined ${analysing ? 'animate-spin' : ''}`}>
+                          {analysing ? 'settings' : 'auto_awesome'}
+                        </span>
+                        {analysing ? t('import.scanAiRunning') : t('import.scanAiStart')}
+                      </button>
+
+                      <p className="sc-hint mt-3">{t('import.scanAiHint')}</p>
+                      {scanFile && !scanIsReadable && (
+                        <p className="sc-hint mt-1">{t('import.scanOcrOnlyForText')}</p>
+                      )}
+                      {/* Said as soon as the file is chosen rather than
+                          only on press: the answer does not depend on
+                          anything that happens in between, and knowing now
+                          is what lets someone switch provider before
+                          waiting through an upload. */}
+                      {mediaCheck && !mediaCheck.ok && (
+                        <p className="mt-2 text-[11px] font-bold text-amber-700 dark:text-amber-500">{mediaCheck.reason}</p>
+                      )}
                     </>
                   ) : sourceType === 'file' ? (
                     <>
@@ -1099,7 +1328,9 @@ export default function RecipeImport() {
                          />
                        </div>
                        <p className="text-zinc-400 dark:text-zinc-500 text-[11px] mt-3 font-bold tabular-nums">{t('import.elapsed', { time: formatElapsed(elapsedMs) })}</p>
-                       <p className="text-zinc-400 dark:text-zinc-500 text-[11px] mt-2">{t('import.localModelNote')}</p>
+                       {runsLocalModel && (
+                         <p className="text-zinc-400 dark:text-zinc-500 text-[11px] mt-2">{t('import.localModelNote')}</p>
+                       )}
                     </div>
                  </div>
                )}
@@ -1115,7 +1346,36 @@ export default function RecipeImport() {
                  <div className="bg-white dark:bg-zinc-900 rounded-[40px] overflow-hidden shadow-xl shadow-zinc-200/50 border border-zinc-100 dark:border-zinc-800">
                     <div className="p-8 max-h-[80vh] overflow-y-auto">
                        <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('import.reviewMatches')}</p>
-                       <h4 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 leading-tight mb-6">{draft.title || t('import.untitledRecipe')}</h4>
+                       <h4 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 leading-tight mb-4">{draft.title || t('import.untitledRecipe')}</h4>
+
+                       {/* The language every suggestion below was scored in.
+                           Shown rather than assumed: a wrong guess here is
+                           what turns the whole list into nonsense ("sale"
+                           → "Sage"), and it is one dropdown to put right
+                           versus twenty rows to correct by hand. */}
+                       <div className="mb-6 rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/40 px-4 py-3">
+                         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                           <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+                             {t('import.matchLanguage')}
+                           </span>
+                           <select
+                             value={matchLang}
+                             onChange={(e) => void changeMatchLang(e.target.value)}
+                             disabled={rematching}
+                             className="sc-field-inset w-auto min-w-[9rem] cursor-pointer text-xs disabled:opacity-50"
+                           >
+                             {SUPPORTED_LANGUAGES.map((l) => (
+                               <option key={l.code} value={l.code}>{l.label}</option>
+                             ))}
+                           </select>
+                           {rematching && <span className="text-[11px] font-bold text-primary">{t('import.rematching')}</span>}
+                         </div>
+                         <p className="sc-hint mt-2">
+                           {detectedUnsupportedLang
+                             ? t('import.langUnsupported', { lang: detectedUnsupportedLang.toUpperCase() })
+                             : t('import.matchLanguageHint')}
+                         </p>
+                       </div>
 
                        {draft.ingredients.length > 0 && (
                          <>

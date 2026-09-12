@@ -86,6 +86,49 @@ techniquesRouter.put("/:id", async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// POST /techniques/:id/merge — folds a duplicated technique into another.
+// Registered before DELETE/PUT /:id so the literal "merge" segment can't be
+// swallowed as an :id. Mirrors POST /tools/:id/merge and
+// POST /ingredients/:id/merge; see techniques.local.ts's mergeTechniques()
+// for the standalone twin.
+//
+// The catalogue collects duplicates on its own: Smart Import creates a
+// technique per parsed step name, so an Italian recipe leaves "Bollitura"
+// sitting next to the "Boil" an English one created. Unlike tools, a
+// technique has no join table — only recipe_steps.technique_ids — so this
+// is a single array rewrite.
+const MergeTechniqueSchema = z.object({ targetId: z.string().uuid() });
+techniquesRouter.post("/:id/merge", async (req: Request, res: Response) => {
+  const { id: sourceId } = req.params;
+  const parsed = MergeTechniqueSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const { targetId } = parsed.data;
+  if (sourceId === targetId) return res.status(400).json({ error: "Cannot merge a technique into itself" });
+
+  const rows = await query<{ id: string }>(
+    "SELECT id FROM techniques WHERE id = ANY($1::uuid[])",
+    [[sourceId, targetId]]
+  );
+  if (rows.length < 2) return res.status(404).json({ error: "Technique not found" });
+
+  const affected = new Set<string>();
+  for (const step of await query<{ id: string; recipe_id: string; technique_ids: string[] }>(
+    "SELECT id, recipe_id, technique_ids FROM recipe_steps WHERE $1 = ANY(technique_ids)",
+    [sourceId]
+  )) {
+    // Deduped: a step already listing BOTH must not end up with the target
+    // twice.
+    const replaced = Array.from(
+      new Set((step.technique_ids ?? []).map((tid) => (tid === sourceId ? targetId : tid)))
+    );
+    await query("UPDATE recipe_steps SET technique_ids=$1 WHERE id=$2", [replaced, step.id]);
+    affected.add(step.recipe_id);
+  }
+
+  await query("UPDATE techniques SET deleted_at=now(), updated_at=now() WHERE id=$1", [sourceId]);
+  res.json({ data: { recipesUpdated: affected.size } });
+});
+
 techniquesRouter.delete("/:id", async (req: Request, res: Response) => {
   await query("UPDATE techniques SET deleted_at=now(), updated_at=now() WHERE id=$1", [req.params.id]);
   res.json({ success: true });

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import AppLayout from '../components/AppLayout';
+import Autocomplete from '../components/Autocomplete';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
 import { ResolvedImage } from '../components/CoverImage';
@@ -7,7 +8,7 @@ import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { TECHNIQUE_ICONS } from '../lib/icons';
-import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
+import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FormSection, IconPicker, TranslationRows } from '../components/Form';
 
 
@@ -19,6 +20,13 @@ export default function LibraryTechniques() {
   const [form, setForm] = useState({ name: '', description: '', icon: 'TbFlame', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
+  // Fold a duplicate technique into another one. The catalogue collects
+  // these on its own — Smart Import creates a technique per parsed step
+  // name, so an Italian recipe leaves "Bollitura" next to the "Boil" an
+  // English one created.
+  const [mergeSource, setMergeSource] = useState<any>(null);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [merging, setMerging] = useState(false);
 
   const fetchTechniques = () => {
     setLoading(true);
@@ -79,14 +87,50 @@ export default function LibraryTechniques() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this technique?')) return;
+    if (!window.confirm("Delete this technique? It's removed from the catalogue and from every step referencing it — this can't be undone. To keep those references, merge it into another technique instead.")) return;
     try {
       const res = await apiFetch(`/api/techniques/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchTechniques();
+      if (res.ok) {
+        setShowModal(false);
+        fetchTechniques();
+      }
     } catch (err) {
       console.error('Delete failed:', err);
     }
   };
+
+  const handleMerge = async () => {
+    if (!mergeSource || !mergeTargetId) return;
+    setMerging(true);
+    try {
+      const res = await apiFetch(`/api/techniques/${mergeSource.id}/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId: mergeTargetId }),
+      });
+      const result = await res.json();
+      if (res.ok) {
+        setMergeSource(null);
+        setMergeTargetId('');
+        fetchTechniques();
+      } else {
+        alert(`Merge failed: ${JSON.stringify(result.error || result)}`);
+      }
+    } catch {
+      alert('Network error while merging.');
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  // Memoized: Autocomplete re-syncs its typed text whenever this array's
+  // identity changes, so a fresh array each render would clear the box.
+  const mergeOptions = useMemo(
+    () => techniques
+      .filter((t) => t.id !== mergeSource?.id)
+      .map((t) => ({ id: t.id, label: t.translated_name || t.name })),
+    [techniques, mergeSource],
+  );
 
   return (
     <>
@@ -136,8 +180,11 @@ export default function LibraryTechniques() {
                       </td>
                       <td className="py-6 text-right pr-4">
                          <div className="flex justify-end gap-2">
-                            <button onClick={() => handleOpenModal(technique)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                            <button onClick={() => handleOpenModal(technique)} title="Edit this technique" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                               <span className="material-symbols-outlined text-xl">edit</span>
+                            </button>
+                            <button onClick={() => { setMergeSource(technique); setMergeTargetId(''); }} title="Merge into another technique" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                              <span className="material-symbols-outlined text-xl">call_merge</span>
                             </button>
                             <button onClick={() => handleDelete(technique.id)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
                               <span className="material-symbols-outlined text-xl">delete</span>
@@ -152,6 +199,35 @@ export default function LibraryTechniques() {
           </section>
       </AppLayout>
 
+      {/* ─── Merge Technique ────────────────────────── */}
+      <Modal
+        open={!!mergeSource}
+        onClose={() => setMergeSource(null)}
+        size="sm"
+        zIndex={120}
+        title="Merge Technique"
+        subtitle={mergeSource ? `Fold "${mergeSource.translated_name || mergeSource.name}" into another technique. Every step referencing it is repointed automatically — nothing is lost.` : undefined}
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setMergeSource(null)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
+              {merging ? 'Merging…' : 'Merge'}
+            </ModalSubmitButton>
+          </>
+        }
+      >
+        <Field label="Merge into" hint="Type to search the catalogue, then pick the technique to keep.">
+          <Autocomplete
+            options={mergeOptions}
+            value={mergeTargetId || null}
+            onSelect={(id) => setMergeTargetId(id)}
+            onClear={() => setMergeTargetId('')}
+            placeholder="Search for a technique…"
+            className="sc-field"
+          />
+        </Field>
+      </Modal>
+
       <Modal
         open={showModal}
         onClose={() => setShowModal(false)}
@@ -161,6 +237,7 @@ export default function LibraryTechniques() {
         subtitle="A named cooking action recipe steps can link to."
         footer={
           <>
+            {editingTechnique && <ModalDeleteButton onClick={() => handleDelete(editingTechnique.id)} label="Delete technique" />}
             <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
             <ModalSubmitButton>{editingTechnique ? 'Update Technique' : 'Add Technique'}</ModalSubmitButton>
           </>

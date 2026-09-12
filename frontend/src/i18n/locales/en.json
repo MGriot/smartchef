@@ -363,7 +363,9 @@
       "minuteShort": "min",
       "storagePrefix": "How to store",
       "techniquesPrefix": "Techniques"
-    }
+    },
+    "optional": "Optional",
+    "optionalHint": "Mark as optional: it still shows in the recipe, but never counts against it when the pantry works out what you can cook."
   },
   "recipeCreate": {
     "newRecipe": "New Recipe",
@@ -455,9 +457,9 @@
     "migrationDone": "Imported {{created}} recipes and created {{ingredients}} new ingredients.",
     "migrationFailed": "{{count}} recipes could not be imported",
     "noCategory": "Create at least one ingredient category first.",
-    "scanTab": "Photo / PDF",
-    "scanHint": "A photo of a recipe page, or a PDF. The text is read on this device and dropped into the raw-text box so you can check it before importing.",
-    "chooseScan": "Choose a photo or PDF",
+    "scanTab": "Photo / audio / video",
+    "scanHint": "A photo of a recipe page, a PDF, a voice note or a cooking clip. Read the text on this device, or hand the whole file to your AI provider.",
+    "chooseScan": "Choose a photo, PDF, audio file or video",
     "scanStart": "Read the recipe",
     "scanning": "Reading…",
     "scanReadingPdf": "Reading the PDF…",
@@ -465,7 +467,16 @@
     "scanReading": "Reading the image…",
     "scanPdfNoText": "That PDF has no text in it — it looks like a scan. Export the page as an image and try that instead.",
     "scanNothingFound": "No readable text was found.",
-    "scanOcrCaveat": "PDFs with real text are read instantly. Photos use on-device text recognition, which downloads a ~{{mb}} MB language model the first time and then works offline. Printed pages read well; handwriting is hit and miss, so always check the result."
+    "scanOcrCaveat": "PDFs with real text are read instantly. Photos use on-device text recognition, which downloads a ~{{mb}} MB language model the first time and then works offline. Printed pages read well; handwriting is hit and miss, so always check the result.",
+    "scanAiStart": "Analyse with AI",
+    "scanAiRunning": "Analysing the file…",
+    "scanAiHint": "Sends the file itself to your AI provider, so it can hear a voice note or watch a clip — not just read printed text. Which file types work depends on the provider: Gemini takes images, PDFs, audio and video; Anthropic takes images and PDFs; OpenAI and Ollama take images (Ollama needs a vision model).",
+    "scanOcrOnlyForText": "On-device reading works on photos and PDFs. For audio or video, use “Analyse with AI”.",
+    "matchLanguage": "Recipe language",
+    "matchLanguageHint": "Ingredients, tools and techniques below are matched against your library in this language. Change it if the suggestions look wrong.",
+    "langUnsupported": "This recipe looks like it's written in {{lang}}, which SmartChef doesn't have a catalogue language for. Pick the language to match and store it in — names are kept exactly as written either way.",
+    "rematching": "Re-matching…",
+    "searchNoResults": "Nothing in your library matches that."
   },
   "login": {
     "enterPasswordToContinue": "Enter your password to continue",
@@ -638,7 +649,12 @@
     "noneCookable": "Nothing matches yet — add more to the pantry, or loosen the filter.",
     "readyToCook": "Ready to cook",
     "haveOf": "{{have}} of {{total}} ingredients",
-    "missing": "Missing:"
+    "missing": "Missing:",
+    "anyMatch": "Anything",
+    "anyMatchHint": "Shows every recipe you have at least one ingredient for, best covered first.",
+    "fellBackTitle": "Nothing matched at that strictness",
+    "fellBackBody": "Here is what your pantry gets you closest to instead.",
+    "noneCookableAtAll": "None of your recipes use anything currently in the pantry."
   },
   "tagPicker": {
     "emptyCatalog": "No tags in the catalogue yet — manage them under Library > Tags."

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import AppLayout from '../components/AppLayout';
+import Autocomplete from '../components/Autocomplete';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
 import { ResolvedImage } from '../components/CoverImage';
@@ -7,7 +8,7 @@ import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { TOOL_ICONS } from '../lib/icons';
-import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
+import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
 
 
@@ -16,6 +17,12 @@ export default function LibraryTools() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingTool, setEditingTool] = useState<any>(null);
+  // Fold a duplicate tool into another one — POST /tools/:id/merge repoints
+  // every recipe and every individual step that referenced it, so nothing
+  // loses its equipment.
+  const [mergeSource, setMergeSource] = useState<any>(null);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [merging, setMerging] = useState(false);
   const [form, setForm] = useState({ name: '', category: '', description: '', icon: 'TbToolsKitchen', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
@@ -80,14 +87,51 @@ export default function LibraryTools() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this tool?')) return;
+    if (!window.confirm("Delete this tool? It's removed from the catalog and from every recipe and step referencing it — this can't be undone. To keep those references, merge it into another tool instead.")) return;
     try {
       const res = await apiFetch(`/api/tools/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchTools();
+      if (res.ok) {
+        setShowModal(false);
+        fetchTools();
+      }
     } catch (err) {
       console.error('Delete failed:', err);
     }
   };
+
+  const handleMerge = async () => {
+    if (!mergeSource || !mergeTargetId) return;
+    setMerging(true);
+    try {
+      const res = await apiFetch(`/api/tools/${mergeSource.id}/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId: mergeTargetId }),
+      });
+      const result = await res.json();
+      if (res.ok) {
+        setMergeSource(null);
+        setMergeTargetId('');
+        fetchTools();
+      } else {
+        alert(`Merge failed: ${JSON.stringify(result.error || result)}`);
+      }
+    } catch {
+      alert('Network error while merging.');
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  // Built once per tools/mergeSource change rather than inline in the JSX:
+  // Autocomplete re-syncs its typed text whenever this array's identity
+  // changes, so a fresh array on every keystroke would wipe the search box.
+  const mergeOptions = useMemo(
+    () => tools
+      .filter((t) => t.id !== mergeSource?.id)
+      .map((t) => ({ id: t.id, label: t.translated_name || t.name, sublabel: t.category || undefined })),
+    [tools, mergeSource],
+  );
 
   return (
     <>
@@ -143,8 +187,11 @@ export default function LibraryTools() {
                       </td>
                       <td className="py-6 text-right pr-4">
                          <div className="flex justify-end gap-2">
-                            <button onClick={() => handleOpenModal(tool)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                            <button onClick={() => handleOpenModal(tool)} title="Edit this tool" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                               <span className="material-symbols-outlined text-xl">edit</span>
+                            </button>
+                            <button onClick={() => { setMergeSource(tool); setMergeTargetId(''); }} title="Merge into another tool" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                              <span className="material-symbols-outlined text-xl">call_merge</span>
                             </button>
                             <button onClick={() => handleDelete(tool.id)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
                               <span className="material-symbols-outlined text-xl">delete</span>
@@ -159,6 +206,35 @@ export default function LibraryTools() {
           </section>
       </AppLayout>
 
+      {/* ─── Merge Tool ──────────────────────────────────────────────── */}
+      <Modal
+        open={!!mergeSource}
+        onClose={() => setMergeSource(null)}
+        size="sm"
+        zIndex={120}
+        title="Merge Tool"
+        subtitle={mergeSource ? `Fold "${mergeSource.translated_name || mergeSource.name}" into another tool. Every recipe and every step referencing it is repointed automatically — nothing is lost.` : undefined}
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setMergeSource(null)}>Cancel</ModalCancelButton>
+            <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
+              {merging ? 'Merging…' : 'Merge'}
+            </ModalSubmitButton>
+          </>
+        }
+      >
+        <Field label="Merge into" hint="Type to search the catalog, then pick the tool to keep.">
+          <Autocomplete
+            options={mergeOptions}
+            value={mergeTargetId || null}
+            onSelect={(id) => setMergeTargetId(id)}
+            onClear={() => setMergeTargetId('')}
+            placeholder="Search for a tool…"
+            className="sc-field"
+          />
+        </Field>
+      </Modal>
+
       <Modal
         open={showModal}
         onClose={() => setShowModal(false)}
@@ -168,6 +244,7 @@ export default function LibraryTools() {
         subtitle={editingTool ? 'Changes apply everywhere this tool is used.' : 'Register a piece of equipment recipes can reference.'}
         footer={
           <>
+            {editingTool && <ModalDeleteButton onClick={() => handleDelete(editingTool.id)} label="Delete tool" />}
             <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
             <ModalSubmitButton>{editingTool ? 'Update Asset' : 'Register Asset'}</ModalSubmitButton>
           </>

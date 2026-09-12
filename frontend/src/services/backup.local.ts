@@ -32,9 +32,32 @@
 import { query, queryOne } from '../db/local';
 import * as ingredientsLocal from './ingredients.local';
 import * as recipesLocal from './recipes.local';
+import { decodeDataUri, isInlineDataUri, storeImage } from '../lib/localImages';
 
 function newId(): string {
   return crypto.randomUUID();
+}
+
+/** The snapshot format embeds images as `data:` URIs, and this used to write
+ *  them straight into the column — which is how a restored library ended up
+ *  with whole photos inside `recipes.cover_image_url` and
+ *  `recipe_steps.image_url`. Every read then dragged them back out, and in
+ *  standalone mode a read crosses the Capacitor bridge (see
+ *  lib/inlineImageMigration.ts for the measured cost).
+ *
+ *  Any other value — a remote URL, a bundled asset path, an already-stored
+ *  `images/<hash>` path, null — passes through untouched. A decode or write
+ *  failure falls back to keeping the original inline value: a bloated image
+ *  that works beats a restore that loses one. */
+async function intoImageStore(value: string | null | undefined): Promise<string | null | undefined> {
+  if (!isInlineDataUri(value)) return value;
+  try {
+    const { bytes, extHint } = decodeDataUri(value as string);
+    return await storeImage(bytes, extHint);
+  } catch (err) {
+    console.error('SmartChef: could not move a restored image into local storage, keeping it inline:', err);
+    return value;
+  }
 }
 
 interface SnapshotTranslation { lang: string; name?: string | null; description?: string | null }
@@ -424,7 +447,7 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
       });
     }
 
-    const stepInputs: recipesLocal.RecipeStepInput[] = (r.steps ?? []).map((s) => ({
+    const stepInputs: recipesLocal.RecipeStepInput[] = await Promise.all((r.steps ?? []).map(async (s) => ({
       stepNumber: s.stepNumber,
       title: s.title,
       description: s.description,
@@ -432,10 +455,10 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
       toolIds: s.toolIds,
       techniqueIds: s.techniqueIds,
       notes: s.notes,
-      imageUrl: s.imageUrl,
+      imageUrl: await intoImageStore(s.imageUrl),
       translations: s.translations,
       stepIngredients: Array.isArray(s.stepIngredients) ? s.stepIngredients : [],
-    }));
+    })));
 
     // recipe_ingredients.sub_recipe_id is a real FK (recipes.id) that this
     // app's actual SQLite engine does enforce (confirmed the hard way —
@@ -448,7 +471,7 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
     const recipeInput = {
       id: r.id, title: r.title, description: r.description, difficulty: r.difficulty, servings: r.servings,
       prepTimeMin: r.prepTimeMin, cookTimeMin: r.cookTimeMin, restTimeMin: r.restTimeMin, rating: r.rating,
-      tags: r.tags, coverImageUrl: r.coverImageUrl, sourceUrl: r.sourceUrl, sources: r.sources,
+      tags: r.tags, coverImageUrl: await intoImageStore(r.coverImageUrl), sourceUrl: r.sourceUrl, sources: r.sources,
       isComponent: r.isComponent, languageCode: r.languageCode ?? undefined,
       storageInstructions: r.storageInstructions ?? undefined, tips: r.tips ?? undefined,
       ingredients: ingredientInputs, steps: stepInputs, toolIds: r.toolIds, translations: r.translations,

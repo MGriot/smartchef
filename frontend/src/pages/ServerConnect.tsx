@@ -168,6 +168,28 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
     setConnecting(true);
     setError(null);
     try {
+      // Last line of defence against re-onboarding a device that is in fact
+      // already set up. checkForExistingProfiles() above only runs when the
+      // user picks a Sync Folder during onboarding, so anyone who just hit
+      // "Use offline on this device" and typed a name went straight to
+      // initStandaloneProfile() — which unconditionally CREATES a profile.
+      //
+      // A library that already has profiles is, by definition, not a first
+      // run. Reaching this screen with one is a bug somewhere upstream (a
+      // second app instance whose localStorage came up empty was the one
+      // found in the wild — see the single-instance lock in
+      // electron/src/index.ts), and the right response to that is to offer
+      // the profiles that exist, not to quietly add a duplicate of the
+      // person already in there.
+      const { initLocalSchema } = await import('../db/local');
+      await initLocalSchema();
+      const { listStandaloneProfiles } = await import('../lib/standalone');
+      const existing = await listStandaloneProfiles();
+      if (existing.length > 0 && !forceCreateNew) {
+        setFolderProfiles(existing);
+        return;
+      }
+
       await initStandaloneProfile(name, avatarUrl || null);
       onConnected();
     } catch (err) {
@@ -211,9 +233,11 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
     </button>
   );
 
-  // Once a folder that already has profiles is chosen, show "pick who you
-  // are" instead of the name form — unless the user explicitly asked to
-  // create a brand-new one anyway (forceCreateNew).
+  // Once profiles are known to exist — either in a Sync Folder the user
+  // just chose, or already in this device's local library (see
+  // handleStartOffline) — show "pick who you are" instead of the name form,
+  // unless the user explicitly asked to create a brand-new one anyway
+  // (forceCreateNew).
   const showExistingProfilesPicker = folderProfiles !== null && folderProfiles.length > 0 && !forceCreateNew;
 
   return (
@@ -425,7 +449,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
 
             {!checkingFolder && showExistingProfilesPicker && (
               <div className="space-y-5">
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">This folder already has profiles — pick who you are, or create a new one.</p>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">This library already has profiles — pick who you are, or create a new one.</p>
                 <div className="space-y-2">
                   {folderProfiles!.map((p) => (
                     <button

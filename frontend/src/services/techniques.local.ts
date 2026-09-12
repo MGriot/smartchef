@@ -8,7 +8,7 @@
 // had no offline path (see localRouter.ts's dispatchTechniques()).
 // ════════════════════════════════════════════════════════════════════════
 
-import { query, queryOne } from "../db/local";
+import { query, queryOne, chunk, inPlaceholders } from "../db/local";
 
 function newId(): string {
   return crypto.randomUUID();
@@ -46,25 +46,51 @@ export async function listTechniques({ lang, q }: { lang?: string; q?: string })
   let where = `WHERE deleted_at IS NULL`;
   if (q) {
     params.push(`%${q}%`, `%${q}%`);
-    where += ` AND (name LIKE $${params.length - 1} OR synonyms LIKE $${params.length})`;
+    let clause = `name LIKE $${params.length - 1} OR synonyms LIKE $${params.length}`;
+    // Same translated-name search as ingredients.local.ts's listIngredients()
+    // — the Import review step searches techniques through the same UI.
+    if (lang) {
+      params.push(`%${q}%`, lang);
+      clause += ` OR EXISTS (SELECT 1 FROM technique_translations tr
+                             WHERE tr.technique_id = techniques.id
+                               AND tr.name LIKE $${params.length - 1}
+                               AND LOWER(tr.language_code) = LOWER($${params.length}))`;
+    }
+    where += ` AND (${clause})`;
   }
   const rows = await query<Record<string, unknown>>(`SELECT * FROM techniques ${where} ORDER BY name`, params);
-  const result = [];
-  for (const row of rows) {
-    const translations = await query<{ language_code: string; name: string; description: string | null }>(
-      `SELECT language_code, name, description FROM technique_translations WHERE technique_id = $1`,
-      [row.id]
+  // Batched rather than one translation query per technique. This list is on
+  // the recipe page's critical path — RecipeDetail.tsx fetches
+  // /api/techniques on every recipe open, in every mode, because it needs
+  // them to resolve {{tech:id}} tokens in step text — so the per-row version
+  // put one Capacitor bridge round-trip per technique in front of every
+  // recipe the user opened, growing with the technique catalog rather than
+  // with the recipe.
+  const translationsByTechniqueId = new Map<string, Array<{ language_code: string; name: string; description: string | null }>>();
+  for (const batch of chunk(rows.map(r => r.id as string))) {
+    const p: unknown[] = [];
+    const trs = await query<{ technique_id: string; language_code: string; name: string; description: string | null }>(
+      `SELECT technique_id, language_code, name, description FROM technique_translations
+       WHERE technique_id IN (${inPlaceholders(p, batch)}) ORDER BY rowid`,
+      p
     );
-    const translatedName = lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null;
-    result.push({
+    for (const t of trs) {
+      const list = translationsByTechniqueId.get(t.technique_id);
+      if (list) list.push(t);
+      else translationsByTechniqueId.set(t.technique_id, [t]);
+    }
+  }
+
+  return rows.map(row => {
+    const translations = translationsByTechniqueId.get(row.id as string) ?? [];
+    return {
       ...row,
       image_urls: JSON.parse((row.image_urls as string) ?? '[]'),
       synonyms: JSON.parse((row.synonyms as string) ?? '[]'),
-      translated_name: translatedName,
+      translated_name: lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null,
       translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
-    });
-  }
-  return result;
+    };
+  });
 }
 
 export interface TechniqueInput {
@@ -115,4 +141,42 @@ export async function updateTechnique(id: string, d: TechniqueInput): Promise<vo
 export async function deleteTechnique(id: string): Promise<void> {
   await query("UPDATE techniques SET deleted_at=now(), updated_at=now() WHERE id=$1", [id]);
   await syncTechnique(id);
+}
+
+/** Folds a duplicated technique into another one — the catalogue fills up
+ *  with the same technique under two names (Smart Import creates one per
+ *  parsed step name, so an Italian recipe leaves "Bollitura" next to the
+ *  "Boil" an English one created), and merging is what puts that right
+ *  without breaking the steps already pointing at either.
+ *
+ *  Simpler than the tool merge next door: a technique has no join table at
+ *  all, only `recipe_steps.technique_ids`, a JSON array of ids. Translations
+ *  and photos on the source are discarded — the target's own are what a
+ *  merge keeps, same rule as everywhere else. */
+export async function mergeTechniques(sourceId: string, targetId: string): Promise<{ recipesUpdated: number }> {
+  if (sourceId === targetId) throw new Error('Cannot merge a technique into itself');
+  const source = await queryOne<{ id: string }>("SELECT id FROM techniques WHERE id=$1", [sourceId]);
+  const target = await queryOne<{ id: string }>("SELECT id FROM techniques WHERE id=$1 AND deleted_at IS NULL", [targetId]);
+  if (!source || !target) throw new Error('Technique not found');
+
+  const affected = new Set<string>();
+  for (const step of await query<{ id: string; recipe_id: string; technique_ids: string }>(
+    "SELECT id, recipe_id, technique_ids FROM recipe_steps WHERE technique_ids LIKE $1", [`%${sourceId}%`],
+  )) {
+    const ids: string[] = JSON.parse(step.technique_ids || '[]');
+    if (!ids.includes(sourceId)) continue;
+    // Deduped: a step that already listed BOTH must not end up with the
+    // target twice.
+    const replaced = Array.from(new Set(ids.map((id) => (id === sourceId ? targetId : id))));
+    await query("UPDATE recipe_steps SET technique_ids=$1 WHERE id=$2", [replaced, step.id]);
+    affected.add(step.recipe_id);
+  }
+
+  await deleteTechnique(sourceId);
+  await syncTechnique(targetId);
+
+  const { syncRecipe } = await import('./recipes.local');
+  for (const recipeId of affected) await syncRecipe(recipeId);
+
+  return { recipesUpdated: affected.size };
 }

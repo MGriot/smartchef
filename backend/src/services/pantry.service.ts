@@ -52,6 +52,15 @@ function toBase(quantity: number, unit: UnitRow | undefined): number | null {
  *     conversion factor, a vague "q.b.") counts as satisfied rather than
  *     missing. Refusing to suggest a recipe because it wants "a pinch of
  *     salt" would make the whole feature useless.
+ *
+ * `minMatchRatio` 0 is the partial-match mode, and it does NOT mean "every
+ * recipe qualifies": taken literally it would return the entire library,
+ * most of it matching nothing at all, which is a worse answer than none.
+ * It means "at least one ingredient I have", i.e. the recipes a pantry
+ * actually has a claim on, ranked by how much of each one it covers.
+ * That mode exists because the alternative — the original 1.0 default —
+ * answers "nothing" for any pantry that isn't already a full shop, which
+ * reads as a broken feature rather than as a strict filter.
  */
 export async function filterByPantry(
   items: PantryRequestItem[],
@@ -107,7 +116,8 @@ export async function filterByPantry(
 
     const have = required.length - missing.length;
     const matchRatio = have / required.length;
-    if (matchRatio >= minMatchRatio) {
+    const qualifies = minMatchRatio <= 0 ? have > 0 : matchRatio >= minMatchRatio;
+    if (qualifies) {
       out.push({
         recipeId: recipe.id,
         title: recipe.title,

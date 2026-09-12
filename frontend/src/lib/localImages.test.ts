@@ -16,6 +16,9 @@ function createFakeImageFs(): ImageFs & { files: Map<string, Uint8Array> } {
     async writeFile(path, data) {
       files.set(path, data);
     },
+    async list() {
+      return [...files.keys()];
+    },
   };
 }
 

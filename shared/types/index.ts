@@ -253,9 +253,22 @@ export interface CRDTOperation {
 
 // ── LLM Parser ────────────────────────────────────────────────────────────
 
+/** One non-text input: a photo, a scan, a PDF, a voice note, a clip.
+ *  `data` is bare base64 with no `data:` prefix — every provider wants it
+ *  that way except OpenAI, which gets a data URI built from these fields. */
+export interface LLMParseMedia {
+  mimeType: string;
+  data: string;
+  /** Only used in messages, so a failure can name the file. */
+  fileName?: string;
+}
+
 export interface LLMParseRequest {
   input: string; // URL o testo grezzo
-  inputType: "url" | "text";
+  inputType: "url" | "text" | "media";
+  /** Required when inputType is "media". `input` then carries whatever
+   *  extra context the user typed (or "" for none), not the recipe. */
+  media?: LLMParseMedia;
 }
 
 export interface LLMParseResult {
@@ -281,6 +294,11 @@ export interface LLMParseResult {
     // Optional short header this ingredient belongs under, e.g. "For the
     // sauce" — see llm.parser.ts SYSTEM_PROMPT for extraction rules.
     groupName?: string | null;
+    // "Facoltativo"/"optional"/"to taste" in the source. Carried through
+    // to recipe_ingredients.is_optional, which the pantry matcher and the
+    // matrioska engine have always read and which nothing could set until
+    // the parsers started extracting it.
+    isOptional?: boolean;
   }>;
   steps: Array<{
     stepNumber: number;
@@ -293,6 +311,10 @@ export interface LLMParseResult {
     techniques?: string[];
   }>;
   sourceUrl?: string;
+  /** Cover image for the recipe, absolute http(s). On a URL import this is
+   *  the page's own og:image unless the model named a better one — see
+   *  llm.parser.ts. The Import screen passes it through as coverImageUrl. */
+  imageUrl?: string;
   confidence: number; // 0-1
   warnings: string[];
 }

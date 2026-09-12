@@ -363,7 +363,9 @@
       "minuteShort": "min",
       "storagePrefix": "Come conservare",
       "techniquesPrefix": "Tecniche"
-    }
+    },
+    "optional": "Facoltativo",
+    "optionalHint": "Segna come facoltativo: resta nella ricetta, ma non conta mai contro di essa quando la dispensa calcola cosa puoi cucinare."
   },
   "login": {
     "password": "Password",
@@ -491,9 +493,9 @@
     "migrationDone": "Importate {{created}} ricette e creati {{ingredients}} nuovi ingredienti.",
     "migrationFailed": "{{count}} ricette non importate",
     "noCategory": "Crea prima almeno una categoria di ingredienti.",
-    "scanTab": "Foto / PDF",
-    "scanHint": "Una foto di una pagina di ricetta, o un PDF. Il testo viene letto su questo dispositivo e inserito nel riquadro di testo, così puoi controllarlo prima di importare.",
-    "chooseScan": "Scegli una foto o un PDF",
+    "scanTab": "Foto / audio / video",
+    "scanHint": "La foto di una pagina di ricetta, un PDF, un vocale o un video di cucina. Leggi il testo su questo dispositivo, oppure passa l'intero file al tuo provider AI.",
+    "chooseScan": "Scegli una foto, un PDF, un audio o un video",
     "scanStart": "Leggi la ricetta",
     "scanning": "Lettura…",
     "scanReadingPdf": "Lettura del PDF…",
@@ -501,7 +503,16 @@
     "scanReading": "Lettura dell'immagine…",
     "scanPdfNoText": "Questo PDF non contiene testo: sembra una scansione. Esporta la pagina come immagine e riprova.",
     "scanNothingFound": "Nessun testo leggibile trovato.",
-    "scanOcrCaveat": "I PDF con testo reale vengono letti subito. Le foto usano il riconoscimento testo sul dispositivo, che scarica un modello di ~{{mb}} MB la prima volta e poi funziona offline. Le pagine stampate si leggono bene; la scrittura a mano è incerta, quindi controlla sempre il risultato."
+    "scanOcrCaveat": "I PDF con testo reale vengono letti subito. Le foto usano il riconoscimento testo sul dispositivo, che scarica un modello di ~{{mb}} MB la prima volta e poi funziona offline. Le pagine stampate si leggono bene; la scrittura a mano è incerta, quindi controlla sempre il risultato.",
+    "scanAiStart": "Analizza con l'AI",
+    "scanAiRunning": "Analisi del file…",
+    "scanAiHint": "Invia il file stesso al tuo provider AI, così può ascoltare un vocale o guardare un video, non solo leggere testo stampato. I tipi di file supportati dipendono dal provider: Gemini accetta immagini, PDF, audio e video; Anthropic immagini e PDF; OpenAI e Ollama immagini (Ollama richiede un modello con visione).",
+    "scanOcrOnlyForText": "La lettura sul dispositivo funziona con foto e PDF. Per audio o video usa “Analizza con l'AI”.",
+    "matchLanguage": "Lingua della ricetta",
+    "matchLanguageHint": "Ingredienti, strumenti e tecniche qui sotto vengono confrontati con la tua libreria in questa lingua. Cambiala se i suggerimenti sembrano sbagliati.",
+    "langUnsupported": "Questa ricetta sembra scritta in {{lang}}, una lingua per cui SmartChef non ha un catalogo. Scegli in quale lingua confrontarla e salvarla — i nomi restano comunque esattamente come sono scritti.",
+    "rematching": "Nuovo confronto…",
+    "searchNoResults": "Nella tua libreria non c'è niente che corrisponda."
   },
   "seasonality": {
     "hint": "Cosa è di stagione, mese per mese — modifica la stagionalità di un ingrediente dalla pagina Ingredienti.",
@@ -638,7 +649,12 @@
     "noneCookable": "Ancora nessuna corrispondenza: aggiungi altro alla dispensa o allenta il filtro.",
     "readyToCook": "Pronta da cucinare",
     "haveOf": "{{have}} ingredienti su {{total}}",
-    "missing": "Mancano:"
+    "missing": "Mancano:",
+    "anyMatch": "Qualsiasi",
+    "anyMatchHint": "Mostra ogni ricetta di cui hai almeno un ingrediente, partendo da quelle più coperte.",
+    "fellBackTitle": "Nessuna corrispondenza a questo livello",
+    "fellBackBody": "Ecco a cosa la tua dispensa si avvicina di più.",
+    "noneCookableAtAll": "Nessuna delle tue ricette usa qualcosa che hai in dispensa."
   },
   "tagPicker": {
     "emptyCatalog": "Nessun tag nel catalogo — gestiscili in Libreria > Tag."

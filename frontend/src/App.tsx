@@ -45,6 +45,39 @@ type AuthState =
   | { status: "needs-profile" }
   | { status: "authenticated" };
 
+/** Where this device is in the "which storage does it use" question.
+ *
+ *  This used to be a boolean (`serverReady`) initialised to `!isNative()`,
+ *  which meant every native launch started out indistinguishable from a
+ *  device that had never been set up — and since `!serverReady` renders
+ *  ServerConnect, the FIRST-RUN STORAGE CHOOSER was what the app showed
+ *  while it was still booting. On a cold boot the async work below (a
+ *  Preferences read, then initLocalSchema() opening a multi-megabyte SQLite
+ *  file and PRAGMA-checking every column) takes seconds, so a returning
+ *  user watched their configured app ask them to choose local-or-server
+ *  again. Worse, clicking through it calls initStandaloneProfile(), which
+ *  mints a BRAND-NEW profile rather than reusing the existing one — real
+ *  damage, not just a confusing frame (five duplicate profiles in one
+ *  install before this was found).
+ *
+ *  So "we don't know yet" is now its own state, distinct from "we know this
+ *  device needs setting up", and only the latter is allowed to render the
+ *  chooser. */
+type SetupState = "unknown" | "needs-setup" | "ready";
+
+/** Runs `fn` once the first screen has had a chance to paint.
+ *
+ *  `requestIdleCallback` is the right tool and is what this uses when it
+ *  exists — but the app's Electron target is Chromium 114 in a WebView and
+ *  Android's WebView version is whatever the device shipped, so the timeout
+ *  fallback is not dead code. The idle deadline is capped so a device that
+ *  never goes idle (a slow first sync, a busy render) still gets there. */
+function afterFirstPaint(fn: () => void): void {
+  const idle = (window as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback;
+  if (idle) idle(fn, { timeout: 3000 });
+  else setTimeout(fn, 1200);
+}
+
 /** Shown while a route's chunk loads. Deliberately the same spinner as the
  *  boot state, so a cold navigation looks like the app starting rather than
  *  like something broke. */
@@ -56,14 +89,53 @@ function RouteFallback() {
   );
 }
 
+/** Startup failed for a reason that is not "this device isn't set up yet" —
+ *  a local database that won't open, a Preferences read that threw. The one
+ *  thing this must not do is offer to reconfigure storage: the device's
+ *  choice is intact, the data is intact, and re-running first-run setup
+ *  would create a duplicate profile on top of a transient failure. Retry
+ *  re-runs exactly the same check. */
+function BootErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center p-6">
+      <div className="max-w-md w-full bg-white dark:bg-zinc-900 rounded-[32px] p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
+        <span className="material-symbols-outlined text-4xl text-amber-500">database_off</span>
+        <h1 className="mt-4 text-2xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">
+          SmartChef could not open your library
+        </h1>
+        <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+          Your recipes and your storage settings are still where they were — the app just
+          failed to load them this time. Retrying usually works; if it doesn't, the message
+          below says why.
+        </p>
+        <p className="mt-4 text-xs font-mono text-left bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 rounded-2xl p-3 break-words">
+          {message}
+        </p>
+        <button
+          onClick={onRetry}
+          className="mt-6 w-full py-3 rounded-2xl bg-primary text-white font-bold text-sm"
+        >
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const setAccount = useStore((s) => s.setAccount);
   const [auth, setAuth] = useState<AuthState>({ status: "loading" });
   // Native only: is there a configured server (or a standalone profile) to
-  // even talk to yet? On web this stays `true` immediately — same-origin
+  // even talk to yet? On web this is "ready" immediately — same-origin
   // nginx proxying needs no configuration, so the native-only connect
   // screen never renders there.
-  const [serverReady, setServerReady] = useState(!isNative());
+  const [setup, setSetup] = useState<SetupState>(isNative() ? "unknown" : "ready");
+  // A failure inside checkNativeReady() — a local schema that won't open, a
+  // Preferences read that throws. Previously this chain had no error
+  // handling at all, so any rejection left the app parked on the storage
+  // chooser forever, which reads as "the app forgot everything" when the
+  // truth is "the database didn't open". Show what actually happened.
+  const [bootError, setBootError] = useState<string | null>(null);
   // Standalone mode has no server at all — set once we know there's a
   // local profile, so the auth-status network call below is skipped
   // entirely rather than failing against a server that doesn't exist.
@@ -74,37 +146,47 @@ export default function App() {
   const [onboarded, setOnboarded] = useState(true);
 
   const checkNativeReady = () => {
-    isStandaloneMode().then((standaloneEnabled) => {
-      if (!standaloneEnabled) {
-        getServerUrl().then((url) => setServerReady(!!url));
-        return;
-      }
-      // First-run (ServerConnect.tsx) / a profile pick only ever calls
-      // initLocalSchema() once, at that moment — a device that's had
-      // standalone mode enabled since before some later app version added
-      // new columns/tables would otherwise never pick up their
-      // addColumnIfMissing() backfills, and every write touching a newer
-      // field would throw "no such column" on this device forever.
-      // Re-running it here on every launch is cheap (CREATE TABLE IF NOT
-      // EXISTS + a PRAGMA table_info check per column) and keeps existing
-      // devices' schemas current.
-      initLocalSchema().then(() => {
+    setBootError(null);
+    // One linear async body with a single catch, rather than the nested
+    // .then() chain this used to be: every level of that chain was an
+    // unhandled rejection waiting to happen, and none of them ever moved
+    // the setup state, so a throw anywhere in here left the storage
+    // chooser on screen permanently with no indication anything failed.
+    void (async () => {
+      try {
+        if (!(await isStandaloneMode())) {
+          const url = await getServerUrl();
+          setSetup(url ? "ready" : "needs-setup");
+          return;
+        }
+        // First-run (ServerConnect.tsx) / a profile pick only ever calls
+        // initLocalSchema() once, at that moment — a device that's had
+        // standalone mode enabled since before some later app version added
+        // new columns/tables would otherwise never pick up their
+        // addColumnIfMissing() backfills, and every write touching a newer
+        // field would throw "no such column" on this device forever.
+        // Re-running it here on every launch is cheap (CREATE TABLE IF NOT
+        // EXISTS + a PRAGMA table_info check per column) and keeps existing
+        // devices' schemas current.
+        await initLocalSchema();
         setStandalone(true);
-        setServerReady(true);
-        getActiveProfile().then((profile) => {
-          if (!profile) {
-            // Standalone-enabled but nobody's picked a profile on this
-            // device yet — either freshly switched, or this device just
-            // joined an existing Sync Folder and pulled in profiles other
-            // devices already created.
-            setAuth({ status: "needs-profile" });
-            return;
-          }
-          setAccount({ id: profile.id, username: profile.name, name: profile.name, role: "user", avatarUrl: profile.avatarUrl });
-          setAuth({ status: "authenticated" });
-        });
-      });
-    });
+        setSetup("ready");
+        const profile = await getActiveProfile();
+        if (!profile) {
+          // Standalone-enabled but nobody's picked a profile on this
+          // device yet — either freshly switched, or this device just
+          // joined an existing Sync Folder and pulled in profiles other
+          // devices already created.
+          setAuth({ status: "needs-profile" });
+          return;
+        }
+        setAccount({ id: profile.id, username: profile.name, name: profile.name, role: "user", avatarUrl: profile.avatarUrl });
+        setAuth({ status: "authenticated" });
+      } catch (err) {
+        console.error("SmartChef: startup check failed:", err);
+        setBootError(err instanceof Error ? err.message : String(err));
+      }
+    })();
   };
 
   useEffect(() => {
@@ -126,11 +208,12 @@ export default function App() {
     await resetDeviceStorageChoice();
     setStandalone(false);
     setAuth({ status: 'loading' });
-    setServerReady(false);
+    setBootError(null);
+    setSetup('needs-setup');
   };
 
   useEffect(() => {
-    if (!serverReady || standalone) return;
+    if (setup !== "ready" || standalone) return;
     apiFetch("/api/auth/status")
       .then((res) => res.json())
       .then((json) => {
@@ -145,7 +228,7 @@ export default function App() {
         }
       })
       .catch(() => setAuth({ status: "needs-auth", hasAccount: false }));
-  }, [setAccount, serverReady]);
+  }, [setAccount, setup]);
 
   useEffect(() => {
     if (auth.status !== "authenticated") return;
@@ -155,13 +238,45 @@ export default function App() {
       // against its sync folder (Electron: user-chosen, kept in sync by an
       // OS-level cloud client; Android: private storage, mirrored to a
       // user-picked SAF tree by SafMirrorPlugin — see lib/sync/gitSync.ts).
-      import('./lib/sync/gitSync').then(({ startFolderSyncWatcher }) => startFolderSyncWatcher());
+      //
+      // Deliberately deferred rather than started inline. Both of these do
+      // real work on the same thread that renders the first screen, and both
+      // queue against db/local.ts's single SQLite mutex — so starting them
+      // here used to mean the very first gallery load raced a full sync
+      // cycle for the bridge and the database at once. A beat of delay costs
+      // nothing (the sync interval is measured in minutes) and hands the
+      // first paint an uncontended thread.
+      afterFirstPaint(() => {
+        import('./lib/sync/gitSync').then(({ startFolderSyncWatcher }) => startFolderSyncWatcher());
+        // One-time, self-skipping once there is nothing left inline: moves
+        // images that were base64-encoded into database columns (by an older
+        // backup restore) into the content-addressed store. See
+        // lib/inlineImageMigration.ts for why that matters so much more on
+        // Android than on desktop.
+        import('./lib/inlineImageMigration').then(({ migrateInlineImagesIfNeeded }) => migrateInlineImagesIfNeeded());
+      });
     } else {
       startOfflineSyncWatcher();
     }
   }, [auth.status, standalone]);
 
-  if (!serverReady) {
+  // Order matters: an unresolved boot must NEVER fall through to
+  // ServerConnect — that screen is the first-run storage chooser, and
+  // showing it to an already-configured device is what made a slow cold
+  // boot look like the app had forgotten its settings.
+  if (bootError) {
+    return <BootErrorScreen message={bootError} onRetry={checkNativeReady} />;
+  }
+
+  if (setup === "unknown") {
+    return (
+      <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center">
+        <span className="material-symbols-outlined text-4xl text-primary animate-spin">progress_activity</span>
+      </div>
+    );
+  }
+
+  if (setup === "needs-setup") {
     return <ServerConnect onConnected={checkNativeReady} />;
   }
 

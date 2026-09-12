@@ -18,6 +18,7 @@ auto_fix_high
 autoplay
 backup
 badge
+blanket
 blind
 block
 bolt
@@ -39,6 +40,7 @@ capture
 cards
 cases
 category
+chat
 check
 check_circle
 checklist
@@ -70,6 +72,7 @@ cut
 cycle
 dark_mode
 database
+database_off
 dataset
 delete
 description
@@ -128,6 +131,7 @@ function
 functions
 gate
 gesture
+gif
 grade
 gradient
 grain
@@ -152,6 +156,7 @@ info
 input
 ios_share
 iso
+javascript
 join
 keep
 key
@@ -187,11 +192,13 @@ message
 mobile
 mode
 model_training
+money
 more
 move
 move_down
 moving
 navigation
+north
 note
 notes
 notifications
@@ -221,12 +228,15 @@ phone
 phone_android
 phone_iphone
 photo
+php
+pill
 pin
 pinch
 place
 play_circle
 plumbing
 policy
+poll
 pool
 post
 preview
@@ -240,6 +250,7 @@ publish
 queue
 radio
 radio_button_unchecked
+redo
 refresh
 remove
 reorder
@@ -304,8 +315,10 @@ straighten
 stream
 style
 subject
+summarize
 support
 swap_horiz
+sweep
 switch
 switches
 sync
@@ -323,6 +336,7 @@ token
 toolbar
 transform
 translate
+travel
 travel_explore
 trip
 try

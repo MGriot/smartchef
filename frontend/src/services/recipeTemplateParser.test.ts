@@ -53,6 +53,27 @@ describe('shipped import templates', () => {
     expect(result.steps[0].durationMin).toBe(10);
   });
 
+  it('reads "(facoltativo)" and friends as an optional ingredient', () => {
+    const result = tryParseStructuredText([
+      'Title: Bruschetta',
+      '',
+      'Ingredients:',
+      '- 4 slices bread',
+      '- 2 tomatoes (facoltativo)',
+      '- 1 clove garlic (optional, chopped)',
+      '- 1 bunch basil (fresh)',
+      '',
+      'Steps:',
+      '1. Toast the bread.',
+      '2. Rub with garlic.',
+    ].join('\n'))!;
+
+    expect(result.ingredients.map((i) => i.isOptional)).toEqual([false, true, true, false]);
+    // The note survives the flag rather than being consumed by it: the
+    // second half of "optional, tritato" is still an instruction.
+    expect(result.ingredients[2].notes).toBe('optional, chopped');
+  });
+
   it('leaves genuinely freeform prose to the AI path', () => {
     expect(
       tryParseStructuredText("Mom's lasagna. Brown the beef, layer it with noodles, bake for 45 minutes."),

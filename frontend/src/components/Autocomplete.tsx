@@ -41,15 +41,27 @@ export default function Autocomplete({ options, value, onSelect, onClear, placeh
 
   // Keep the displayed text in sync when the selected value changes from outside
   // (e.g. loading an existing recipe) without clobbering what the user is typing.
+  //
+  // Deliberately keyed on the resolved *label* rather than on `options`
+  // itself: every call site builds its options array inline
+  // (`items.map(...)`), so that array is a new object on each render of the
+  // parent. Depending on it meant this effect re-ran — and reset `query`
+  // to '' whenever nothing was selected yet — on any parent re-render,
+  // which silently wiped whatever the user had typed. Harmless as long as
+  // the parent held still while you typed; typing became impossible the
+  // moment it didn't (a sibling field, a poll, a dialog sharing the page's
+  // state). Keying on the label instead still picks up "the selection
+  // changed" and "the catalog finished loading, so the id now resolves to
+  // a name", which is all this was ever for.
+  const selectedLabel = options.find(o => o.id === value)?.label ?? null;
   useEffect(() => {
-    const selected = options.find(o => o.id === value);
-    setQuery(selected ? selected.label : (unmatchedLabel ?? ''));
+    setQuery(selectedLabel ?? unmatchedLabel ?? '');
     // An unmatched row needs a decision (pick an existing match or create
     // new) — open the dropdown immediately instead of waiting for the user
     // to click in, so that decision is visible right away rather than
     // looking like a plain pre-filled text field.
-    if (!selected && unmatchedLabel) setOpen(true);
-  }, [value, options, unmatchedLabel]);
+    if (!selectedLabel && unmatchedLabel) setOpen(true);
+  }, [value, selectedLabel, unmatchedLabel]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {

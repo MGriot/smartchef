@@ -143,6 +143,54 @@ tagsRouter.post("/custom/merge", async (req: Request, res: Response) => {
   res.json({ data: { recipesUpdated } });
 });
 
+// ── Tag group labels ────────────────────────────────────────────────────
+// A tag group is not an entity: tags.group_name is free text with no
+// "groups" table behind it, so its translations are keyed by that text.
+// See db/migrations/041_tag_group_translations.sql for the whole story,
+// and frontend/src/lib/tagGroups.ts for the static fallback that still
+// covers the four seeded groups in languages nobody has filled in here.
+
+// GET /tags/groups/translations — every group's labels at once, keyed by
+// group name. The tags page renders a heading per group, so per-group
+// requests would be one round trip per heading for a handful of rows.
+tagsRouter.get("/groups/translations", async (_req: Request, res: Response) => {
+  const rows = await query<{ group_name: string; language_code: string; name: string }>(
+    "SELECT group_name, language_code, name FROM tag_group_translations ORDER BY group_name, language_code"
+  );
+  const data: Record<string, Array<{ lang: string; name: string }>> = {};
+  for (const row of rows) {
+    (data[row.group_name] ||= []).push({ lang: row.language_code, name: row.name });
+  }
+  res.json({ data });
+});
+
+// PUT /tags/groups/translations — replaces the whole set for one group,
+// same semantics as every other translations upsert in this file.
+const TagGroupTranslationsSchema = z.object({
+  groupName: z.string().min(1),
+  translations: z.array(z.object({ lang: z.string(), name: z.string().optional() })).default([]),
+});
+tagsRouter.put("/groups/translations", async (req: Request, res: Response) => {
+  const parsed = TagGroupTranslationsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const groupName = parsed.data.groupName.trim();
+  if (!groupName) return res.status(400).json({ error: "A group name is required" });
+
+  await query("DELETE FROM tag_group_translations WHERE group_name=$1", [groupName]);
+  const saved: Array<{ lang: string; name: string }> = [];
+  for (const t of parsed.data.translations) {
+    const lang = t.lang?.trim();
+    const name = t.name?.trim();
+    if (!lang || !name) continue;
+    await query(
+      "INSERT INTO tag_group_translations (group_name, language_code, name) VALUES ($1, $2, $3)",
+      [groupName, lang, name]
+    );
+    saved.push({ lang, name });
+  }
+  res.json({ data: { groupName, translations: saved } });
+});
+
 const MergeTagGroupsSchema = z.object({ sourceGroup: z.string().min(1), targetGroup: z.string().min(1) });
 
 // POST /tags/groups/merge — group_name is free text with no separate
@@ -158,6 +206,23 @@ tagsRouter.post("/groups/merge", async (req: Request, res: Response) => {
     "UPDATE tags SET group_name=$1, updated_at=now() WHERE group_name=$2 AND deleted_at IS NULL RETURNING id",
     [targetGroup, sourceGroup]
   );
+  // The group's translated labels are keyed by this same free text, so
+  // they travel with the rename or they end up stranded behind a label no
+  // tag carries any more. Where both groups already have a label for a
+  // language the target's wins — a merge picks a side, same as everywhere.
+  if (sourceGroup !== targetGroup) {
+    await query(
+      `DELETE FROM tag_group_translations s
+        WHERE s.group_name=$1
+          AND EXISTS (SELECT 1 FROM tag_group_translations t
+                       WHERE t.group_name=$2 AND LOWER(t.language_code)=LOWER(s.language_code))`,
+      [sourceGroup, targetGroup]
+    );
+    await query(
+      "UPDATE tag_group_translations SET group_name=$1, updated_at=now() WHERE group_name=$2",
+      [targetGroup, sourceGroup]
+    );
+  }
   res.json({ data: { tagsUpdated: result.length } });
 });
 

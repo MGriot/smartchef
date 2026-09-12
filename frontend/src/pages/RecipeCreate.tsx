@@ -898,13 +898,30 @@ const RecipeCreate: React.FC = () => {
                       </button>
                     ))}
                   </div>
-                  <button
-                    onClick={() => removeIngredient(idx)}
-                    title={t('common.delete')}
-                    className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">delete</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {/* Same control as the recipe editor's — see the note
+                        there for why `is_optional` needed one at all. */}
+                    <button
+                      type="button"
+                      onClick={() => updateIngredient(idx, 'isOptional', !ing.isOptional)}
+                      aria-pressed={!!ing.isOptional}
+                      title={t('recipeDetail.optionalHint')}
+                      className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                        ing.isOptional
+                          ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
+                      }`}
+                    >
+                      {t('recipeDetail.optional')}
+                    </button>
+                    <button
+                      onClick={() => removeIngredient(idx)}
+                      title={t('common.delete')}
+                      className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">delete</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-12 gap-3">
                   <div className="col-span-12 @lg:col-span-6">

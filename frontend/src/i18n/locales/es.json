@@ -363,7 +363,9 @@
       "minuteShort": "min",
       "storagePrefix": "Cómo conservar",
       "techniquesPrefix": "Técnicas"
-    }
+    },
+    "optional": "Opcional",
+    "optionalHint": "Marcar como opcional: sigue en la receta, pero nunca cuenta en su contra cuando la despensa calcula qué puedes cocinar."
   },
   "recipeCreate": {
     "newRecipe": "Nueva receta",
@@ -455,9 +457,9 @@
     "migrationDone": "Se han importado {{created}} recetas y creado {{ingredients}} ingredientes nuevos.",
     "migrationFailed": "{{count}} recetas no se han importado",
     "noCategory": "Crea primero al menos una categoría de ingredientes.",
-    "scanTab": "Foto / PDF",
-    "scanHint": "Una foto de una página de receta, o un PDF. El texto se lee en este dispositivo y se coloca en el cuadro de texto para que puedas revisarlo antes de importar.",
-    "chooseScan": "Elige una foto o un PDF",
+    "scanTab": "Foto / audio / vídeo",
+    "scanHint": "La foto de una página de receta, un PDF, una nota de voz o un vídeo de cocina. Lee el texto en este dispositivo, o entrega el archivo entero a tu proveedor de IA.",
+    "chooseScan": "Elige una foto, un PDF, un audio o un vídeo",
     "scanStart": "Leer la receta",
     "scanning": "Leyendo…",
     "scanReadingPdf": "Leyendo el PDF…",
@@ -465,7 +467,16 @@
     "scanReading": "Leyendo la imagen…",
     "scanPdfNoText": "Ese PDF no contiene texto: parece un escaneo. Exporta la página como imagen e inténtalo de nuevo.",
     "scanNothingFound": "No se ha encontrado texto legible.",
-    "scanOcrCaveat": "Los PDF con texto real se leen al instante. Las fotos usan reconocimiento de texto en el dispositivo, que descarga un modelo de ~{{mb}} MB la primera vez y luego funciona sin conexión. Las páginas impresas se leen bien; la escritura a mano es irregular, así que revisa siempre el resultado."
+    "scanOcrCaveat": "Los PDF con texto real se leen al instante. Las fotos usan reconocimiento de texto en el dispositivo, que descarga un modelo de ~{{mb}} MB la primera vez y luego funciona sin conexión. Las páginas impresas se leen bien; la escritura a mano es irregular, así que revisa siempre el resultado.",
+    "scanAiStart": "Analizar con IA",
+    "scanAiRunning": "Analizando el archivo…",
+    "scanAiHint": "Envía el archivo en sí a tu proveedor de IA, para que pueda escuchar una nota de voz o ver un vídeo, no solo leer texto impreso. Los tipos admitidos dependen del proveedor: Gemini acepta imágenes, PDF, audio y vídeo; Anthropic imágenes y PDF; OpenAI y Ollama imágenes (Ollama necesita un modelo con visión).",
+    "scanOcrOnlyForText": "La lectura en el dispositivo funciona con fotos y PDF. Para audio o vídeo usa «Analizar con IA».",
+    "matchLanguage": "Idioma de la receta",
+    "matchLanguageHint": "Los ingredientes, utensilios y técnicas de abajo se comparan con tu biblioteca en este idioma. Cámbialo si las sugerencias no cuadran.",
+    "langUnsupported": "Esta receta parece escrita en {{lang}}, un idioma para el que SmartChef no tiene catálogo. Elige en qué idioma compararla y guardarla — los nombres se conservan tal cual en cualquier caso.",
+    "rematching": "Comparando de nuevo…",
+    "searchNoResults": "No hay nada en tu biblioteca que coincida."
   },
   "login": {
     "signingIn": "Iniciando…",
@@ -638,7 +649,12 @@
     "noneCookable": "Todavía no hay coincidencias: añade más a la despensa o afloja el filtro.",
     "readyToCook": "Lista para cocinar",
     "haveOf": "{{have}} de {{total}} ingredientes",
-    "missing": "Faltan:"
+    "missing": "Faltan:",
+    "anyMatch": "Cualquiera",
+    "anyMatchHint": "Muestra todas las recetas de las que tienes al menos un ingrediente, primero las más cubiertas.",
+    "fellBackTitle": "Nada coincide con ese nivel",
+    "fellBackBody": "Esto es a lo que más se acerca tu despensa.",
+    "noneCookableAtAll": "Ninguna de tus recetas usa algo que tengas en la despensa."
   },
   "tagPicker": {
     "emptyCatalog": "Todavía no hay etiquetas en el catálogo — gestiónalas en Biblioteca > Etiquetas."

@@ -21,7 +21,7 @@ declare global {
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
       geocode: (q: string) => Promise<{ lat: number; lng: number; displayName: string } | null>;
-      httpRequest: (req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array }) => Promise<{
+      httpRequest: (req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array; timeoutMs?: number }) => Promise<{
         url: string;
         statusCode: number;
         statusMessage: string;
@@ -103,6 +103,10 @@ export async function electronHttpRequest(req: {
   method: string;
   headers: Record<string, string>;
   body?: Uint8Array;
+  /** Optional abort ceiling, applied in the main process — see the
+   *  `smartchef-http-request` handler. Unset (git transport) means no
+   *  ceiling, which is the behaviour that predates this parameter. */
+  timeoutMs?: number;
 }): Promise<{ url: string; statusCode: number; statusMessage: string; headers: Record<string, string>; body: Uint8Array }> {
   if (!window.smartchefElectron) {
     throw new Error('electronHttpRequest() is only available in the Electron app');

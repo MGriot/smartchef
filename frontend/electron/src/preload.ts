@@ -35,7 +35,7 @@ contextBridge.exposeInMainWorld('smartchefElectron', {
   // handler in electron/src/index.ts for why this can't just be a
   // renderer-side fetch() call (same no-CORS-in-main-process reasoning as
   // geocode above).
-  httpRequest: (req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array }) =>
+  httpRequest: (req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array; timeoutMs?: number }) =>
     ipcRenderer.invoke('smartchef-http-request', req),
   fs: {
     readFile: (path: string, encoding?: string) => ipcRenderer.invoke('smartchef-fs-readFile', path, encoding),

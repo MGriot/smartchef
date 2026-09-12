@@ -2,6 +2,11 @@
 Status: accepted
 ---
 
+> **Implemented 2026-09-12.** This decision was recorded but the code was never
+> written — `gitSync.ts` committed only the JSON entity directories, and a Hidden
+> Clone on disk had no `images/` folder at all. `lib/sync/imageSync.ts` is that
+> missing half; see `docs/plans/2026-09-12-android-performance-plan.md`.
+
 # Hidden Clone and Sync Folder carry full-resolution images
 
 **Context**: The codebase has an established precedent for image handling in sync-adjacent contexts — `backupImages.service.ts` recompresses images to WebP, q82, ≤1600px, specifically to keep manual backup exports small and self-contained. The Hidden Clone's working tree (ADR 0001) is what gets pushed into the Sync Folder and physically replicated by Syncthing, so the same question applied: recompress, or preserve originals?

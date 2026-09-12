@@ -1280,7 +1280,11 @@ function LlmProviderCard() {
           setSavedOllamaUrl(json.data.ollamaUrl ?? '');
         }
       })
-      .catch(() => {})
+      // Not swallowed: a failure here used to leave the card silently
+      // showing its defaults (provider "ollama", no key) as if that were
+      // the saved configuration, so the only sign anything was wrong came
+      // later, from Save.
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load the provider settings'))
       .finally(() => setLoaded(true));
   }, []);
 

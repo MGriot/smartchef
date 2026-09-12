@@ -3,9 +3,11 @@
 // A tiny in-process "router" that apiFetch (lib/api.ts) calls into instead
 // of making an HTTP request, when standalone mode is active and the path
 // falls under /api/recipes* or /api/ingredients*|/units*|/tools*|/tags*|/techniques* —
-// the narrow slice ported in this stage. Every other path returns `undefined`
-// (not handled here) so the caller's existing native/offline logic keeps
-// owning it unchanged, exactly as before standalone mode existed.
+// the narrow slice ported in this stage, plus the two /api/auth endpoints
+// the AI Provider settings card needs (see dispatchAuth). Every other path
+// returns `undefined` (not handled here) so the caller's existing
+// native/offline logic keeps owning it unchanged, exactly as before
+// standalone mode existed.
 // ════════════════════════════════════════════════════════════════════════
 
 import * as recipes from './recipes.local';
@@ -58,7 +60,23 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     return { status: 200, data: await pantry.filterByPantry(items, body.minMatchRatio ?? 1) };
   }
   if (id === 'parse') {
-    return { status: 501, error: `Smart Import needs a server-configured LLM provider — not available in offline mode yet.` };
+    if (method !== 'POST') return NOT_HANDLED;
+    const body = parseBody(init) ?? {};
+    const input = typeof body.input === 'string' ? body.input : '';
+    // 'media' carries the file in `media` and uses `input` only for
+    // whatever context the user typed, so the not-empty check below can't
+    // apply to it — see llmParser.local.ts's parseRecipeLocally().
+    const inputType: 'url' | 'text' | 'media' =
+      body.inputType === 'url' ? 'url' : body.inputType === 'media' ? 'media' : 'text';
+    if (inputType === 'media' && !body.media?.data) return { status: 400, error: 'Attach a photo, PDF, audio file or video first.' };
+    if (inputType !== 'media' && !input.trim()) return { status: 400, error: 'Paste a recipe or a link first.' };
+    // Standalone mode used to answer 501 here — Smart Import needed a
+    // server. It doesn't any more: llmParser.local.ts runs the same
+    // pipeline on the device against whichever provider this device has
+    // configured (Account -> AI Provider, stored per-device by
+    // lib/llmSettings.ts), including a local Ollama.
+    const { parseRecipeLocally } = await import('./llmParser.local');
+    return { status: 200, data: await parseRecipeLocally({ input, inputType, media: body.media }) };
   }
 
   if (!id) {
@@ -164,11 +182,16 @@ async function dispatchUnits(segments: string[], method: string, sp: URLSearchPa
 }
 
 async function dispatchTools(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
-  const [, id] = segments;
+  const [, id, sub] = segments;
   if (!id) {
     if (method === 'GET') return { status: 200, data: await ingredients.listTools({ lang: sp.get('lang') ?? undefined, q: sp.get('q') ?? undefined }) };
     if (method === 'POST') return { status: 200, data: await ingredients.createTool(parseBody(init)) };
     return NOT_HANDLED;
+  }
+  if (sub === 'merge' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    if (!body.targetId) return { status: 400, error: 'A tool to merge into is required.' };
+    return { status: 200, data: await ingredients.mergeTools(id, body.targetId) };
   }
   if (method === 'PUT') { await ingredients.updateTool(id, parseBody(init)); return { status: 200, data: { success: true } }; }
   if (method === 'DELETE') { await ingredients.deleteTool(id); return { status: 200, data: { success: true } }; }
@@ -199,6 +222,15 @@ async function dispatchTags(segments: string[], method: string, sp: URLSearchPar
       const body = parseBody(init);
       return { status: 200, data: await tags.mergeTagGroups(body.sourceGroup, body.targetGroup) };
     }
+    // Translated labels for the free-text group names — see tags.local.ts.
+    if (sub === 'translations') {
+      if (method === 'GET') return { status: 200, data: await tags.listTagGroupTranslations() };
+      if (method === 'PUT') {
+        const body = parseBody(init) ?? {};
+        if (!body.groupName) return { status: 400, error: 'A group name is required.' };
+        return { status: 200, data: await tags.setTagGroupTranslations(body.groupName, body.translations ?? []) };
+      }
+    }
     return NOT_HANDLED;
   }
   if (sub === 'merge' && method === 'POST') {
@@ -211,11 +243,16 @@ async function dispatchTags(segments: string[], method: string, sp: URLSearchPar
 }
 
 async function dispatchTechniques(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
-  const [, id] = segments;
+  const [, id, sub] = segments;
   if (!id) {
     if (method === 'GET') return { status: 200, data: await techniques.listTechniques({ lang: sp.get('lang') ?? undefined, q: sp.get('q') ?? undefined }) };
     if (method === 'POST') return { status: 200, data: await techniques.createTechnique(parseBody(init)) };
     return NOT_HANDLED;
+  }
+  if (sub === 'merge' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    if (!body.targetId) return { status: 400, error: 'A technique to merge into is required.' };
+    return { status: 200, data: await techniques.mergeTechniques(id, body.targetId) };
   }
   if (method === 'PUT') { await techniques.updateTechnique(id, parseBody(init)); return { status: 200, data: { success: true } }; }
   if (method === 'DELETE') { await techniques.deleteTechnique(id); return { status: 200, data: { success: true } }; }
@@ -459,6 +496,51 @@ async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult
   return { status: 200, data: result };
 }
 
+// ── /api/auth ────────────────────────────────────────────────────────────
+// Standalone mode has no account row and no session, so almost nothing
+// under /api/auth means anything here — but the AI Provider settings card
+// (Account.tsx's LlmProviderCard) is rendered in BOTH modes and talks to
+// exactly two of these endpoints. Without them the card fell through to
+// the network path and failed with "No server configured — connect to your
+// SmartChef server first", which is both wrong (this device deliberately
+// has no server) and a dead end: there was no way to save a Gemini/
+// Anthropic/OpenAI key at all in offline mode.
+//
+// Identity is deliberately NOT handled here. In standalone mode the
+// name/avatar form is StandaloneProfileCard, which writes the profile row
+// directly through lib/standalone.ts — so a PUT carrying username or
+// password is a caller that thinks it's talking to a server, and saying so
+// beats silently dropping it.
+async function dispatchAuth(segments: string[], method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  const [, action] = segments; // segments[0] === 'auth'
+  const { getLlmConfigSummary, updateLlmSettings } = await import('../lib/llmSettings');
+
+  if (action === 'llm-config' && method === 'GET') {
+    return { status: 200, data: await getLlmConfigSummary() };
+  }
+
+  if (action === 'account' && method === 'PUT') {
+    const body = parseBody(init) ?? {};
+    if (body.username !== undefined || body.password !== undefined) {
+      return { status: 400, error: 'Offline mode has no username or password — profiles are managed under Account.' };
+    }
+    // Same patch semantics as the backend route: a field that is absent
+    // stays as it is, an empty string clears it. That is what lets the
+    // settings form send only the key the user actually typed instead of
+    // wiping the other providers' keys on every save.
+    await updateLlmSettings({
+      provider: body.llmProvider,
+      ollamaUrl: body.ollamaUrl,
+      anthropicApiKey: body.anthropicApiKey,
+      geminiApiKey: body.geminiApiKey,
+      openaiApiKey: body.openaiApiKey,
+    });
+    return { status: 200, data: { success: true } };
+  }
+
+  return NOT_HANDLED;
+}
+
 /** Returns `null` when `path` isn't under a prefix this stage owns at all
  *  (caller should fall through to its existing native-server/offline-cache
  *  behavior, unaffected). Returns a result object — possibly a 501 "not
@@ -466,12 +548,12 @@ async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult
  *  /api/ingredients*, /api/units*, /api/tools*, /api/tags*, /api/techniques* even if that specific
  *  sub-route isn't implemented, since silently falling through there would
  *  incorrectly try to reach a server that (in standalone mode) doesn't
- *  exist. */
+ *  exist. /api/auth is the exception to that rule — see dispatchAuth. */
 export async function dispatchLocal(path: string, init?: RequestInit): Promise<LocalDispatchResult | null> {
   const { segments, searchParams } = segmentsAndQuery(path);
   const method = (init?.method ?? 'GET').toUpperCase();
 
-  if (!['recipes', 'ingredients', 'units', 'tools', 'tags', 'techniques', 'backup', 'geocode', 'share', 'shopping', 'menus', 'collections', 'cook-log', 'pantry'].includes(segments[0])) {
+  if (!['recipes', 'ingredients', 'units', 'tools', 'tags', 'techniques', 'backup', 'geocode', 'share', 'shopping', 'menus', 'collections', 'cook-log', 'pantry', 'auth'].includes(segments[0])) {
     return null;
   }
 
@@ -495,6 +577,7 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
     else if (segments[0] === 'techniques') result = await dispatchTechniques(segments, method, searchParams, init);
     else if (segments[0] === 'geocode') result = await dispatchGeocode(searchParams);
     else if (segments[0] === 'share') result = await dispatchShare(segments, method, init);
+    else if (segments[0] === 'auth') result = await dispatchAuth(segments, method, init);
     else result = await dispatchBackup(segments, method, init);
   } catch (err) {
     console.error(`Local dispatch failed for ${method} ${path}:`, err);
@@ -502,6 +585,12 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
   }
 
   if (result === NOT_HANDLED) {
+    // /api/auth is the one PARTIAL namespace here: dispatchAuth claims only
+    // the two LLM-settings endpoints, and everything else under it has to
+    // keep falling through to apiFetch's pre-existing handling rather than
+    // becoming a hard 501 — /api/auth/status in particular, whose
+    // tryServeFromCache() branch serves the cached account offline.
+    if (segments[0] === 'auth') return null;
     return { status: 501, error: `This action isn't available in offline mode yet.` };
   }
   return result;

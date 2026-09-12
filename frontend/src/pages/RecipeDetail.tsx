@@ -840,7 +840,7 @@ const RecipeDetail: React.FC = () => {
 
     return (
       <div className="min-h-screen bg-zinc-900 text-white font-body">
-        <header className="sticky top-0 z-50 bg-zinc-900/95 backdrop-blur-md border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+        <header className="sticky top-0 z-50 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
           <button onClick={() => setMode('view')} className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 hover:text-white transition-colors">
             <span className="material-symbols-outlined">arrow_back</span>
             <span className="text-sm font-bold">{t('recipeDetail.exitKitchen')}</span>
@@ -997,7 +997,7 @@ const RecipeDetail: React.FC = () => {
     return (
       <div className="min-h-screen bg-zinc-900 text-white font-body">
         {/* Header */}
-        <header className="sticky top-0 z-50 bg-zinc-900/95 backdrop-blur-md border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+        <header className="sticky top-0 z-50 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
           <button onClick={() => setMode('view')} className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 hover:text-white transition-colors">
             <span className="material-symbols-outlined">arrow_back</span>
             <span className="text-sm font-bold">{t('recipeDetail.exitKitchen')}</span>
@@ -1471,7 +1471,7 @@ const RecipeDetail: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 font-body">
         {/* Header */}
-        <header className="bg-[#fafaf5]/90 dark:bg-zinc-950/90 backdrop-blur-md sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between">
+        <header className="bg-[#fafaf5] dark:bg-zinc-950 sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between">
           <button onClick={() => { setDraft(recipe); setRawTextMode(false); setRawTextError(null); setMode('view'); }} className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
             <span className="material-symbols-outlined">close</span>
             <span className="text-sm font-bold">{t('common.cancel')}</span>
@@ -1616,13 +1616,37 @@ const RecipeDetail: React.FC = () => {
                             </button>
                           ))}
                         </div>
-                        <button
-                          onClick={() => removeIngredient(idx)}
-                          title={t('common.delete')}
-                          className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">delete</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {/* `is_optional` has been on the row, in the
+                              matrioska engine and in the pantry matcher
+                              from the start — "optional ingredients never
+                              count against a recipe" is the rule the whole
+                              \"what can I cook\" feature rests on — with
+                              nothing anywhere in the app that could set it.
+                              Every ingredient was therefore mandatory, so
+                              a recipe was hidden from the pantry over a
+                              garnish. */}
+                          <button
+                            type="button"
+                            onClick={() => updateIngredient(idx, 'isOptional', !ing.isOptional)}
+                            aria-pressed={!!ing.isOptional}
+                            title={t('recipeDetail.optionalHint')}
+                            className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                              ing.isOptional
+                                ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400'
+                                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
+                            }`}
+                          >
+                            {t('recipeDetail.optional')}
+                          </button>
+                          <button
+                            onClick={() => removeIngredient(idx)}
+                            title={t('common.delete')}
+                            className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">delete</span>
+                          </button>
+                        </div>
                       </div>
                       <div className="grid grid-cols-12 gap-3">
                         <div className="col-span-12 @lg:col-span-6">
@@ -2690,6 +2714,45 @@ const RecipeDetail: React.FC = () => {
               <div className="flex justify-between mt-2 text-[10px] text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider">
                 <span>{t('recipeDetail.onePortion')}</span><span>{t('recipeDetail.twelvePortions')}</span>
               </div>
+
+              {/* How much this makes in total, tracking the slider. The
+                  recipe stores its yield at its OWN base servings, so it has
+                  to scale like every ingredient amount does — and it goes
+                  through formatAmount() rather than being printed raw, so it
+                  also restates in the chosen measurement system (a 500 g
+                  yield reads in ounces for someone on imperial) instead of
+                  being the one number on the page that ignores that setting.
+                  Hidden entirely when the recipe has no yield on file, which
+                  is most of them: it is an optional field. */}
+              {recipe.yield_amount != null && (
+                <div className="flex items-baseline justify-between gap-3 mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider">
+                    {t('recipeDetail.yield')}
+                  </span>
+                  <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300 tabular-nums">
+                    {formatAmount(
+                      recipe.yield_amount,
+                      allUnits.find((u) => u.id === recipe.yield_unit_id)?.symbol ?? null
+                    )}
+                    {/* A yield with no unit on file renders as a bare number
+                        ("315"), which says nothing — 315 grams, millilitres,
+                        biscuits? The unit is an optional column and plenty of
+                        rows were saved without it, so rather than hiding the
+                        problem this offers the one-click way to fix it: the
+                        edit form's yield row already has the unit picker. */}
+                    {!recipe.yield_unit_id && (
+                      <button
+                        type="button"
+                        onClick={() => setMode('edit')}
+                        className="ml-2 text-[10px] font-bold uppercase tracking-wider text-primary hover:underline align-middle"
+                      >
+                        + {t('recipeDetail.unit')}
+                      </button>
+                    )}
+                  </span>
+                </div>
+              )}
+
               <button
                 onClick={() => {
                   addToShoppingCart({ recipeId: id!, title: recipe.translated_title || recipe.title, servings });
@@ -2757,6 +2820,16 @@ const RecipeDetail: React.FC = () => {
                         <span className={`text-sm ${ing.subRecipeId ? 'font-bold text-zinc-800 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'}`}>
                           {ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaleNum(ing.quantity)) : ing.subRecipeTitle}
                         </span>
+                        {/* Said out loud rather than left to the cook to
+                            infer from a note: this is also the flag the
+                            pantry matcher discounts, so someone wondering
+                            why a recipe came up "ready to cook" without
+                            the garnish can see why. */}
+                        {ing.isOptional && (
+                          <span className="shrink-0 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-500">
+                            {t('recipeDetail.optional')}
+                          </span>
+                        )}
                       </div>
                       <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">
                         {formatAmount(ing.quantity, ing.unitSymbol, ing.quantityText)}

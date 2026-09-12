@@ -33,6 +33,41 @@ if (capacitorFileConfig.electron?.deepLinkingEnabled) {
   });
 }
 
+// ── Single instance ──────────────────────────────────────────────────
+// Without this, launching SmartChef while it is ALREADY running starts a
+// whole second app against the same userData directory — and the second one
+// comes up as if the device had never been set up, because Chromium's
+// Local Storage LevelDB is already locked by the first process, so the
+// second instance's localStorage silently falls back to empty. There is no
+// error anywhere: @capacitor/preferences has no Electron implementation, so
+// it runs its WEB implementation on top of that localStorage, which means
+// isStandaloneMode() (lib/standalone.ts) and getServerUrl() (lib/api.ts)
+// both read null and App.tsx renders the FIRST-RUN storage chooser.
+//
+// That is not merely a confusing screen: choosing "Use offline on this
+// device" there calls initStandaloneProfile(), which writes a brand-new
+// profile into the (file-based, still perfectly writable) SQLite library.
+// Five duplicate profiles accumulated in one install this way before the
+// cause was found.
+//
+// The tray icon and hideMainWindowOnLaunch make hitting this easy: the app
+// can be running with no visible window, so clicking the icon again is the
+// natural thing to do — and it used to launch a second app rather than
+// show the window that already existed. Now it does the latter.
+const isPrimaryInstance = app.requestSingleInstanceLock();
+
+if (!isPrimaryInstance) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const win = myCapacitorApp.getMainWindow();
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    if (!win.isVisible()) win.show();
+    win.focus();
+  });
+}
+
 // If we are in Dev mode, use the file watcher components.
 if (electronIsDev) {
   setupReloadWatcher(myCapacitorApp);
@@ -40,6 +75,9 @@ if (electronIsDev) {
 
 // Run Application
 (async () => {
+  // A losing second instance is already on its way out via app.quit()
+  // above — building a window here would defeat the point of the lock.
+  if (!isPrimaryInstance) return;
   // Wait for electron app to be ready.
   await app.whenReady();
   // Security - Set Content-Security-Policy based on whether or not we are in dev mode.
@@ -149,7 +187,7 @@ ipcMain.handle('smartchef-geocode', async (_e, q: string) => {
 // not streamed; Electron's IPC structured-clones Uint8Array directly (no
 // base64 needed, unlike the Capacitor plugin bridge's JSON-only channel
 // Android's equivalent, GitHttpPlugin.java, has to use).
-ipcMain.handle('smartchef-http-request', async (_e, req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array }) => {
+ipcMain.handle('smartchef-http-request', async (_e, req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array; timeoutMs?: number }) => {
   const init: RequestInit & { duplex?: 'half' } = {
     method: req.method,
     headers: req.headers,
@@ -157,6 +195,14 @@ ipcMain.handle('smartchef-http-request', async (_e, req: { url: string; method: 
   if (req.body) {
     init.body = Buffer.from(req.body);
     init.duplex = 'half'; // required by Node's fetch whenever a body is present, even a non-streamed one
+  }
+  // Optional, and unset for git transport — a clone/push has always run
+  // unbounded here and a ceiling on it would be a behaviour change. The
+  // LLM callers (lib/nativeHttp.ts) do pass one: without it a wedged
+  // provider request has no way back at all, since the renderer cannot
+  // abort an in-flight ipcRenderer.invoke().
+  if (req.timeoutMs) {
+    init.signal = AbortSignal.timeout(req.timeoutMs);
   }
   const response = await fetch(req.url, init);
   const headers: Record<string, string> = {};

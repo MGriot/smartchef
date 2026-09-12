@@ -4,7 +4,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { Agent, setGlobalDispatcher } from "undici";
-import type { LLMParseRequest, LLMParseResult } from "@shared/types/index";
+import type { LLMParseMedia, LLMParseRequest, LLMParseResult } from "@shared/types/index";
 import { queryOne } from "../db/pool";
 import { decrypt } from "./crypto.service";
 import { callAnthropic, callGemini, callOpenAI } from "./llm.providers";
@@ -53,7 +53,8 @@ Il JSON deve avere questa struttura:
       "quantityText": "string | null",
       "unit": "string | null",
       "notes": "string | null",
-      "groupName": "string | null"
+      "groupName": "string | null",
+      "isOptional": "boolean"
     }
   ],
   "steps": [
@@ -65,6 +66,7 @@ Il JSON deve avere questa struttura:
       "techniques": ["string"]
     }
   ],
+  "imageUrl": "string | null (URL assoluto http/https dell'immagine di copertina del piatto, se una compare nel contenuto; altrimenti null)",
   "confidence": "number (0-1)",
   "warnings": ["string"]
 }
@@ -74,12 +76,14 @@ Regole:
 - tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari (es. "forno", "planetaria", "frullatore"), nomi brevi e generici
 - storageInstructions è come conservare gli avanzi ("Come conservare"), tips sono consigli generali distinti dalla description — entrambi null se non menzionati
 - groupName (negli ingredienti) è un'intestazione breve e opzionale sotto cui questo ingrediente è raggruppato, es. "Per il condimento" — impostalo SOLO quando la ricetta originale raggruppa visivamente gli ingredienti in sezioni etichettate; altrimenti lascialo null. Non inventare raggruppamenti assenti nella fonte
+- isOptional (negli ingredienti) è true quando la ricetta presenta quell'ingrediente come facoltativo o a piacere (es. "facoltativo", "se gradito", "optional", "per guarnire", "q.b. a piacere"); altrimenti false. Non dedurlo dal fatto che una quantità sia vaga
 - techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step (es. "Rosolare", "Brasare"), nomi brevi, stesso criterio di "tools"
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
 - Se non riesci a estrarre un campo, usa null
 - Aggiungi warnings per informazioni ambigue o mancanti
+- imageUrl: usa SOLO un URL che compare letteralmente nel contenuto (incluso quello proposto come "Immagine di copertina della pagina"), mai inventato. Deve mostrare il piatto finito: scarta loghi, avatar, banner pubblicitari e icone. null se non ce n'è uno adatto
 - confidence deve riflettere quanto sei sicuro dell'estrazione (1.0 = perfetto)`;
 
 /**
@@ -129,11 +133,113 @@ export function assertSafeImportUrl(rawUrl: string): URL {
  *  used to lose it. Capped at 4 MB so a hostile or broken URL can't stream
  *  unbounded into memory. */
 export async function fetchUrlHtml(url: string): Promise<string> {
-  assertSafeImportUrl(url);
-  const response = await fetch(url, { headers: IMPORT_FETCH_HEADERS, signal: AbortSignal.timeout(15_000) });
+  const parsed = assertSafeImportUrl(url);
+  const response = await fetch(url, {
+    headers: isCaptionOnlyHost(parsed) ? CRAWLER_FETCH_HEADERS : IMPORT_FETCH_HEADERS,
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
   const html = await response.text();
   return html.length > 4_000_000 ? html.slice(0, 4_000_000) : html;
+}
+
+// ── Caption-only hosts (Instagram) ────────────────────────────────
+// Mirrors frontend/src/services/pageFetcher.ts's block of the same name —
+// keep the two in step. Instagram answers a browser User-Agent with a
+// ~650KB JavaScript shell whose entire visible text is the word
+// "Instagram", so fetchUrlContent()'s tag-stripping used to hand the model
+// nothing at all for an imported reel. The post's text is published only to
+// a crawler-shaped request, and only <meta name="description"> carries the
+// WHOLE caption — og:description is truncated mid-word, losing the
+// ingredients.
+const CAPTION_ONLY_HOSTS = [/(?:^|\.)instagram\.com$/i];
+
+function isCaptionOnlyHost(url: URL): boolean {
+  return CAPTION_ONLY_HOSTS.some((re) => re.test(url.hostname));
+}
+
+const CRAWLER_FETCH_HEADERS: Record<string, string> = {
+  "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+  Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
+};
+
+/** Entity decode that PRESERVES newlines — a caption's line breaks are the
+ *  structure the model reads its ingredient list from. */
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&#x([0-9a-f]+);/gi, (_m, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&"); // last, or it would mangle the entities above
+}
+
+function metaContent(html: string, attr: "name" | "property", key: string): string | null {
+  const patterns = [
+    new RegExp(`<meta[^>]+${attr}=["']${key}["'][^>]*\scontent=["']([^"']*)["']`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*\s${attr}=["']${key}["']`, "i"),
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m && m[1].trim()) return m[1];
+  }
+  return null;
+}
+
+/** The cover image a page nominates for itself. og:image is the picture the
+ *  site publishes for link previews, so it is the dish rather than a logo,
+ *  and it needs no guessing about which of forty <img> tags is the recipe.
+ *  Mirrors frontend/src/services/pageFetcher.ts's extractPageImage(). */
+function extractPageImage(rawUrl: string, html: string): string | null {
+  const raw =
+    metaContent(html, "property", "og:image") ??
+    metaContent(html, "property", "og:image:url") ??
+    metaContent(html, "name", "twitter:image");
+  if (!raw) return null;
+  return absoluteImageUrl(decodeEntities(raw).trim(), rawUrl);
+}
+
+/** Resolves a possibly-relative image URL against its page and rejects
+ *  anything that is not a real remote image — `data:` blobs included, since
+ *  a cover is stored as a URL string. */
+export function absoluteImageUrl(candidate: string | null | undefined, baseUrl?: string): string | null {
+  if (!candidate) return null;
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
+  try {
+    const resolved = baseUrl ? new URL(trimmed, baseUrl) : new URL(trimmed);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null;
+    return resolved.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** The post's caption for a caption-only host; null for every ordinary
+ *  site, where a <meta name="description"> is just a 160-char SEO blurb and
+ *  preferring it over the page body would break working imports. */
+function extractSocialCaption(rawUrl: string, html: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (!isCaptionOnlyHost(url)) return null;
+
+  const raw = metaContent(html, "name", "description") ?? metaContent(html, "property", "og:description");
+  if (!raw) return null;
+
+  let caption = decodeEntities(raw).trim();
+  // `13K likes, 118 comments - someone on June 7, 2023: "<caption>". `
+  const framed = caption.match(/^[\d.,KMkm]+\s+likes?,\s*[\d.,KMkm]+\s+comments?\s+-\s+[^:]+:\s*"([\s\S]*)"\.?\s*$/);
+  if (framed) caption = framed[1].trim();
+
+  return caption || null;
 }
 
 const IMPORT_FETCH_HEADERS: Record<string, string> = {
@@ -149,11 +255,16 @@ const IMPORT_FETCH_HEADERS: Record<string, string> = {
   "Sec-Fetch-User": "?1",
 };
 
-async function fetchUrlContent(url: string): Promise<string> {
-  assertSafeImportUrl(url);
+/** The page's text for the model, plus the cover image the page nominates.
+ *  Returned together because both come from the SAME fetch — asking for the
+ *  image separately would mean requesting the page twice. */
+async function fetchUrlContent(url: string): Promise<{ text: string; imageUrl: string | null }> {
+  const parsedUrl = assertSafeImportUrl(url);
   // Aggiungiamo header più completi per bypassare firewall basici
   const response = await fetch(url, {
-    headers: {
+    // A caption host ignores all of this and needs an unfurler-shaped
+    // request instead — see CAPTION_ONLY_HOSTS above.
+    headers: isCaptionOnlyHost(parsedUrl) ? CRAWLER_FETCH_HEADERS : {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
       "Accept-Language": "en-US,en;q=0.9,it;q=0.8",
@@ -174,20 +285,146 @@ async function fetchUrlContent(url: string): Promise<string> {
   }
   
   const html = await response.text();
+
+  // A caption host publishes the post text as page metadata; its page body
+  // is an empty JS shell, so stripping tags off it would return nothing.
+  const caption = extractSocialCaption(url, html);
+  const imageUrl = extractPageImage(url, html);
+  if (caption) return { text: caption.slice(0, 6000), imageUrl };
+
   // Rimuovi tag HTML per semplificare il testo
-  return html.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, "")
+  const text = html.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, "")
              .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gim, "")
              .replace(/<[^>]+>/g, " ")
              .replace(/\s+/g, " ")
              .trim()
              .slice(0, 6000); // ridotto da 10000: meno prefill su CPU-only inference, il contenuto della ricetta è quasi sempre entro questa soglia
+  return { text, imageUrl };
+}
+
+// ── Media ──────────────────────────────────────────────────────────────────
+// Mirrors frontend/src/services/llmParser.local.ts's own block. Kept in
+// step with it deliberately rather than shared: standalone mode has no
+// backend to import from, and this is the half of the two files that MUST
+// agree, because a user moving a library between the two modes expects the
+// same file to import the same way.
+
+export type MediaKind = "image" | "audio" | "video" | "document";
+
+/** Thrown when the attached file is something the configured provider
+ *  cannot read, or is too big to send. Distinguished from every other
+ *  parse failure so the route can answer 400 rather than 502: the request
+ *  is the problem and the user can fix it (switch provider, trim the file),
+ *  which a "bad gateway" actively hides. */
+export class MediaNotSupportedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MediaNotSupportedError";
+  }
+}
+
+/** What kind of thing a MIME type is, as far as the providers care. PDFs
+ *  are their own kind because they are the one format a model reads as a
+ *  *document* (page structure, embedded text) rather than as pixels. */
+export function mediaKindFor(mimeType: string): MediaKind | null {
+  const mime = mimeType.toLowerCase().split(";")[0].trim();
+  if (mime === "application/pdf") return "document";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  return null;
+}
+
+/** Which provider can read which kind, as of the models pinned in
+ *  llm.providers.ts.
+ *
+ *  A table rather than try-and-see: every one of these rejections comes
+ *  back as an HTTP 400 about a malformed content block, which tells the
+ *  user nothing about the real problem (their provider cannot do audio) or
+ *  the real fix (switch to one that can). Gemini is the only one of the
+ *  four that takes audio and video at all, which is worth saying out loud
+ *  rather than making someone discover.
+ *
+ *  Ollama's entry means "images, if the model has eyes": the API accepts an
+ *  `images` array against any model and a text-only one simply ignores it,
+ *  so a wrong local model shows up as a recipe hallucinated out of nothing
+ *  rather than as an error. That cannot be caught here — hence the mention
+ *  in the error text and in the import screen. */
+const MEDIA_SUPPORT: Record<string, MediaKind[]> = {
+  anthropic: ["image", "document"],
+  gemini: ["image", "document", "audio", "video"],
+  openai: ["image"],
+  ollama: ["image"],
+};
+
+const PROVIDER_LABEL: Record<string, string> = {
+  anthropic: "Anthropic",
+  gemini: "Google Gemini",
+  openai: "OpenAI",
+  ollama: "Ollama",
+};
+
+const KIND_LABEL: Record<MediaKind, string> = {
+  image: "images",
+  document: "PDFs",
+  audio: "audio",
+  video: "video",
+};
+
+/** Base64 inflates by ~4/3, and every provider has a request ceiling in the
+ *  tens of megabytes for an inline payload. Checked before the upload goes
+ *  anywhere, because the failure otherwise arrives minutes into pushing a
+ *  video across. Kept in step with the route's own body-size limit — see
+ *  POST /recipes/parse in routes/recipes.ts. */
+const MAX_MEDIA_BYTES = 18 * 1024 * 1024;
+
+export function providersSupporting(kind: MediaKind): string[] {
+  return Object.keys(MEDIA_SUPPORT).filter((p) => MEDIA_SUPPORT[p].includes(kind));
+}
+
+function assertMediaSupported(provider: string, media: LLMParseMedia): void {
+  const kind = mediaKindFor(media.mimeType);
+  if (!kind) {
+    throw new MediaNotSupportedError(
+      `SmartChef doesn't know what to do with a ${media.mimeType || "file of that type"} — use an image, a PDF, an audio file or a video.`
+    );
+  }
+  const supported = MEDIA_SUPPORT[provider] ?? [];
+  if (!supported.includes(kind)) {
+    const alternatives = providersSupporting(kind).map((p) => PROVIDER_LABEL[p] ?? p);
+    throw new MediaNotSupportedError(
+      `${PROVIDER_LABEL[provider] ?? provider} can't read ${KIND_LABEL[kind]}. ` +
+        (alternatives.length
+          ? `Switch to ${alternatives.join(" or ")} in Account settings, or extract the text yourself and paste it in.`
+          : "Extract the text yourself and paste it in instead.")
+    );
+  }
+  // Approximate: 4 base64 characters carry 3 bytes.
+  const bytes = Math.floor((media.data.length * 3) / 4);
+  if (bytes > MAX_MEDIA_BYTES) {
+    throw new MediaNotSupportedError(
+      `That file is about ${Math.round(bytes / 1024 / 1024)} MB — too large to send in one request. Trim the clip, or use a smaller photo.`
+    );
+  }
 }
 
 /**
  * Chiama Ollama con un system prompt arbitrario — usato sia per il parsing
  * ricette (SYSTEM_PROMPT) sia per la traduzione contenuti ricetta.
  */
-async function callOllama(content: string, systemPrompt: string, ollamaUrl: string = OLLAMA_URL): Promise<string> {
+async function callOllama(
+  content: string,
+  systemPrompt: string,
+  ollamaUrl: string = OLLAMA_URL,
+  media?: LLMParseMedia
+): Promise<string> {
+  // Ollama attaches images as a base64 array on the message itself. It
+  // accepts this against ANY model: a text-only one silently drops the
+  // image and answers from the prompt alone, which is why the capability
+  // table's error text talks about needing a vision model rather than
+  // assuming the right request shape is enough.
+  const userMessage: Record<string, unknown> = { role: "user", content };
+  if (media) userMessage.images = [media.data];
   const response = await fetch(`${ollamaUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -196,7 +433,7 @@ async function callOllama(content: string, systemPrompt: string, ollamaUrl: stri
       stream: false,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content },
+        userMessage,
       ],
       options: {
         temperature: 0.1, // bassa temperatura per output strutturato
@@ -237,31 +474,39 @@ interface LLMAccountConfig {
  * error handling unchanged. Generic over systemPrompt/content so it's
  * reusable for both recipe parsing and recipe-content translation.
  */
-export async function callConfiguredProvider(content: string, systemPrompt: string): Promise<string> {
+export async function callConfiguredProvider(
+  content: string,
+  systemPrompt: string,
+  media?: LLMParseMedia
+): Promise<string> {
   const account = await queryOne<LLMAccountConfig>(
     `SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted, ollama_url FROM account LIMIT 1`
   );
   const provider = account?.llm_provider ?? "ollama";
+  // Checked before the key checks below on purpose: "Gemini can't read
+  // video" is the more useful sentence than "no key saved" when both are
+  // true, since pasting a key would not have helped.
+  if (media) assertMediaSupported(provider, media);
 
   if (provider === "anthropic") {
     if (!account?.anthropic_api_key_encrypted) {
       throw new Error("Anthropic selected but no API key configured — add one in Account settings");
     }
-    return callAnthropic(content, decrypt(account.anthropic_api_key_encrypted), systemPrompt);
+    return callAnthropic(content, decrypt(account.anthropic_api_key_encrypted), systemPrompt, media);
   }
   if (provider === "gemini") {
     if (!account?.gemini_api_key_encrypted) {
       throw new Error("Gemini selected but no API key configured — add one in Account settings");
     }
-    return callGemini(content, decrypt(account.gemini_api_key_encrypted), systemPrompt);
+    return callGemini(content, decrypt(account.gemini_api_key_encrypted), systemPrompt, media);
   }
   if (provider === "openai") {
     if (!account?.openai_api_key_encrypted) {
       throw new Error("OpenAI selected but no API key configured — add one in Account settings");
     }
-    return callOpenAI(content, decrypt(account.openai_api_key_encrypted), systemPrompt);
+    return callOpenAI(content, decrypt(account.openai_api_key_encrypted), systemPrompt, media);
   }
-  return callOllama(content, systemPrompt, resolveOllamaUrl(account?.ollama_url));
+  return callOllama(content, systemPrompt, resolveOllamaUrl(account?.ollama_url), media);
 }
 
 /**
@@ -325,7 +570,7 @@ function repairTruncatedJson(raw: string): string {
 /**
  * Parsa la risposta JSON dell'LLM con fallback
  */
-function parseJsonResponse(raw: string): LLMParseResult {
+function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
   // Cerca il JSON nella risposta (l'LLM potrebbe aggiungere testo)
   const jsonMatch = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
   if (!jsonMatch) throw new Error("Nessun JSON valido nella risposta LLM");
@@ -363,6 +608,7 @@ function parseJsonResponse(raw: string): LLMParseResult {
           unit: ing.unit ?? undefined,
           notes: ing.notes ?? undefined,
           groupName: typeof ing.groupName === "string" ? ing.groupName : null,
+          isOptional: ing.isOptional === true,
         }))
       : [],
     steps: Array.isArray(parsed.steps)
@@ -375,28 +621,85 @@ function parseJsonResponse(raw: string): LLMParseResult {
         }))
       : [],
     sourceUrl: undefined,
+    // Resolved and validated rather than trusted: a model will happily
+    // return a relative path, a `data:` blob or a plausible URL it invented.
+    // The caller falls back to the page's own og:image when this is empty.
+    imageUrl: absoluteImageUrl(typeof parsed.imageUrl === "string" ? parsed.imageUrl : null, baseUrl) ?? undefined,
     confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
     warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
   };
 }
 
+/** What to tell the model about a file it is being handed. The prompt
+ *  itself stays SYSTEM_PROMPT — this only names the medium, so the model
+ *  treats a transcript-shaped input as a recipe being dictated rather than
+ *  as prose to summarize. Italian, like the system prompt, and for the same
+ *  reason: the two are read together, and the unit-normalization rule is
+ *  written against Italian. Kept identical to the standalone twin's. */
+const MEDIA_INSTRUCTION: Record<MediaKind, string> = {
+  image:
+    "Estrai la ricetta dall'immagine allegata (una foto, una scansione o uno screenshot di una pagina di ricetta). Leggi tutto il testo visibile, comprese le liste di ingredienti e i passaggi.",
+  document: "Estrai la ricetta dal documento allegato.",
+  audio:
+    "Ascolta l'audio allegato: è qualcuno che racconta o detta una ricetta. Trascrivila mentalmente e restituisci la ricetta strutturata. Gli ingredienti e le quantità possono essere detti in modo informale (\"un paio di cucchiai\") — in quel caso usa quantityText.",
+  video:
+    "Guarda il video allegato: è una preparazione di cucina. Usa sia il parlato sia ciò che si vede (ingredienti inquadrati, testo sovrimpresso) per ricostruire la ricetta. Se una quantità non viene mai detta né mostrata, lascia quantity a null invece di inventarla.",
+};
+
 /**
  * Entry point principale del parser LLM
  */
 export async function parseRecipeWithLLM(req: LLMParseRequest): Promise<LLMParseResult> {
+  // A file goes up alongside the prompt rather than being flattened to text
+  // first. The client's own OCR (frontend/src/services/migration/ocr.ts) is
+  // still the right tool for a clean scan of printed text — free, offline,
+  // exact — but it has nothing to say about a voice note or a clip, and it
+  // throws away the layout that tells a model which column is the
+  // ingredient list.
+  if (req.inputType === "media") {
+    if (!req.media?.data) throw new MediaNotSupportedError("No file was attached.");
+    const kind = mediaKindFor(req.media.mimeType);
+    if (!kind) {
+      throw new MediaNotSupportedError(
+        `SmartChef doesn't know what to do with a ${req.media.mimeType || "file of that type"}.`
+      );
+    }
+    const extra = req.input.trim();
+    const prompt = `${MEDIA_INSTRUCTION[kind]}${extra ? `
+
+Note aggiuntive dall'utente:
+${extra}` : ""}`;
+    return parseJsonResponse(await callConfiguredProvider(prompt, SYSTEM_PROMPT, req.media));
+  }
+
   let content: string;
+  // The cover image the page nominates for itself. The model only ever sees
+  // STRIPPED text, so without handing it one it has no way to find an image
+  // at all — which is why AI import produced recipes with no cover while
+  // the structured-data path always set one.
+  let pageImage: string | null = null;
 
   if (req.inputType === "url") {
-    content = await fetchUrlContent(req.input);
+    const fetched = await fetchUrlContent(req.input);
+    content = fetched.text;
+    pageImage = fetched.imageUrl;
+    // Offered rather than forced: the model can reject it (a logo, a
+    // category banner) or name a better URL from the text. Appended after
+    // the 6 000-character cut so a long page cannot truncate it away.
+    if (pageImage) {
+      content += `\n\nImmagine di copertina della pagina: ${pageImage}`;
+    }
   } else {
     content = req.input;
   }
 
   const rawResponse = await callConfiguredProvider(`Analizza questa ricetta:\n\n${content}`, SYSTEM_PROMPT);
-  const result = parseJsonResponse(rawResponse);
+  const result = parseJsonResponse(rawResponse, req.inputType === "url" ? req.input : undefined);
 
   if (req.inputType === "url") {
     result.sourceUrl = req.input;
+    // Fallback, not override: a model that found a better image keeps it.
+    if (!result.imageUrl && pageImage) result.imageUrl = pageImage;
   }
 
   return result;

@@ -77,17 +77,31 @@ export function matchUnitId(unitText: string | undefined, units: { id: string; s
  *  form, taking whichever scores higher — see ingredients.plural_name),
  *  returns the top `limit` above a floor score. Shared by the standalone
  *  local matcher and anything scoring suggestions client-side. */
-export function topMatches<T extends { id: string; name: string; pluralName?: string | null }>(
+export function topMatches<
+  T extends { id: string; name: string; pluralName?: string | null; aliases?: Array<string | null | undefined> }
+>(
   name: string,
   candidates: T[],
   limit = 3,
   minScore = 0.4
 ): MatchSuggestion[] {
-  const scored = candidates.map((c) => ({
-    id: c.id,
-    name: c.name,
-    score: c.pluralName ? Math.max(similarity(name, c.name), similarity(name, c.pluralName)) : similarity(name, c.name),
-  }));
+  const scored = candidates.map((c) => {
+    // `name` is what gets SHOWN; every string here is scored against, and
+    // the best one wins. That split is what lets a candidate be displayed
+    // in the app's language while still matching a recipe written in
+    // another one: localMatcher.ts puts the translated name in `name` and
+    // the base name in `aliases`, so "burro" matches the Italian label and
+    // "butter" still matches the same row. Omitting `aliases` (as most
+    // callers do) behaves exactly as before.
+    const probes = [c.name, c.pluralName, ...(c.aliases ?? [])].filter(
+      (p): p is string => typeof p === 'string' && p.trim().length > 0
+    );
+    return {
+      id: c.id,
+      name: c.name,
+      score: probes.length ? Math.max(...probes.map((p) => similarity(name, p))) : 0,
+    };
+  });
   return scored
     .filter((s) => s.score > minScore)
     .sort((a, b) => b.score - a.score)

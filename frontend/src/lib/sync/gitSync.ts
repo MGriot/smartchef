@@ -38,6 +38,8 @@ import { createElectronRemoteTransport } from './electronRemoteTransport';
 import { createAndroidRemoteTransport } from './androidRemoteTransport';
 import { getMirrorState, setSyncPauseReason } from './androidMirror';
 import { mergeRemoteIntoLocal } from './mergeBridge';
+import { copyImagesIntoClone, materializeImagesFromCommit } from './imageSync';
+import { IMAGES_SUBDIR } from '../localImages';
 
 const DEVICE_ID_KEY = 'smartchef.sync.deviceId';
 const DEVICE_NAME_KEY = 'smartchef.sync.deviceName';
@@ -89,6 +91,14 @@ const ENTITY_TYPE_TO_DIR: Record<string, EntityType> = {
   profile: 'profiles',
 };
 const ALL_ENTITY_DIRS: EntityType[] = ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles'];
+
+// What git actually stages and commits: every entity directory, plus the
+// content-addressed image store. `images` is deliberately NOT an
+// EntityType and deliberately absent from mergeBridge.ts's ENTITY_DIRS —
+// those hold JSON records that can diverge and need Structured Merge, while
+// an image path encodes its own content and therefore can never conflict.
+// It only needs to be committed and replicated. See lib/sync/imageSync.ts.
+const COMMITTED_DIRS: string[] = [...ALL_ENTITY_DIRS, IMAGES_SUBDIR];
 
 let deviceId: string | null = null;
 
@@ -189,13 +199,24 @@ export function scheduleCommit(delayMs = 2000): void {
  *  going through commitNow() there would deadlock. */
 async function commitNowInternal(): Promise<boolean> {
   const { dir, gitdir } = await ensureHiddenCloneInitialized();
+
+  // Before git looks at the working tree: bring any image this device has
+  // stored but not yet committed into the clone, so a recipe's cover travels
+  // with the recipe row that references it. Add-only and content-addressed
+  // (lib/sync/imageSync.ts), so this is a no-op on every cycle after the
+  // first for a given photo.
+  const imageCopy = await copyImagesIntoClone(dir);
+  if (imageCopy.copied > 0) {
+    console.info(`SmartChef: staged ${imageCopy.copied} image(s) for sync`);
+  }
+
   const statusStartedAt = performance.now();
-  const matrix = await git.statusMatrix({ fs: gitfs, dir, gitdir, filepaths: ALL_ENTITY_DIRS });
+  const matrix = await git.statusMatrix({ fs: gitfs, dir, gitdir, filepaths: COMMITTED_DIRS });
   logIfSlow('commit statusMatrix', statusStartedAt, `${matrix.length} files`);
   const changed = matrix.some(([, head, workdir, stage]) => !(head === 1 && workdir === 1 && stage === 1));
   if (!changed) return false;
 
-  await git.add({ fs: gitfs, dir, gitdir, filepath: ALL_ENTITY_DIRS });
+  await git.add({ fs: gitfs, dir, gitdir, filepath: COMMITTED_DIRS });
   const id = await getDeviceId();
   const changedCount = matrix.filter(([, head, workdir]) => head !== workdir).length;
   await git.commit({
@@ -424,6 +445,16 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
         'again once another device has synced recently.'
       );
     }
+    // Before the merged entities land: make sure the images they reference
+    // actually exist on this device. mergeRemoteIntoLocal() only writes the
+    // JSON records it merged, so without this a recipe synced from another
+    // device arrives pointing at a cover that was fetched as a git object
+    // and never written anywhere a screen can read it.
+    const imagesIn = await materializeImagesFromCommit(dir, gitdir, remoteOid);
+    if (imagesIn.copied > 0) {
+      console.info(`SmartChef: brought ${imagesIn.copied} image(s) across from the sync folder`);
+    }
+
     applied += mergeResult.entitiesCreated + mergeResult.entitiesUpdated;
     conflicts += mergeResult.conflictsRecorded;
     failedEntities.push(...mergeResult.failedEntities);

@@ -83,7 +83,21 @@ export async function listIngredients({ q, lang }: ListIngredientsParams) {
     // serialized text rather than a real per-element search, same
     // trade-off db/local.ts's other JSON-array columns already make.
     params.push(`%${q}%`, `%${q}%`);
-    where += ` AND (i.name LIKE $${params.length - 1} OR i.synonyms LIKE $${params.length})`;
+    let clause = `i.name LIKE $${params.length - 1} OR i.synonyms LIKE $${params.length}`;
+    // Also search the content-language name. Without this the Import review
+    // step's "search existing" box was English-only: typing "burro" matched
+    // nothing at all, because `q` only ever hit the base name and the
+    // JSON-encoded synonyms. The translated name lives in a side table, so
+    // this is an EXISTS rather than another column to LIKE against, and it
+    // only applies when a language is actually in play.
+    if (lang) {
+      params.push(`%${q}%`, lang);
+      clause += ` OR EXISTS (SELECT 1 FROM ingredient_translations tr
+                             WHERE tr.ingredient_id = i.id
+                               AND tr.translated_name LIKE $${params.length - 1}
+                               AND LOWER(tr.language_code) = LOWER($${params.length}))`;
+    }
+    where += ` AND (${clause})`;
   }
 
   const rows = await query<Record<string, unknown>>(
@@ -372,20 +386,34 @@ export async function listCategories({ lang }: { lang?: string }) {
   const rows = await query<Record<string, unknown>>(
     `SELECT * FROM ingredient_categories WHERE deleted_at IS NULL ORDER BY sort_order, name`
   );
-  const result = [];
-  for (const row of rows) {
-    const translations = await query<{ language_code: string; name: string; description: string | null }>(
-      `SELECT language_code, name, description FROM ingredient_category_translations WHERE category_id = $1`,
-      [row.id]
+  // One batched read instead of one per category. The gallery fetches
+  // /api/ingredients/categories on mount alongside /api/tags, so this sat on
+  // the same critical path — and every Capacitor bridge round-trip here is
+  // one the recipe grid waits behind, since db/local.ts serializes them all
+  // through a single queue.
+  const translationsByCategoryId = new Map<string, Array<{ language_code: string; name: string; description: string | null }>>();
+  for (const batch of chunk(rows.map(r => r.id as string))) {
+    const p: unknown[] = [];
+    const trs = await query<{ category_id: string; language_code: string; name: string; description: string | null }>(
+      `SELECT category_id, language_code, name, description FROM ingredient_category_translations
+       WHERE category_id IN (${inPlaceholders(p, batch)}) ORDER BY rowid`,
+      p
     );
-    const translatedName = lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null;
-    result.push({
-      ...row,
-      translated_name: translatedName,
-      translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
-    });
+    for (const t of trs) {
+      const list = translationsByCategoryId.get(t.category_id);
+      if (list) list.push(t);
+      else translationsByCategoryId.set(t.category_id, [t]);
+    }
   }
-  return result;
+
+  return rows.map(row => {
+    const translations = translationsByCategoryId.get(row.id as string) ?? [];
+    return {
+      ...row,
+      translated_name: lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null,
+      translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
+    };
+  });
 }
 
 export interface CategoryInput {
@@ -436,16 +464,34 @@ export async function deleteCategory(id: string): Promise<void> {
 
 export async function listUnits({ lang }: { lang?: string }) {
   const rows = await query<Record<string, unknown>>(`SELECT * FROM units ORDER BY unit_type, name`);
-  const result = [];
-  for (const row of rows) {
-    const translations = await query<{ language_code: string; name: string }>(
-      `SELECT language_code, name FROM unit_translations WHERE unit_id = $1`,
-      [row.id]
+
+  // Batched for the same reason as listCategories() above. Units are the
+  // smallest of these catalogs (the starter seed ships nine), but this list
+  // is fetched by the recipe editor, RecipeCreate, Pantry and the shopping
+  // list, so the per-row version was a round-trip tax on four screens.
+  const translationsByUnitId = new Map<string, Array<{ language_code: string; name: string }>>();
+  for (const batch of chunk(rows.map(r => r.id as string))) {
+    const p: unknown[] = [];
+    const trs = await query<{ unit_id: string; language_code: string; name: string }>(
+      `SELECT unit_id, language_code, name FROM unit_translations
+       WHERE unit_id IN (${inPlaceholders(p, batch)}) ORDER BY rowid`,
+      p
     );
-    const translatedName = lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null;
-    result.push({ ...row, translated_name: translatedName, translations: translations.map(t => ({ lang: t.language_code, name: t.name })) });
+    for (const t of trs) {
+      const list = translationsByUnitId.get(t.unit_id);
+      if (list) list.push(t);
+      else translationsByUnitId.set(t.unit_id, [t]);
+    }
   }
-  return result;
+
+  return rows.map(row => {
+    const translations = translationsByUnitId.get(row.id as string) ?? [];
+    return {
+      ...row,
+      translated_name: lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null,
+      translations: translations.map(t => ({ lang: t.language_code, name: t.name })),
+    };
+  });
 }
 
 export interface UnitInput {
@@ -523,7 +569,17 @@ export async function listTools({ lang, q }: { lang?: string; q?: string }) {
   let where = `WHERE deleted_at IS NULL`;
   if (q) {
     params.push(`%${q}%`, `%${q}%`);
-    where += ` AND (name LIKE $${params.length - 1} OR synonyms LIKE $${params.length})`;
+    let clause = `name LIKE $${params.length - 1} OR synonyms LIKE $${params.length}`;
+    // Same translated-name search as listIngredients() above — the review
+    // step searches tools through the identical UI.
+    if (lang) {
+      params.push(`%${q}%`, lang);
+      clause += ` OR EXISTS (SELECT 1 FROM tool_translations tr
+                             WHERE tr.tool_id = tools.id
+                               AND tr.name LIKE $${params.length - 1}
+                               AND LOWER(tr.language_code) = LOWER($${params.length}))`;
+    }
+    where += ` AND (${clause})`;
   }
   const rows = await query<Record<string, unknown>>(`SELECT * FROM tools ${where} ORDER BY category, name`, params);
   const result = [];
@@ -595,4 +651,51 @@ export async function updateTool(id: string, d: ToolInput): Promise<void> {
 export async function deleteTool(id: string): Promise<void> {
   await query("UPDATE tools SET deleted_at=now(), updated_at=now() WHERE id=$1", [id]);
   await syncTool(id);
+}
+
+/** Folds a mistakenly-duplicated tool into another one — the same shape as
+ *  mergeIngredients() above, with one extra place to repoint that
+ *  ingredients don't have: `recipe_steps.tool_ids` is a JSON array of tool
+ *  ids, so a merge that only rewrote `recipe_tools` would leave the source
+ *  id dangling inside individual steps (StepEditor renders those by id, so
+ *  the step would silently lose its tool the moment the source row was
+ *  tombstoned). Translations/photos on the source are discarded — the
+ *  target's own are what a merge keeps, same rule as everywhere else. */
+export async function mergeTools(sourceId: string, targetId: string): Promise<{ recipesUpdated: number }> {
+  if (sourceId === targetId) throw new Error('Cannot merge a tool into itself');
+  const source = await queryOne<{ id: string }>("SELECT id FROM tools WHERE id=$1", [sourceId]);
+  const target = await queryOne<{ id: string }>("SELECT id FROM tools WHERE id=$1 AND deleted_at IS NULL", [targetId]);
+  if (!source || !target) throw new Error('Tool not found');
+
+  const affected = new Set<string>();
+
+  // recipe_tools is a (recipe_id, tool_id) join table: union rather than
+  // UPDATE, so a recipe that already carried BOTH tools doesn't trip the
+  // primary key.
+  for (const row of await query<{ recipe_id: string }>("SELECT recipe_id FROM recipe_tools WHERE tool_id=$1", [sourceId])) {
+    affected.add(row.recipe_id);
+  }
+  await query(
+    "INSERT INTO recipe_tools (recipe_id, tool_id) SELECT recipe_id, $1 FROM recipe_tools WHERE tool_id=$2 ON CONFLICT DO NOTHING",
+    [targetId, sourceId],
+  );
+  await query("DELETE FROM recipe_tools WHERE tool_id=$1", [sourceId]);
+
+  for (const step of await query<{ id: string; recipe_id: string; tool_ids: string }>(
+    "SELECT id, recipe_id, tool_ids FROM recipe_steps WHERE tool_ids LIKE $1", [`%${sourceId}%`],
+  )) {
+    const ids: string[] = JSON.parse(step.tool_ids || '[]');
+    if (!ids.includes(sourceId)) continue;
+    const replaced = Array.from(new Set(ids.map((id) => (id === sourceId ? targetId : id))));
+    await query("UPDATE recipe_steps SET tool_ids=$1 WHERE id=$2", [replaced, step.id]);
+    affected.add(step.recipe_id);
+  }
+
+  await deleteTool(sourceId);
+  await syncTool(targetId);
+
+  const { syncRecipe } = await import('./recipes.local');
+  for (const recipeId of affected) await syncRecipe(recipeId);
+
+  return { recipesUpdated: affected.size };
 }
