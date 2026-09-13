@@ -16,3 +16,10 @@ smartchef-backup-*.json
 # Stray working images dropped at the repo root while designing avatars.
 /Avatars.jpeg
 
+# Android release signing. The keystore IS the app's identity: an app signed
+# with a different key can never update an installed one, so this file is
+# both irreplaceable and a secret. Never commit it, and keep a backup
+# somewhere that is not this repo.
+*.jks
+*.keystore
+keystore.properties

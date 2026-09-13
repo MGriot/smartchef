@@ -1,5 +1,44 @@
 apply plugin: 'com.android.application'
 
+// ── Release signing ────────────────────────────────────────────────────
+// The keystore and its passwords are deliberately NOT in this file. They
+// come from keystore.properties (gitignored, next to this module or at the
+// android/ root) or from the environment, so the secret lives on the
+// machine that builds releases and nowhere in git.
+//
+//   keystore.properties:
+//     storeFile=../../release.jks      # relative to this build.gradle
+//     storePassword=...
+//     keyAlias=release-alias
+//     keyPassword=...
+//
+//   or: SMARTCHEF_KEYSTORE / SMARTCHEF_KEYSTORE_PASSWORD /
+//       SMARTCHEF_KEY_ALIAS / SMARTCHEF_KEY_PASSWORD
+//
+// When neither is present the release build stays UNSIGNED rather than
+// failing: a contributor without the key can still run assembleRelease,
+// and `assembleDebug` is unaffected either way.
+def keystoreProps = new Properties()
+def keystorePropsFile = [
+    file('keystore.properties'),
+    rootProject.file('keystore.properties'),
+].find { it.exists() }
+if (keystorePropsFile != null) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+def signingValue = { String propKey, String envKey ->
+    def fromEnv = System.getenv(envKey)
+    return (fromEnv != null && !fromEnv.isEmpty()) ? fromEnv : keystoreProps.getProperty(propKey)
+}
+
+def storeFilePath = signingValue('storeFile', 'SMARTCHEF_KEYSTORE')
+def resolvedStoreFile = storeFilePath ? file(storeFilePath) : null
+def hasReleaseKey = resolvedStoreFile != null && resolvedStoreFile.exists()
+if (storeFilePath != null && !hasReleaseKey) {
+    logger.warn("SmartChef: release keystore '${storeFilePath}' not found - release build will be UNSIGNED")
+}
+
 android {
     namespace = "com.smartchef.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +46,8 @@ android {
         applicationId "com.smartchef.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.1.0"
+        versionCode 3
+        versionName "1.1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +55,30 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    if (hasReleaseKey) {
+        signingConfigs {
+            release {
+                storeFile resolvedStoreFile
+                storePassword signingValue('storePassword', 'SMARTCHEF_KEYSTORE_PASSWORD')
+                keyAlias signingValue('keyAlias', 'SMARTCHEF_KEY_ALIAS')
+                keyPassword signingValue('keyPassword', 'SMARTCHEF_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseKey) {
+                signingConfig signingConfigs.release
+            }
+            // Left off deliberately. R8 renames and strips by reachability,
+            // and this app's Capacitor plugins - including the two written
+            // for it, SafMirrorPlugin and GitHttpPlugin - are resolved by
+            // NAME at runtime, so nothing static references the classes it
+            // would remove. `assembleRelease` already clears
+            // android:debuggable and testOnly, which is what the store
+            // requirements actually ask for; minification buys size at the
+            // cost of a failure mode that only shows up on a device.
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

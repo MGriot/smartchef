@@ -1,0 +1,7 @@
+L'importazione da foto funziona di nuovo su desktop: la content-security policy bloccava il worker del riconoscimento testo e il suo core WebAssembly.
+
+La revisione dell'importazione mostra le categorie nella lingua della ricetta.
+
+Le ricette importate collegano i passaggi agli ingredienti: all'AI viene chiesto quali ingredienti usa ogni passaggio e quanto, cosi le quantita rimanenti e la checklist funzionano subito.
+
+La build Android e firmata con una chiave di rilascio.

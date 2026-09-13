@@ -5,6 +5,16 @@ Everything here is prepared and checked against F-Droid's
 The one step that cannot be done from this repository is the last one: the
 merge request has to come from **your** GitLab account.
 
+> **Looking for less work?** f-droid.org has no "point us at your repo"
+> intake — building from source and signing with their own key is the whole
+> trust model. [IzzyOnDroid](https://apt.izzysoft.de/fdroid/index/info) does
+> exactly that instead: it re-serves the APK you attach to a GitHub release,
+> so one request covers every future tag. It needs a release-signed APK
+> (which this repo now builds) and the same `fastlane/` metadata, and asks
+> for nothing else. See the README's
+> [Publishing on F-Droid](../README.md#publishing-on-f-droid) section — the
+> two are not exclusive.
+
 ## What is already done
 
 | Requirement | Status |

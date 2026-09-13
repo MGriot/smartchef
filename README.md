@@ -564,19 +564,59 @@ no `google-services.json`, no proprietary libraries, and the whole thing builds
 from this repo. There are two routes, and they cost very different amounts of
 work.
 
-#### What has to change first, either way
+#### Building a signed release APK
 
-1. **Release signing.** The APK above is a *debug* build signed with the shared
-   Android debug keystore. Android identifies an app by its signing key, so the
-   key you publish with is a one-way decision — an app signed with a different key
-   later cannot update the installed one. Generate a keystore, keep it backed up,
-   and add a `signingConfigs`/`release` block to `frontend/android/app/build.gradle`
-   (F-Droid's own repo does not need this — it signs with *its* key — but your own
-   repo does).
-2. **Bump `versionCode` on every release.** It is the only number Android compares
-   when deciding whether something is an upgrade; `versionName` is for humans.
+Everything except the keystore itself is wired up. Generate one once:
 
-#### Route A — your own F-Droid repository (an afternoon)
+```bash
+keytool -genkey -v -keystore release.jks -keyalg RSA -keysize 2048 \
+        -validity 10000 -alias release-alias
+```
+
+Then copy `frontend/android/keystore.properties.example` to
+`keystore.properties` in the same folder and fill in the two passwords. Both
+that file and `*.jks` are gitignored.
+
+```bash
+cd frontend && npm run build && npx cap sync android
+cd android && ./gradlew assembleRelease
+apksigner verify --verbose app/build/outputs/apk/release/app-release.apk
+```
+
+With no `keystore.properties` and no `SMARTCHEF_KEYSTORE*` environment
+variables the release build still runs, it just produces an unsigned APK — a
+contributor without the key is not blocked.
+
+Two things worth knowing:
+
+- **The keystore is the app's identity.** An app signed with a different key
+  can never update an installed one, so losing it means every user has to
+  uninstall and reinstall. Back it up somewhere that is not this repository.
+- **Bump `versionCode` on every release.** It is the only number Android
+  compares when deciding whether something is an upgrade; `versionName` is
+  for humans. `minifyEnabled` is deliberately left off — see the comment in
+  `app/build.gradle` for why R8 is risky for this particular app.
+
+#### Route A — IzzyOnDroid (the least work, and it tracks GitHub releases)
+
+[IzzyOnDroid](https://apt.izzysoft.de/fdroid/index/info) is a third-party
+F-Droid repository most F-Droid users already have enabled. It does **not**
+build anything: it takes the APK you attach to a GitHub release and re-serves
+it, so after a one-off request every future tagged release is picked up
+automatically.
+
+Its [inclusion policy](https://izzyondroid.org/docs/general/AppInclusionPolicy/)
+asks for an OSI/FSF licence, public source, no trackers, fastlane metadata
+with a short description, full description, icon and screenshots — all of
+which this repo has — and an APK **signed with a release key**, explicitly
+not a debug one and not carrying `android:debuggable` or `android:testOnly`.
+
+Request inclusion by opening an issue on their
+[repodata tracker](https://codeberg.org/IzzyOnDroid/repodata) pointing at this
+repository's releases. Note the request goes to *their* Codeberg; the release
+itself stays on GitHub.
+
+#### Route B — your own F-Droid repository (an afternoon)
 
 Full control, no review queue, and users add one URL. This is the pragmatic
 option for a self-hosted app with a handful of users.
@@ -590,7 +630,7 @@ fdroid update -c                   # builds the index, reads metadata out of the
 ```
 
 (`fdroid-repo/`, not `fdroid/` — the latter holds the submission files for
-Route B below.)
+Route C below.)
 
 Serve the resulting `fdroid-repo/repo/` directory over HTTPS — GitHub Pages is
 enough. Users then add `https://<user>.github.io/smartchef/fdroid-repo/repo`
@@ -598,7 +638,7 @@ under **F-Droid → Settings → Repositories**. Keep `fdroid-repo/keystore.p12`
 and `config.yml` out of git; losing the repo key means every user has to
 remove and re-add the repository.
 
-#### Route B — the official f-droid.org repository (weeks, mostly waiting)
+#### Route C — the official f-droid.org repository (weeks, mostly waiting)
 
 Widest reach, and F-Droid builds the APK itself on its own build server and
 signs it with its own key, so nothing of yours is trusted beyond the source.

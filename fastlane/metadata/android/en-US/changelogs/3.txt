@@ -1,0 +1,7 @@
+Photo import works again on the desktop app: its content-security policy blocked the text-recognition worker and its WebAssembly core outright.
+
+The import review shows ingredient categories in the recipe's language, not always in English.
+
+Imported recipes link steps to ingredients. The AI is asked which ingredients each step uses and how much, so remaining amounts and the kitchen-mode checklist work without linking them by hand.
+
+The Android build is signed with a release key.
