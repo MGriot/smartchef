@@ -1,0 +1,19 @@
+SmartChef è un ricettario self-hosted che funziona anche senza alcun server. Tutto — le ricette, la libreria degli ingredienti, le liste della spesa — vive in un database sul dispositivo, e nulla viene inviato altrove se non sei tu a configurarlo.
+
+<b>Ricette dentro le ricette</b>
+Una ricetta può essere usata come ingrediente di un'altra. Cambi le porzioni di un piatto e la salsa su cui è costruito si scala insieme, per quanti livelli vuoi. È questo che fa funzionare il resto: lista della spesa, valori nutrizionali e dispensa risolvono l'intero albero, non solo il primo strato.
+
+<b>Scritte come si cucina</b>
+Il testo dei passaggi può puntare agli ingredienti, agli strumenti e alle tecniche della ricetta stessa. Un riferimento mostra la quantità che quel passaggio usa — 500 g dei 620 g di farina, non il totale — e può essere rinominato, così un passaggio legge "setaccia la farina" pur puntando a "Farina di grano tipo 00". Un ingrediente può essere indicato come alternativa a un altro, e allora resta fuori dalla lista della spesa invece di essere comprato due volte.
+
+<b>In cucina</b>
+Modalità cucina a tutto schermo, anche nella variante che intreccia i passaggi di una sotto-ricetta con quelli della ricetta principale. Ogni passaggio elenca i suoi ingredienti come checklist, con quanto usa e quanto resta. I timer sopravvivono all'uscita dalla schermata e lo schermo resta acceso.
+
+<b>Far entrare le ricette</b>
+Incolla un URL e i dati schema.org della pagina vengono letti direttamente. Importa da Paprika, Mealie, Crouton, Mela, Nextcloud Cookbook o CopyMeThat. Leggi il livello di testo di un PDF, o una foto con OCR sul dispositivo. Un modello linguistico opzionale può interpretare il resto, e può essere un Ollama locale, così anche quello resta offline.
+
+<b>Organizzazione</b>
+Pianificatore settimanale, liste della spesa raggruppate per reparto, una dispensa che risponde a "cosa posso cucinare adesso?", una mappa della provenienza delle ricette e un diario delle cotture.
+
+<b>I tuoi dati</b>
+Sincronizza tra i tuoi dispositivi tramite una cartella già replicata dal tuo strumento di sync, o un remote git che controlli tu. Merge campo per campo, con i conflitti veri mostrati invece che risolti in silenzio. Backup completo con esportazione e ripristino. Interfaccia e contenuti in inglese, italiano, francese e spagnolo.

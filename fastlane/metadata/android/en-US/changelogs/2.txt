@@ -1,0 +1,9 @@
+Ingredient substitutes: mark a row an alternative to another and it is listed under it, and left off the shopping list.
+
+Step references print the amount that step uses, not the recipe total, and can be re-labelled.
+
+Ingredient and step lists fold, and "add another" sits at the bottom.
+
+Kitchen mode lists each step's ingredients as a checklist.
+
+Regions search real cities. The pantry reads names in your language. Tag groups can be removed.

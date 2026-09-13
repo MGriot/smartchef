@@ -1,0 +1,9 @@
+Ingredienti sostitutivi: segna una riga come alternativa a un'altra e comparira sotto di essa, fuori dalla lista della spesa.
+
+I riferimenti nei passaggi mostrano la quantita usata da quel passaggio, non il totale.
+
+Le liste di ingredienti e passaggi si comprimono, e "aggiungi" sta in fondo.
+
+La modalita cucina elenca gli ingredienti come checklist.
+
+Le regioni cercano citta reali. La dispensa usa la tua lingua.

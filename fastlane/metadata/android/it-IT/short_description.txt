@@ -1,0 +1,1 @@
+Ricettario offline: ricette annidate, porzioni dinamiche, sync tra dispositivi

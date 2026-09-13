@@ -1,0 +1,19 @@
+SmartChef is a self-hosted recipe manager that works with no server at all. Everything — your recipes, your ingredient library, your shopping lists — lives in a database on the device, and nothing is sent anywhere unless you set that up yourself.
+
+<b>Recipes inside recipes</b>
+A recipe can be used as an ingredient of another one. Change the portions of a dish and the sauce it is built on scales with it, down through as many levels as you like. This is what makes the rest work: the shopping list, the nutrition figures and the pantry matcher all resolve the whole tree rather than the top layer.
+
+<b>Written the way you cook</b>
+Step text can point at the recipe's own ingredients, tools and techniques. A reference prints the amount that step uses — 500 g of the 620 g of flour, not the total — and can be re-labelled, so a step reads "sift the flour" while still pointing at "Type 00 wheat flour". An ingredient can be marked an alternative to another one, and is then left off the shopping list rather than bought twice.
+
+<b>In the kitchen</b>
+Full-screen cooking mode, including a variant that interleaves a sub-recipe's steps with the main recipe's. Each step lists its ingredients as a checklist showing what it takes and what is left. Timers survive leaving the screen, and the screen stays awake.
+
+<b>Getting recipes in</b>
+Paste a URL and the schema.org data on the page is read directly. Import from Paprika, Mealie, Crouton, Mela, Nextcloud Cookbook or CopyMeThat. Read a PDF's text layer, or a photo with on-device OCR. An optional language model can parse anything else, and it can be a local Ollama, so that stays offline too.
+
+<b>Planning</b>
+Weekly planner, shopping lists grouped by aisle, a pantry that answers "what can I cook right now?", a map of where your recipes come from, and a cooking log.
+
+<b>Your data</b>
+Sync between your own devices over a folder your file-sync tool already mirrors, or a git remote you control. Field-level merging, with genuine conflicts surfaced rather than silently resolved. Full backup export and restore. Interface and content in English, Italian, French and Spanish.

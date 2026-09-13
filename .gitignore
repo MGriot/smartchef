@@ -6,3 +6,13 @@ dist/
 .DS_Store
 backend/uploads/
 sync-data/
+.claude
+.scratch
+.stich
+# Backup exports written by Account > Backup & Restore. They are a user's
+# whole library (recipes, and optionally every image inline), so they are
+# data rather than source and can be tens of megabytes.
+smartchef-backup-*.json
+# Stray working images dropped at the repo root while designing avatars.
+/Avatars.jpeg
+

@@ -1,0 +1,1 @@
+Offline recipe manager with nested recipes, scaling and device-to-device sync

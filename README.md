@@ -6,6 +6,7 @@
 
 ## 📋 Table of Contents
 
+- [What it looks like](#-what-it-looks-like)
 - [How to start the app](#-how-to-start-the-app)
   - [Option 1 — Docker (recommended)](#-option-1--docker-recommended)
   - [Option 2 — Local, without Docker](#-option-2--local-without-docker)
@@ -20,10 +21,62 @@
 - [Pantry — what can I cook right now?](#-pantry--what-can-i-cook-right-now)
 - [Sharing a recipe with someone who has no account](#-sharing-a-recipe-with-someone-who-has-no-account)
 - [Multi-device sync](#-multi-device-sync)
+- [Database migrations (server mode)](#️-database-migrations-server-mode)
 - [Standalone Mode (Windows & Android, No Server)](#-standalone-mode-windows--android-no-server)
 - [Mobile App (Android) & Remote Access via Tailscale](#-mobile-app-android--remote-access-via-tailscale)
 - [Running Compose commands from any folder](#-running-compose-commands-from-any-folder)
 - [Implementation status](#️-implementation-status)
+
+---
+
+## 📸 What it looks like
+
+The desktop shots are the Windows build running against a real library; the
+phone shots are the Android build on an emulator.
+
+### The gallery
+
+Every recipe, with its tags, times and difficulty. Filters, full-text search
+and collections sit above it.
+
+![Recipe gallery](docs/images/01-gallery.png)
+
+### A recipe
+
+Hero image, the tags, and the times broken out — prep, waiting, cooking and
+the total, because "1h" hides which part of it you have to be present for.
+Below this sit the ingredients (scaled live by the servings slider, metric or
+imperial), the method, and the origin map.
+
+![Recipe detail](docs/images/02-recipe-detail.png)
+
+### The Atlas
+
+Where your cooking comes from, counted by place. Pressing a pin — or the
+"no region" counter — filters the library to it.
+
+![Atlas](docs/images/04-atlas.png)
+
+### Writing a recipe
+
+Long recipes fold. Each ingredient and step card collapses to a one-line
+summary, whole sections fold away, and "add another" is at the bottom of the
+list where you already are.
+
+<img src="docs/images/10-editor-folding-android.png" width="300" alt="A folded ingredient row" />
+
+An ingredient can be marked an **alternative to** another one, rather than a
+further thing to buy — it is then listed under the ingredient it replaces and
+left off the shopping list.
+
+<img src="docs/images/12-substitute-android.png" width="300" alt="The Alternative to picker" />
+
+Step text points at the recipe's own ingredients, tools and techniques. A
+reference prints the amount *that step* uses, and **Show as** re-labels it
+with any of the ingredient's other names, so a step can read "sift the flour"
+while still pointing at "Type 00 wheat flour".
+
+<img src="docs/images/11-step-reference-android.png" width="300" alt="Inserting a step reference" />
 
 ---
 
@@ -530,90 +583,53 @@ option for a self-hosted app with a handful of users.
 
 ```bash
 pipx install fdroidserver          # or: apt install fdroidserver
-mkdir -p fdroid && cd fdroid
+mkdir -p fdroid-repo && cd fdroid-repo
 fdroid init                        # creates config.yml + the repo signing key
 cp ../frontend/android/app/build/outputs/apk/release/app-release.apk repo/
 fdroid update -c                   # builds the index, reads metadata out of the APK
 ```
 
-Serve the resulting `fdroid/repo/` directory over HTTPS — GitHub Pages is enough.
-Users then add `https://<user>.github.io/smartchef/fdroid/repo` under
-**F-Droid → Settings → Repositories**. Keep `fdroid/keystore.p12` and
-`config.yml` out of git; losing the repo key means every user has to remove and
-re-add the repository.
+(`fdroid-repo/`, not `fdroid/` — the latter holds the submission files for
+Route B below.)
+
+Serve the resulting `fdroid-repo/repo/` directory over HTTPS — GitHub Pages is
+enough. Users then add `https://<user>.github.io/smartchef/fdroid-repo/repo`
+under **F-Droid → Settings → Repositories**. Keep `fdroid-repo/keystore.p12`
+and `config.yml` out of git; losing the repo key means every user has to
+remove and re-add the repository.
 
 #### Route B — the official f-droid.org repository (weeks, mostly waiting)
 
-Widest reach, and F-Droid builds the APK itself on its own build server and signs
-it with its own key, so nothing of yours is trusted beyond the source. You open a
-merge request against [`fdroid/fdroiddata`](https://gitlab.com/fdroid/fdroiddata)
-adding `metadata/com.smartchef.app.yml`.
+Widest reach, and F-Droid builds the APK itself on its own build server and
+signs it with its own key, so nothing of yours is trusted beyond the source.
+You open a merge request against
+[`fdroid/fdroiddata`](https://gitlab.com/fdroid/fdroiddata) adding
+`metadata/com.smartchef.app.yml`.
 
-The awkward part for this app is that the APK is a Capacitor shell around a Vite
-build, so **Node has to run before Gradle does** — F-Droid's build server has no
-Node by default. That goes in `sudo:` (root, in the build VM) and `build:`. Note
-`build:` and not `prebuild:`: F-Droid's own reference is explicit that "nothing
-should be built during the prebuild phase", because the source scanner runs
-between the two, and `npm ci` would otherwise drop a `node_modules` full of
-binaries straight into its path.
+**That submission is already prepared in this repo** — see
+[`fdroid/README.md`](fdroid/README.md). It has the finished build recipe
+(`fdroid/metadata/com.smartchef.app.yml`), a checklist of every requirement in
+F-Droid's quick-start guide against what this repo already satisfies, and the
+exact `git`/`fdroid` commands for the fork and the merge request. The app's
+own store listing — descriptions, changelog, icon and screenshots, in English
+and Italian — lives in [`fastlane/metadata/android/`](fastlane/metadata/android/),
+which is where F-Droid reads it from.
 
-`init`, `prebuild` and `build` all run **inside `subdir:`** — hence the `cd ../..`
-below, which lands in `frontend/`, where `package.json` lives.
+The awkward part, documented there in full: the APK is a Capacitor shell
+around a Vite build, so **Node has to run before Gradle does** and F-Droid's
+build server has no Node by default. It goes in `sudo:` and `build:` — not
+`prebuild:`, because the source scanner runs between the two and `npm ci`
+would drop a `node_modules` full of binaries into its path.
 
-```yaml
-Categories:
-  - Internet
-License: MIT
-AuthorName: Matteo Griot
-SourceCode: https://github.com/MGriot/smartchef
-IssueTracker: https://github.com/MGriot/smartchef/issues
 
-AutoName: SmartChef
-Summary: Offline-first recipe manager with nested recipes and device-to-device sync
+### Something to look at on first run
 
-RepoType: git
-Repo: https://github.com/MGriot/smartchef.git
-
-Builds:
-  - versionName: 1.1.0
-    versionCode: 2
-    commit: v1.1.0
-    subdir: frontend/android/app
-    sudo:
-      - curl -Lo node.tar.xz https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-x64.tar.xz
-      - echo "<sha256 of that tarball>  node.tar.xz" | sha256sum -c -
-      - tar xJf node.tar.xz -C /opt
-      - ln -s /opt/node-v20.18.1-linux-x64/bin/node /usr/local/bin/node
-      - ln -s /opt/node-v20.18.1-linux-x64/bin/npm  /usr/local/bin/npm
-    build:
-      - cd ../..
-      - npm ci
-      - npm run build
-      - npx cap sync android
-    gradle:
-      - yes
-
-AutoUpdateMode: Version
-UpdateCheckMode: Tags
-CurrentVersion: 1.1.0
-CurrentVersionCode: 2
-```
-
-Things a reviewer will raise, worth getting ahead of:
-
-- **Anti-features.** Declare them honestly rather than being asked to. The cloud
-  LLM providers (Anthropic/Gemini/OpenAI) are opt-in and off by default — the
-  default is a local Ollama — but they are non-free network services, so
-  `AntiFeatures: [NonFreeNet]` is the safe declaration. The map tiles and the
-  Nominatim geocoder are free services but still network calls; the Tesseract OCR
-  model is Apache-2.0 and downloads on first use.
-- **`npm ci` needs the committed `frontend/package-lock.json`** — it is in the
-  repo, which is what makes the build deterministic enough to be accepted.
-- **The exact `subdir`/`build` shape** is the part most likely to need a round of
-  review feedback; `gradlew` lives at `frontend/android/gradlew` while the module
-  is `frontend/android/app`, which is a slightly unusual layout for fdroiddata.
-- **Tag the release.** `commit:` should point at an annotated tag (`v1.1.0`), not a
-  branch, and `UpdateCheckMode: Tags` then picks up future ones automatically.
+A fresh install opens on an empty gallery. [`samples/`](samples/) holds a real
+exported library — 46 recipes, 239 ingredients, the tag and technique
+catalogues — that loads through **Account → Backup & Restore → Restore from
+Backup**. [`samples/README.md`](samples/README.md) explains exactly what
+restoring does to a library you already have: it merges by id, never deletes,
+and is safe to run twice.
 
 ### First run: standalone vs. server
 
