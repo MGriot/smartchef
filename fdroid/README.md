@@ -22,18 +22,7 @@ merge request has to come from **your** GitLab account.
 
 ## What you still have to do
 
-### 1. Fill in the Node checksum
-
-`metadata/com.smartchef.app.yml` downloads Node in `sudo:` and verifies it.
-The placeholder has to become the real value or a reviewer will ask:
-
-```bash
-curl -s https://nodejs.org/dist/v20.18.1/SHASUMS256.txt | grep node-v20.18.1-linux-x64.tar.xz
-```
-
-Paste the hash over `REPLACE_WITH_SHA256`.
-
-### 2. Fork fdroiddata and add the file
+### 1. Fork fdroiddata and add the file
 
 ```bash
 # fork https://gitlab.com/fdroid/fdroiddata in the GitLab UI first
@@ -43,7 +32,7 @@ git checkout -b com.smartchef.app
 cp /path/to/smartchef/fdroid/metadata/com.smartchef.app.yml metadata/
 ```
 
-### 3. Check it locally before asking anyone to review it
+### 2. Check it locally before asking anyone to review it
 
 This is optional in the guide and worth the time here, because the
 Node-before-Gradle step is the part most likely to need adjusting:
@@ -58,7 +47,7 @@ fdroid build com.smartchef.app         # runs the real build in their VM
 setting that up is more than you want, skip it — the reviewers run it — but
 expect one round of feedback on `subdir:`/`build:`.
 
-### 4. Open the merge request
+### 3. Open the merge request
 
 ```bash
 git add metadata/com.smartchef.app.yml
