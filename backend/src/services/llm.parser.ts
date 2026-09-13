@@ -63,7 +63,14 @@ Il JSON deve avere questa struttura:
       "title": "string | null",
       "description": "string",
       "durationMin": "number | null",
-      "techniques": ["string"]
+      "techniques": ["string"],
+      "ingredients": [
+        {
+          "name": "string",
+          "quantity": "number | null",
+          "unit": "string | null"
+        }
+      ]
     }
   ],
   "imageUrl": "string | null (URL assoluto http/https dell'immagine di copertina del piatto, se una compare nel contenuto; altrimenti null)",
@@ -78,6 +85,7 @@ Regole:
 - groupName (negli ingredienti) è un'intestazione breve e opzionale sotto cui questo ingrediente è raggruppato, es. "Per il condimento" — impostalo SOLO quando la ricetta originale raggruppa visivamente gli ingredienti in sezioni etichettate; altrimenti lascialo null. Non inventare raggruppamenti assenti nella fonte
 - isOptional (negli ingredienti) è true quando la ricetta presenta quell'ingrediente come facoltativo o a piacere (es. "facoltativo", "se gradito", "optional", "per guarnire", "q.b. a piacere"); altrimenti false. Non dedurlo dal fatto che una quantità sia vaga
 - techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step (es. "Rosolare", "Brasare"), nomi brevi, stesso criterio di "tools"
+- ingredients (negli step) è l'elenco degli ingredienti che QUEL passaggio usa. Il campo name deve essere copiato ESATTAMENTE come compare nella lista "ingredients" principale, altrimenti il collegamento viene scartato. Metti quantity/unit SOLO quando il passaggio usa una parte dichiarata dell'ingrediente (es. "metà dello zucchero" su 100 g -> quantity 50, unit "g"); se il passaggio usa semplicemente l'ingrediente, lascia quantity e unit a null. Non elencare ingredienti che quel passaggio non nomina né usa, e non inventarne di assenti dalla lista principale
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
@@ -618,6 +626,19 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
           description: step.description ?? "",
           durationMin: typeof step.durationMin === "number" ? step.durationMin : undefined,
           techniques: Array.isArray(step.techniques) ? step.techniques.filter((t: unknown) => typeof t === "string") : [],
+          // Which of the recipe's ingredients this step uses. Kept as the
+          // model's own names and resolved against the ingredient list by
+          // the client (lib/stepRefs.ts's matchStepIngredients) rather than
+          // trusting an array index, which is what a model gets wrong.
+          ingredients: Array.isArray(step.ingredients)
+            ? step.ingredients
+                .filter((u: any) => u && typeof u.name === "string")
+                .map((u: any) => ({
+                  name: u.name as string,
+                  quantity: typeof u.quantity === "number" ? u.quantity : null,
+                  unit: typeof u.unit === "string" ? u.unit : null,
+                }))
+            : [],
         }))
       : [],
     sourceUrl: undefined,

@@ -3,6 +3,7 @@ import {
   parseRefParams, formatRefParams, buildRef,
   syncIngredientRefAmount, reindexIngredientRefs,
   stepIngredientConsumption, remainingBeforeStep,
+  matchStepIngredients, linkIngredientsInText,
 } from './stepRefs';
 
 describe('parseRefParams', () => {
@@ -121,5 +122,84 @@ describe('remainingBeforeStep', () => {
       [{ stepIngredients: [{ ingredientSortOrder: 0, amountMode: 'absolute' as const, portion: 1, quantity: 900, unitSymbol: 'g' }] }],
       1, flour,
     )).toBe(0);
+  });
+});
+
+describe('matchStepIngredients', () => {
+  const ingredients = [
+    { name: 'Farina di grano tipo 00', quantity: 620, unit: 'g' },
+    { name: 'Zucchero', quantity: 100, unit: 'g' },
+    { name: 'Uova', quantity: 4, unit: 'pz' },
+  ];
+
+  it('matches on the name, not on the order the model listed them in', () => {
+    expect(matchStepIngredients([{ name: 'Uova' }, { name: 'Zucchero' }], ingredients))
+      .toEqual([
+        { ingredientSortOrder: 2, amountMode: 'fraction', portion: 1 },
+        { ingredientSortOrder: 1, amountMode: 'fraction', portion: 1 },
+      ]);
+  });
+
+  it('survives articles, case and accents the model added or dropped', () => {
+    expect(matchStepIngredients([{ name: 'la farina di grano tipo 00' }], ingredients)[0].ingredientSortOrder).toBe(0);
+    expect(matchStepIngredients([{ name: 'ZUCCHERO' }], ingredients)[0].ingredientSortOrder).toBe(1);
+  });
+
+  it('records an explicit amount as an absolute row', () => {
+    expect(matchStepIngredients([{ name: 'Farina di grano tipo 00', quantity: 500, unit: 'g' }], ingredients))
+      .toEqual([{ ingredientSortOrder: 0, amountMode: 'absolute', portion: 1, quantity: 500, unitSymbol: 'g' }]);
+  });
+
+  it('falls back to the ingredient own unit when the step gives none', () => {
+    expect(matchStepIngredients([{ name: 'Zucchero', quantity: 50 }], ingredients)[0].unitSymbol).toBe('g');
+  });
+
+  it('drops an ingredient the recipe does not have rather than guessing', () => {
+    expect(matchStepIngredients([{ name: 'Burro' }], ingredients)).toEqual([]);
+  });
+
+  it('never links the same ingredient twice in one step', () => {
+    expect(matchStepIngredients([{ name: 'Uova' }, { name: 'uova' }], ingredients)).toHaveLength(1);
+  });
+
+  it('has nothing to say about a step that lists none', () => {
+    expect(matchStepIngredients(undefined, ingredients)).toEqual([]);
+    expect(matchStepIngredients([], ingredients)).toEqual([]);
+  });
+});
+
+describe('linkIngredientsInText', () => {
+  const ingredients = [
+    { name: 'Farina di grano tipo 00', quantity: 620, unit: 'g' },
+    { name: 'Zucchero', quantity: 100, unit: 'g' },
+  ];
+  const refs = [
+    { ingredientSortOrder: 0, amountMode: 'fraction' as const, portion: 1 },
+    { ingredientSortOrder: 1, amountMode: 'fraction' as const, portion: 1 },
+  ];
+
+  it('turns the first literal mention into a reference', () => {
+    expect(linkIngredientsInText('Setaccia la Farina di grano tipo 00 in una ciotola.', refs, ingredients))
+      .toBe('Setaccia la {{ing:0}} in una ciotola.');
+  });
+
+  it('replaces only the first mention, leaving the prose alone after that', () => {
+    const out = linkIngredientsInText('Zucchero sopra, poi ancora Zucchero.', [refs[1]], ingredients);
+    expect(out).toBe('{{ing:1}} sopra, poi ancora Zucchero.');
+  });
+
+  it('leaves a step that never names the ingredient untouched', () => {
+    const text = 'Mescola per bene fino a ottenere un impasto liscio.';
+    expect(linkIngredientsInText(text, refs, ingredients)).toBe(text);
+  });
+
+  it('does not double-link an ingredient the author already referenced', () => {
+    const text = 'Setaccia {{ing:0|q=500 g}} e aggiungi la Farina di grano tipo 00.';
+    expect(linkIngredientsInText(text, refs, ingredients)).toBe(text);
+  });
+
+  it('does not match a name inside a longer word', () => {
+    const text = 'Usa lo zuccherificio del paese.';
+    expect(linkIngredientsInText(text, [refs[1]], ingredients)).toBe(text);
   });
 });

@@ -30,6 +30,12 @@ export interface TemplateParseStep {
   // — the text template has no per-step technique field, so the local
   // parser never sets this.
   techniques?: string[];
+  /** Which of the recipe's ingredients this step uses, by the name the
+   *  model copied out of the ingredient list, optionally with how much of
+   *  it this step takes. Resolved against the real ingredient rows at save
+   *  time (lib/stepRefs.ts's matchStepIngredients) rather than trusted as
+   *  an index. AI path only — the text template has no such field. */
+  ingredients?: Array<{ name: string; quantity?: number | null; unit?: string | null }>;
 }
 
 // Shared "parsed but not yet matched against the library" shape — produced

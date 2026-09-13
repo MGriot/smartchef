@@ -191,3 +191,116 @@ export function remainingBeforeStep(
   }
   return Math.max(0, ing.quantity - used);
 }
+
+// ── Linking imported steps to imported ingredients ──────────────────────
+// An imported recipe arrives as a list of ingredients and a list of step
+// prose with nothing joining them, so every step said it used nothing and
+// the editor showed the whole ingredient list as untouched at every step.
+// The parser now asks the model which ingredients each step uses; these
+// turn that answer into the same stepIngredients rows the editor writes.
+
+/** What the model is asked for per step: the ingredient by the name it used
+ *  in the ingredient list, optionally with how much of it this step takes. */
+export interface ParsedStepIngredient {
+  name: string;
+  quantity?: number | null;
+  unit?: string | null;
+}
+
+export interface ImportedIngredient {
+  name: string;
+  quantity?: number | null;
+  unit?: string | null;
+}
+
+/** Loose enough to survive a model returning "Farina 00" for "farina 00",
+ *  "le uova" for "Uova", or a trailing note in brackets. Accents are folded
+ *  because a model transcribing an Italian recipe is not reliable about
+ *  them and an unmatched ingredient is silently dropped. */
+function normalizeName(name: string): string {
+  return name
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\b(il|lo|la|i|gli|le|un|uno|una|di|del|della|dei|degli|delle|the|of|a|an)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Resolves the model's per-step ingredient names against the recipe's own
+ * ingredient list, into rows the editor and kitchen mode understand.
+ *
+ * Matching is by normalized name, then by one containing the other — never
+ * by the model's array index, which is the thing models get wrong most
+ * often and which would silently point a step at the wrong ingredient.
+ * Anything that doesn't match is dropped rather than guessed at.
+ */
+export function matchStepIngredients(
+  uses: ParsedStepIngredient[] | undefined,
+  ingredients: ImportedIngredient[],
+): StepIngredientRefLike[] {
+  if (!uses?.length || !ingredients.length) return [];
+  const normalized = ingredients.map((ing, sortOrder) => ({ sortOrder, key: normalizeName(ing.name), ing }));
+  const out: StepIngredientRefLike[] = [];
+  const claimed = new Set<number>();
+
+  for (const use of uses) {
+    if (!use?.name) continue;
+    const key = normalizeName(use.name);
+    if (!key) continue;
+    const hit =
+      normalized.find(n => n.key === key) ??
+      normalized.find(n => n.key.includes(key) || key.includes(n.key));
+    if (!hit || claimed.has(hit.sortOrder)) continue;
+    claimed.add(hit.sortOrder);
+
+    // An explicit amount for this step becomes an absolute row; without one
+    // the step simply uses the ingredient, which is 100% of it.
+    const hasAmount = typeof use.quantity === 'number' && Number.isFinite(use.quantity) && use.quantity > 0;
+    out.push(hasAmount
+      ? {
+          ingredientSortOrder: hit.sortOrder,
+          amountMode: 'absolute',
+          portion: 1,
+          quantity: use.quantity as number,
+          unitSymbol: use.unit ?? hit.ing.unit ?? null,
+        }
+      : { ingredientSortOrder: hit.sortOrder, amountMode: 'fraction', portion: 1 });
+  }
+  return out;
+}
+
+/**
+ * Turns the first literal mention of each linked ingredient in the step's
+ * prose into a {{ing:N}} reference, so an imported recipe reads like one
+ * written in the editor.
+ *
+ * Deliberately conservative: only an exact, whole-word occurrence of the
+ * ingredient's own name is replaced, only the first one per ingredient, and
+ * only when the step already links to it. A model's prose is the author's
+ * text — rewriting more of it than this is worse than leaving it alone.
+ */
+export function linkIngredientsInText(
+  text: string,
+  refs: StepIngredientRefLike[],
+  ingredients: ImportedIngredient[],
+): string {
+  if (!text || !refs.length) return text;
+  let out = text;
+  for (const ref of refs) {
+    const ing = ingredients[ref.ingredientSortOrder];
+    if (!ing?.name) continue;
+    const name = ing.name.trim();
+    // Skip names too short to match safely ("sale" is fine, "e" is not) and
+    // anything already referenced.
+    if (name.length < 3) continue;
+    if (new RegExp(String.raw`\{\{ing:${ref.ingredientSortOrder}[|}]`).test(out)) continue;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(String.raw`(^|[^\p{L}\p{N}])` + `(${escaped})` + String.raw`(?![\p{L}\p{N}])`, 'iu');
+    if (!re.test(out)) continue;
+    out = out.replace(re, (_m, before: string) => `${before}${buildRef('ing', ref.ingredientSortOrder)}`);
+  }
+  return out;
+}

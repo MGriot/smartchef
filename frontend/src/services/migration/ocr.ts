@@ -62,6 +62,12 @@ export async function readImageText(
   const worker = await createWorker(language, 1, {
     workerPath,
     corePath,
+    // tesseract.js otherwise fetches workerPath and re-wraps it in a blob:
+    // URL, which is a different origin as far as CSP is concerned — the
+    // desktop build's policy refused it outright ("Failed to construct
+    // 'Worker'"). The asset is already served from the app's own scheme,
+    // so the blob round-trip buys nothing here.
+    workerBlobURL: false,
     logger: (m: { status?: string; progress?: number }) => {
       if (!onProgress) return;
       const stage = m.status === 'recognizing text' ? 'recognising' : 'loading';

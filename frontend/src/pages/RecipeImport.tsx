@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
@@ -18,6 +18,7 @@ import { proposeMatches, ProposedMatches } from '../services/matchSuggestions';
 import { matchUnitId, type MatchSuggestion } from '../lib/fuzzyMatch';
 import { repairIngredientAmount } from '../lib/ingredientAmount';
 import { checkMediaForProvider } from '../lib/llmMedia';
+import { matchStepIngredients, linkIngredientsInText } from '../lib/stepRefs';
 
 interface MatchedIngredient {
   ingredientId: string;
@@ -302,16 +303,30 @@ export default function RecipeImport() {
     setSearchQuery(null);
   };
 
+  // Cached per language, not once: the "recipe language" selector above the
+  // matches is allowed to change after the categories have been fetched,
+  // and a cache with no language in its key would keep serving the list
+  // that was loaded first.
+  const categoriesLang = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (categoriesLang.current !== null && categoriesLang.current !== matchLang) {
+      setCategories(null);
+    }
+  }, [matchLang]);
+
   const loadCategoriesOnce = async (): Promise<Category[]> => {
-    if (categories) return categories;
+    if (categories && categoriesLang.current === matchLang) return categories;
     try {
-      const res = await apiFetch('/api/ingredients/categories');
+      const res = await apiFetch(`/api/ingredients/categories?lang=${encodeURIComponent(matchLang)}`);
       const json = await res.json();
       const cats: Category[] = json.data || [];
       setCategories(cats);
+      categoriesLang.current = matchLang;
       return cats;
     } catch {
       setCategories([]);
+      categoriesLang.current = matchLang;
       return [];
     }
   };
@@ -559,6 +574,18 @@ export default function RecipeImport() {
         techniqueIdByName.set(name, techniqueId);
       }
 
+      // The ingredient rows as the steps will see them: same order as the
+      // `ingredients` array built below, so a step's sortOrder means the
+      // same thing on both sides. Matched by the name the MODEL used (the
+      // draft's own wording, which is what it copied into each step) rather
+      // than the library name it resolved to, which can differ — "farina
+      // multicereali" matching an existing "Farina integrale" row.
+      const draftIngredientsForSteps = matchedIngredients.map((m, i) => ({
+        name: draft.steps.length ? (draft.ingredients[i]?.name || m.ingredientName) : m.ingredientName,
+        quantity: m.quantity ?? null,
+        unit: draft.ingredients[i]?.unit ?? null,
+      }));
+
       const payload = {
         title: draft.title,
         description: draft.description || undefined,
@@ -595,15 +622,25 @@ export default function RecipeImport() {
           isOptional: ing.isOptional === true,
           groupName: ing.groupName || undefined,
         })),
-        steps: draft.steps.map((s) => ({
-          stepNumber: s.stepNumber,
-          title: s.title || undefined,
-          description: s.description,
-          durationMin: s.durationMin || undefined,
-          toolIds: [],
-          techniqueIds: (s.techniques ?? []).map((n) => techniqueIdByName.get(n)).filter((id): id is string => !!id),
-          stepIngredients: [],
-        })),
+        // Steps arrived with no link to the ingredients at all, so an
+        // imported recipe opened in the editor showing every ingredient as
+        // untouched at every step, and kitchen mode had no checklist to
+        // show. The model is now asked which ingredients each step uses;
+        // the names are resolved against the rows actually being saved
+        // (never the model's array index), and the first literal mention in
+        // the prose becomes an inline {{ing:N}} reference.
+        steps: draft.steps.map((s) => {
+          const stepIngredients = matchStepIngredients(s.ingredients, draftIngredientsForSteps);
+          return {
+            stepNumber: s.stepNumber,
+            title: s.title || undefined,
+            description: linkIngredientsInText(s.description, stepIngredients, draftIngredientsForSteps),
+            durationMin: s.durationMin || undefined,
+            toolIds: [],
+            techniqueIds: (s.techniques ?? []).map((n) => techniqueIdByName.get(n)).filter((id): id is string => !!id),
+            stepIngredients,
+          };
+        }),
         toolIds: matchedTools.map((t) => t.toolId),
       };
       const res = await apiFetch('/api/recipes', {

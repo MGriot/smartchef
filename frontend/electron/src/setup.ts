@@ -233,16 +233,26 @@ export class ElectronCapacitorApp {
 //     arbitrary user-supplied and CARTO URLs, both cross-origin http(s).
 //   - connect-src: server-mode API calls (any user-configured host) and the
 //     geocode proxy's outbound calls, also cross-origin http(s)/ws(s).
+//   - worker-src: on-device OCR (tesseract.js) and PDF text extraction
+//     (pdf.js) both run in Workers, and both may construct one from a
+//     blob: URL rather than the asset URL they were handed. With no
+//     worker-src of its own this fell through to default-src, which has no
+//     blob:, so importing a photo died on "Failed to construct 'Worker'".
+//   - script-src: same two features compile WebAssembly, which CSP gates
+//     behind 'wasm-unsafe-eval'. Without it the OCR core fails to
+//     instantiate even once its worker is allowed to exist. Spelled out in
+//     full because declaring script-src at all overrides default-src for
+//     scripts.
 export function setupContentSecurityPolicy(customScheme: string): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    const shared = `img-src ${customScheme}://* 'self' data: blob: http: https:; connect-src ${customScheme}://* 'self' http: https: ws: wss:; style-src ${customScheme}://* 'unsafe-inline'; font-src ${customScheme}://* data:`;
+    const shared = `img-src ${customScheme}://* 'self' data: blob: http: https:; connect-src ${customScheme}://* 'self' http: https: ws: wss:; style-src ${customScheme}://* 'unsafe-inline'; font-src ${customScheme}://* data:; worker-src ${customScheme}://* 'self' blob:; child-src ${customScheme}://* 'self' blob:`;
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           electronIsDev
-            ? `default-src ${customScheme}://* 'unsafe-inline' devtools://* 'unsafe-eval' data:; ${shared}`
-            : `default-src ${customScheme}://* 'unsafe-inline' data:; ${shared}`,
+            ? `default-src ${customScheme}://* 'unsafe-inline' devtools://* 'unsafe-eval' data:; script-src ${customScheme}://* 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:; ${shared}`
+            : `default-src ${customScheme}://* 'unsafe-inline' data:; script-src ${customScheme}://* 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: data:; ${shared}`,
         ],
       },
     });
