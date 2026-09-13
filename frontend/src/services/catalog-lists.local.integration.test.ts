@@ -134,6 +134,22 @@ async function seedUnitTranslations() {
   return units.length;
 }
 
+async function seedTools(count: number) {
+  const { query } = await import('../db/local');
+  for (let i = 0; i < count; i++) {
+    await query(
+      `INSERT INTO tools (id, name, category, synonyms) VALUES ($1,$2,'prep',$3)`,
+      [`tool-${i}`, `Tool ${i}`, JSON.stringify([`synonym-${i}`])]
+    );
+    for (const lang of LANGS) {
+      await query(
+        `INSERT INTO tool_translations (id, tool_id, language_code, name, description) VALUES ($1,$2,$3,$4,$5)`,
+        [`tooltr-${i}-${lang}`, `tool-${i}`, lang, `Tool ${i} (${lang})`, `desc ${lang}`]
+      );
+    }
+  }
+}
+
 describe('listTags', () => {
   it('returns the requested language plus the full per-language array', async () => {
     const { initLocalSchema } = await import('../db/local');
@@ -288,6 +304,75 @@ describe('listUnits', () => {
 
     queryCount = 0;
     await listUnits({ lang: 'it' });
+
+    expect(queryCount).toBe(2);
+  });
+});
+
+// listTools() was the fifth member of this family and was missed by the
+// sweep the four blocks above came from — it still resolved translations one
+// query per tool, which measured 31 bridge round-trips for a 30-tool catalog
+// on the real library. Pinned here the same way, so it cannot regress back.
+describe('listTools', () => {
+  it('returns the requested language plus the full per-language array', async () => {
+    const { initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await seedTools(3);
+
+    const { listTools } = await import('./ingredients.local');
+    const tools = await listTools({ lang: 'fr' });
+
+    expect(tools).toHaveLength(3);
+    expect(tools[0].translated_name).toBe('Tool 0 (fr)');
+    expect(tools[0].translations).toEqual(
+      LANGS.map(lang => ({ lang, name: `Tool 0 (${lang})`, description: `desc ${lang}` }))
+    );
+  });
+
+  it('leaves translated_name null when no language was asked for', async () => {
+    const { initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await seedTools(2);
+
+    const { listTools } = await import('./ingredients.local');
+    const tools = await listTools({});
+
+    expect(tools[0].translated_name).toBeNull();
+    expect(tools[0].translations).toHaveLength(3);
+  });
+
+  it('still parses the JSON-encoded array columns', async () => {
+    const { initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await seedTools(1);
+
+    const { listTools } = await import('./ingredients.local');
+    const [tool] = await listTools({ lang: 'it' });
+
+    expect(field(tool, 'image_urls')).toEqual([]);
+    expect(field(tool, 'synonyms')).toEqual(['synonym-0']);
+  });
+
+  it('keeps the search filter working alongside the batched translations', async () => {
+    const { initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await seedTools(5);
+
+    const { listTools } = await import('./ingredients.local');
+    const found = await listTools({ lang: 'it', q: 'Tool 3' });
+
+    expect(found).toHaveLength(1);
+    expect(found[0].translated_name).toBe('Tool 3 (it)');
+  });
+
+  it('costs a fixed number of queries regardless of catalog size', async () => {
+    const { initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await seedTools(30);
+    const { listTools } = await import('./ingredients.local');
+
+    queryCount = 0;
+    await listTools({ lang: 'it' });
 
     expect(queryCount).toBe(2);
   });
