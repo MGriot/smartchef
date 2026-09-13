@@ -90,6 +90,37 @@ main repository, plus however long review itself takes.
   repository — see the README's
   [Publishing on F-Droid](../README.md#publishing-on-f-droid) section.
 
+## Appendix: the IzzyOnDroid request
+
+If you take the IzzyOnDroid route instead (or as well), open an issue on
+[codeberg.org/IzzyOnDroid/repodata](https://codeberg.org/IzzyOnDroid/repodata)
+using their app-inclusion template. Everything it asks for is already true of
+this repo; the body below is ready to paste once a **release-signed** APK is
+attached to the GitHub release.
+
+```text
+App name: SmartChef
+Package ID: com.smartchef.app
+Source: https://github.com/MGriot/smartchef
+Licence: MIT (LICENSE in the repo root)
+Releases: https://github.com/MGriot/smartchef/releases
+          APK attached to each tagged release, signed with our release key.
+
+Summary: Offline-first recipe manager - nested recipes that scale together,
+dynamic portions, on-device import (schema.org, PDF, photo OCR, optional
+local LLM), and device-to-device sync with no central server.
+
+- Fastlane metadata: fastlane/metadata/android/{en-US,it-IT}/ with short and
+  full descriptions, icon and phone screenshots, plus per-versionCode
+  changelogs.
+- No trackers, no ads, no analytics, no Google Play Services and no
+  google-services.json. Optional cloud LLM providers are opt-in and off by
+  default (the default is a local Ollama); everything else works offline.
+- Release-signed, not debug: android:debuggable and testOnly are both absent
+  (verified with aapt dump badging and apksigner verify).
+- versionCode increases with every release; tags are v<versionName>.
+```
+
 ## Keeping it updated
 
 `UpdateCheckMode: Tags` plus `AutoUpdateMode: Version` means F-Droid picks up
