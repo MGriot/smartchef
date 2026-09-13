@@ -616,27 +616,76 @@ Request inclusion by opening an issue on their
 repository's releases. Note the request goes to *their* Codeberg; the release
 itself stays on GitHub.
 
-#### Route B — your own F-Droid repository (an afternoon)
+#### Route B — our own F-Droid repository (already built)
 
-Full control, no review queue, and users add one URL. This is the pragmatic
-option for a self-hosted app with a handful of users.
+Full control, no review queue, and users add one URL:
 
-```bash
-pipx install fdroidserver          # or: apt install fdroidserver
-mkdir -p fdroid-repo && cd fdroid-repo
-fdroid init                        # creates config.yml + the repo signing key
-cp ../frontend/android/app/build/outputs/apk/release/app-release.apk repo/
-fdroid update -c                   # builds the index, reads metadata out of the APK
+```
+https://mgriot.github.io/smartchef/fdroid-repo/repo
 ```
 
-(`fdroid-repo/`, not `fdroid/` — the latter holds the submission files for
-Route C below.)
+`.github/workflows/fdroid-repo.yml` builds and signs it. It runs on
+`release: published`, so adding a version to the repo costs nothing beyond
+publishing the release that already happens — it takes the APKs from the
+releases themselves, which means the repo can never serve a build that was
+not published.
 
-Serve the resulting `fdroid-repo/repo/` directory over HTTPS — GitHub Pages is
-enough. Users then add `https://<user>.github.io/smartchef/fdroid-repo/repo`
-under **F-Droid → Settings → Repositories**. Keep `fdroid-repo/keystore.p12`
-and `config.yml` out of git; losing the repo key means every user has to
-remove and re-add the repository.
+Two details worth knowing, because both are the kind of thing that breaks a
+repository silently:
+
+- **Only APKs signed with the release key are published.** Every downloaded
+  APK's certificate is compared against the release certificate's SHA-256 and
+  dropped if it differs. Android identifies an app by its signing key, so
+  serving the old debug-signed v1.0.0/v1.1.0 alongside a release-signed build
+  would hand users an upgrade that cannot install.
+- **The index is signed with a key that must never change.** If it is
+  regenerated, every user has to remove and re-add the repository. That is
+  why the workflow reads it from secrets and never calls `fdroid init`.
+
+The output goes to an orphan `gh-pages` branch, so `master`'s history does
+not grow by ~16 MB per release.
+
+##### Setting it up (once)
+
+1. Create the repository signing key — this is separate from the app signing
+   key, and just as irreplaceable:
+
+   ```bash
+   keytool -genkeypair -v -keystore fdroid-repo-keystore.p12 -storetype PKCS12 \
+           -alias fdroid-repo -keyalg RSA -keysize 4096 -validity 10000
+   ```
+
+2. Add three repository secrets (**Settings → Secrets and variables →
+   Actions**). `FDROID_KEYSTORE_B64` is the keystore base64-encoded:
+
+   ```bash
+   base64 -w0 fdroid-repo-keystore.p12       # Windows: certutil -encode
+   ```
+
+   | Secret | Value |
+   |---|---|
+   | `FDROID_KEYSTORE_B64` | the base64 above |
+   | `FDROID_KEYSTORE_PASS` | the store password |
+   | `FDROID_KEY_PASS` | the key password |
+   | `FDROID_KEY_ALIAS` | optional, defaults to `fdroid-repo` |
+
+   Avoid `"` and `\` in those passwords — they are interpolated into the
+   generated `config.yml`.
+
+3. Run the workflow once (**Actions → F-Droid repository → Run workflow**),
+   then set **Settings → Pages** to serve from the `gh-pages` branch, root.
+
+Back the keystore up somewhere that is not this repository, and keep it: it
+is the only thing that lets an existing user receive an update.
+
+##### Rehearsing a change
+
+`Run workflow` has a **dry_run** option that builds the whole index with a
+throwaway key and publishes nothing. Useful before the secrets exist, and for
+checking a metadata change without touching what users are subscribed to.
+
+(`fdroid-repo/` is the published output; `fdroid/` holds the submission files
+for Route C below.)
 
 #### Route C — the official f-droid.org repository (weeks, mostly waiting)
 
