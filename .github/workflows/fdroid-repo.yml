@@ -63,11 +63,23 @@ jobs:
             exit 1
           fi
 
+      # Deliberately NOT the distro package. Ubuntu's fdroidserver 2.2.1
+      # bundles an androguard old enough to fail on any APK built with a
+      # recent AAPT2 -- it dies parsing resources.arsc with
+      # "ResParserError: res1 must be zero!", which reads like a corrupt APK
+      # and is really just a stale parser. A current fdroidserver pulls
+      # androguard 4.x, which reads it.
       - name: Install fdroidserver
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fdroidserver
-          fdroid --version
+          sudo apt-get install -y --no-install-recommends python3-venv apksigner
+          python3 -m venv "$HOME/.fdroid-venv"
+          "$HOME/.fdroid-venv/bin/pip" install --quiet --upgrade pip wheel
+          "$HOME/.fdroid-venv/bin/pip" install --quiet fdroidserver
+          echo "$HOME/.fdroid-venv/bin" >> "$GITHUB_PATH"
+          "$HOME/.fdroid-venv/bin/fdroid" --version
+          python3 -c "import sys; sys.path.insert(0,'$HOME/.fdroid-venv/lib/python3/site-packages')" || true
+          "$HOME/.fdroid-venv/bin/python" -c "import androguard; print('androguard', androguard.__version__)"
 
       - name: Lay out the repository
         run: |
