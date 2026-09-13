@@ -32,11 +32,29 @@ def signingValue = { String propKey, String envKey ->
     return (fromEnv != null && !fromEnv.isEmpty()) ? fromEnv : keystoreProps.getProperty(propKey)
 }
 
+// A relative storeFile is resolved against the directory holding
+// keystore.properties, which is what someone editing that file expects.
+// Resolving it against this module instead (Gradle's own default for
+// file()) silently pointed one level too shallow and produced an UNSIGNED
+// apk with only a warning to say so.
 def storeFilePath = signingValue('storeFile', 'SMARTCHEF_KEYSTORE')
-def resolvedStoreFile = storeFilePath ? file(storeFilePath) : null
+def resolvedStoreFile = null
+if (storeFilePath != null && !storeFilePath.isEmpty()) {
+    def candidate = new File(storeFilePath)
+    if (candidate.isAbsolute()) {
+        resolvedStoreFile = candidate
+    } else {
+        def bases = []
+        if (keystorePropsFile != null) bases << keystorePropsFile.parentFile
+        bases << projectDir
+        bases << rootProject.projectDir
+        resolvedStoreFile = bases.collect { new File(it, storeFilePath) }.find { it.exists() }
+                            ?: new File(projectDir, storeFilePath)
+    }
+}
 def hasReleaseKey = resolvedStoreFile != null && resolvedStoreFile.exists()
-if (storeFilePath != null && !hasReleaseKey) {
-    logger.warn("SmartChef: release keystore '${storeFilePath}' not found - release build will be UNSIGNED")
+if (storeFilePath != null && !storeFilePath.isEmpty() && !hasReleaseKey) {
+    logger.error("SmartChef: release keystore '${storeFilePath}' not found (looked for ${resolvedStoreFile}) - the release APK will be UNSIGNED")
 }
 
 android {
