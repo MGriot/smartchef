@@ -1,0 +1,211 @@
+# Builds the self-hosted F-Droid repository and publishes it to GitHub Pages.
+#
+# Why this runs here rather than on a laptop: fdroidserver needs Java and a
+# Linux package that is awkward to install on Windows, and the index has to be
+# re-signed every time a release is added. Running it on `release: published`
+# means adding a version to the F-Droid repo costs nothing beyond publishing
+# the release that already happens.
+#
+# The APKs are taken from this repo's GitHub releases — the same files people
+# download by hand — so the repo can never serve a build that was not
+# published, and there is no second place to upload to.
+name: F-Droid repository
+
+on:
+  release:
+    types: [published]
+  # Lets the repo be rebuilt without cutting a release: after changing the
+  # fastlane descriptions, say, or to publish it the first time.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Rehearse only: build the index with a throwaway key and publish nothing'
+        type: boolean
+        default: false
+
+# One at a time. Two concurrent runs would each rebuild the index from a
+# different set of APKs and the second push would win arbitrarily.
+concurrency:
+  group: fdroid-repo
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v4
+
+      # A rehearsal proves the parts that have nothing to do with the key:
+      # that fdroidserver installs, that the metadata tree is laid out where
+      # it looks for it, that the APKs download, and that an index actually
+      # builds from them. It signs with a throwaway key and publishes
+      # nothing, so it can be run before the real secrets exist.
+      - name: Fail early if the signing secrets are missing
+        if: ${{ !inputs.dry_run }}
+        env:
+          KEYSTORE_B64: ${{ secrets.FDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS }}
+          KEY_PASS: ${{ secrets.FDROID_KEY_PASS }}
+        run: |
+          missing=""
+          [ -n "$KEYSTORE_B64" ]  || missing="$missing FDROID_KEYSTORE_B64"
+          [ -n "$KEYSTORE_PASS" ] || missing="$missing FDROID_KEYSTORE_PASS"
+          [ -n "$KEY_PASS" ]      || missing="$missing FDROID_KEY_PASS"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            echo "See fdroid/README.md - 'Your own F-Droid repository' - for how to create the"
+            echo "repo signing key and add these. The index must be signed with the SAME key"
+            echo "every time, or every user has to remove and re-add the repository."
+            exit 1
+          fi
+
+      - name: Install fdroidserver
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fdroidserver
+          fdroid --version
+
+      - name: Lay out the repository
+        run: |
+          mkdir -p fdroid-repo/repo fdroid-repo/metadata
+          cp frontend/public/icon-512.png fdroid-repo/icon.png
+          # fdroidserver reads per-app text and images from
+          # metadata/<applicationId>/<locale>/, which is the same tree the app
+          # repo already keeps for F-Droid proper — copied rather than
+          # duplicated so there is one source of truth.
+          for locale_dir in fastlane/metadata/android/*/; do
+            locale="$(basename "$locale_dir")"
+            mkdir -p "fdroid-repo/metadata/com.smartchef.app/$locale"
+            cp -r "$locale_dir". "fdroid-repo/metadata/com.smartchef.app/$locale/"
+          done
+          find fdroid-repo/metadata -type f | sort
+
+      - name: Generate a throwaway key (rehearsal only)
+        if: ${{ inputs.dry_run }}
+        run: |
+          keytool -genkeypair -v -keystore fdroid-repo/keystore.p12 \
+            -storetype PKCS12 -alias fdroid-repo -keyalg RSA -keysize 2048 \
+            -validity 30 -storepass rehearsal -keypass rehearsal \
+            -dname "CN=rehearsal, OU=none, O=none, L=none, S=none, C=ZZ"
+          echo "THROWAWAY key - this run must not publish"
+
+      - name: Restore the repository signing key
+        if: ${{ !inputs.dry_run }}
+        env:
+          KEYSTORE_B64: ${{ secrets.FDROID_KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > fdroid-repo/keystore.p12
+          # Never echo the file itself; a size check is enough to catch a
+          # truncated or mis-pasted secret before fdroid fails obscurely.
+          bytes=$(stat -c%s fdroid-repo/keystore.p12)
+          echo "keystore restored: ${bytes} bytes"
+          [ "$bytes" -gt 100 ] || { echo "::error::Keystore looks empty - is FDROID_KEYSTORE_B64 valid base64?"; exit 1; }
+
+      - name: Write the fdroid config
+        env:
+          KEYSTORE_PASS: ${{ inputs.dry_run && 'rehearsal' || secrets.FDROID_KEYSTORE_PASS }}
+          KEY_PASS: ${{ inputs.dry_run && 'rehearsal' || secrets.FDROID_KEY_PASS }}
+          KEY_ALIAS: ${{ inputs.dry_run && 'fdroid-repo' || secrets.FDROID_KEY_ALIAS }}
+        run: |
+          cd fdroid-repo
+          # Written here rather than committed, because it holds the
+          # passwords. `fdroid init` would generate this plus a fresh key —
+          # which is exactly what must NOT happen on every run.
+          cat > config.yml <<CONFIG
+          repo_url: https://mgriot.github.io/smartchef/fdroid-repo/repo
+          repo_name: SmartChef
+          repo_icon: icon.png
+          repo_description: >-
+            Offline-first, self-hosted recipe manager: nested recipes that scale
+            together, dynamic portions, on-device import, and device-to-device
+            sync with no central server. Builds published by the developer.
+          archive_older: 0
+          keystore: keystore.p12
+          repo_keyalias: ${KEY_ALIAS:-fdroid-repo}
+          keystorepass: "${KEYSTORE_PASS}"
+          keypass: "${KEY_PASS}"
+          CONFIG
+          chmod 600 config.yml
+
+      - name: Collect the published APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd fdroid-repo
+          # Every release, not just the newest: an F-Droid repo is a catalogue,
+          # and a user on an older Android wants the version that still runs.
+          for tag in $(gh release list --limit 50 --json tagName --jq '.[].tagName'); do
+            gh release download "$tag" --dir repo --pattern '*.apk' --clobber || true
+          done
+          ls -la repo/
+          count=$(find repo -name '*.apk' | wc -l)
+          echo "apks: $count"
+          [ "$count" -gt 0 ] || { echo "::error::No APKs found on any release - nothing to publish"; exit 1; }
+
+      - name: Build and sign the index
+        run: |
+          cd fdroid-repo
+          # -c writes metadata for any APK that has none yet, so a new release
+          # needs no hand-written entry.
+          fdroid update -c --pretty
+          echo "--- generated ---"
+          ls -la repo/ | head -20
+
+      - name: Publish to GitHub Pages
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # An orphan branch: the APKs and the index are build output, and
+          # keeping them out of master's history stops it growing by ~16 MB a
+          # release.
+          git fetch origin gh-pages --depth=1 2>/dev/null || true
+          rm -rf .pages && mkdir .pages
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add .pages origin/gh-pages
+          else
+            git worktree add --detach .pages
+            cd .pages && git checkout --orphan gh-pages && git rm -rf . >/dev/null 2>&1 || true
+            cd ..
+          fi
+
+          rm -rf .pages/fdroid-repo
+          mkdir -p .pages/fdroid-repo
+          # config.yml and the keystore stay behind: only what a client reads
+          # is published.
+          cp -r fdroid-repo/repo .pages/fdroid-repo/repo
+          # Jekyll would otherwise skip the index files, whose names start
+          # with characters it treats as special, and 404 them.
+          touch .pages/.nojekyll
+
+          cd .pages
+          git add -A
+          if git diff --cached --quiet; then
+            echo "index unchanged - nothing to publish"
+          else
+            git commit -m "F-Droid repo: ${{ github.event.release.tag_name || 'manual rebuild' }}"
+            git push origin HEAD:gh-pages
+          fi
+
+      - name: Say where it landed
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "### Rehearsal only - nothing was published" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The index built with a throwaway key. Add the three repository" >> $GITHUB_STEP_SUMMARY
+            echo "secrets and run this again without \`dry_run\` to publish for real." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          echo "### F-Droid repository published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Add this in F-Droid → Settings → Repositories:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "https://mgriot.github.io/smartchef/fdroid-repo/repo" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
