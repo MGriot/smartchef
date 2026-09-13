@@ -32,9 +32,59 @@ async function getDb(): Promise<SQLiteDBConnection> {
       ? await sqlite.retrieveConnection(DB_NAME, false)
       : await sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
     await database.open();
+    await applyWriteJournalPragmas(database);
     return database;
   })();
   return dbPromise;
+}
+
+// ── Write durability settings ─────────────────────────────────────────────
+// Neither platform's plugin sets these, so both inherited SQLite's own
+// defaults: journal_mode=delete (a rollback journal file created, fsync'd
+// and deleted around every write) and synchronous=FULL (fsync at every
+// commit boundary). That combination is only affordable when writes come in
+// large transactions — and here they never do. The plugin's run() wraps
+// EVERY statement in its own BEGIN/COMMIT (its `transaction` option defaults
+// to true), and withTransaction() below is deliberately NOT a real
+// transaction either (see its comment for why), so each individual INSERT in
+// a save loop pays a full journal create/fsync/delete cycle of its own.
+//
+// Measured on the real local library, desktop NVMe:
+//   200 single-statement writes, delete + FULL  ..... 996 ms  (4.98 ms each)
+//   200 single-statement writes, WAL + NORMAL  .....  24 ms  (0.12 ms each)
+// and one real recipe save (23 ingredients, 8 steps) = 36 write statements
+// = 292 ms of pure SQLite time before any bridge cost at all. Android pays
+// the same shape on slower flash, through SQLCipher's page encryption.
+//
+// That cost is not confined to saving, which is why this shows up as "slow
+// to LOAD": serialize() below is one FIFO for the whole app, so a sync
+// merge's few hundred row writes hold the queue for seconds and every
+// gallery/recipe read queued behind them simply waits — with no slow query
+// anywhere to find.
+//
+// WAL is safe here specifically because nothing in this app ever copies the
+// database file itself (the -wal/-shm sidecars would otherwise need a
+// checkpoint first): backups go through exportSnapshot()'s SQL, and the
+// Android mirror replicates the Sync Folder, never Local Storage.
+// synchronous=NORMAL is WAL's documented companion — a crash can lose the
+// last commits, a power cut cannot corrupt the database — which is the right
+// trade for a local, single-user, git-replicated library.
+//
+// `false` as execute()'s 2nd arg is load-bearing, not tidiness: SQLite
+// documents PRAGMA journal_mode as a no-op while a transaction is pending,
+// and execute() wraps itself in one by default. Left at the default this
+// silently does nothing — the same trap dropDanglingForeignKeys() below
+// already documents having fallen into with PRAGMA foreign_keys.
+async function applyWriteJournalPragmas(database: SQLiteDBConnection): Promise<void> {
+  try {
+    await database.execute('PRAGMA journal_mode=WAL', false);
+    await database.execute('PRAGMA synchronous=NORMAL', false);
+  } catch (err) {
+    // A platform that refuses either pragma keeps the old (slow, but
+    // correct) defaults rather than failing to open the database at all —
+    // this runs inside the one code path every screen depends on.
+    console.warn('SmartChef: could not apply SQLite journal pragmas:', err);
+  }
 }
 
 // ── Postgres → SQLite text translation ────────────────────────────────────

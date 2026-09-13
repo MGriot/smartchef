@@ -18,8 +18,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 let inFlight = 0;
 let maxInFlight = 0;
 
+/** Every execute() the module issues at open time, with the `transaction`
+ *  argument it passed — see the journal-pragma test at the bottom. */
+const executed: Array<{ sql: string; transaction: unknown }> = [];
+
 class FakeSqliteDb {
   async open(): Promise<void> {}
+  async execute(sql: string, transaction?: boolean): Promise<void> {
+    executed.push({ sql, transaction });
+  }
   async query(sql: string): Promise<{ values: Array<{ sql: string }> }> {
     return this.record(sql, { values: [{ sql }] });
   }
@@ -81,5 +88,26 @@ describe('db/local.ts SQLite access serialization', () => {
     await expect(query('FAIL')).rejects.toThrow('simulated failure');
     // The queue must not be stuck — a subsequent call still completes.
     await expect(query('SELECT 1')).resolves.toBeDefined();
+  });
+});
+
+// ── Write durability ──────────────────────────────────────────────────────
+// Both platforms' plugins leave SQLite on journal_mode=delete +
+// synchronous=FULL, and neither ever batches: the plugin wraps every single
+// run() in its own BEGIN/COMMIT. Measured, that is ~5ms per write statement
+// against ~0.12ms under WAL — and because everything above shares one queue,
+// a sync merge's write burst is paid by whatever read is waiting behind it.
+// So this asserts the pragmas are issued at all, and that they are issued
+// UNWRAPPED: SQLite documents PRAGMA journal_mode as a no-op while a
+// transaction is pending, and execute() wraps itself in one by default, so
+// passing `false` is the whole point rather than a detail.
+describe('journal pragmas', () => {
+  it('puts the connection into WAL with synchronous=NORMAL, outside a transaction', async () => {
+    await query('SELECT 1'); // any call opens the connection
+
+    expect(executed).toEqual([
+      { sql: 'PRAGMA journal_mode=WAL', transaction: false },
+      { sql: 'PRAGMA synchronous=NORMAL', transaction: false },
+    ]);
   });
 });

@@ -582,22 +582,39 @@ export async function listTools({ lang, q }: { lang?: string; q?: string }) {
     where += ` AND (${clause})`;
   }
   const rows = await query<Record<string, unknown>>(`SELECT * FROM tools ${where} ORDER BY category, name`, params);
-  const result = [];
-  for (const row of rows) {
-    const translations = await query<{ language_code: string; name: string; description: string | null }>(
-      `SELECT language_code, name, description FROM tool_translations WHERE tool_id = $1`,
-      [row.id]
+  // Batched rather than one translation query per tool — the same rewrite
+  // listTags()/listTechniques()/listCategories()/listUnits() already got, and
+  // the last one of that family still carrying the N+1 (measured: 31 bridge
+  // round-trips for 30 tools). It is not an obscure path: RecipeDetail
+  // fetches /api/tools on entering edit mode, RecipeCreate on mount, and the
+  // Tools library page on every visit. `ORDER BY rowid` keeps the
+  // per-language `translations` arrays in the order the editors round-trip,
+  // exactly as the other four do.
+  const translationsByToolId = new Map<string, Array<{ language_code: string; name: string; description: string | null }>>();
+  for (const batch of chunk(rows.map(r => r.id as string))) {
+    const p: unknown[] = [];
+    const trs = await query<{ tool_id: string; language_code: string; name: string; description: string | null }>(
+      `SELECT tool_id, language_code, name, description FROM tool_translations
+       WHERE tool_id IN (${inPlaceholders(p, batch)}) ORDER BY rowid`,
+      p
     );
-    const translatedName = lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null;
-    result.push({
+    for (const t of trs) {
+      const list = translationsByToolId.get(t.tool_id);
+      if (list) list.push(t);
+      else translationsByToolId.set(t.tool_id, [t]);
+    }
+  }
+
+  return rows.map(row => {
+    const translations = translationsByToolId.get(row.id as string) ?? [];
+    return {
       ...row,
       image_urls: JSON.parse((row.image_urls as string) ?? '[]'),
       synonyms: JSON.parse((row.synonyms as string) ?? '[]'),
-      translated_name: translatedName,
+      translated_name: lang ? translations.find(t => t.language_code.toLowerCase() === lang.toLowerCase())?.name ?? null : null,
       translations: translations.map(t => ({ lang: t.language_code, name: t.name, description: t.description })),
-    });
-  }
-  return result;
+    };
+  });
 }
 
 export interface ToolInput {
