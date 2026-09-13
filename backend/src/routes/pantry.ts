@@ -14,18 +14,29 @@ import { query, queryOne } from "../db/pool";
 export const pantryRouter = Router();
 
 pantryRouter.get("/", async (req: Request, res: Response) => {
+  // ?lang resolves the ingredient and category names out of the side
+  // translation tables, the same way every other catalog read here does.
+  // Without it a library browsed in Italian still listed "Butter" under
+  // "Dairy & Eggs", because these two names are the only ones on the page
+  // and neither was ever translated.
+  const lang = typeof req.query.lang === "string" ? req.query.lang : null;
   const rows = await query(
-    `SELECT p.id, p.ingredient_id, i.name AS ingredient_name,
-            ic.name AS category_name, ic.color AS category_color,
+    `SELECT p.id, p.ingredient_id,
+            COALESCE(it.translated_name, i.name) AS ingredient_name,
+            COALESCE(ict.name, ic.name) AS category_name, ic.color AS category_color,
             p.quantity, p.unit_id, u.symbol AS unit_symbol,
             p.expires_at, p.note
        FROM pantry_items p
        LEFT JOIN ingredients i ON i.id = p.ingredient_id
        LEFT JOIN ingredient_categories ic ON ic.id = i.category_id
        LEFT JOIN units u ON u.id = p.unit_id
+       LEFT JOIN ingredient_translations it
+              ON it.ingredient_id = i.id AND $2::text IS NOT NULL AND LOWER(it.language_code) = LOWER($2)
+       LEFT JOIN ingredient_category_translations ict
+              ON ict.category_id = ic.id AND $2::text IS NOT NULL AND LOWER(ict.language_code) = LOWER($2)
       WHERE p.owner_id = $1
       ORDER BY ic.sort_order, i.name`,
-    [req.userId]
+    [req.userId, lang]
   );
   res.json({ data: rows });
 });

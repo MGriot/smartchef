@@ -56,6 +56,18 @@ export interface CookSequenceStep {
   techniqueIds: UUID[];
   imageUrl: string | null;
   notes: string | null;
+  /** Which of the section's ingredients this step uses, and how much —
+   *  the same shape recipe_steps.step_ingredients holds. Kitchen mode
+   *  renders it as a tickable checklist, so the sub-recipe-flattened
+   *  variant of that screen needs it as much as the plain one does. */
+  stepIngredients: Array<{
+    ingredientSortOrder: number;
+    amountMode?: 'fraction' | 'absolute';
+    portion: number;
+    quantity?: number | null;
+    unitId?: UUID | null;
+    unitSymbol?: string | null;
+  }>;
 }
 
 export interface CookSequenceIngredientRef {
@@ -106,7 +118,7 @@ async function loadSubRecipeRefs(recipeId: UUID): Promise<SubRecipeRef[]> {
 
 async function loadRecipeStepsRaw(recipeId: UUID): Promise<Array<Record<string, unknown>>> {
   return query(
-    `SELECT id, step_number, title, description, duration_min, tool_ids, technique_ids, image_url, notes
+    `SELECT id, step_number, title, description, duration_min, tool_ids, technique_ids, image_url, notes, step_ingredients
      FROM recipe_steps
      WHERE recipe_id = $1
      ORDER BY step_number`,
@@ -126,6 +138,7 @@ async function loadRecipeSteps(recipeId: UUID): Promise<CookSequenceStep[]> {
     techniqueIds: JSON.parse((r.technique_ids as string) ?? '[]'),
     imageUrl: (r.image_url as string) ?? null,
     notes: (r.notes as string) ?? null,
+    stepIngredients: JSON.parse((r.step_ingredients as string) ?? '[]'),
   }));
 }
 
@@ -260,6 +273,12 @@ interface RawRecipeIngredient {
   to_base_factor: number | null;
   notes: string | null;
   is_optional: number;
+  /** Non-null on a row that is an ALTERNATIVE to the row at that
+   *  sort_order. Every consumer of this engine — the shopping list, the
+   *  nutrition totals, the pantry matcher, the kitchen-mode sequence —
+   *  wants the thing you actually cook with, not both halves of an
+   *  either/or, so these rows are dropped in loadRecipeIngredients(). */
+  substitute_for: number | null;
 }
 
 /** Every recipe's rows, read once.
@@ -298,7 +317,7 @@ export async function preloadMatrioska(): Promise<MatrioskaPreload> {
          yu.to_base_factor AS sub_recipe_yield_to_base_factor,
          ri.quantity, ri.quantity_text,
          ri.unit_id, u.symbol AS unit_symbol, u.unit_type AS unit_type, u.to_base_factor AS to_base_factor,
-         ri.notes, ri.is_optional
+         ri.notes, ri.is_optional, ri.substitute_for
        FROM recipe_ingredients ri
        LEFT JOIN ingredients i    ON i.id = ri.ingredient_id
        LEFT JOIN recipes sr       ON sr.id = ri.sub_recipe_id
@@ -334,8 +353,8 @@ async function loadRecipeIngredients(
   // A preload is authoritative: a recipe with no ingredients is simply
   // absent from the map, and must read as "no rows" rather than fall back
   // to the query the preload exists to avoid.
-  if (preload) return preload.ingredients.get(recipeId) ?? [];
-  return query<RawRecipeIngredient>(
+  if (preload) return dropSubstitutes(preload.ingredients.get(recipeId) ?? []);
+  return dropSubstitutes(await query<RawRecipeIngredient>(
     `SELECT
        ri.id, ri.sort_order,
        ri.ingredient_id,
@@ -348,7 +367,7 @@ async function loadRecipeIngredients(
        yu.to_base_factor AS sub_recipe_yield_to_base_factor,
        ri.quantity, ri.quantity_text,
        ri.unit_id, u.symbol AS unit_symbol, u.unit_type AS unit_type, u.to_base_factor AS to_base_factor,
-       ri.notes, ri.is_optional
+       ri.notes, ri.is_optional, ri.substitute_for
      FROM recipe_ingredients ri
      LEFT JOIN ingredients i    ON i.id = ri.ingredient_id
      LEFT JOIN recipes sr       ON sr.id = ri.sub_recipe_id
@@ -357,7 +376,18 @@ async function loadRecipeIngredients(
      WHERE ri.recipe_id = $1
      ORDER BY ri.sort_order`,
     [recipeId]
-  );
+  ));
+}
+
+/** Drops the "or use margarine instead" rows. They are alternatives to a
+ *  sibling row, so counting them would have the shopping list buying both,
+ *  the nutrition totals adding both, and the pantry matcher demanding
+ *  both. Kept out here, at the one place every caller reads rows through,
+ *  rather than in each consumer. */
+function dropSubstitutes(rows: RawRecipeIngredient[]): RawRecipeIngredient[] {
+  return rows.some(r => r.substitute_for != null)
+    ? rows.filter(r => r.substitute_for == null)
+    : rows;
 }
 
 /**

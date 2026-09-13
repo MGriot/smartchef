@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
-import { SUPPORTED_LANGUAGES } from '../i18n';
+import { useLanguages } from '../hooks/useLanguages';
+import { hasUiBundle } from '../lib/languages';
 import OfflineBanner from './OfflineBanner';
 import CoverImage from './CoverImage';
 
@@ -55,6 +56,9 @@ const DEFAULT_AVATAR = '/chef.svg';
 export default function AppLayout({ children, librarySection, sidebarExtra, headerActions }: AppLayoutProps) {
   const { t, i18n } = useTranslation();
   const setContentLang = useStore((s) => s.setContentLang);
+  // The picker reflects the CONTENT language now, not i18n.language: those
+  // two can legitimately differ once a user adds a language with no UI bundle.
+  const contentLang = useStore((s) => s.contentLang);
   const account = useStore((s) => s.account);
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -67,9 +71,18 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
+  const { languages } = useLanguages();
+
   const handleLanguageChange = (code: string) => {
-    i18n.changeLanguage(code);
-    localStorage.setItem('smartchef.uiLang', code);
+    // A user-added language has no translation bundle, so switching the
+    // interface to it would just fall back to English — losing the UI
+    // language the user had, to no benefit. For those, only the content
+    // language moves: recipes are read and written in the new language while
+    // the interface stays where it was. The bundled four behave as before.
+    if (hasUiBundle(code)) {
+      i18n.changeLanguage(code);
+      localStorage.setItem('smartchef.uiLang', code);
+    }
     setContentLang(code);
   };
 
@@ -124,12 +137,12 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             {t('nav.createRecipe')}
           </Link>
           <select
-            value={i18n.language}
+            value={contentLang}
             onChange={(e) => handleLanguageChange(e.target.value)}
             aria-label={t('common.language')}
             className="text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-3 pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
           >
-            {SUPPORTED_LANGUAGES.map((l) => (
+            {languages.map((l) => (
               <option key={l.code} value={l.code}>{l.label}</option>
             ))}
           </select>

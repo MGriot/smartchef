@@ -6,15 +6,21 @@ import Autocomplete from '../components/Autocomplete';
 import StepEditor, { StepIngredientAmount } from '../components/StepEditor';
 import RecipeSourcesEditor, { RecipeSourceEntry } from '../components/RecipeSourcesEditor';
 import ImageUrlInput from '../components/ImageUrlInput';
+import AutoTextarea from '../components/AutoTextarea';
 import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
 import TagPicker from '../components/TagPicker';
 import RegionPicker from '../components/RegionPicker';
 import RegionsMap from '../components/RegionsMap';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useStore } from '../store/app.store';
-import { SUPPORTED_LANGUAGES } from '../i18n';
+import { listLanguages, languageLabel } from '../lib/languages';
+import { useLanguages } from '../hooks/useLanguages';
 import { apiFetch } from '../lib/api';
 import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/recipeDraftCoercion';
+import {
+  STEP_REF_RE, syncIngredientRefAmount, reindexIngredientRefs,
+  stepIngredientConsumption, remainingBeforeStep,
+} from '../lib/stepRefs';
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Ingredient {
@@ -33,6 +39,10 @@ interface Ingredient {
   /** Optional "Per il condimento"/"Per l'impasto" style group header — see
    *  RecipeIngredientInput.groupName in recipes.local.ts. */
   groupName?: string | null;
+  /** sortOrder of the ingredient this row stands in for — "or margarine,
+   *  instead of the butter". See db/migrations/042_recipe_ingredient_substitutes.sql. */
+  substituteFor?: number | null;
+  ingredientPluralName?: string | null;
 }
 
 interface StepIngredientRef {
@@ -64,7 +74,51 @@ interface Tool {
   name: string;
   icon: string | null;
   translated_name?: string | null;
+  /** Alternate names, offered as the label for an inline {{tool:id}}
+   *  reference — see lib/stepRefs.ts. */
+  synonyms?: string[];
 }
+
+/** A row of the ingredient library as the editor needs it: the name to
+ *  show, plus every other way this ingredient can be named. */
+interface LibraryIngredient {
+  id: string;
+  name: string;
+  translated_name?: string | null;
+  plural_name?: string | null;
+  synonyms?: string[];
+  translations?: Array<{ lang: string; text: string }>;
+}
+
+/** How an amount is written into a step's text and into the editor's own
+ *  summaries — plain and unscaled, since the editor works in the recipe's
+ *  own base servings. */
+const formatEditorAmount = (qty: number, unitSymbol?: string | null): string =>
+  `${qty % 1 === 0 ? qty : Number(qty.toFixed(2))}${unitSymbol ? ` ${unitSymbol}` : ''}`;
+
+/** De-duplicates and tidies candidate names for the "show as" suggestions
+ *  on an inline step reference, keeping the first spelling of each. */
+const uniqueNames = (values: Array<string | null | undefined>): string[] => {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const name = (value ?? '').trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+};
+
+/** The opening of a step's text, for the one-line summary a folded step
+ *  card shows when it has no title of its own. */
+const firstWordsOf = (text: string | null | undefined, max = 60): string => {
+  const plain = (text ?? '').replace(STEP_REF_RE, '').replace(/\s+/g, ' ').trim();
+  if (plain.length <= max) return plain;
+  return plain.slice(0, max).replace(/\s\S*$/, '') + '…';
+};
 
 interface Recipe {
   id: string;
@@ -102,6 +156,7 @@ const difficultyKey: Record<string, string> = {
 
 const RecipeCreate: React.FC = () => {
   const { t } = useTranslation();
+  const { languages } = useLanguages();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const isOnline = useOnlineStatus();
@@ -117,8 +172,8 @@ const RecipeCreate: React.FC = () => {
   const contentLang = useStore((s) => s.contentLang);
   const [allTools, setAllTools] = useState<Tool[]>([]);
   const [allUnits, setAllUnits] = useState<{ id: string; name: string; symbol: string; translated_name?: string | null }[]>([]);
-  const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
-  const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; icon: string | null; translated_name?: string | null }[]>([]);
+  const [allIngredients, setAllIngredients] = useState<LibraryIngredient[]>([]);
+  const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; icon: string | null; translated_name?: string | null; synonyms?: string[] }[]>([]);
   const [allRecipes, setAllRecipes] = useState<{ id: string; title: string; translated_title?: string | null }[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
   // Per-row "Ingredient" vs "Recipe" toggle for the ingredient picker — not
@@ -131,6 +186,13 @@ const RecipeCreate: React.FC = () => {
   const [pendingIngredient, setPendingIngredient] = useState<{ idx: number; name: string; categoryId: string; pluralName: string; description: string } | null>(null);
   const [creatingPendingIngredient, setCreatingPendingIngredient] = useState(false);
   const [newToolName, setNewToolName] = useState('');
+  // Which ingredient/step cards are folded to a one-line summary, and
+  // whether the two editors are folded whole — see RecipeDetail.tsx's edit
+  // mode, which this screen mirrors field for field.
+  const [collapsedIngredients, setCollapsedIngredients] = useState<Set<number>>(new Set());
+  const [collapsedSteps, setCollapsedSteps] = useState<Set<number>>(new Set());
+  const [ingredientsFolded, setIngredientsFolded] = useState(false);
+  const [stepsFolded, setStepsFolded] = useState(false);
   const [newTechniqueName, setNewTechniqueName] = useState('');
 
   // Draft state
@@ -215,48 +277,65 @@ const RecipeCreate: React.FC = () => {
         if (i !== stepIdx) return s;
         const existing = s.stepIngredients || [];
         const has = existing.some(si => si.ingredientSortOrder === ingredientSortOrder);
-        return {
+        const next: Step = {
           ...s,
           stepIngredients: has
             ? existing.filter(si => si.ingredientSortOrder !== ingredientSortOrder)
             : [...existing, { ingredientSortOrder, amountMode: 'fraction' as const, portion: 1 }],
         };
+        // Unticking drops the pinned amount out of the sentence too — an
+        // inline reference claiming an amount this step no longer says it
+        // uses is worse than one that just names the ingredient.
+        return withSyncedRefs(next, ingredientSortOrder, prev.ingredients || []);
+      }),
+    }));
+
+  /** Re-states a step's {{ing:N}} tokens after its amount for that
+   *  ingredient changed anywhere other than the insert popover — see
+   *  RecipeDetail.tsx's identical handler for why. */
+  const withSyncedRefs = (step: Step, ingredientSortOrder: number, ingredients: Ingredient[]): Step => {
+    const ref = (step.stepIngredients || []).find(si => si.ingredientSortOrder === ingredientSortOrder);
+    const ing = ingredients.find(i => i.sortOrder === ingredientSortOrder);
+    let amount: string | null = null;
+    if (ref && ing) {
+      if (ref.amountMode === 'absolute') {
+        amount = ref.quantity != null ? formatEditorAmount(ref.quantity, ref.unitSymbol || ing.unitSymbol) : null;
+      } else {
+        const consumed = stepIngredientConsumption(ref, { sortOrder: ing.sortOrder, quantity: ing.quantity, unitSymbol: ing.unitSymbol });
+        amount = consumed != null ? formatEditorAmount(consumed, ing.unitSymbol) : null;
+      }
+    }
+    return { ...step, description: syncIngredientRefAmount(step.description || '', ingredientSortOrder, amount) };
+  };
+
+  const patchStepIngredient = (
+    stepIdx: number,
+    ingredientSortOrder: number,
+    patch: Partial<StepIngredientRef>,
+  ) =>
+    setDraft(prev => ({
+      ...prev,
+      steps: (prev.steps || []).map((s, i) => {
+        if (i !== stepIdx) return s;
+        const next: Step = {
+          ...s,
+          stepIngredients: (s.stepIngredients || []).map(si =>
+            si.ingredientSortOrder === ingredientSortOrder ? { ...si, ...patch } : si
+          ),
+        };
+        return withSyncedRefs(next, ingredientSortOrder, prev.ingredients || []);
       }),
     }));
 
   const updateStepIngredientPortion = (stepIdx: number, ingredientSortOrder: number, portion: number) =>
-    setDraft(prev => ({
-      ...prev,
-      steps: (prev.steps || []).map((s, i) => i === stepIdx ? {
-        ...s,
-        stepIngredients: (s.stepIngredients || []).map(si =>
-          si.ingredientSortOrder === ingredientSortOrder ? { ...si, portion } : si
-        ),
-      } : s),
-    }));
+    patchStepIngredient(stepIdx, ingredientSortOrder, { portion });
 
   // Switches a step-ingredient between "% of total" and "exact amount" mode.
   const setStepIngredientMode = (stepIdx: number, ingredientSortOrder: number, amountMode: 'fraction' | 'absolute') =>
-    setDraft(prev => ({
-      ...prev,
-      steps: (prev.steps || []).map((s, i) => i === stepIdx ? {
-        ...s,
-        stepIngredients: (s.stepIngredients || []).map(si =>
-          si.ingredientSortOrder === ingredientSortOrder ? { ...si, amountMode } : si
-        ),
-      } : s),
-    }));
+    patchStepIngredient(stepIdx, ingredientSortOrder, { amountMode });
 
   const updateStepIngredientAmount = (stepIdx: number, ingredientSortOrder: number, field: 'quantity' | 'unitId' | 'unitSymbol', value: unknown) =>
-    setDraft(prev => ({
-      ...prev,
-      steps: (prev.steps || []).map((s, i) => i === stepIdx ? {
-        ...s,
-        stepIngredients: (s.stepIngredients || []).map(si =>
-          si.ingredientSortOrder === ingredientSortOrder ? { ...si, [field]: value } : si
-        ),
-      } : s),
-    }));
+    patchStepIngredient(stepIdx, ingredientSortOrder, { [field]: value } as Partial<StepIngredientRef>);
 
   // Adds (or updates the amount of) a step ingredient — unlike
   // toggleStepIngredient this never removes, used when inserting an inline
@@ -344,16 +423,75 @@ const RecipeCreate: React.FC = () => {
   const removeIngredient = (idx: number) =>
     setDraft(prev => ({
       ...prev,
-      ingredients: (prev.ingredients || []).filter((_, i) => i !== idx).map((ing, i) => ({ ...ing, sortOrder: i })),
+      ingredients: (prev.ingredients || [])
+        .filter((_, i) => i !== idx)
+        .map((ing, i) => ({
+          ...ing,
+          sortOrder: i,
+          substituteFor:
+            ing.substituteFor == null ? null
+            : ing.substituteFor === idx ? null
+            : ing.substituteFor > idx ? ing.substituteFor - 1
+            : ing.substituteFor,
+        })),
       // Drop step references to the removed ingredient and shift down references
-      // to ingredients that moved up a slot, so sortOrder links stay accurate.
+      // to ingredients that moved up a slot, so sortOrder links stay accurate —
+      // in the stepIngredients rows AND in the {{ing:N}} tokens inside the step
+      // text, which used to be left pointing at whatever row slid into place.
       steps: (prev.steps || []).map(s => ({
         ...s,
+        description: reindexIngredientRefs(s.description || '', idx),
         stepIngredients: (s.stepIngredients || [])
           .filter(si => si.ingredientSortOrder !== idx)
           .map(si => si.ingredientSortOrder > idx ? { ...si, ingredientSortOrder: si.ingredientSortOrder - 1 } : si),
       })),
     }));
+
+  /** Marks a row as an alternative to another ingredient of the same
+   *  recipe, or clears that. Chains are not a thing, so the picker only
+   *  offers ordinary rows and this clears anything pointing at a row that
+   *  just became a substitute itself. */
+  const setSubstituteFor = (idx: number, target: number | null) =>
+    setDraft(prev => ({
+      ...prev,
+      ingredients: (prev.ingredients || []).map((ing, i) => {
+        if (i === idx) return { ...ing, substituteFor: target };
+        if (target !== null && ing.substituteFor === idx) return { ...ing, substituteFor: null };
+        return ing;
+      }),
+    }));
+
+  /* ── Folding the two long editors ────────────────────────────────── */
+  const ingredientCount = (draft.ingredients || []).length;
+  const stepCount = (draft.steps || []).length;
+  const allIngredientsCollapsed = ingredientCount > 0 && collapsedIngredients.size >= ingredientCount;
+  const allStepsCollapsed = stepCount > 0 && collapsedSteps.size >= stepCount;
+  const toggleIn = (set: Set<number>, idx: number) => {
+    const next = new Set(set);
+    next.has(idx) ? next.delete(idx) : next.add(idx);
+    return next;
+  };
+  const toggleIngredientCollapsed = (idx: number) => setCollapsedIngredients(prev => toggleIn(prev, idx));
+  const toggleStepCollapsed = (idx: number) => setCollapsedSteps(prev => toggleIn(prev, idx));
+  const toggleAllIngredients = () =>
+    setCollapsedIngredients(allIngredientsCollapsed ? new Set() : new Set((draft.ingredients || []).map((_, i) => i)));
+  const toggleAllSteps = () =>
+    setCollapsedSteps(allStepsCollapsed ? new Set() : new Set((draft.steps || []).map((_, i) => i)));
+
+  /** Every name this ingredient answers to, for the "show as" box on an
+   *  inline step reference — see RecipeDetail.tsx's identical helper. */
+  const ingredientAliases = (ing: Ingredient): string[] => {
+    const row = allIngredients.find(i => i.id === ing.ingredientId);
+    return uniqueNames([
+      ing.ingredientName,
+      row?.translated_name,
+      row?.name,
+      row?.plural_name,
+      ing.ingredientPluralName,
+      ...(row?.synonyms ?? []),
+      ...((row?.translations ?? []).map(tr => tr.text)),
+    ]);
+  };
 
   const toggleTool = (tool: Tool) =>
     setDraft(prev => {
@@ -505,6 +643,7 @@ const RecipeCreate: React.FC = () => {
           isOptional: ing.isOptional || false,
           notes: ing.notes || undefined,
           groupName: ing.groupName || undefined,
+          substituteFor: ing.substituteFor ?? null,
         })),
         steps: (d.steps || []).map((s, i) => ({
           stepNumber: i + 1,
@@ -657,7 +796,7 @@ const RecipeCreate: React.FC = () => {
                   onChange={e => updateDraft('language_code', e.target.value)}
                   className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 py-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-400 focus:ring-2 focus:ring-primary/20 cursor-pointer"
                 >
-                  {SUPPORTED_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                  {languages.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                 </select>
                 <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
               </span>
@@ -671,28 +810,28 @@ const RecipeCreate: React.FC = () => {
           </label>
           <label className="block mb-6">
             <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.description')}</span>
-            <textarea
+            <AutoTextarea
               value={draft.description || ''}
               onChange={e => updateDraft('description', e.target.value)}
-              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px] max-h-[50vh] overflow-y-auto [field-sizing:content]"
+              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px] max-h-[50vh] overflow-y-auto"
               placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
             />
           </label>
           <label className="block mb-6">
             <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>
-            <textarea
+            <AutoTextarea
               value={draft.storage_instructions || ''}
               onChange={e => updateDraft('storage_instructions', e.target.value || null)}
-              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
+              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto"
               placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
             />
           </label>
           <label className="block mb-6">
             <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.tips')}</span>
-            <textarea
+            <AutoTextarea
               value={draft.tips || ''}
               onChange={e => updateDraft('tips', e.target.value || null)}
-              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto [field-sizing:content]"
+              className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px] max-h-[40vh] overflow-y-auto"
               placeholder={t('recipeDetail.tipsPlaceholder')}
             />
           </label>
@@ -865,12 +1004,40 @@ const RecipeCreate: React.FC = () => {
 
         {/* Ingredients Editor */}
         <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-headline font-bold text-xl">{t('recipeDetail.ingredients')}</h3>
-            <button onClick={addIngredient} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-full text-sm font-bold hover:bg-primary/90 transition-colors">
-              <span className="material-symbols-outlined text-sm">add</span> {t('recipeDetail.addIngredient')}
-            </button>
+          <div className="flex items-center justify-between gap-3 mb-6">
+            <h3 className="font-headline font-bold text-xl">
+              {t('recipeDetail.ingredients')}
+              <span className="ml-2 text-sm font-bold text-zinc-300 dark:text-zinc-600 tabular-nums">{ingredientCount}</span>
+            </h3>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleAllIngredients}
+                className="px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+              >
+                {allIngredientsCollapsed ? t('recipeDetail.expandAll') : t('recipeDetail.collapseAll')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIngredientsFolded(f => !f)}
+                aria-expanded={!ingredientsFolded}
+                title={ingredientsFolded ? t('recipeDetail.expandSection') : t('recipeDetail.collapseSection')}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[20px]">{ingredientsFolded ? 'unfold_more' : 'unfold_less'}</span>
+              </button>
+            </div>
           </div>
+          {ingredientsFolded ? (
+            <button
+              type="button"
+              onClick={() => setIngredientsFolded(false)}
+              className="w-full text-left text-sm text-zinc-400 dark:text-zinc-500 font-medium hover:text-primary transition-colors"
+            >
+              {t('recipeDetail.sectionFolded', { count: ingredientCount })}
+            </button>
+          ) : (
+          <>
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {(draft.ingredients || []).map((ing, idx) => (
               /* @container: the fields inside lay themselves out from the CARD's
@@ -879,6 +1046,35 @@ const RecipeCreate: React.FC = () => {
                  the ingredient name about 170px - name, type toggle, QTY and UNIT
                  all printing over each other. */
               <div key={idx} className="@container bg-zinc-50 dark:bg-zinc-800/40 rounded-2xl p-4 border border-zinc-100 dark:border-zinc-800">
+                {collapsedIngredients.has(idx) ? (
+                  /* Folded: one line saying what this row is — see the same
+                     control in RecipeDetail.tsx's edit mode. */
+                  <button
+                    type="button"
+                    onClick={() => toggleIngredientCollapsed(idx)}
+                    className="w-full flex items-center gap-2 text-left group/row"
+                  >
+                    <span className="w-6 h-6 shrink-0 rounded-lg bg-primary/10 text-primary text-[11px] font-bold flex items-center justify-center tabular-nums">{idx + 1}</span>
+                    <span className="flex-1 min-w-0 truncate text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                      {ing.ingredientName || ing.subRecipeTitle || t('recipeDetail.unnamedIngredient')}
+                    </span>
+                    {ing.substituteFor != null && (
+                      <span className="shrink-0 rounded-full bg-sky-50 dark:bg-sky-950/40 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-sky-700 dark:text-sky-400">
+                        {t('recipeDetail.substitute')}
+                      </span>
+                    )}
+                    {ing.isOptional && (
+                      <span className="shrink-0 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-500">
+                        {t('recipeDetail.optional')}
+                      </span>
+                    )}
+                    <span className="shrink-0 text-xs font-semibold text-zinc-500 dark:text-zinc-400 tabular-nums">
+                      {ing.quantity != null ? formatEditorAmount(ing.quantity, ing.unitSymbol) : ''}
+                    </span>
+                    <span className="material-symbols-outlined text-[18px] text-zinc-300 dark:text-zinc-600 group-hover/row:text-primary">expand_more</span>
+                  </button>
+                ) : (
+                <>
                 {/* Type toggle and delete get their own row. The toggle used to share
                     a line with the "Ingredient" label and ran straight through it,
                     and delete was an absolutely-positioned button lying on top of
@@ -913,6 +1109,14 @@ const RecipeCreate: React.FC = () => {
                       }`}
                     >
                       {t('recipeDetail.optional')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleIngredientCollapsed(idx)}
+                      title={t('recipeDetail.collapseRow')}
+                      className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-600 dark:hover:text-zinc-300"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">unfold_less</span>
                     </button>
                     <button
                       onClick={() => removeIngredient(idx)}
@@ -1082,29 +1286,119 @@ const RecipeCreate: React.FC = () => {
                       placeholder={t('recipeDetail.chefsNoteIngredientPlaceholder')}
                     />
                   </div>
+                  {/* "Or use this instead" — an alternative to one of the
+                      other rows rather than a further thing to buy. */}
+                  <div className="col-span-12">
+                    <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.substituteForLabel')}</label>
+                    <select
+                      value={ing.substituteFor ?? ''}
+                      onChange={e => setSubstituteFor(idx, e.target.value === '' ? null : parseInt(e.target.value, 10))}
+                      className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="">{t('recipeDetail.substituteForNone')}</option>
+                      {(draft.ingredients || []).map((other, otherIdx) => (
+                        otherIdx === idx || other.substituteFor != null ? null : (
+                          <option key={otherIdx} value={otherIdx}>
+                            {other.ingredientName || other.subRecipeTitle || t('recipeDetail.unnamedIngredient')}
+                          </option>
+                        )
+                      ))}
+                    </select>
+                    {ing.substituteFor != null && (
+                      <p className="text-[9px] text-sky-600 dark:text-sky-500 font-bold mt-1">{t('recipeDetail.substituteHint')}</p>
+                    )}
+                  </div>
                 </div>
+                </>
+                )}
               </div>
             ))}
           </div>
+          {/* The way to add another one lives at the BOTTOM of the list,
+              where you are once you have filled the last row in. */}
+          <button
+            onClick={addIngredient}
+            className="mt-4 w-full flex items-center justify-center gap-1.5 px-4 py-3 rounded-2xl border-2 border-dashed border-primary/30 text-primary text-sm font-bold hover:bg-primary/5 hover:border-primary/50 transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">add</span> {t('recipeDetail.addIngredient')}
+          </button>
+          </>
+          )}
         </div>
 
         {/* Steps editor */}
         <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-headline font-bold text-xl">{t('recipeDetail.steps')}</h3>
-            <button onClick={addStep} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-full text-sm font-bold hover:bg-primary/90 transition-colors">
-              <span className="material-symbols-outlined text-sm">add</span> {t('recipeDetail.addStep')}
-            </button>
+          <div className="flex items-center justify-between gap-3 mb-6">
+            <h3 className="font-headline font-bold text-xl">
+              {t('recipeDetail.steps')}
+              <span className="ml-2 text-sm font-bold text-zinc-300 dark:text-zinc-600 tabular-nums">{stepCount}</span>
+            </h3>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleAllSteps}
+                className="px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+              >
+                {allStepsCollapsed ? t('recipeDetail.expandAll') : t('recipeDetail.collapseAll')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setStepsFolded(f => !f)}
+                aria-expanded={!stepsFolded}
+                title={stepsFolded ? t('recipeDetail.expandSection') : t('recipeDetail.collapseSection')}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[20px]">{stepsFolded ? 'unfold_more' : 'unfold_less'}</span>
+              </button>
+            </div>
           </div>
+          {stepsFolded ? (
+            <button
+              type="button"
+              onClick={() => setStepsFolded(false)}
+              className="w-full text-left text-sm text-zinc-400 dark:text-zinc-500 font-medium hover:text-primary transition-colors"
+            >
+              {t('recipeDetail.stepsFolded', { count: stepCount })}
+            </button>
+          ) : (
+          <>
           <div className="space-y-4">
             {(draft.steps || []).map((step, idx) => (
               <div key={idx} className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-6 relative group border border-zinc-100 dark:border-zinc-800">
-                <button
-                  onClick={() => removeStep(idx)}
-                  className="absolute top-3 right-3 w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
-                >
-                  <span className="material-symbols-outlined text-sm">delete</span>
-                </button>
+                {collapsedSteps.has(idx) ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleStepCollapsed(idx)}
+                    className="w-full flex items-center gap-3 text-left group/row"
+                  >
+                    <span className="w-8 h-8 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-sm tabular-nums">{idx + 1}</span>
+                    <span className="flex-1 min-w-0 truncate text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                      {step.title || firstWordsOf(step.description) || t('recipeDetail.stepNumber', { number: idx + 1 })}
+                    </span>
+                    {step.durationMin ? (
+                      <span className="shrink-0 text-xs font-semibold text-zinc-400 dark:text-zinc-500 tabular-nums">{t('recipeDetail.durationMinutes', { count: step.durationMin })}</span>
+                    ) : null}
+                    <span className="material-symbols-outlined text-[18px] text-zinc-300 dark:text-zinc-600 group-hover/row:text-primary">expand_more</span>
+                  </button>
+                ) : (
+                <>
+                <div className="absolute top-3 right-3 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => toggleStepCollapsed(idx)}
+                    title={t('recipeDetail.collapseRow')}
+                    className="w-8 h-8 rounded-full bg-white/80 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:text-zinc-700 dark:hover:text-zinc-200"
+                  >
+                    <span className="material-symbols-outlined text-sm">unfold_less</span>
+                  </button>
+                  <button
+                    onClick={() => removeStep(idx)}
+                    title={t('common.delete')}
+                    className="w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
+                  >
+                    <span className="material-symbols-outlined text-sm">delete</span>
+                  </button>
+                </div>
                 <div className="flex items-center gap-3 mb-3">
                   <span className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">{idx + 1}</span>
                   <input
@@ -1117,10 +1411,13 @@ const RecipeCreate: React.FC = () => {
                 <StepEditor
                   description={step.description}
                   onChangeDescription={text => updateStep(idx, 'description', text)}
-                  ingredients={draft.ingredients || []}
-                  tools={allTools}
+                  ingredients={(draft.ingredients || []).map(ing => ({ ...ing, aliases: ingredientAliases(ing) }))}
+                  tools={allTools.map(tool => ({ ...tool, name: tool.translated_name || tool.name, aliases: uniqueNames([tool.name, ...(tool.synonyms ?? [])]) }))}
                   units={allUnits}
-                  techniques={allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }))}
+                  techniques={allTechniques.map(tech => ({ id: tech.id, name: tech.translated_name || tech.name, aliases: uniqueNames([tech.name, ...(tech.synonyms ?? [])]) }))}
+                  stepIngredients={step.stepIngredients || []}
+                  allSteps={draft.steps || []}
+                  stepIndex={idx}
                   onInsertIngredient={(sortOrder, amount) => setStepIngredient(idx, sortOrder, amount)}
                   onInsertTool={(toolId) => addToolToStep(idx, toolId)}
                 />
@@ -1142,7 +1439,7 @@ const RecipeCreate: React.FC = () => {
                     compact
                   />
                 </div>
-                <textarea
+                <AutoTextarea
                   value={step.notes || ''}
                   onChange={e => updateStep(idx, 'notes', e.target.value)}
                   className="w-full mt-3 border border-dashed border-primary/20 bg-primary/5 rounded-xl p-3 text-xs italic resize-none focus:ring-2 focus:ring-primary/20 min-h-[60px]"
@@ -1250,7 +1547,18 @@ const RecipeCreate: React.FC = () => {
                               className={`text-xs font-bold flex-1 text-left ${isUsed ? 'text-primary' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
                             >
                               {ing.ingredientName || t('recipeDetail.unnamedIngredient')}
-                              {ing.quantity ? ` (${ing.quantity}${ing.unitSymbol ? ' ' + ing.unitSymbol : ''} total)` : ''}
+                              {ing.quantity ? ` (${formatEditorAmount(ing.quantity, ing.unitSymbol)} ${t('recipeDetail.totalLower')})` : ''}
+                              {/* What is still unspoken for by the time this
+                                  step runs — see RecipeDetail.tsx's edit mode. */}
+                              {(() => {
+                                const left = remainingBeforeStep(draft.steps || [], idx, { sortOrder: ing.sortOrder, quantity: ing.quantity, unitSymbol: ing.unitSymbol });
+                                if (left === null || ing.quantity == null || left >= ing.quantity) return null;
+                                return (
+                                  <span className="ml-1 font-bold text-amber-600 dark:text-amber-500">
+                                    {t('recipeDetail.remainingHere', { amount: formatEditorAmount(left, ing.unitSymbol) })}
+                                  </span>
+                                );
+                              })()}
                             </button>
                             {isUsed && (
                               <>
@@ -1305,9 +1613,21 @@ const RecipeCreate: React.FC = () => {
                     </div>
                   </div>
                 )}
+                </>
+                )}
               </div>
             ))}
           </div>
+          {/* Same reasoning as the ingredients list: you add the next step
+              from the bottom of the last one. */}
+          <button
+            onClick={addStep}
+            className="mt-4 w-full flex items-center justify-center gap-1.5 px-4 py-3 rounded-2xl border-2 border-dashed border-primary/30 text-primary text-sm font-bold hover:bg-primary/5 hover:border-primary/50 transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">add</span> {t('recipeDetail.addStep')}
+          </button>
+          </>
+          )}
         </div>
       </main>
       )}

@@ -50,6 +50,11 @@ export function translateTagGroup(
   translations?: TagGroupTranslations,
   lang?: string | null,
 ): string {
+  // '' is the ungrouped bucket — what a tag's group_name becomes when its
+  // group is removed (POST /tags/groups/delete). It is a real heading with
+  // tags under it, not a missing value, so it gets a real label rather
+  // than rendering as a blank line.
+  if (!groupName.trim()) return t('tagGroups.ungrouped', 'Ungrouped');
   const userLabel = findTranslation(translations, groupName, lang);
   if (userLabel) return userLabel;
   const key = groupName.trim().toLowerCase();

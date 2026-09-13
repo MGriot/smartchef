@@ -133,11 +133,20 @@ async function upsertTagTranslations(tagId: string, translations?: TagInput['tra
   }
 }
 
+/** '' is a real answer here — the ungrouped bucket — and has to survive
+ *  being saved. `groupName || 'Altro'` used to turn every blank into the
+ *  catch-all group, which meant "no group" was not a state a tag could be
+ *  in at all: deleting a group had nowhere to put its tags. An ABSENT
+ *  groupName still falls back to 'Altro', so a caller that never mentions
+ *  groups behaves as before. */
+const resolveGroupName = (groupName: string | undefined | null): string =>
+  groupName === undefined || groupName === null ? 'Altro' : groupName.trim();
+
 export async function createTag(d: TagInput): Promise<{ id: string }> {
   const id = d.id ?? newId();
   await query(
     "INSERT INTO tags (id, name, group_name, color, icon, exclude_tag_ids, synonyms) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-    [id, d.name, d.groupName || 'Altro', d.color || null, d.icon || null, d.excludeTagIds ?? [], d.synonyms ?? []]
+    [id, d.name, resolveGroupName(d.groupName), d.color || null, d.icon || null, d.excludeTagIds ?? [], d.synonyms ?? []]
   );
   await upsertTagTranslations(id, d.translations);
   await syncTag(id);
@@ -147,7 +156,7 @@ export async function createTag(d: TagInput): Promise<{ id: string }> {
 export async function updateTag(id: string, d: TagInput): Promise<void> {
   await query(
     "UPDATE tags SET name=$1, group_name=$2, color=$3, icon=$4, exclude_tag_ids=$5, synonyms=$6, updated_at=now() WHERE id=$7",
-    [d.name, d.groupName || 'Altro', d.color || null, d.icon || null, d.excludeTagIds ?? [], d.synonyms ?? [], id]
+    [d.name, resolveGroupName(d.groupName), d.color || null, d.icon || null, d.excludeTagIds ?? [], d.synonyms ?? [], id]
   );
   await upsertTagTranslations(id, d.translations);
   await syncTag(id);
@@ -253,6 +262,26 @@ export async function mergeTagGroups(sourceGroup: string, targetGroup: string): 
     }
   }
   return { tagsUpdated: rows.length };
+}
+
+/** Deletes a group without deleting anything that was in it: every tag
+ *  filed under it becomes ungrouped, and the group's own translated labels
+ *  go with it (they are keyed by the free text, so leaving them would
+ *  strand them behind a name no tag carries).
+ *
+ *  There was no way to do this before — a group could be renamed or folded
+ *  into another group, but never dissolved, so a group created by a typo
+ *  was permanent and the only way to empty it was to re-file every tag by
+ *  hand. */
+export async function deleteTagGroup(groupName: string): Promise<{ tagsUngrouped: number }> {
+  const group = groupName.trim();
+  const rows = await query<{ id: string }>("SELECT id FROM tags WHERE group_name=$1 AND deleted_at IS NULL", [group]);
+  for (const row of rows) {
+    await query("UPDATE tags SET group_name='', updated_at=now() WHERE id=$1", [row.id]);
+    await syncTag(row.id);
+  }
+  await query("DELETE FROM tag_group_translations WHERE group_name=$1", [group]);
+  return { tagsUngrouped: rows.length };
 }
 
 // ── Tag group labels ─────────────────────────────────────────────────────

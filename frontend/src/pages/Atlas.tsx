@@ -32,6 +32,13 @@ interface AtlasRecipe {
 
 const CARD = 'bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-[0_1px_8px_rgba(0,0,0,0.04)]';
 
+/** Not a region — the selection that means "the recipes with no region at
+ *  all". The unmapped count was a number on a card with nothing behind it:
+ *  it told you 2 recipes were missing from the map and gave you no way to
+ *  find out which, so the one action it invites (go and tag them) meant
+ *  hunting the whole library by hand. */
+const UNMAPPED = '__unmapped__';
+
 export default function Atlas() {
   const { t, i18n } = useTranslation();
   const contentLang = useStore((s) => s.contentLang);
@@ -86,6 +93,7 @@ export default function Atlas() {
   }, [recipes]);
 
   const shown = useMemo(() => {
+    if (selected === UNMAPPED) return recipes.filter((r) => (r.regions || []).length === 0);
     if (selected === null) return recipes.filter((r) => (r.regions || []).length > 0);
     return recipes.filter((r) => (r.regions || []).includes(selected));
   }, [recipes, selected]);
@@ -110,7 +118,9 @@ export default function Atlas() {
   }, [shown]);
 
   const label = (key: string) =>
-    isCountryCode(key) ? `${flagEmoji(key)} ${countryDisplayName(key, i18n.language)}` : key;
+    key === UNMAPPED ? t('atlas.unmapped')
+    : isCountryCode(key) ? `${flagEmoji(key)} ${countryDisplayName(key, i18n.language)}`
+    : key;
 
   const maxCount = ranked.length ? ranked[0][1] : 0;
 
@@ -127,24 +137,48 @@ export default function Atlas() {
             does. */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {[
-            { label: t('atlas.mappedRecipes'), value: recipes.length - unmapped, icon: 'travel_explore' },
-            { label: t('atlas.regionsCovered'), value: ranked.length, icon: 'public' },
-            { label: t('atlas.totalCooks'), value: recipes.reduce((s, r) => s + (r.times_cooked || 0), 0), icon: 'skillet' },
-            { label: t('atlas.unmapped'), value: unmapped, icon: 'location_off' },
-          ].map((s) => (
-            <div key={s.label} className={`${CARD} px-5 py-4 flex items-center gap-4`}>
-              <span className="material-symbols-outlined text-primary/60 text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>{s.icon}</span>
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold">{s.label}</p>
-                <p className="text-2xl font-bold font-headline text-zinc-800 dark:text-zinc-200 tabular-nums">{s.value}</p>
-              </div>
-            </div>
-          ))}
+            { label: t('atlas.mappedRecipes'), value: recipes.length - unmapped, icon: 'travel_explore', onClick: null },
+            { label: t('atlas.regionsCovered'), value: ranked.length, icon: 'public', onClick: null },
+            { label: t('atlas.totalCooks'), value: recipes.reduce((s, r) => s + (r.times_cooked || 0), 0), icon: 'skillet', onClick: null },
+            {
+              label: t('atlas.unmapped'),
+              value: unmapped,
+              icon: 'location_off',
+              // The only KPI here with something to open: pressing it
+              // selects the recipes that have no region, so they can be
+              // looked at (and tagged) rather than just counted.
+              onClick: unmapped > 0 ? () => setSelected((cur) => (cur === UNMAPPED ? null : UNMAPPED)) : null,
+            },
+          ].map((s) => {
+            const active = s.onClick && selected === UNMAPPED;
+            const body = (
+              <>
+                <span className={`material-symbols-outlined text-[28px] ${active ? 'text-primary' : 'text-primary/60'}`} style={{ fontVariationSettings: "'FILL' 1" }}>{s.icon}</span>
+                <div className="text-left">
+                  <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-400 dark:text-zinc-500 font-bold">{s.label}</p>
+                  <p className={`text-2xl font-bold font-headline tabular-nums ${active ? 'text-primary' : 'text-zinc-800 dark:text-zinc-200'}`}>{s.value}</p>
+                </div>
+              </>
+            );
+            return s.onClick ? (
+              <button
+                key={s.label}
+                onClick={s.onClick}
+                aria-pressed={!!active}
+                title={t('atlas.showUnmapped')}
+                className={`${CARD} px-5 py-4 flex items-center gap-4 w-full transition-colors ${active ? 'border-primary/40 bg-primary/5' : 'hover:border-primary/30'}`}
+              >
+                {body}
+              </button>
+            ) : (
+              <div key={s.label} className={`${CARD} px-5 py-4 flex items-center gap-4`}>{body}</div>
+            );
+          })}
         </div>
 
         {loading ? (
           <p className="text-sm text-zinc-400 dark:text-zinc-500">{t('atlas.loading')}</p>
-        ) : ranked.length === 0 ? (
+        ) : ranked.length === 0 && selected !== UNMAPPED ? (
           <div className={`${CARD} p-10 text-center`}>
             <span className="material-symbols-outlined text-4xl text-zinc-300 dark:text-zinc-600">public_off</span>
             <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400 max-w-md mx-auto">{t('atlas.emptyState')}</p>
@@ -260,7 +294,14 @@ export default function Atlas() {
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
                   {shown.map((r) => (
-                    <Link key={r.id} to={`/recipe/${r.id}`} className={`${CARD} overflow-hidden group`}>
+                    <Link
+                      key={r.id}
+                      /* Straight into the editor for the unmapped ones:
+                         the reason to open that list at all is to give
+                         these recipes a region. */
+                      to={selected === UNMAPPED ? `/recipe/${r.id}?mode=edit` : `/recipe/${r.id}`}
+                      className={`${CARD} overflow-hidden group`}
+                    >
                       <div className="h-40 overflow-hidden">
                         <CoverImage
                           src={r.cover_image_url}
@@ -272,6 +313,9 @@ export default function Atlas() {
                         <h3 className="font-headline font-bold text-sm text-zinc-800 dark:text-zinc-200 leading-snug line-clamp-2">
                           {r.translated_title || r.title}
                         </h3>
+                        {selected === UNMAPPED && (
+                          <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-primary">{t('atlas.addRegion')}</p>
+                        )}
                         <div className="flex flex-wrap gap-1 mt-2">
                           {(r.regions || []).slice(0, 3).map((region) => (
                             <span key={region} className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">

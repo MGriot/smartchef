@@ -246,6 +246,11 @@ interface RawRecipeIngredientRow {
   notes?: string | null;
   is_optional?: number | null;
   group_name?: string | null;
+  /** sortOrder of the row this one is an alternative to — see
+   *  db/migrations/042_recipe_ingredient_substitutes.sql. Carried through
+   *  here or a recipe arriving from another device would land with its
+   *  substitutes turned back into ordinary ingredients. */
+  substitute_for?: number | null;
 }
 
 interface RawRecipeStepRow {
@@ -293,17 +298,18 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
     for (const row of (value as RawRecipeIngredientRow[] | null) ?? []) {
       await query(
         `INSERT INTO recipe_ingredients
-           (id, recipe_id, sort_order, ingredient_id, subtype_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional, group_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           (id, recipe_id, sort_order, ingredient_id, subtype_id, sub_recipe_id, quantity, quantity_text, unit_id, notes, is_optional, group_name, substitute_for)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT(id) DO UPDATE SET
            recipe_id = excluded.recipe_id, sort_order = excluded.sort_order, ingredient_id = excluded.ingredient_id,
            subtype_id = excluded.subtype_id, sub_recipe_id = excluded.sub_recipe_id, quantity = excluded.quantity,
            quantity_text = excluded.quantity_text, unit_id = excluded.unit_id, notes = excluded.notes,
-           is_optional = excluded.is_optional, group_name = excluded.group_name`,
+           is_optional = excluded.is_optional, group_name = excluded.group_name,
+           substitute_for = excluded.substitute_for`,
         [
           row.id ?? newId(), entityId, row.sort_order ?? 0, row.ingredient_id ?? null, row.subtype_id ?? null,
           row.sub_recipe_id ?? null, row.quantity ?? null, row.quantity_text ?? null, row.unit_id ?? null,
-          row.notes ?? null, row.is_optional ?? 0, row.group_name ?? null,
+          row.notes ?? null, row.is_optional ?? 0, row.group_name ?? null, row.substitute_for ?? null,
         ]
       );
     }

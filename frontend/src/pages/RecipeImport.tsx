@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import CatalogSearchBox from '../components/CatalogSearchBox';
 import { useStore } from '../store/app.store';
-import { SUPPORTED_LANGUAGES } from '../i18n';
+import { listLanguages, languageLabel } from '../lib/languages';
+import { useLanguages } from '../hooks/useLanguages';
 import { apiFetch } from '../lib/api';
 import { tryParseStructuredText, TemplateParseResult } from '../services/recipeTemplateParser';
 import { extractRecipeFromHtml } from '../services/recipeStructuredData';
@@ -108,6 +109,7 @@ function mimeTypeOf(file: File): string {
 
 export default function RecipeImport() {
   const { t } = useTranslation();
+  const { languages } = useLanguages();
   const navigate = useNavigate();
   const contentLang = useStore((s) => s.contentLang);
   const RAW_TEXT_TEMPLATE = t('import.rawTextTemplate');
@@ -343,7 +345,7 @@ export default function RecipeImport() {
     // content language, which says what the *reader* browses in, not what
     // the recipe is written in.
     const detected = d.language?.trim().toLowerCase() || null;
-    const supported = detected && SUPPORTED_LANGUAGES.some((l) => l.code === detected) ? detected : null;
+    const supported = detected && listLanguages().some((l) => l.code === detected) ? detected : null;
     setDetectedUnsupportedLang(detected && !supported ? detected : null);
     const lang = supported || contentLang || 'en';
     setMatchLang(lang);
@@ -1364,7 +1366,7 @@ export default function RecipeImport() {
                              disabled={rematching}
                              className="sc-field-inset w-auto min-w-[9rem] cursor-pointer text-xs disabled:opacity-50"
                            >
-                             {SUPPORTED_LANGUAGES.map((l) => (
+                             {languages.map((l) => (
                                <option key={l.code} value={l.code}>{l.label}</option>
                              ))}
                            </select>

@@ -98,6 +98,10 @@ export interface Snapshot {
       sortOrder: number; ingredientId?: string; subRecipeId?: string; quantity?: number | null;
       quantityText?: string | null; unitSymbol?: string | null; notes?: string | null; isOptional?: boolean;
       groupName?: string | null;
+      /** sortOrder of the ingredient this row is an alternative to — see
+       *  db/migrations/042_recipe_ingredient_substitutes.sql. A backup that
+       *  dropped it would restore the substitutes as extra ingredients. */
+      substituteFor?: number | null;
       translations?: Array<{ lang: string; notes?: string | null }>;
     }>;
     steps?: Array<{
@@ -311,6 +315,7 @@ export async function exportSnapshot(): Promise<Snapshot> {
       quantity: ri.quantity as number | null, quantityText: ri.quantity_text as string | null,
       unitSymbol: ri.unit_id ? unitSymbolById.get(ri.unit_id as string) ?? null : null,
       notes: ri.notes as string | null, isOptional: !!ri.is_optional, groupName: ri.group_name as string | null,
+      substituteFor: (ri.substitute_for as number | null) ?? null,
       translations: (riTranslations.get(ri.id as string) ?? []).map(t => ({ lang: t.language_code, notes: t.notes })),
     })),
     steps: (stepRows.get(r.id as string) ?? []).map(st => ({
@@ -443,6 +448,7 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
         notes: ri.notes ?? undefined,
         isOptional: ri.isOptional,
         groupName: ri.groupName ?? undefined,
+        substituteFor: ri.substituteFor ?? null,
         translations: ri.translations,
       });
     }

@@ -24,6 +24,17 @@ export interface CookSequenceStep {
   toolIds: UUID[];
   imageUrl: string | null;
   notes: string | null;
+  /** Which of the section's ingredients this step uses, and how much —
+   *  the same shape recipe_steps.step_ingredients holds. Kitchen mode
+   *  renders it as a tickable checklist. */
+  stepIngredients: Array<{
+    ingredientSortOrder: number;
+    amountMode?: "fraction" | "absolute";
+    portion: number;
+    quantity?: number | null;
+    unitId?: UUID | null;
+    unitSymbol?: string | null;
+  }>;
 }
 
 export interface CookSequenceIngredientRef {
@@ -67,7 +78,8 @@ async function loadSubRecipeRefs(recipeId: UUID): Promise<SubRecipeRef[]> {
 async function loadRecipeSteps(recipeId: UUID): Promise<CookSequenceStep[]> {
   return query<CookSequenceStep>(
     `SELECT id, step_number AS "stepNumber", title, description,
-            duration_min AS "durationMin", tool_ids AS "toolIds", image_url AS "imageUrl", notes
+            duration_min AS "durationMin", tool_ids AS "toolIds", image_url AS "imageUrl", notes,
+            step_ingredients AS "stepIngredients"
      FROM recipe_steps
      WHERE recipe_id = $1
      ORDER BY step_number`,
@@ -170,13 +182,18 @@ interface RawRecipeIngredient {
   to_base_factor: number | null;
   notes: string | null;
   is_optional: boolean;
+  /** Non-null on a row that is an ALTERNATIVE to the row at that
+   *  sort_order. Dropped below, so the shopping list, the nutrition
+   *  totals and the pantry matcher see the thing you actually cook with
+   *  rather than both halves of an either/or. */
+  substitute_for: number | null;
 }
 
 /**
  * Carica gli ingredienti diretti di una ricetta dal DB
  */
 async function loadRecipeIngredients(recipeId: UUID): Promise<RawRecipeIngredient[]> {
-  return query<RawRecipeIngredient>(
+  const rows = await query<RawRecipeIngredient>(
     `SELECT
        ri.id, ri.sort_order,
        ri.ingredient_id,
@@ -189,7 +206,7 @@ async function loadRecipeIngredients(recipeId: UUID): Promise<RawRecipeIngredien
        yu.to_base_factor AS sub_recipe_yield_to_base_factor,
        ri.quantity, ri.quantity_text,
        ri.unit_id, u.symbol AS unit_symbol, u.unit_type AS unit_type, u.to_base_factor AS to_base_factor,
-       ri.notes, ri.is_optional
+       ri.notes, ri.is_optional, ri.substitute_for
      FROM recipe_ingredients ri
      LEFT JOIN ingredients i    ON i.id = ri.ingredient_id
      LEFT JOIN recipes sr       ON sr.id = ri.sub_recipe_id
@@ -199,6 +216,10 @@ async function loadRecipeIngredients(recipeId: UUID): Promise<RawRecipeIngredien
      ORDER BY ri.sort_order`,
     [recipeId]
   );
+  // The "or use margarine instead" rows are alternatives to a sibling row,
+  // so counting them would have the shopping list buying both, the
+  // nutrition totals adding both, and the pantry matcher demanding both.
+  return rows.filter(r => r.substitute_for == null);
 }
 
 /**

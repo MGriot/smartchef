@@ -34,6 +34,9 @@ const RecipeIngredientSchema = z.object({
   notes: z.string().optional(),
   isOptional: z.boolean().default(false),
   groupName: z.string().optional().nullable(),
+  /** sort_order of the ingredient this row is an alternative to — see
+   *  db/migrations/042_recipe_ingredient_substitutes.sql. */
+  substituteFor: z.number().int().min(0).optional().nullable(),
   translations: z.array(IngredientNoteTranslationSchema).optional(),
 }).refine(d => d.ingredientId || d.subRecipeId, {
   message: "Deve essere presente ingredientId o subRecipeId",
@@ -333,6 +336,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'isOptional', ri.is_optional,
               'notes', ri.notes,
               'groupName', ri.group_name,
+              'substituteFor', ri.substitute_for,
               'translatedNotes', ${ingredientTranslatedNotes},
               'translations', COALESCE(
                 (SELECT json_agg(json_build_object('lang', rit2.language_code, 'notes', rit2.notes))
@@ -414,11 +418,12 @@ recipeRouter.post("/", async (req: Request, res: Response) => {
         await client.query(
           `INSERT INTO recipe_ingredients
              (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
-              quantity,quantity_text,unit_id,notes,is_optional,group_name)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+              quantity,quantity_text,unit_id,notes,is_optional,group_name,substitute_for)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
           [recipeIngredientId,recipeId,ing.sortOrder,ing.ingredientId??null,
            ing.subtypeId??null,ing.subRecipeId??null,ing.quantity??null,
-           ing.quantityText??null,ing.unitId??null,ing.notes??null,ing.isOptional,ing.groupName??null]
+           ing.quantityText??null,ing.unitId??null,ing.notes??null,ing.isOptional,ing.groupName??null,
+           ing.substituteFor??null]
         );
         await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
       }
@@ -726,7 +731,11 @@ recipeRouter.post("/filter-by-pantry", async (req: Request, res: Response) => {
   // see services/pantry.service.ts.
   const { ingredients, minMatchRatio } = parsed.data;
   try {
-    const results = await filterByPantry(ingredients, minMatchRatio ?? 1);
+    const results = await filterByPantry(
+      ingredients,
+      minMatchRatio ?? 1,
+      typeof req.query.lang === "string" ? req.query.lang : null,
+    );
     res.json({ data: results });
   } catch (err) {
     console.error("Pantry match failed:", err);
@@ -767,11 +776,12 @@ recipeRouter.put("/:id", async (req: Request, res: Response) => {
         await client.query(
           `INSERT INTO recipe_ingredients
              (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
-              quantity,quantity_text,unit_id,notes,is_optional,group_name)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+              quantity,quantity_text,unit_id,notes,is_optional,group_name,substitute_for)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
           [recipeIngredientId, id, ing.sortOrder, ing.ingredientId??null,
            ing.subtypeId??null, ing.subRecipeId??null, ing.quantity??null,
-           ing.quantityText??null, ing.unitId??null, ing.notes??null, ing.isOptional, ing.groupName??null]
+           ing.quantityText??null, ing.unitId??null, ing.notes??null, ing.isOptional, ing.groupName??null,
+           ing.substituteFor??null]
         );
         await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
       }

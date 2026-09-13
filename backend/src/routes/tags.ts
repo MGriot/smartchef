@@ -13,6 +13,14 @@ import { z } from "zod";
 
 export const tagsRouter = Router();
 
+/** '' is a real answer here — the ungrouped bucket — and has to survive
+ *  being saved. `groupName || 'Altro'` used to turn every blank into the
+ *  catch-all group, which meant "no group" was not a state a tag could be
+ *  in at all, so POST /tags/groups/delete would have nowhere to put the
+ *  tags it dissolves. An ABSENT groupName still falls back to 'Altro'. */
+const resolveGroupName = (groupName: string | undefined | null): string =>
+  groupName === undefined || groupName === null ? "Altro" : groupName.trim();
+
 // GET /tags
 tagsRouter.get("/", async (req: Request, res: Response) => {
   const { lang, q } = req.query;
@@ -70,7 +78,7 @@ tagsRouter.post("/", async (req: Request, res: Response) => {
   await query(
     `INSERT INTO tags (id, name, group_name, color, icon, exclude_tag_ids, synonyms)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, d.name, d.groupName || 'Altro', d.color || null, d.icon || null, d.excludeTagIds || [], d.synonyms ?? []]
+    [id, d.name, resolveGroupName(d.groupName), d.color || null, d.icon || null, d.excludeTagIds || [], d.synonyms ?? []]
   );
   await upsertTagTranslations(id, d.translations);
   res.json({ data: { id } });
@@ -226,6 +234,24 @@ tagsRouter.post("/groups/merge", async (req: Request, res: Response) => {
   res.json({ data: { tagsUpdated: result.length } });
 });
 
+// POST /tags/groups/delete — dissolves a group without deleting anything
+// that was in it: every tag filed under it becomes ungrouped (group_name
+// ''), and the group's own translated labels go with it, since they are
+// keyed by that same free text. Registered before POST /tags/:id/merge
+// for the same reason groups/merge above is.
+const DeleteTagGroupSchema = z.object({ groupName: z.string().min(1) });
+tagsRouter.post("/groups/delete", async (req: Request, res: Response) => {
+  const parsed = DeleteTagGroupSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const groupName = parsed.data.groupName.trim();
+  const result = await query(
+    "UPDATE tags SET group_name='', updated_at=now() WHERE group_name=$1 AND deleted_at IS NULL RETURNING id",
+    [groupName]
+  );
+  await query("DELETE FROM tag_group_translations WHERE group_name=$1", [groupName]);
+  res.json({ data: { tagsUngrouped: result.length } });
+});
+
 // POST /tags/:id/merge — folds a mistakenly-duplicated catalog tag into
 // another one: every recipe carrying it (by name), every ingredient
 // tagged with it, and every other tag's excludeTagIds (the diet auto-tag
@@ -270,7 +296,7 @@ tagsRouter.put("/:id", async (req: Request, res: Response) => {
   await query(
     `UPDATE tags SET name=$1, group_name=$2, color=$3, icon=$4, exclude_tag_ids=$5, synonyms=$6, updated_at=now()
      WHERE id=$7`,
-    [d.name, d.groupName || 'Altro', d.color || null, d.icon || null, d.excludeTagIds || [], d.synonyms ?? [], id]
+    [d.name, resolveGroupName(d.groupName), d.color || null, d.icon || null, d.excludeTagIds || [], d.synonyms ?? [], id]
   );
   await upsertTagTranslations(id, d.translations);
   res.json({ success: true });

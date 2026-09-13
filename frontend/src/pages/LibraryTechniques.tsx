@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import Autocomplete from '../components/Autocomplete';
 import RenderFaIcon from '../components/RenderFaIcon';
@@ -10,6 +11,9 @@ import { apiFetch } from '../lib/api';
 import { TECHNIQUE_ICONS } from '../lib/icons';
 import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FormSection, IconPicker, TranslationRows } from '../components/Form';
+import { LibraryToolbar } from '../components/LibraryViewControls';
+import { useLibraryView } from '../hooks/useLibraryView';
+import { sortLibraryItems } from '../lib/librarySort';
 
 
 export default function LibraryTechniques() {
@@ -20,6 +24,8 @@ export default function LibraryTechniques() {
   const [form, setForm] = useState({ name: '', description: '', icon: 'TbFlame', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
+  const { t } = useTranslation();
+  const { view, setView, sort, setSort } = useLibraryView('techniques', 'list');
   // Fold a duplicate technique into another one. The catalogue collects
   // these on its own — Smart Import creates a technique per parsed step
   // name, so an Italian recipe leaves "Bollitura" next to the "Boil" an
@@ -125,6 +131,17 @@ export default function LibraryTechniques() {
 
   // Memoized: Autocomplete re-syncs its typed text whenever this array's
   // identity changes, so a fresh array each render would clear the box.
+  // Techniques have no category column, so the sort menu below omits the
+  // group ordering rather than offering one that would silently fall back
+  // to alphabetical.
+  const visibleTechniques = useMemo(
+    () => sortLibraryItems(techniques, sort, {
+      label: (item: any) => item.translated_name || item.name || '',
+      createdAt: (item: any) => item.created_at,
+    }, contentLang),
+    [techniques, sort, contentLang],
+  );
+
   const mergeOptions = useMemo(
     () => techniques
       .filter((t) => t.id !== mergeSource?.id)
@@ -149,7 +166,56 @@ export default function LibraryTechniques() {
             </button>
           </div>
 
+          <LibraryToolbar
+            value={view}
+            onChange={setView}
+            sortValue={sort}
+            sortOptions={['name-asc', 'name-desc', 'newest', 'oldest']}
+            onSortChange={setSort}
+          />
+
           <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+            {view === 'grid' ? (
+              loading ? (
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</p>
+              ) : visibleTechniques.length === 0 ? (
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.common.empty')}</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {visibleTechniques.map((technique: any) => (
+                    <div
+                      key={technique.id}
+                      className="group relative bg-zinc-50/60 dark:bg-zinc-800/40 rounded-3xl p-4 border border-zinc-100 dark:border-zinc-800 hover:border-primary/30 hover:shadow-sm transition-all"
+                    >
+                      <div className="aspect-square rounded-2xl overflow-hidden bg-white dark:bg-zinc-900 flex items-center justify-center mb-3">
+                        {technique.image_urls?.[0] ? (
+                          <ResolvedImage src={technique.image_urls[0]} className="w-full h-full object-cover" />
+                        ) : (
+                          <RenderFaIcon name={technique.icon || 'TbFlame'} className="text-[32px] text-zinc-300 dark:text-zinc-600" />
+                        )}
+                      </div>
+                      <p className="font-extrabold text-sm text-zinc-900 dark:text-zinc-100 leading-tight truncate" title={technique.translated_name || technique.name}>
+                        {technique.translated_name || technique.name}
+                      </p>
+                      {technique.description && (
+                        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-2">{technique.description}</p>
+                      )}
+                      <div className="flex justify-center gap-1 mt-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <button onClick={() => handleOpenModal(technique)} title="Edit this technique" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                          <span className="material-symbols-outlined text-[18px]">edit</span>
+                        </button>
+                        <button onClick={() => { setMergeSource(technique); setMergeTargetId(''); }} title="Merge into another technique" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                          <span className="material-symbols-outlined text-[18px]">call_merge</span>
+                        </button>
+                        <button onClick={() => handleDelete(technique.id)} title="Delete" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -161,7 +227,7 @@ export default function LibraryTechniques() {
                 <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">
                   {loading ? (
                     <tr><td colSpan={2} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</td></tr>
-                  ) : techniques.map((technique) => (
+                  ) : visibleTechniques.map((technique: any) => (
                     <tr key={technique.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
                       <td className="py-6 pl-4">
                         <div className="flex items-center gap-4">
@@ -196,6 +262,7 @@ export default function LibraryTechniques() {
                 </tbody>
               </table>
             </div>
+            )}
           </section>
       </AppLayout>
 

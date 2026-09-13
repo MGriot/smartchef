@@ -3,6 +3,9 @@ import { useNavigate, Link } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
+import { useTranslation } from 'react-i18next';
+import { useLanguages } from '../hooks/useLanguages';
+import { isValidLanguageCode, languageLabel, normalizeLanguageCode } from '../lib/languages';
 import type { ThemeMode } from '../store/app.store';
 import { apiFetch, isNative, getServerUrl } from '../lib/api';
 import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
@@ -2095,6 +2098,105 @@ function AppearanceCard() {
   );
 }
 
+function LanguagesCard() {
+  const { t } = useTranslation();
+  const { languages, add, remove } = useLanguages();
+  const contentLang = useStore((s) => s.contentLang);
+  const setContentLang = useStore((s) => s.setContentLang);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const custom = languages.filter((l) => !l.hasUiBundle);
+  const preview = isValidLanguageCode(draft) ? languageLabel(draft) : null;
+
+  const handleAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = draft.trim();
+    if (!code) return;
+    if (!isValidLanguageCode(code)) {
+      setError(t('languages.invalidCode'));
+      return;
+    }
+    add(code);
+    setDraft('');
+    setError(null);
+  };
+
+  const handleRemove = (code: string) => {
+    // Removing the language currently being read would leave every screen
+    // asking the backend for a language no longer in the picker, so fall
+    // back to English first.
+    if (normalizeLanguageCode(code) === normalizeLanguageCode(contentLang)) setContentLang('en');
+    remove(code);
+  };
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+      <div className="mb-6">
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('languages.heading')}</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('languages.subtitle')}</p>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-5">
+        {languages.map((l) => (
+          <span
+            key={l.code}
+            className={`inline-flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-full text-xs font-bold border ${
+              l.hasUiBundle
+                ? 'bg-zinc-50 dark:bg-zinc-950 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'
+                : 'bg-primary/8 text-primary border-primary/20'
+            }`}
+          >
+            {l.label}
+            <span className="opacity-50 font-mono text-[10px] uppercase">{l.code}</span>
+            {l.hasUiBundle ? (
+              <span title={t('languages.bundledHint')} className="material-symbols-outlined text-[14px] opacity-50">lock</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleRemove(l.code)}
+                title={t('languages.remove')}
+                className="w-5 h-5 rounded-full flex items-center justify-center hover:bg-primary/15 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </button>
+            )}
+          </span>
+        ))}
+      </div>
+
+      <form onSubmit={handleAdd} className="flex flex-wrap items-start gap-2">
+        <div className="flex-1 min-w-[180px]">
+          <input
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); setError(null); }}
+            placeholder={t('languages.codePlaceholder')}
+            aria-label={t('languages.addLabel')}
+            className="w-full border-none bg-zinc-50 dark:bg-zinc-950 rounded-xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+          />
+          {/* Resolving the name as they type is what makes a bare code
+              trustworthy — you can see "pt" really is Portuguese before adding it. */}
+          {preview && !error && (
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-1.5 px-1">{preview}</p>
+          )}
+          {error && <p className="text-xs text-red-500 font-bold mt-1.5 px-1">{error}</p>}
+        </div>
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+          className="px-5 py-3 bg-primary text-white rounded-xl font-bold text-sm disabled:opacity-40 transition-all active:scale-95"
+        >
+          {t('languages.add')}
+        </button>
+      </form>
+
+      <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-4 leading-relaxed">
+        {t('languages.note')}
+      </p>
+    </div>
+  );
+}
+
 export default function Account() {
   const navigate = useNavigate();
   const account = useStore((s) => s.account);
@@ -2253,6 +2355,7 @@ export default function Account() {
         </div>
         <div className="xl:col-span-5 space-y-6 sm:space-y-8 min-w-0">
           <AppearanceCard />
+          <LanguagesCard />
           <LlmProviderCard />
           <BackupCard />
           {standalone && <AllProfilesCard />}

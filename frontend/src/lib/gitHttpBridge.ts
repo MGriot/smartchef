@@ -43,7 +43,7 @@ interface GeocodeResult { lat: number; lng: number; displayName: string }
 // home for this the way electron/src/index.ts's geocodeCache has; a plain
 // module-level Map here is exactly as effective for the same purpose
 // (skip re-geocoding the same free-text region repeatedly).
-const geocodeCache = new Map<string, GeocodeResult | null>();
+const geocodeCache = new Map<string, GeocodeResult[]>();
 
 /** Android's counterpart to electronBridge.ts's electronGeocode() — same
  *  Nominatim endpoint, same User-Agent (its usage policy requires one
@@ -52,29 +52,26 @@ const geocodeCache = new Map<string, GeocodeResult | null>();
  *  GitHttpPlugin native request above instead of Electron's main-process
  *  IPC. null on no match or any failure — RegionsMap.tsx/RegionPicker.tsx
  *  already treat a missing pin as "not geocoded yet," not an error. */
-export async function androidGeocode(q: string): Promise<GeocodeResult | null> {
+export async function androidGeocode(q: string, limit = 1): Promise<GeocodeResult[]> {
   const query = q.trim();
-  if (!query) return null;
-  const key = query.toLowerCase();
-  if (geocodeCache.has(key)) return geocodeCache.get(key) ?? null;
+  if (!query) return [];
+  const max = Math.min(8, Math.max(1, Math.trunc(limit) || 1));
+  const key = `${max}:${query.toLowerCase()}`;
+  if (geocodeCache.has(key)) return geocodeCache.get(key)!;
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=${max}&q=${encodeURIComponent(query)}`;
     const res = await GitHttp.request({ url, method: 'GET', headers: { 'User-Agent': 'SmartChef/1.0 (self-hosted recipe app)' } });
     if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`Nominatim error ${res.statusCode}`);
-    const results = JSON.parse(new TextDecoder().decode(base64ToBytes(res.body))) as Array<{ lat: string; lon: string; display_name: string }>;
-    if (!results.length) {
-      geocodeCache.set(key, null);
-      return null;
-    }
-    const result: GeocodeResult = { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), displayName: results[0].display_name };
-    geocodeCache.set(key, result);
-    return result;
+    const raw = JSON.parse(new TextDecoder().decode(base64ToBytes(res.body))) as Array<{ lat: string; lon: string; display_name: string }>;
+    const results: GeocodeResult[] = raw.map((r) => ({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), displayName: r.display_name }));
+    geocodeCache.set(key, results);
+    return results;
   } catch (err) {
     // Not cached, unlike a confirmed no-results — a transient failure
     // (network blip, timeout) shouldn't permanently block a retry for
     // this query, matching electronGeocode()'s own catch behavior.
     console.error('SmartChef: Android geocode failed:', err);
-    return null;
+    return [];
   }
 }

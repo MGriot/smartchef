@@ -147,7 +147,7 @@ Expected response:
   "db": true,
   "ollama": true,
   "ollamaModels": ["gemma3:4b"],
-  "version": "1.0.0"
+  "version": "1.1.0"
 }
 ```
 
@@ -477,7 +477,7 @@ cd frontend
 npm install
 npm run electron:build
 ```
-Produces an NSIS installer at `frontend/electron/dist/SmartChef Setup 1.0.0.exe`.
+Produces an NSIS installer at `frontend/electron/dist/SmartChef Setup 1.1.0.exe`.
 
 **Android**:
 ```bash
@@ -487,6 +487,133 @@ cd android
 ./gradlew assembleDebug
 ```
 Produces `frontend/android/app/build/outputs/apk/debug/app-debug.apk` — install via `adb install app-debug.apk`, or transfer the file to the phone and open it directly (requires allowing "install from unknown sources").
+
+> On Windows, `gradlew` reads `JAVA_HOME` before it ever gets to the JDK pinned in
+> `android/gradle.properties`, so an inherited `JAVA_HOME` pointing at a JDK that
+> isn't there any more aborts the build with a path nobody configured. Override it
+> for the one command:
+> `JAVA_HOME="C:\Program Files\Microsoft\jdk-21.0.12.101-hotspot" ./gradlew assembleDebug`
+
+To try it on an emulator rather than a handset:
+
+```bash
+emulator -list-avds                     # pick one, or make one in Android Studio
+emulator -avd <name> -no-snapshot-load &
+adb wait-for-device
+adb install -r frontend/android/app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.smartchef.app/.MainActivity
+```
+
+### Publishing on F-Droid
+
+The app is a good F-Droid candidate as-is: MIT licensed, no Google Play Services,
+no `google-services.json`, no proprietary libraries, and the whole thing builds
+from this repo. There are two routes, and they cost very different amounts of
+work.
+
+#### What has to change first, either way
+
+1. **Release signing.** The APK above is a *debug* build signed with the shared
+   Android debug keystore. Android identifies an app by its signing key, so the
+   key you publish with is a one-way decision — an app signed with a different key
+   later cannot update the installed one. Generate a keystore, keep it backed up,
+   and add a `signingConfigs`/`release` block to `frontend/android/app/build.gradle`
+   (F-Droid's own repo does not need this — it signs with *its* key — but your own
+   repo does).
+2. **Bump `versionCode` on every release.** It is the only number Android compares
+   when deciding whether something is an upgrade; `versionName` is for humans.
+
+#### Route A — your own F-Droid repository (an afternoon)
+
+Full control, no review queue, and users add one URL. This is the pragmatic
+option for a self-hosted app with a handful of users.
+
+```bash
+pipx install fdroidserver          # or: apt install fdroidserver
+mkdir -p fdroid && cd fdroid
+fdroid init                        # creates config.yml + the repo signing key
+cp ../frontend/android/app/build/outputs/apk/release/app-release.apk repo/
+fdroid update -c                   # builds the index, reads metadata out of the APK
+```
+
+Serve the resulting `fdroid/repo/` directory over HTTPS — GitHub Pages is enough.
+Users then add `https://<user>.github.io/smartchef/fdroid/repo` under
+**F-Droid → Settings → Repositories**. Keep `fdroid/keystore.p12` and
+`config.yml` out of git; losing the repo key means every user has to remove and
+re-add the repository.
+
+#### Route B — the official f-droid.org repository (weeks, mostly waiting)
+
+Widest reach, and F-Droid builds the APK itself on its own build server and signs
+it with its own key, so nothing of yours is trusted beyond the source. You open a
+merge request against [`fdroid/fdroiddata`](https://gitlab.com/fdroid/fdroiddata)
+adding `metadata/com.smartchef.app.yml`.
+
+The awkward part for this app is that the APK is a Capacitor shell around a Vite
+build, so **Node has to run before Gradle does** — F-Droid's build server has no
+Node by default. That goes in `sudo:` (root, in the build VM) and `build:`. Note
+`build:` and not `prebuild:`: F-Droid's own reference is explicit that "nothing
+should be built during the prebuild phase", because the source scanner runs
+between the two, and `npm ci` would otherwise drop a `node_modules` full of
+binaries straight into its path.
+
+`init`, `prebuild` and `build` all run **inside `subdir:`** — hence the `cd ../..`
+below, which lands in `frontend/`, where `package.json` lives.
+
+```yaml
+Categories:
+  - Internet
+License: MIT
+AuthorName: Matteo Griot
+SourceCode: https://github.com/MGriot/smartchef
+IssueTracker: https://github.com/MGriot/smartchef/issues
+
+AutoName: SmartChef
+Summary: Offline-first recipe manager with nested recipes and device-to-device sync
+
+RepoType: git
+Repo: https://github.com/MGriot/smartchef.git
+
+Builds:
+  - versionName: 1.1.0
+    versionCode: 2
+    commit: v1.1.0
+    subdir: frontend/android/app
+    sudo:
+      - curl -Lo node.tar.xz https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-x64.tar.xz
+      - echo "<sha256 of that tarball>  node.tar.xz" | sha256sum -c -
+      - tar xJf node.tar.xz -C /opt
+      - ln -s /opt/node-v20.18.1-linux-x64/bin/node /usr/local/bin/node
+      - ln -s /opt/node-v20.18.1-linux-x64/bin/npm  /usr/local/bin/npm
+    build:
+      - cd ../..
+      - npm ci
+      - npm run build
+      - npx cap sync android
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 1.1.0
+CurrentVersionCode: 2
+```
+
+Things a reviewer will raise, worth getting ahead of:
+
+- **Anti-features.** Declare them honestly rather than being asked to. The cloud
+  LLM providers (Anthropic/Gemini/OpenAI) are opt-in and off by default — the
+  default is a local Ollama — but they are non-free network services, so
+  `AntiFeatures: [NonFreeNet]` is the safe declaration. The map tiles and the
+  Nominatim geocoder are free services but still network calls; the Tesseract OCR
+  model is Apache-2.0 and downloads on first use.
+- **`npm ci` needs the committed `frontend/package-lock.json`** — it is in the
+  repo, which is what makes the build deterministic enough to be accepted.
+- **The exact `subdir`/`build` shape** is the part most likely to need a round of
+  review feedback; `gradlew` lives at `frontend/android/gradlew` while the module
+  is `frontend/android/app`, which is a slightly unusual layout for fdroiddata.
+- **Tag the release.** `commit:` should point at an annotated tag (`v1.1.0`), not a
+  branch, and `UpdateCheckMode: Tags` then picks up future ones automatically.
 
 ### First run: standalone vs. server
 
@@ -602,7 +729,10 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 |------|-------------|--------|
 | Docker + DB schema + Matrioska Engine | Recursive portion scaling, nested sub-recipes | ✅ Complete |
 | Gallery — search, filters, sort, density | Search across title/description/ingredients, tag + ingredient-category filters, sort (recent/newest/oldest/A-Z), adjustable 2/3/4-column grid | ✅ Complete |
-| Recipe editor | Ingredients (with optional sub-groups), steps (taggable with techniques), tools, storage instructions & tips, inline step↔ingredient references ("Bimby-style", live-scaled quantities), translations, ratings, cook counter, delete | ✅ Complete |
+| Recipe editor | Ingredients (with optional sub-groups), steps (taggable with techniques), tools, storage instructions & tips, inline step↔ingredient references ("Bimby-style", live-scaled quantities), translations, ratings, ingredient substitutes, cook counter, delete. Both long lists fold: each ingredient/step card collapses to a one-line summary, the whole section folds, and "add another" sits at the bottom of the list rather than in the header. Every long-text box grows with its content (`AutoTextarea`) — measured in JS, because the one-line CSS answer (`field-sizing: content`) is inert in the Electron build's Chromium 114 and on older Android WebViews, which is the one place it was needed | ✅ Complete |
+| Dialog focus on old WebViews | Dialogs animate in from `opacity: 0`, and focusing the first field on that frame is accepted by Chromium 114 (what Electron 25 ships) without key events ever reaching it — the dialog looked focused and silently refused to type until something forced a focus re-commit, such as alt-tabbing away or taking a screenshot. `Modal` now waits for the entry animation to finish (`getAnimations()`, with a timeout fallback for `prefers-reduced-motion`) before focusing anything | ✅ Complete |
+| Inline step references | `{{ing:N}}` / `{{tool:id}}` / `{{tech:id}}` tokens expanded in the step text (`frontend/src/lib/stepRefs.ts`). A reference prints the amount **that step** uses — 500 g of the 620 g of flour, not the recipe's total — and `as=` re-labels it with any of the entity's synonyms, so a sentence can read "setaccia la farina" while still pointing at "Farina di grano tipo 00". `q=` with an empty value prints the name alone. The picker offers only what is still unspoken for at that step (with one click to see the rest) and shows what is left rather than the recipe total. The editor keeps the token's amount in step with the step's own ingredient row, and re-numbers every reference when an ingredient is deleted | ✅ Complete |
+| Ingredient substitutes | An ingredient row can be marked as an **alternative to** another one ("or 100 g of margarine") rather than a further thing the recipe needs: shown indented under the ingredient it replaces, and dropped from everything built on the matrioska engine — the shopping list, the nutrition totals and the pantry matcher — so an either/or is never bought, counted or demanded twice | ✅ Complete |
 | Scaling warnings | Flags when a requested portion count scales a recipe more than 3x up or down from its original yield, since ingredient ratios/cook times stop being reliable past that range | ✅ Complete |
 | Library (Ingredients/Tools/Units/Techniques/Tags) | Full CRUD + translation editors; managed tag catalog with ingredient-driven auto-tagging | ✅ Complete |
 | Nutrition | Per-serving calculation from ingredient nutrition data, resolved through nested sub-recipes | ✅ Complete |
@@ -611,7 +741,7 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Structured-data URL import | schema.org JSON-LD and microdata parsed before the LLM is ever called — exact quantities, units, yields and ISO-8601 times instead of a page truncated to fit a context window. Falls back to the LLM only when a page publishes neither | ✅ Complete |
 | Migration importers | Paprika (`.paprikarecipes`), Mealie, Crouton, Mela, Nextcloud Cookbook, CopyMeThat and bare schema.org JSON; zip/gzip unpacked in the browser via `DecompressionStream`. Imports run through the existing fuzzy matcher rather than trusting foreign ids, so they can't mint duplicate ingredients | ✅ Complete |
 | PDF & photo/OCR import | Text extracted directly from a PDF's text layer; photos read on-device with Tesseract (nothing uploaded — the language model downloads once, ~12 MB, then works offline). Extracted text lands in the review box rather than importing straight off | ✅ Complete |
-| Cook mode, timers & wake lock | Full-screen kitchen mode, including a variant that interleaves a sub-recipe's steps with the main recipe's; step timers held in a module-level store so leaving the screen doesn't cancel the roast; screen kept awake, re-acquired after the app is backgrounded | ✅ Complete |
+| Cook mode, timers & wake lock | Full-screen kitchen mode, including a variant that interleaves a sub-recipe's steps with the main recipe's; each step's ingredients as a tickable checklist showing the amount that step takes and how much of it is left afterwards; step timers held in a module-level store so leaving the screen doesn't cancel the roast; screen kept awake, re-acquired after the app is backgrounded | ✅ Complete |
 | Unit / temperature / tin-size converter | Metric ⇄ imperial, affine temperature, area-based tin scaling. Display-only and never written back, so a converted view can't corrupt the recipe | ✅ Complete |
 | Pantry & "what can I cook?" | Per-account pantry; matching resolves through nested sub-recipes, so a dish whose sauce is itself a recipe is judged on the sauce's ingredients too. A quantity-less entry means "I have some", optional ingredients never count against a recipe, and an incomparable amount is assumed fine rather than hiding the recipe | ✅ Complete |
 | Public share links | Server mode only. A revocable, optionally-expiring token (32 random bytes, never derived from the recipe id) exposes one recipe through an allowlisted projection, plus a server-rendered HTML page so a pasted link previews properly in a chat | ✅ Complete |
@@ -620,7 +750,7 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Cloud LLM providers | Optional Anthropic/Gemini/OpenAI for recipe-import parsing and AI translation, per-instance encrypted API keys (Account page); local Ollama stays the default | ✅ Complete |
 | AI recipe translation | One-click translate a recipe's title/description/steps/ingredient notes into another language via whichever LLM provider is configured | ✅ Complete |
 | Cook-history calendar | Month-view log of "I cooked this" events per recipe, linked from the recipe page | ✅ Complete |
-| Recipe geolocation | Chip-based region picker (country list + free-text sub-national, geocoded via a Nominatim proxy), Leaflet map (CARTO tiles, degrades gracefully offline), Gallery region filter | ✅ Complete |
+| Recipe geolocation | Chip-based region picker that searches **real places**, not just the ~195 countries: type three letters and the Nominatim proxy offers matching cities and sub-regions, each with its full address so two places of the same name can be told apart, and picking one stores its coordinates there and then. A hand-typed name still works and is geocoded in the background, as before. Leaflet map (CARTO tiles, degrades gracefully offline), Gallery region filter; the Atlas's "no region" counter opens the recipes behind it, straight into the editor | ✅ Complete |
 | Ingredient seasonality | Per-ingredient in-season months set from the Library, a calendar-style browse page (Library → Seasonality), and a Gallery "in season" filter — an ingredient with no seasonality data never excludes a recipe | ✅ Complete |
 | Sub-recipe-as-ingredient | Pick an existing recipe as an ingredient line from the recipe editor UI; optional recipe "yield" field lets sub-recipe amounts be specified by weight/volume instead of only by servings | ✅ Complete |
 | Avatar presets | Original cartoon-chef SVGs, adaptively discovered from `frontend/src/assets/avatars/` (drop in a new file, no code change) | ✅ Complete |
@@ -638,7 +768,7 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Windows desktop app | Electron wrapper (`frontend/electron/`) around the same React frontend, real native SQLite via `better-sqlite3-multiple-ciphers`, native folder-picker for Folder Sync | ✅ Complete |
 | Folder Sync (standalone git sync) | Real `isomorphic-git` commit history pushed/pulled between a private per-device Hidden Clone and a bare-style Sync Folder (local/network-share/cloud-synced, native picker on Windows, SAF picker on Android); field-level Structured Merge with surfaced Conflicts on genuine double-edits; covers recipes, ingredients, tools, tags, techniques and profiles; object transfers run concurrently (not one-by-one) for real-world speed; live push/pull progress and a per-entity-type summary on the Account page; commit history browsable per device | ✅ Complete |
 | Standalone Backup & Restore | Export and Restore both work fully offline in standalone mode now (export was previously server-only); idempotent by id | ✅ Complete |
-| Ingredient/Tag catalog management | Merge two duplicate ingredients or catalog tags (repoints every recipe/association, tombstones the loser); merge or rename a whole tag group at once; delete a tag (catalog or free-text/"custom") from every recipe carrying it; surfaces free-text recipe tags that were never added to the catalog with one-click "add to catalog" | ✅ Complete |
+| Ingredient/Tag catalog management | Merge two duplicate ingredients or catalog tags (repoints every recipe/association, tombstones the loser); merge, rename or remove a whole tag group at once (removing one leaves its tags in place, ungrouped); delete a tag (catalog or free-text/"custom") from every recipe carrying it; surfaces free-text recipe tags that were never added to the catalog with one-click "add to catalog" | ✅ Complete |
 | Ingredient varieties & synonyms | Optional "variety of" self-reference (e.g. Red Apple → Apple, purely organizational — no inherited fields) shown nested in the Library; optional alternate names (synonyms) on tags/ingredients/tools/techniques, matched by every existing name search | ✅ Complete |
 | Ingredients library UX | Grid/list view toggle (photo-forward cards vs. dense table) and a read-only detail card (photo, nutrition, seasonality, synonyms, translations, tags) separate from the edit form | ✅ Complete |
 | Git Remote sync mode | A second Folder Sync transport, chosen per device (Account → Folder Sync): a real git server (GitHub/GitLab/self-hosted) over git's actual push/fetch protocol instead of a file-sync-tool-mirrored folder — no ref races or listing truncation, since the server owns atomic ref updates natively; configurable auto-sync interval for both modes; see [ADR 0004](./docs/adr/0004-git-remote-sync-mode.md). Device-record tracking ("Known Devices") is Folder-mode-only for now | ✅ Complete |

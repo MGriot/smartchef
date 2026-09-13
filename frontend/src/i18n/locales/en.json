@@ -36,7 +36,9 @@
     "emptyState": "No recipe has a region yet. Open one, go to Regions and add a country or a place.",
     "loading": "Loading…",
     "showOnlyThese": "Show only these",
-    "andMore": "+{{count}} more"
+    "andMore": "+{{count}} more",
+    "showUnmapped": "Show the recipes with no region",
+    "addRegion": "Add a region"
   },
   "common": {
     "cancel": "Cancel",
@@ -151,6 +153,19 @@
       "sectionNamingHint": "Alternate names make it findable; translations give it a name per language.",
       "moveUp": "Move up (earlier aisle)",
       "moveDown": "Move down (later aisle)"
+    },
+    "common": {
+      "gridView": "Grid view",
+      "listView": "List view",
+      "sortBy": "Sort by",
+      "sortNameAsc": "Name (A–Z)",
+      "sortNameDesc": "Name (Z–A)",
+      "sortNewest": "Newest first",
+      "sortOldest": "Oldest first",
+      "sortGroup": "Group",
+      "sortCategory": "Category",
+      "sortType": "Type",
+      "empty": "Nothing here yet"
     }
   },
   "gallery": {
@@ -239,7 +254,7 @@
     "yield": "Yield",
     "yieldHint": "Optional. How much this recipe makes in total (e.g. 500 g of sauce) — lets other recipes use it as a sub-recipe ingredient by weight/volume instead of only by servings.",
     "yieldAmountPlaceholder": "Amount",
-    "regionSearchPlaceholder": "Search a country, or type a region…",
+    "regionSearchPlaceholder": "Search a country, city or region…",
     "addCustomRegion": "Add \"{{text}}\" as a custom region",
     "sourcesReferences": "Sources & References",
     "equipment": "Equipment",
@@ -365,7 +380,24 @@
       "techniquesPrefix": "Techniques"
     },
     "optional": "Optional",
-    "optionalHint": "Mark as optional: it still shows in the recipe, but never counts against it when the pantry works out what you can cook."
+    "optionalHint": "Mark as optional: it still shows in the recipe, but never counts against it when the pantry works out what you can cook.",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all",
+    "expandSection": "Expand this section",
+    "collapseSection": "Collapse this section",
+    "collapseRow": "Collapse",
+    "sectionFolded": "{{count}} ingredients — click to open",
+    "stepsFolded": "{{count}} steps — click to open",
+    "substitute": "Substitute",
+    "substituteForLabel": "Alternative to (optional)",
+    "substituteForNone": "— an ingredient in its own right",
+    "substituteHint": "Listed under that ingredient as an alternative, and left off the shopping list.",
+    "orInstead": "or",
+    "totalLower": "total",
+    "remainingHere": "{{amount}} left by here",
+    "leftAfter": "{{amount}} left",
+    "regionPlaces": "Places",
+    "regionSearching": "Searching the map…"
   },
   "recipeCreate": {
     "newRecipe": "New Recipe",
@@ -525,7 +557,8 @@
     "dieta": "Diet",
     "contiene": "Contains",
     "portata": "Course",
-    "altro": "Other"
+    "altro": "Other",
+    "ungrouped": "Ungrouped"
   },
   "editors": {
     "amount": "Amount",
@@ -556,7 +589,13 @@
     "unitPlaceholder": "Unit…",
     "unnamed": "Unnamed",
     "uploadFailed": "Upload failed",
-    "urlPlaceholder": "https://…"
+    "urlPlaceholder": "https://…",
+    "showAs": "Show as",
+    "showAsPlaceholder": "Its own name",
+    "nameOnly": "Name only",
+    "remainingAtThisStep": "{{amount}} left at this step — use that",
+    "ofTotal": "of {{total}} in the recipe",
+    "showUsedUp": "{{count}} already used up — show them anyway"
   },
   "errors": {
     "couldNotCreateIngredient": "Could not create ingredient",
@@ -658,5 +697,23 @@
   },
   "tagPicker": {
     "emptyCatalog": "No tags in the catalogue yet — manage them under Library > Tags."
+  },
+  "print": {
+    "printRecipe": "Print recipe",
+    "printList": "Print list",
+    "source": "Source",
+    "printedFrom": "Printed from SmartChef",
+    "uncheckedOnly": "Print only unchecked items"
+  },
+  "languages": {
+    "heading": "Languages",
+    "subtitle": "Add a language to write recipes and translations in. The interface stays in one of the four it ships with.",
+    "add": "Add",
+    "addLabel": "Language code",
+    "codePlaceholder": "Language code, e.g. pt or pt-BR",
+    "invalidCode": "Use a code like \"pt\" or \"pt-BR\".",
+    "remove": "Remove this language",
+    "bundledHint": "Ships with the app — cannot be removed",
+    "note": "Languages you add are stored on this device. Recipes written in them sync normally, and their names are recognised on your other devices."
   }
 }

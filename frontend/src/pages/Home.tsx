@@ -51,6 +51,12 @@ interface IngredientCategory {
   icon?: string | null;
 }
 
+/* ── Gallery grid density ──────────────────────────────────────────────
+   Only applies at/above the `sm` breakpoint; below it the grid is always a
+   single column regardless (see isDesktopViewport). */
+export const GRID_COL_CHOICES = [2, 3, 4, 5, 6, 7] as const;
+export type GridCols = typeof GRID_COL_CHOICES[number];
+
 /* ── Gallery card badges: Matrioska + up to 3 catalog tags (localized + colored), "+N" overflow ── */
 type CardBadge = { label: string; bg?: string; text?: string; color?: string | null };
 const MAX_CARD_TAG_BADGES = 3;
@@ -132,10 +138,16 @@ const Home: React.FC = () => {
     setActiveCategoryFilters(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id]);
   };
   const [sortBy, setSortBy] = useState<'recently-edited' | 'newest' | 'oldest' | 'alphabetical'>('recently-edited');
-  const [gridCols, setGridCols] = useState<2 | 3 | 4>(() => {
+  // 2-7. Past four columns the cards get narrow enough that the card's own
+  // padding and type have to come down with them, or the title wraps to four
+  // lines and the meta row overflows — see `dense` below.
+  const [gridCols, setGridCols] = useState<GridCols>(() => {
     const stored = Number(localStorage.getItem('smartchef.galleryGridCols'));
-    return stored === 2 || stored === 3 || stored === 4 ? stored : 3;
+    return (GRID_COL_CHOICES as readonly number[]).includes(stored) ? stored as GridCols : 3;
   });
+  // Cards at 5+ columns are roughly half the width they are at 3, so they
+  // drop to the compact treatment rather than keeping desktop padding.
+  const dense = gridCols >= 5;
   useEffect(() => {
     localStorage.setItem('smartchef.galleryGridCols', String(gridCols));
   }, [gridCols]);
@@ -441,7 +453,7 @@ const Home: React.FC = () => {
 
                     {Object.entries(tagGroups).map(([group, tags]) => (
                       <div key={group}>
-                        <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{group}</p>
+                        <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{group || t('tagGroups.ungrouped')}</p>
                         <div className="flex flex-wrap gap-1.5">
                           {tags.map(t => {
                             const active = activeTagFilters.includes(t.name);
@@ -518,12 +530,12 @@ const Home: React.FC = () => {
 
             {/* Grid density */}
             <div className="flex items-center gap-0.5 bg-zinc-100/80 dark:bg-zinc-800/80 rounded-full p-1 shrink-0">
-              {([2, 3, 4] as const).map((n) => (
+              {GRID_COL_CHOICES.map((n) => (
                 <button
                   key={n}
                   onClick={() => setGridCols(n)}
                   title={`${n} columns`}
-                  className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-xs transition-all duration-200 ${
+                  className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs transition-all duration-200 ${
                     gridCols === n ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
                   }`}
                 >
@@ -583,7 +595,7 @@ const Home: React.FC = () => {
             </div>
           ) : (
             <div
-              className="grid grid-cols-1 gap-7 animate-fade-in-up"
+              className={`grid grid-cols-1 animate-fade-in-up ${dense ? 'gap-4' : 'gap-7'}`}
               style={isDesktopViewport ? { animationDelay: '0.1s', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` } : { animationDelay: '0.1s' }}
             >
               {recipes.map((recipe) => {
@@ -644,36 +656,36 @@ const Home: React.FC = () => {
                     </div>
 
                     {/* Content */}
-                    <div className="p-6">
-                      <h3 className="text-xl font-bold font-headline text-zinc-900 dark:text-zinc-100 mb-1 group-hover:text-primary transition-colors duration-200">
+                    <div className={dense ? 'p-4' : 'p-6'}>
+                      <h3 className={`font-bold font-headline text-zinc-900 dark:text-zinc-100 mb-1 group-hover:text-primary transition-colors duration-200 ${dense ? 'text-sm leading-snug line-clamp-2' : 'text-xl'}`}>
                         {recipe.translated_title || recipe.title}
                       </h3>
-                      {(recipe.translated_description || recipe.description) && (
+                      {!dense && (recipe.translated_description || recipe.description) && (
                         <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-2 line-clamp-2">
                           {recipe.translated_description || recipe.description}
                         </p>
                       )}
                       {recipe.creator_name && (
-                        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mb-3">by {recipe.creator_name}</p>
+                        <p className={`text-zinc-400 dark:text-zinc-500 font-medium ${dense ? 'text-[10px] mb-2 truncate' : 'text-xs mb-3'}`}>by {recipe.creator_name}</p>
                       )}
-                      <div className="flex items-center gap-5 text-zinc-500 dark:text-zinc-400 text-[13px] font-medium">
+                      <div className={`flex items-center text-zinc-500 dark:text-zinc-400 font-medium flex-wrap ${dense ? 'gap-x-2 gap-y-0.5 text-[11px]' : 'gap-x-5 gap-y-1 text-[13px]'}`}>
                         <div className="flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                          <span className={`material-symbols-outlined text-primary ${dense ? 'text-[14px]' : 'text-[18px]'}`} style={{ fontVariationSettings: "'FILL' 1" }}>
                             schedule
                           </span>
                           {totalTime > 0 ? `${totalTime} min` : '—'}
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                          <span className={`material-symbols-outlined text-primary ${dense ? 'text-[14px]' : 'text-[18px]'}`} style={{ fontVariationSettings: "'FILL' 1" }}>
                             restaurant
                           </span>
-                          {difficultyKey[recipe.difficulty] ? t(difficultyKey[recipe.difficulty]) : recipe.difficulty}
+                          <span className={dense ? 'truncate max-w-[3.5rem]' : ''}>{difficultyKey[recipe.difficulty] ? t(difficultyKey[recipe.difficulty]) : recipe.difficulty}</span>
                         </div>
                         {(recipe.times_cooked > 0 || (recipe.rating !== null && recipe.rating !== undefined)) && (
-                          <div className="flex items-center gap-3 ml-auto">
+                          <div className={`flex items-center ${dense ? 'gap-2' : 'gap-3 ml-auto'}`}>
                             {recipe.times_cooked > 0 && (
                               <div className="flex items-center gap-1" title={t('gallery.cookedTimes', { count: recipe.times_cooked })}>
-                                <span className="material-symbols-outlined text-primary/60 text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                                <span className={`material-symbols-outlined text-primary/60 ${dense ? 'text-[14px]' : 'text-[18px]'}`} style={{ fontVariationSettings: "'FILL' 1" }}>
                                   skillet
                                 </span>
                                 {recipe.times_cooked}
@@ -681,7 +693,7 @@ const Home: React.FC = () => {
                             )}
                             {recipe.rating !== null && recipe.rating !== undefined && (
                               <div className="flex items-center gap-1">
-                                <span className="material-symbols-outlined text-amber-400 text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                                <span className={`material-symbols-outlined text-amber-400 ${dense ? 'text-[14px]' : 'text-[18px]'}`} style={{ fontVariationSettings: "'FILL' 1" }}>
                                   star
                                 </span>
                                 {recipe.rating}

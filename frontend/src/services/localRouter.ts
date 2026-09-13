@@ -27,6 +27,10 @@ import { androidGeocode } from '../lib/gitHttpBridge';
 export interface LocalDispatchResult {
   status: number;
   data?: unknown;
+  /** Extra top-level key alongside `data`, for the handful of endpoints
+   *  that answer with both "the one you asked for" and "all the matches" —
+   *  see dispatchGeocode(). */
+  results?: unknown;
   error?: string;
 }
 
@@ -57,7 +61,7 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     const body = parseBody(init) ?? {};
     const items = Array.isArray(body.ingredients) ? body.ingredients : [];
     if (items.length === 0) return { status: 400, error: 'Add something to the pantry first.' };
-    return { status: 200, data: await pantry.filterByPantry(items, body.minMatchRatio ?? 1) };
+    return { status: 200, data: await pantry.filterByPantry(items, body.minMatchRatio ?? 1, sp.get('lang') ?? undefined) };
   }
   if (id === 'parse') {
     if (method !== 'POST') return NOT_HANDLED;
@@ -222,6 +226,12 @@ async function dispatchTags(segments: string[], method: string, sp: URLSearchPar
       const body = parseBody(init);
       return { status: 200, data: await tags.mergeTagGroups(body.sourceGroup, body.targetGroup) };
     }
+    // Dissolves a group, leaving its tags ungrouped — see tags.local.ts.
+    if (sub === 'delete' && method === 'POST') {
+      const body = parseBody(init) ?? {};
+      if (!body.groupName) return { status: 400, error: 'A group name is required.' };
+      return { status: 200, data: await tags.deleteTagGroup(body.groupName) };
+    }
     // Translated labels for the free-text group names — see tags.local.ts.
     if (sub === 'translations') {
       if (method === 'GET') return { status: 200, data: await tags.listTagGroupTranslations() };
@@ -310,11 +320,11 @@ async function dispatchShare(segments: string[], method: string, init?: RequestI
 }
 
 /** The pantry — see pantry.local.ts. */
-async function dispatchPantry(segments: string[], method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+async function dispatchPantry(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const [, id] = segments; // segments[0] === 'pantry'
 
   if (!id) {
-    if (method === 'GET') return { status: 200, data: await pantry.listPantry() };
+    if (method === 'GET') return { status: 200, data: await pantry.listPantry(sp.get('lang') ?? undefined) };
     if (method === 'PUT') {
       const body = parseBody(init) ?? {};
       if (!body.ingredientId) return { status: 400, error: 'An ingredient is required.' };
@@ -491,9 +501,13 @@ async function dispatchShopping(segments: string[], method: string, init?: Reque
 async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
   const q = sp.get('q');
   if (!q) return { status: 400, error: 'Missing q' };
-  const result = isElectron() ? await electronGeocode(q) : await androidGeocode(q);
-  if (!result) return { status: 404, error: 'No match found' };
-  return { status: 200, data: result };
+  // `limit` > 1 turns this from "resolve this place" into the search the
+  // region picker offers city/sub-region suggestions from. `data` stays the
+  // first match so callers that predate the search box are unaffected.
+  const limit = Math.min(8, Math.max(1, Math.trunc(Number(sp.get('limit')) || 1)));
+  const results = isElectron() ? await electronGeocode(q, limit) : await androidGeocode(q, limit);
+  if (!results.length) return { status: 404, error: 'No match found' };
+  return { status: 200, data: results[0], results };
 }
 
 // ── /api/auth ────────────────────────────────────────────────────────────
@@ -573,7 +587,7 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
     else if (segments[0] === 'menus') result = await dispatchMenus(segments, method, init);
     else if (segments[0] === 'collections') result = await dispatchCollections(segments, method, init);
     else if (segments[0] === 'cook-log') result = await dispatchCookLog(method, searchParams);
-    else if (segments[0] === 'pantry') result = await dispatchPantry(segments, method, init);
+    else if (segments[0] === 'pantry') result = await dispatchPantry(segments, method, searchParams, init);
     else if (segments[0] === 'techniques') result = await dispatchTechniques(segments, method, searchParams, init);
     else if (segments[0] === 'geocode') result = await dispatchGeocode(searchParams);
     else if (segments[0] === 'share') result = await dispatchShare(segments, method, init);

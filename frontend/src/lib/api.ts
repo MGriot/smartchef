@@ -197,7 +197,18 @@ export async function apiFetch(path: string, init?: RequestInit & { timeoutMs?: 
       const { dispatchLocal } = await import('../services/localRouter');
       const result = await dispatchLocal(path, init);
       if (result) {
-        return jsonResponse(result.error ? { error: result.error } : { data: result.data }, result.status);
+        // `results` rides alongside `data` for the endpoints that answer
+        // with both the one you asked for and the whole list (geocode's
+        // place search) — dropped here for years' worth of endpoints that
+        // never set it, so it is spread in only when present.
+        return jsonResponse(
+          result.error
+            ? { error: result.error }
+            : result.results !== undefined
+              ? { data: result.data, results: result.results }
+              : { data: result.data },
+          result.status,
+        );
       }
       // Not a path this stage's local router owns (e.g. /api/tags) — falls
       // through to the pre-existing native/offline logic below, unaffected.

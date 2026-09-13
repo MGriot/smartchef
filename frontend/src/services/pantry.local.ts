@@ -14,7 +14,7 @@
 // don't check amounts".
 // ════════════════════════════════════════════════════════════════════════
 
-import { query, queryOne } from '../db/local';
+import { query, queryOne, chunk, inPlaceholders } from '../db/local';
 import { calculatePortions, preloadMatrioska } from './matrioska.local';
 
 export interface PantryItemRow {
@@ -34,9 +34,42 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
-export async function listPantry(): Promise<PantryItemRow[]> {
-  return query<PantryItemRow>(
+/** Names in the reader's language, for as many ids as are asked about.
+ *
+ *  Every other list in this app takes a `lang` and resolves its names out
+ *  of the side translation tables; the pantry never did, so a library
+ *  browsed in Italian still listed "Butter" and "Dairy & Eggs" — and the
+ *  "what can I cook" answers below named the missing ingredients in
+ *  English too, next to recipe titles that were in Italian. */
+async function translationsFor(
+  table: 'ingredient_translations' | 'ingredient_category_translations' | 'recipe_translations',
+  column: string,
+  foreignKey: string,
+  ids: string[],
+  lang: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const batch of chunk(ids)) {
+    const p: unknown[] = [];
+    const placeholders = inPlaceholders(p, batch);
+    p.push(lang);
+    const rows = await query<Record<string, string>>(
+      `SELECT ${foreignKey}, ${column} FROM ${table}
+        WHERE ${foreignKey} IN (${placeholders}) AND LOWER(language_code) = LOWER($${p.length})`,
+      p,
+    );
+    for (const row of rows) {
+      const name = row[column];
+      if (name) out.set(row[foreignKey], name);
+    }
+  }
+  return out;
+}
+
+export async function listPantry(lang?: string): Promise<PantryItemRow[]> {
+  const rows = await query<PantryItemRow & { category_id: string | null }>(
     `SELECT p.id, p.ingredient_id, i.name AS ingredient_name,
+            i.category_id AS category_id,
             ic.name AS category_name, ic.color AS category_color,
             p.quantity, p.unit_id, u.symbol AS unit_symbol,
             p.expires_at, p.note
@@ -46,6 +79,19 @@ export async function listPantry(): Promise<PantryItemRow[]> {
        LEFT JOIN units u ON u.id = p.unit_id
       ORDER BY ic.sort_order, i.name`,
   );
+  if (!lang || rows.length === 0) return rows;
+
+  const [names, categories] = await Promise.all([
+    translationsFor('ingredient_translations', 'translated_name', 'ingredient_id',
+      [...new Set(rows.map(r => r.ingredient_id).filter(Boolean))] as string[], lang),
+    translationsFor('ingredient_category_translations', 'name', 'category_id',
+      [...new Set(rows.map(r => r.category_id).filter(Boolean))] as string[], lang),
+  ]);
+  return rows.map(row => ({
+    ...row,
+    ingredient_name: names.get(row.ingredient_id) ?? row.ingredient_name,
+    category_name: (row.category_id ? categories.get(row.category_id) : null) ?? row.category_name,
+  }));
 }
 
 /** Upsert by ingredient: topping up the flour edits the existing row rather
@@ -137,6 +183,7 @@ function toBase(quantity: number, unit: UnitRow | undefined): number | null {
 export async function filterByPantry(
   items: PantryRequestItem[],
   minMatchRatio = 1,
+  lang?: string,
 ): Promise<CookableRecipe[]> {
   const units = await query<UnitRow>('SELECT id, symbol, name, unit_type, to_base_factor FROM units');
   const unitById = new Map(units.map((u) => [u.id, u]));
@@ -220,5 +267,21 @@ export async function filterByPantry(
   }
 
   // Best matches first; among equals, the one needing fewest things.
-  return out.sort((a, b) => b.matchRatio - a.matchRatio || a.missing.length - b.missing.length);
+  out.sort((a, b) => b.matchRatio - a.matchRatio || a.missing.length - b.missing.length);
+  if (!lang || out.length === 0) return out;
+
+  // Translated last, over the answer rather than inside the resolver: the
+  // matrioska engine works in ids and base names (and is shared with the
+  // shopping list and the nutrition figures, neither of which wants a
+  // language), so the reader's language is applied to what comes out.
+  const missingIds = [...new Set(out.flatMap(r => r.missing.map(m => m.ingredientId)).filter(Boolean))];
+  const [titles, names] = await Promise.all([
+    translationsFor('recipe_translations', 'title', 'recipe_id', out.map(r => r.recipeId), lang),
+    translationsFor('ingredient_translations', 'translated_name', 'ingredient_id', missingIds, lang),
+  ]);
+  return out.map(r => ({
+    ...r,
+    title: titles.get(r.recipeId) ?? r.title,
+    missing: r.missing.map(m => ({ ...m, name: names.get(m.ingredientId) ?? m.name })),
+  }));
 }

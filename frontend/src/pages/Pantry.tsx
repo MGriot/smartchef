@@ -68,9 +68,13 @@ export default function Pantry() {
   const load = async () => {
     try {
       const [pantryRes, ingRes, unitRes] = await Promise.all([
-        apiFetch('/api/pantry'),
+        // The pantry list carries ingredient and category NAMES, so it
+        // needs the content language like every other catalog read here —
+        // without it a library browsed in Italian listed "Butter" under
+        // "Dairy & Eggs".
+        apiFetch(`/api/pantry${langQuery}`),
         apiFetch(`/api/ingredients${langQuery}`),
-        apiFetch('/api/units'),
+        apiFetch(`/api/units${langQuery}`),
       ]);
       setItems((await pantryRes.json()).data ?? []);
       setAllIngredients((await ingRes.json()).data ?? []);
@@ -124,7 +128,7 @@ export default function Pantry() {
   };
 
   const runMatch = async (ratio: number): Promise<Cookable[]> => {
-    const res = await apiFetch('/api/recipes/filter-by-pantry', {
+    const res = await apiFetch(`/api/recipes/filter-by-pantry${langQuery}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

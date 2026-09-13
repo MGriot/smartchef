@@ -42,6 +42,8 @@ cases
 category
 chat
 check
+check_box
+check_box_outline_blank
 check_circle
 checklist
 chevron_left
@@ -106,6 +108,7 @@ error
 event
 event_available
 exercise
+expand
 expand_less
 expand_more
 explicit
@@ -142,6 +145,7 @@ hardware
 heat
 height
 help
+hide
 highlight
 history
 home
@@ -176,6 +180,7 @@ list
 lists
 local_fire_department
 location_off
+location_on
 lock
 login
 logout
@@ -318,6 +323,7 @@ subject
 summarize
 support
 swap_horiz
+swap_vert
 sweep
 switch
 switches
@@ -342,6 +348,8 @@ trip
 try
 tune
 undo
+unfold_less
+unfold_more
 unsubscribe
 update
 upgrade

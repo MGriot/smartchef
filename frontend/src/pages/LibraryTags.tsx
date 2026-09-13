@@ -10,6 +10,9 @@ import { useTagGroupLabels } from '../hooks/useTagGroupLabels';
 import { TAG_ICONS } from '../lib/icons';
 import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
+import { LibraryToolbar } from '../components/LibraryViewControls';
+import { useLibraryView } from '../hooks/useLibraryView';
+import { sortLibraryItems } from '../lib/librarySort';
 
 
 const DEFAULT_COLOR = '#3f3f46';
@@ -23,6 +26,7 @@ export default function LibraryTags() {
   const [form, setForm] = useState({ name: '', groupName: 'Altro', color: DEFAULT_COLOR, icon: 'TbTag', excludeTagIds: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
+  const { view, setView, sort, setSort } = useLibraryView('tags', 'grid');
   // Group headings: the user's own translation for the group first, then
   // the static lookup for the seeded groups — see hooks/useTagGroupLabels.
   const { label: groupLabel, translations: groupTranslations, reload: reloadGroupTranslations } = useTagGroupLabels();
@@ -169,12 +173,43 @@ export default function LibraryTags() {
     }
   };
 
+  /** Dissolves a group: its tags become ungrouped and stay exactly where
+   *  they were otherwise. Nothing is deleted, which is why this asks with
+   *  the tag count in the question rather than the usual "are you sure". */
+  const handleDeleteGroup = async () => {
+    if (!mergingGroup) return;
+    const count = (groups[mergingGroup] || []).length;
+    if (!window.confirm(`Remove the group "${groupLabel(mergingGroup)}"? Its ${count} tag${count === 1 ? '' : 's'} stay, but become ungrouped.`)) return;
+    setMergingGroupBusy(true);
+    try {
+      const res = await apiFetch('/api/tags/groups/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupName: mergingGroup }),
+      });
+      if (!res.ok) {
+        const result = await res.json();
+        alert(`Failed: ${JSON.stringify(result.error || result)}`);
+        return;
+      }
+      setMergingGroup(null);
+      fetchTags();
+      reloadGroupTranslations();
+    } catch {
+      alert('Network error while removing the group.');
+    } finally {
+      setMergingGroupBusy(false);
+    }
+  };
+
   const handleOpenModal = (tag: any = null) => {
     if (tag) {
       setEditingTag(tag);
       setForm({
         name: tag.name,
-        groupName: tag.group_name || 'Altro',
+        // ?? not || — '' is the ungrouped bucket and must round-trip, or
+        // editing an ungrouped tag would silently re-file it under 'Altro'.
+        groupName: tag.group_name ?? 'Altro',
         color: tag.color || DEFAULT_COLOR,
         icon: tag.icon || 'TbTag',
         excludeTagIds: tag.exclude_tag_ids || [],
@@ -183,9 +218,11 @@ export default function LibraryTags() {
       setTranslations(tag.translations || []);
     } else {
       setEditingTag(null);
-      // Left blank (not pre-filled with 'Altro') so the "e.g. Dieta" placeholder
-      // and the existing-groups datalist are actually visible — the backend
-      // still falls back to 'Altro' if this is saved empty.
+      // Left blank (not pre-filled with 'Altro') so the "e.g. Dieta"
+      // placeholder and the existing-groups datalist are actually visible.
+      // Saving it blank now files the tag under Ungrouped rather than under
+      // the 'Altro' catch-all — '' became a real group_name value when
+      // groups got a Remove action to put their tags somewhere.
       setForm({ name: '', groupName: '', color: DEFAULT_COLOR, icon: 'TbTag', excludeTagIds: [], synonyms: [] });
       setTranslations([]);
     }
@@ -260,10 +297,27 @@ export default function LibraryTags() {
     }
   };
 
-  const groups = tags.reduce<Record<string, any[]>>((acc, t) => {
-    (acc[t.group_name] ||= []).push(t);
-    return acc;
-  }, {});
+  // Sorted once, then grouped from the sorted array — so the chosen order
+  // holds *within* each group heading in grid view, and the flat list view
+  // gets the same ordering with the grouping dropped. Building groups from
+  // the sorted list also means group headings themselves appear in the order
+  // their first tag does, which is what makes "Group" sort read correctly.
+  const sortedTags = useMemo(
+    () => sortLibraryItems(tags, sort, {
+      label: (item: any) => item.translated_name || item.name || '',
+      group: (item: any) => item.group_name,
+      createdAt: (item: any) => item.created_at,
+    }, contentLang),
+    [tags, sort, contentLang],
+  );
+
+  const groups = useMemo(
+    () => sortedTags.reduce<Record<string, any[]>>((acc, tag: any) => {
+      (acc[tag.group_name] ||= []).push(tag);
+      return acc;
+    }, {}),
+    [sortedTags],
+  );
 
   return (
     <>
@@ -282,19 +336,65 @@ export default function LibraryTags() {
           </button>
         </div>
 
+        <LibraryToolbar
+          value={view}
+          onChange={setView}
+          sortValue={sort}
+          sortOptions={['name-asc', 'name-desc', 'group-asc', 'newest', 'oldest']}
+          onSortChange={setSort}
+        />
+
         <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-8">
           {loading ? (
             <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading tags...</p>
           ) : Object.keys(groups).length === 0 ? (
             <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">No tags yet — create your first one.</p>
+          ) : view === 'list' ? (
+            /* Flat, one tag per row, grouping dropped — the chip cloud is
+               lovely for browsing a handful of groups and hopeless for
+               finding one tag among fifty. The group is shown as a column
+               instead of a heading so the chosen sort stays visible. */
+            <div className="divide-y divide-zinc-50 dark:divide-zinc-800">
+              {sortedTags.map((tag: any) => (
+                <div key={tag.id} className="group flex items-center gap-4 py-3">
+                  <span
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[14px] shrink-0"
+                    style={{ backgroundColor: tag.color || DEFAULT_COLOR }}
+                  >
+                    <RenderFaIcon name={tag.icon || 'TbTag'} />
+                  </span>
+                  <button type="button" onClick={() => handleOpenModal(tag)} className="flex-1 min-w-0 text-left">
+                    <span className="block font-extrabold text-zinc-900 dark:text-zinc-100 text-sm leading-tight truncate">
+                      {tag.translated_name || tag.name}
+                    </span>
+                    {tag.exclude_tag_ids?.length > 0 && (
+                      <span className="block text-[10px] font-medium text-zinc-400 dark:text-zinc-500">Auto (diet)</span>
+                    )}
+                  </button>
+                  <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase rounded-md shrink-0">
+                    {groupLabel(tag.group_name)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setMergeSource({ id: tag.id, name: tag.translated_name || tag.name }); setMergeTargetId(''); }}
+                    title="Merge into another tag"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-300 dark:text-zinc-600 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all shrink-0"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">call_merge</span>
+                  </button>
+                </div>
+              ))}
+            </div>
           ) : Object.entries(groups).map(([group, groupTags]) => (
             <div key={group}>
               <div className="flex items-center gap-1.5 mb-3">
-                <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{groupLabel(group)}</p>
+                <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
+                  {groupLabel(group)}
+                </p>
                 <button
                   type="button"
                   onClick={() => setMergingGroup(group)}
-                  title="Rename or merge this group"
+                  title={group ? 'Rename, merge or remove this group' : 'File these tags under a group'}
                   className="w-5 h-5 rounded-full flex items-center justify-center text-zinc-300 dark:text-zinc-600 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
                 >
                   <span className="material-symbols-outlined text-[13px]">edit</span>
@@ -422,7 +522,8 @@ export default function LibraryTags() {
       {mergingGroup && (
         <RenameGroupModal
           currentGroup={mergingGroup}
-          existingGroups={Object.keys(groups).filter(g => g !== mergingGroup)}
+          existingGroups={Object.keys(groups).filter(g => g !== mergingGroup && g !== '')}
+          onDelete={mergingGroup ? handleDeleteGroup : undefined}
           initialTranslations={groupTranslations[mergingGroup] ?? []}
           busy={mergingGroupBusy}
           onCancel={() => setMergingGroup(null)}
@@ -552,13 +653,16 @@ export default function LibraryTags() {
  *  lib/tagGroups.ts and every group anyone typed themselves showed the
  *  same text in every language. */
 function RenameGroupModal({
-  currentGroup, existingGroups, initialTranslations, busy, onCancel, onConfirm,
+  currentGroup, existingGroups, initialTranslations, busy, onCancel, onConfirm, onDelete,
 }: {
   currentGroup: string; existingGroups: string[];
   initialTranslations: Array<{ lang: string; name: string }>;
   busy: boolean;
   onCancel: () => void;
   onConfirm: (newName: string, translations: Array<{ lang: string; name: string }>) => void;
+  /** Dissolves the group, leaving its tags ungrouped. Absent for the
+   *  ungrouped bucket itself, which has no group to remove. */
+  onDelete?: () => void;
 }) {
   const [name, setName] = useState(currentGroup);
   const [translations, setTranslations] = useState(initialTranslations);
@@ -571,9 +675,21 @@ function RenameGroupModal({
       size="sm"
       zIndex={120}
       title="Group"
-      subtitle={`Rename "${currentGroup}", fold it into another group, or give it a name per language.`}
+      subtitle={currentGroup
+        ? `Rename "${currentGroup}", fold it into another group, remove it, or give it a name per language.`
+        : 'File these ungrouped tags under a group by typing its name.'}
       footer={
         <>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              className="mr-auto px-4 py-2 rounded-full text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50"
+            >
+              Remove group
+            </button>
+          )}
           <ModalCancelButton onClick={onCancel}>Cancel</ModalCancelButton>
           <ModalSubmitButton type="button" onClick={() => onConfirm(name, translations)} disabled={!name.trim() || busy}>
             {busy ? 'Saving…' : merging ? 'Merge' : renaming ? 'Rename' : 'Save'}
@@ -584,7 +700,7 @@ function RenameGroupModal({
       <div className="space-y-8">
         <FormSection
           title="Name"
-          description="Every tag currently under this group moves to whatever you type here. A brand-new name renames the group; an existing one folds the two together."
+          description="Every tag currently under this group moves to whatever you type here. A brand-new name renames the group; an existing one folds the two together. Removing the group instead leaves its tags in place, ungrouped."
         >
           <Field label="Group name">
             <input

@@ -516,6 +516,14 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
   -- behavior). Also backfilled onto pre-existing local DBs via
   -- addColumnIfMissing() below, since this table already shipped without it.
   group_name    TEXT,
+  -- This row is an ALTERNATIVE to the row at this sort_order, not another
+  -- thing to buy: "or 100 g of margarine" under the butter. NULL for every
+  -- ordinary ingredient. Referenced by sort_order (not by id) for the same
+  -- reason recipe_steps.step_ingredients references ingredients that way —
+  -- it survives a round-trip through the editor's draft, where rows have
+  -- no id until they are saved. Also backfilled onto pre-existing local
+  -- DBs via addColumnIfMissing() below.
+  substitute_for INTEGER,
   created_at    TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
@@ -882,6 +890,7 @@ export async function initLocalSchema(): Promise<void> {
     const db = await getDb();
     await db.execute(SCHEMA_SQL);
     await addColumnIfMissing(db, 'recipe_ingredients', 'group_name', 'TEXT');
+    await addColumnIfMissing(db, 'recipe_ingredients', 'substitute_for', 'INTEGER');
     await addColumnIfMissing(db, 'recipe_steps', 'technique_ids', "TEXT DEFAULT '[]'");
     await addColumnIfMissing(db, 'recipes', 'storage_instructions', 'TEXT');
     await addColumnIfMissing(db, 'recipes', 'tips', 'TEXT');

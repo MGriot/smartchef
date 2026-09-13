@@ -150,30 +150,31 @@ ipcMain.handle('smartchef-get-hidden-clone-dir', async () => {
 // Chromium's fetch (unlike Node's) refuse to let script code set that
 // header at all — it's on the forbidden-headers list — regardless of CSP.
 interface GeocodeResult { lat: number; lng: number; displayName: string }
-const geocodeCache = new Map<string, GeocodeResult | null>();
-ipcMain.handle('smartchef-geocode', async (_e, q: string) => {
+// Keyed by "<limit>:<query>" — a 1-result answer is not the answer to an
+// 8-result question, and the region picker asks both (one to place a pin,
+// many to offer city/sub-region suggestions as you type).
+const geocodeCache = new Map<string, GeocodeResult[]>();
+ipcMain.handle('smartchef-geocode', async (_e, q: string, limit?: number) => {
   const query = String(q ?? '').trim();
-  if (!query) return null;
-  const key = query.toLowerCase();
-  if (geocodeCache.has(key)) return geocodeCache.get(key) ?? null;
+  if (!query) return [];
+  const max = Math.min(8, Math.max(1, Math.trunc(Number(limit) || 1)));
+  const key = `${max}:${query.toLowerCase()}`;
+  if (geocodeCache.has(key)) return geocodeCache.get(key)!;
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=${max}&q=${encodeURIComponent(query)}`;
     const response = await fetch(url, {
       headers: { 'User-Agent': 'SmartChef/1.0 (self-hosted recipe app)' },
       signal: AbortSignal.timeout(8000),
     });
     if (!response.ok) throw new Error(`Nominatim error ${response.status}`);
-    const results = (await response.json()) as Array<{ lat: string; lon: string; display_name: string }>;
-    if (!results.length) {
-      geocodeCache.set(key, null);
-      return null;
-    }
-    const result: GeocodeResult = { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon), displayName: results[0].display_name };
-    geocodeCache.set(key, result);
-    return result;
+    const raw = (await response.json()) as Array<{ lat: string; lon: string; display_name: string }>;
+    const results: GeocodeResult[] = raw.map((r) => ({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), displayName: r.display_name }));
+    geocodeCache.set(key, results);
+    return results;
   } catch {
-    return null;
+    // Not cached: a transient failure should not permanently block a retry.
+    return [];
   }
 });
 

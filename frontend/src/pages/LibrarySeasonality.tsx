@@ -4,6 +4,9 @@ import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import { LibraryToolbar } from '../components/LibraryViewControls';
+import { useLibraryView } from '../hooks/useLibraryView';
+import { sortLibraryItems } from '../lib/librarySort';
 
 interface SeasonalIngredient {
   id: string;
@@ -32,6 +35,7 @@ export default function LibrarySeasonality() {
   const [ingredients, setIngredients] = useState<SeasonalIngredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const { view, setView, sort, setSort } = useLibraryView('seasonality', 'grid');
 
   useEffect(() => {
     setLoading(true);
@@ -49,7 +53,22 @@ export default function LibrarySeasonality() {
     return Array.from({ length: 12 }, (_, i) => fmt.format(new Date(2026, i, 1)));
   }, [i18n.language]);
 
-  const withSeasonData = ingredients.filter(i => (i.seasonal_months || []).length > 0);
+  // Sorted before the in/out split so both lists follow the same chosen
+  // order. This screen is read-only, so there is no ordering to preserve
+  // beyond what the reader picks. "Category" is offered here because,
+  // unlike LibraryIngredients, this view does not already group by it.
+  const withSeasonData = useMemo(
+    () => sortLibraryItems(
+      ingredients.filter(i => (i.seasonal_months || []).length > 0),
+      sort,
+      {
+        label: (item) => item.translated_name || item.name || '',
+        group: (item) => item.category_name,
+      },
+      contentLang,
+    ),
+    [ingredients, sort, contentLang],
+  );
   const inSeasonNow = withSeasonData.filter(i => (i.seasonal_months || []).includes(selectedMonth));
   const outOfSeason = withSeasonData.filter(i => !(i.seasonal_months || []).includes(selectedMonth));
 
@@ -86,18 +105,42 @@ export default function LibrarySeasonality() {
           <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('seasonality.noData')}</p>
         ) : (
           <>
+            <LibraryToolbar
+              value={view}
+              onChange={setView}
+              sortValue={sort}
+              sortOptions={['name-asc', 'name-desc', 'group-asc']}
+              onSortChange={setSort}
+              groupLabelKey="library.common.sortCategory"
+            />
+
             <div className="mb-10">
               <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">
                 {t('seasonality.inSeason', { month: monthLabels[selectedMonth - 1] })} — {inSeasonNow.length}
               </p>
               {inSeasonNow.length === 0 ? (
                 <p className="text-sm text-zinc-300 dark:text-zinc-600 font-medium">{t('seasonality.noneInSeason')}</p>
-              ) : (
+              ) : view === 'grid' ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                   {inSeasonNow.map(ing => (
                     <div key={ing.id} className="flex items-center gap-3 px-4 py-3 bg-primary/5 border border-primary/15 rounded-2xl">
                       <RenderFaIcon name={ing.icon || 'TbCarrot'} className="text-primary text-lg shrink-0" />
                       <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 truncate">{ing.translated_name || ing.name}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                /* One per row, with the category spelled out — the grid hides
+                   it for space, and it is the thing you want visible when
+                   reading the list sorted by category. */
+                <div className="divide-y divide-zinc-100 dark:divide-zinc-800 border border-primary/15 rounded-2xl overflow-hidden">
+                  {inSeasonNow.map(ing => (
+                    <div key={ing.id} className="flex items-center gap-3 px-4 py-3 bg-primary/5">
+                      <RenderFaIcon name={ing.icon || 'TbCarrot'} className="text-primary text-lg shrink-0" />
+                      <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 flex-1 min-w-0 truncate">{ing.translated_name || ing.name}</span>
+                      {ing.category_name && (
+                        <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500 shrink-0">{ing.category_name}</span>
+                      )}
                     </div>
                   ))}
                 </div>

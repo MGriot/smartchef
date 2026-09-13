@@ -36,7 +36,9 @@
     "emptyState": "Ninguna receta tiene región todavía. Abre una, ve a Regiones y añade un país o un lugar.",
     "loading": "Cargando…",
     "showOnlyThese": "Mostrar solo estas",
-    "andMore": "+{{count}} más"
+    "andMore": "+{{count}} más",
+    "showUnmapped": "Mostrar las recetas sin región",
+    "addRegion": "Añadir una región"
   },
   "common": {
     "cancel": "Cancelar",
@@ -151,6 +153,19 @@
       "sectionNamingHint": "Los sinónimos lo hacen localizable; las traducciones le dan un nombre por idioma.",
       "moveUp": "Subir (pasillo anterior)",
       "moveDown": "Bajar (pasillo siguiente)"
+    },
+    "common": {
+      "gridView": "Vista de cuadrícula",
+      "listView": "Vista de lista",
+      "sortBy": "Ordenar por",
+      "sortNameAsc": "Nombre (A–Z)",
+      "sortNameDesc": "Nombre (Z–A)",
+      "sortNewest": "Más recientes",
+      "sortOldest": "Más antiguos",
+      "sortGroup": "Grupo",
+      "sortCategory": "Categoría",
+      "sortType": "Tipo",
+      "empty": "Aquí todavía no hay nada"
     }
   },
   "gallery": {
@@ -239,7 +254,7 @@
     "yield": "Rendimiento",
     "yieldHint": "Opcional. Cuánto produce esta receta en total (p. ej. 500 g de salsa) — permite que otras recetas la usen como subreceta por peso/volumen en lugar de solo por porciones.",
     "yieldAmountPlaceholder": "Cantidad",
-    "regionSearchPlaceholder": "Busca un país, o escribe una región…",
+    "regionSearchPlaceholder": "Busca un país, una ciudad o una región…",
     "addCustomRegion": "Añadir \"{{text}}\" como región personalizada",
     "sourcesReferences": "Fuentes y Referencias",
     "equipment": "Equipamiento",
@@ -365,7 +380,24 @@
       "techniquesPrefix": "Técnicas"
     },
     "optional": "Opcional",
-    "optionalHint": "Marcar como opcional: sigue en la receta, pero nunca cuenta en su contra cuando la despensa calcula qué puedes cocinar."
+    "optionalHint": "Marcar como opcional: sigue en la receta, pero nunca cuenta en su contra cuando la despensa calcula qué puedes cocinar.",
+    "expandAll": "Expandir todo",
+    "collapseAll": "Contraer todo",
+    "expandSection": "Expandir esta sección",
+    "collapseSection": "Contraer esta sección",
+    "collapseRow": "Contraer",
+    "sectionFolded": "{{count}} ingredientes — haz clic para abrir",
+    "stepsFolded": "{{count}} pasos — haz clic para abrir",
+    "substitute": "Sustituto",
+    "substituteForLabel": "Alternativa a (opcional)",
+    "substituteForNone": "— un ingrediente por derecho propio",
+    "substituteHint": "Aparece bajo ese ingrediente como alternativa y queda fuera de la lista de la compra.",
+    "orInstead": "o",
+    "totalLower": "en total",
+    "remainingHere": "aquí quedan {{amount}}",
+    "leftAfter": "quedan {{amount}}",
+    "regionPlaces": "Lugares",
+    "regionSearching": "Buscando en el mapa…"
   },
   "recipeCreate": {
     "newRecipe": "Nueva receta",
@@ -525,7 +557,8 @@
     "dieta": "Dieta",
     "contiene": "Contiene",
     "portata": "Plato",
-    "altro": "Otro"
+    "altro": "Otro",
+    "ungrouped": "Sin grupo"
   },
   "editors": {
     "amount": "Cantidad",
@@ -556,7 +589,13 @@
     "unitPlaceholder": "Unidad…",
     "unnamed": "Sin nombre",
     "uploadFailed": "Error al subir",
-    "urlPlaceholder": "https://…"
+    "urlPlaceholder": "https://…",
+    "showAs": "Mostrar como",
+    "showAsPlaceholder": "Su propio nombre",
+    "nameOnly": "Solo nombre",
+    "remainingAtThisStep": "En este paso quedan {{amount}} — usar eso",
+    "ofTotal": "de {{total}} en la receta",
+    "showUsedUp": "{{count}} ya agotados — mostrarlos igualmente"
   },
   "errors": {
     "couldNotCreateIngredient": "No se pudo crear el ingrediente",
@@ -658,5 +697,23 @@
   },
   "tagPicker": {
     "emptyCatalog": "Todavía no hay etiquetas en el catálogo — gestiónalas en Biblioteca > Etiquetas."
+  },
+  "print": {
+    "printRecipe": "Imprimir receta",
+    "printList": "Imprimir lista",
+    "source": "Fuente",
+    "printedFrom": "Impreso desde SmartChef",
+    "uncheckedOnly": "Imprimir solo los artículos sin marcar"
+  },
+  "languages": {
+    "heading": "Idiomas",
+    "subtitle": "Añade un idioma para escribir recetas y traducciones. La interfaz permanece en uno de los cuatro incluidos.",
+    "add": "Añadir",
+    "addLabel": "Código de idioma",
+    "codePlaceholder": "Código de idioma, p. ej. pt o pt-BR",
+    "invalidCode": "Usa un código como «pt» o «pt-BR».",
+    "remove": "Quitar este idioma",
+    "bundledHint": "Incluido en la app — no se puede quitar",
+    "note": "Los idiomas que añadas se guardan en este dispositivo. Las recetas escritas en ellos se sincronizan con normalidad y sus nombres se reconocen en tus otros dispositivos."
   }
 }

@@ -20,7 +20,7 @@ declare global {
       pickSyncFolder: () => Promise<string | null>;
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
-      geocode: (q: string) => Promise<{ lat: number; lng: number; displayName: string } | null>;
+      geocode: (q: string, limit?: number) => Promise<Array<{ lat: number; lng: number; displayName: string }>>;
       httpRequest: (req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array; timeoutMs?: number }) => Promise<{
         url: string;
         statusCode: number;
@@ -86,9 +86,9 @@ export async function getHiddenCloneDir(): Promise<string> {
  *  handler for why — Chromium's fetch can't set the User-Agent header
  *  Nominatim's usage policy requires). Electron-only; null on no match or
  *  any failure — callers already treat a missing pin as a non-error. */
-export async function electronGeocode(q: string): Promise<{ lat: number; lng: number; displayName: string } | null> {
-  if (!window.smartchefElectron) return null;
-  return window.smartchefElectron.geocode(q);
+export async function electronGeocode(q: string, limit = 1): Promise<Array<{ lat: number; lng: number; displayName: string }>> {
+  if (!window.smartchefElectron) return [];
+  return window.smartchefElectron.geocode(q, limit);
 }
 
 /** Makes a single HTTP request from the main process (Node's fetch, not

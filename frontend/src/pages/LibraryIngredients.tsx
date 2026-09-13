@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
+import { SortSelect, ViewToggle } from '../components/LibraryViewControls';
+import { useLibraryView } from '../hooks/useLibraryView';
+import { sortLibraryItems } from '../lib/librarySort';
 import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
 import { ResolvedImage } from '../components/CoverImage';
@@ -36,7 +39,9 @@ export default function LibraryIngredients() {
   const [search, setSearch] = useState('');
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  // Was component-local state that reset on every visit; now persisted per
+  // section alongside the sort order, like the other Library screens.
+  const { view: viewMode, setView: setViewMode, sort, setSort } = useLibraryView('ingredients', 'grid');
   const [viewingIng, setViewingIng] = useState<any>(null);
   const [mergingIng, setMergingIng] = useState<any>(null);
   const [mergeTargetId, setMergeTargetId] = useState('');
@@ -535,7 +540,16 @@ export default function LibraryIngredients() {
   };
 
   const categorySection = (categoryId: string | null, catName: string, catIcon: string | undefined, catColor: string | undefined, items: any[]) => {
-    const matched = sortWithVariants(items.filter(matchesFilters));
+    // Order applied BEFORE sortWithVariants(), never after: that function
+    // files each variety immediately behind its base ingredient, and
+    // re-sorting its output would scatter the varieties away from the
+    // parents it just gathered them under.
+    const matched = sortWithVariants(
+      sortLibraryItems(items.filter(matchesFilters), sort, {
+        label: (item: any) => item.translated_name || item.name || '',
+        createdAt: (item: any) => item.created_at,
+      }, contentLang),
+    );
     if (isFiltering && matched.length === 0) return null;
     return (
       <details key={categoryId || 'uncategorized'} open className="group/section">
@@ -594,24 +608,15 @@ export default function LibraryIngredients() {
                 className="w-full pl-11 pr-4 py-3 bg-white dark:bg-zinc-900 rounded-full border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
               />
             </div>
-            <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 rounded-full border border-zinc-200 dark:border-zinc-700 p-1 shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode('grid')}
-                title={t('library.ingredients.gridView')}
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${viewMode === 'grid' ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
-              >
-                <span className="material-symbols-outlined text-lg">grid_view</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                title={t('library.ingredients.listView')}
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${viewMode === 'list' ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
-              >
-                <span className="material-symbols-outlined text-lg">view_list</span>
-              </button>
-            </div>
+            {/* Ingredients are already grouped into category sections, so the
+                sort menu offers no "Category" ordering — it would reorder
+                nothing visible. */}
+            <SortSelect
+              value={sort}
+              onChange={setSort}
+              options={['name-asc', 'name-desc', 'newest', 'oldest']}
+            />
+            <ViewToggle value={viewMode} onChange={setViewMode} />
             <div className="flex flex-wrap gap-1.5">
               {allTags.map(tg => (
                 <button

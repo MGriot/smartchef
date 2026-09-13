@@ -64,7 +64,8 @@ function toBase(quantity: number, unit: UnitRow | undefined): number | null {
  */
 export async function filterByPantry(
   items: PantryRequestItem[],
-  minMatchRatio = 1
+  minMatchRatio = 1,
+  lang?: string | null
 ): Promise<CookableRecipe[]> {
   const units = await query<UnitRow>("SELECT id, symbol, unit_type, to_base_factor FROM units");
   const unitById = new Map(units.map((u) => [u.id, u]));
@@ -130,5 +131,34 @@ export async function filterByPantry(
     }
   }
 
-  return out.sort((a, b) => b.matchRatio - a.matchRatio || a.missing.length - b.missing.length);
+  out.sort((a, b) => b.matchRatio - a.matchRatio || a.missing.length - b.missing.length);
+  if (!lang || out.length === 0) return out;
+
+  // Translated over the answer rather than inside the resolver: the
+  // matrioska engine works in ids and base names, and is shared with the
+  // shopping list and the nutrition figures, neither of which wants a
+  // language. Without this the results named Italian recipes correctly and
+  // then listed their missing ingredients in English.
+  const missingIds = [...new Set(out.flatMap((r) => r.missing.map((m) => m.ingredientId)).filter(Boolean))];
+  const [titleRows, nameRows] = await Promise.all([
+    query<{ recipe_id: string; title: string | null }>(
+      `SELECT recipe_id, title FROM recipe_translations
+        WHERE recipe_id = ANY($1::uuid[]) AND LOWER(language_code) = LOWER($2)`,
+      [out.map((r) => r.recipeId), lang]
+    ),
+    missingIds.length
+      ? query<{ ingredient_id: string; translated_name: string | null }>(
+          `SELECT ingredient_id, translated_name FROM ingredient_translations
+            WHERE ingredient_id = ANY($1::uuid[]) AND LOWER(language_code) = LOWER($2)`,
+          [missingIds, lang]
+        )
+      : Promise.resolve([]),
+  ]);
+  const titleById = new Map(titleRows.filter((r) => r.title).map((r) => [r.recipe_id, r.title as string]));
+  const nameById = new Map(nameRows.filter((r) => r.translated_name).map((r) => [r.ingredient_id, r.translated_name as string]));
+  return out.map((r) => ({
+    ...r,
+    title: titleById.get(r.recipeId) ?? r.title,
+    missing: r.missing.map((m) => ({ ...m, name: nameById.get(m.ingredientId) ?? m.name })),
+  }));
 }

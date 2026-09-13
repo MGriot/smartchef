@@ -447,7 +447,7 @@ describe('createEntity', () => {
       { id: 's1', recipe_id: 'r1', step_number: 1, title: null, description: 'Boil water', duration_min: null, tool_ids: '[]', technique_ids: '[]', notes: null, image_url: null, step_ingredients: '[]' },
     ]);
     expect(childTables.recipe_ingredients).toEqual([
-      { id: 'ri1', recipe_id: 'r1', sort_order: 0, ingredient_id: 'tomato', subtype_id: null, sub_recipe_id: null, quantity: 2, quantity_text: null, unit_id: null, notes: null, is_optional: 0, group_name: null },
+      { id: 'ri1', recipe_id: 'r1', sort_order: 0, ingredient_id: 'tomato', subtype_id: null, sub_recipe_id: null, quantity: 2, quantity_text: null, unit_id: null, notes: null, is_optional: 0, group_name: null, substitute_for: null },
     ]);
     expect(childTables.recipe_tools).toEqual([{ recipe_id: 'r1', tool_id: 'pot' }]);
   });

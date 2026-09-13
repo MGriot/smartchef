@@ -105,6 +105,12 @@ export interface RecipeIngredientInput {
    *  sortOrder position, distinct rows with groupName=null render ungrouped.
    *  See db/migrations/031_recipe_ingredient_groups.sql. */
   groupName?: string | null;
+  /** Marks this row as an alternative to the ingredient at that sortOrder
+   *  ("or margarine, instead of the butter") rather than a further thing
+   *  the recipe needs. Substitutes are excluded from the resolved
+   *  ingredient totals the shopping list, the nutrition figures and the
+   *  pantry matcher are built from — see matrioska.local.ts. */
+  substituteFor?: number | null;
   translations?: Array<{ lang: string; notes?: string | null }>;
 }
 
@@ -519,6 +525,7 @@ export async function getRecipe(id: string, lang?: string) {
       // convention (ingredientName, unitSymbol, ...) and matrioska.local.ts's
       // CookSequenceIngredientRef.groupName.
       groupName: row.group_name as string | null,
+      substituteFor: row.substitute_for as number | null,
       translatedNotes,
       translations: rowTranslations.map(t => ({ lang: t.language_code, notes: t.notes })),
     });
@@ -739,12 +746,12 @@ export async function createRecipe(d: RecipeInput, creatorName: string | null): 
       await client.query(
         `INSERT INTO recipe_ingredients
            (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
-            quantity,quantity_text,unit_id,notes,is_optional,group_name)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            quantity,quantity_text,unit_id,notes,is_optional,group_name,substitute_for)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [recipeIngredientId, recipeId, ing.sortOrder, ingredientId,
          ing.subtypeId ?? null, subRecipeId, ing.quantity ?? null,
          ing.quantityText ?? null, unitId, ing.notes ?? null, ing.isOptional ?? false,
-         ing.groupName ?? null]
+         ing.groupName ?? null, ing.substituteFor ?? null]
       );
       await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
     }
@@ -818,12 +825,12 @@ export async function updateRecipe(id: string, d: RecipeInput): Promise<{ id: st
       await client.query(
         `INSERT INTO recipe_ingredients
            (id,recipe_id,sort_order,ingredient_id,subtype_id,sub_recipe_id,
-            quantity,quantity_text,unit_id,notes,is_optional,group_name)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            quantity,quantity_text,unit_id,notes,is_optional,group_name,substitute_for)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [recipeIngredientId, id, ing.sortOrder, ingredientId,
          ing.subtypeId ?? null, subRecipeId, ing.quantity ?? null,
          ing.quantityText ?? null, unitId, ing.notes ?? null, ing.isOptional ?? false,
-         ing.groupName ?? null]
+         ing.groupName ?? null, ing.substituteFor ?? null]
       );
       await insertIngredientTranslations(client, recipeIngredientId, ing.translations);
     }

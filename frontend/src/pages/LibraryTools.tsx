@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import Autocomplete from '../components/Autocomplete';
 import RenderFaIcon from '../components/RenderFaIcon';
@@ -10,6 +11,9 @@ import { apiFetch } from '../lib/api';
 import { TOOL_ICONS } from '../lib/icons';
 import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
+import { LibraryToolbar } from '../components/LibraryViewControls';
+import { useLibraryView } from '../hooks/useLibraryView';
+import { sortLibraryItems } from '../lib/librarySort';
 
 
 export default function LibraryTools() {
@@ -26,6 +30,21 @@ export default function LibraryTools() {
   const [form, setForm] = useState({ name: '', category: '', description: '', icon: 'TbToolsKitchen', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
+  const { t } = useTranslation();
+  const { view, setView, sort, setSort } = useLibraryView('tools', 'list');
+
+  // Sorted here rather than by refetching with an ORDER BY: the catalog is
+  // already in memory and, in standalone mode, a refetch is a Capacitor
+  // bridge round-trip. Keyed off contentLang too so the comparison follows
+  // the language the names are actually being read in.
+  const visibleTools = useMemo(
+    () => sortLibraryItems(tools, sort, {
+      label: (item: any) => item.translated_name || item.name || '',
+      group: (item: any) => item.category,
+      createdAt: (item: any) => item.created_at,
+    }, contentLang),
+    [tools, sort, contentLang],
+  );
 
   const fetchTools = () => {
     setLoading(true);
@@ -150,7 +169,59 @@ export default function LibraryTools() {
             </button>
           </div>
 
+          <LibraryToolbar
+            value={view}
+            onChange={setView}
+            sortValue={sort}
+            sortOptions={['name-asc', 'name-desc', 'group-asc', 'newest', 'oldest']}
+            onSortChange={setSort}
+            groupLabelKey="library.common.sortCategory"
+          />
+
           <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+            {view === 'grid' ? (
+              loading ? (
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</p>
+              ) : visibleTools.length === 0 ? (
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.common.empty')}</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {visibleTools.map((tool: any) => (
+                    <div
+                      key={tool.id}
+                      className="group relative bg-zinc-50/60 dark:bg-zinc-800/40 rounded-3xl p-4 border border-zinc-100 dark:border-zinc-800 hover:border-primary/30 hover:shadow-sm transition-all"
+                    >
+                      <div className="aspect-square rounded-2xl overflow-hidden bg-white dark:bg-zinc-900 flex items-center justify-center mb-3">
+                        {tool.image_urls?.[0] ? (
+                          <ResolvedImage src={tool.image_urls[0]} className="w-full h-full object-cover" />
+                        ) : (
+                          <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-[32px] text-zinc-300 dark:text-zinc-600" />
+                        )}
+                      </div>
+                      <p className="font-extrabold text-sm text-zinc-900 dark:text-zinc-100 leading-tight truncate" title={tool.translated_name || tool.name}>
+                        {tool.translated_name || tool.name}
+                      </p>
+                      <p className="text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mt-1 truncate">
+                        {tool.category || 'GENERAL'}
+                      </p>
+                      {/* Same three actions as the table row, revealed on hover
+                          so the tile stays readable as a catalog at a glance. */}
+                      <div className="flex justify-center gap-1 mt-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <button onClick={() => handleOpenModal(tool)} title="Edit this tool" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                          <span className="material-symbols-outlined text-[18px]">edit</span>
+                        </button>
+                        <button onClick={() => { setMergeSource(tool); setMergeTargetId(''); }} title="Merge into another tool" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                          <span className="material-symbols-outlined text-[18px]">call_merge</span>
+                        </button>
+                        <button onClick={() => handleDelete(tool.id)} title="Delete" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -163,7 +234,7 @@ export default function LibraryTools() {
                 <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">
                   {loading ? (
                     <tr><td colSpan={3} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</td></tr>
-                  ) : tools.map((tool) => (
+                  ) : visibleTools.map((tool: any) => (
                     <tr key={tool.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
                       <td className="py-6 pl-4">
                         <div className="flex items-center gap-4">
@@ -203,6 +274,7 @@ export default function LibraryTools() {
                 </tbody>
               </table>
             </div>
+            )}
           </section>
       </AppLayout>
 

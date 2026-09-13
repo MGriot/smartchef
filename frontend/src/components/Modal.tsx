@@ -114,14 +114,50 @@ export default function Modal({
 
   // Focus the first control on open, and hand focus back to whatever opened
   // the dialog on close.
+  //
+  // Deliberately waits for the entry animation to finish. The panel starts
+  // at `opacity: 0` and mid-transform (`.animate-dialog-in`, with
+  // fill-mode both), so on the frame this effect runs the thing being
+  // focused is invisible — and Chromium 114, which is what the Electron
+  // build ships, takes the focus() (document.activeElement updates, so it
+  // LOOKS right) without routing key events to it. The dialog then sits
+  // there refusing to accept typing until something forces a focus
+  // re-commit: alt-tabbing away and back, or — as it was reported — taking
+  // a screenshot. Focusing once the panel is actually on screen avoids the
+  // whole thing, and costs ~0.22s nobody can act inside anyway.
   useEffect(() => {
     if (!open) return;
     restoreFocusTo.current = document.activeElement as HTMLElement | null;
-    const first = panelRef.current?.querySelector<HTMLElement>(
-      'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
-    );
-    first?.focus();
-    return () => restoreFocusTo.current?.focus?.();
+
+    let cancelled = false;
+    const focusFirst = () => {
+      const panel = panelRef.current;
+      if (cancelled || !panel) return;
+      // A click that landed inside while the dialog was animating already
+      // said where focus belongs — don't yank it back to the first field.
+      if (panel.contains(document.activeElement)) return;
+      panel.querySelector<HTMLElement>(
+        'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
+      )?.focus({ preventScroll: true });
+    };
+
+    const panel = panelRef.current;
+    const running = panel?.getAnimations?.() ?? [];
+    if (running.length === 0) {
+      // prefers-reduced-motion, or a browser with no Web Animations API:
+      // nothing is animating, so the panel is already visible.
+      focusFirst();
+    } else {
+      Promise.all(running.map((a) => a.finished)).then(focusFirst, focusFirst);
+      // Safety net: a cancelled/never-finishing animation must not leave the
+      // dialog permanently unfocused.
+      setTimeout(focusFirst, 400);
+    }
+
+    return () => {
+      cancelled = true;
+      restoreFocusTo.current?.focus?.();
+    };
   }, [open]);
 
   if (!open) return null;

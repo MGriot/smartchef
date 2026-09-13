@@ -99,7 +99,7 @@ app.get("/health", async (_req, res) => {
     db: dbOk,
     ollama: ollama.ok,
     ollamaModels: ollama.models,
-    version: "1.0.0",
+    version: "1.1.0",
     timestamp: new Date().toISOString(),
   });
 });

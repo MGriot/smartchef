@@ -5,6 +5,7 @@ import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import { canPrint, printPage } from '../lib/print';
 import { pickIngredientName } from '../lib/ingredientDisplay';
 
 interface MenuSummary {
@@ -411,7 +412,7 @@ export default function ShoppingList() {
           </>
         ) : (
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 no-print">
               <button onClick={() => setActiveList(null)} className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors text-sm font-bold">
                 <span className="material-symbols-outlined text-lg">arrow_back</span>
                 Back
@@ -424,6 +425,15 @@ export default function ShoppingList() {
                   <span className="material-symbols-outlined text-sm">download</span>
                   Export
                 </a>
+                {canPrint() && (
+                  <button
+                    onClick={() => printPage(activeList.name)}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-full text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-sm">print</span>
+                    {t('print.printList')}
+                  </button>
+                )}
                 <button onClick={handleDeleteList} className="flex items-center gap-1.5 px-4 py-2 text-red-500 hover:bg-red-50 rounded-full text-xs font-bold transition-colors">
                   <span className="material-symbols-outlined text-sm">delete</span>
                   Delete
@@ -432,8 +442,11 @@ export default function ShoppingList() {
             </div>
 
             <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight mb-4">{activeList.name}</h1>
+            <p className="print-only text-xs mb-4">
+              {t('print.printedFrom')} · {progress.total - progress.checked}/{progress.total}
+            </p>
 
-            <div className="flex items-center gap-4 mb-8">
+            <div className="flex items-center gap-4 mb-8 no-print">
               <div className="flex-1 h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-primary transition-all duration-300"
@@ -443,7 +456,7 @@ export default function ShoppingList() {
               <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400 whitespace-nowrap">{progress.checked} / {progress.total} checked</span>
             </div>
 
-            <div className="flex gap-2 mb-6 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl w-max">
+            <div className="flex gap-2 mb-6 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl w-max no-print">
               <button
                 onClick={() => setViewMode('ingredient')}
                 className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'ingredient' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}
@@ -463,7 +476,7 @@ export default function ShoppingList() {
                 {groupByAisle(activeList.items, t('shopping.otherAisle')).map(group => {
                   const remaining = group.items.filter(i => !i.isChecked).length;
                   return (
-                    <div key={group.key} className="bg-white dark:bg-zinc-900 rounded-3xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+                    <div key={group.key} className="bg-white dark:bg-zinc-900 rounded-3xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 overflow-hidden print-keep-together">
                       {/* The aisle header carries the category's own colour and
                           icon, so the list reads the same way the Library and
                           the ingredient cards already do. */}

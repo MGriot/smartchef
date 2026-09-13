@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FieldRow, FormSection, TranslationRows } from '../components/Form';
+import { LibraryToolbar } from '../components/LibraryViewControls';
+import { useLibraryView } from '../hooks/useLibraryView';
+import { sortLibraryItems } from '../lib/librarySort';
 
 export default function LibraryUnits() {
   const [units, setUnits] = useState<any[]>([]);
@@ -14,6 +18,19 @@ export default function LibraryUnits() {
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
 
   const contentLang = useStore((s) => s.contentLang);
+  const { t } = useTranslation();
+  const { view, setView, sort, setSort } = useLibraryView('units', 'list');
+
+  // Units group by unit_type (weight, volume, ...), which is what the sort
+  // menu's "Type" option orders by.
+  const visibleUnits = useMemo(
+    () => sortLibraryItems(units, sort, {
+      label: (item: any) => item.translated_name || item.name || '',
+      group: (item: any) => item.unit_type,
+      createdAt: (item: any) => item.created_at,
+    }, contentLang),
+    [units, sort, contentLang],
+  );
 
   const fetchUnits = () => {
     setLoading(true);
@@ -110,7 +127,53 @@ export default function LibraryUnits() {
             </button>
           </div>
 
+          <LibraryToolbar
+            value={view}
+            onChange={setView}
+            sortValue={sort}
+            sortOptions={['name-asc', 'name-desc', 'group-asc', 'newest', 'oldest']}
+            onSortChange={setSort}
+            groupLabelKey="library.common.sortType"
+          />
+
           <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+            {view === 'grid' ? (
+              loading ? (
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading units...</p>
+              ) : visibleUnits.length === 0 ? (
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.common.empty')}</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {visibleUnits.map((u: any) => (
+                    <div
+                      key={u.id}
+                      className="group relative bg-zinc-50/60 dark:bg-zinc-800/40 rounded-3xl p-5 border border-zinc-100 dark:border-zinc-800 hover:border-primary/30 hover:shadow-sm transition-all text-center"
+                    >
+                      {/* The symbol is what a unit is recognised by, so it
+                          leads the tile the way the photo leads a tool's. */}
+                      <p className="text-3xl font-black text-zinc-900 dark:text-zinc-100 leading-none tracking-tight">{u.symbol}</p>
+                      <p className="font-bold text-xs text-zinc-600 dark:text-zinc-300 mt-2 truncate" title={u.translated_name || u.name}>
+                        {u.translated_name || u.name}
+                      </p>
+                      <div className="flex items-center justify-center gap-1.5 mt-2">
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${u.system === 'metric' ? 'bg-primary/10 text-primary' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}`}>
+                          {u.system || 'N/A'}
+                        </span>
+                        <span className="text-[9px] font-black uppercase text-zinc-400 dark:text-zinc-500">{u.unit_type}</span>
+                      </div>
+                      <div className="flex justify-center gap-1 mt-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <button onClick={() => handleOpenModal(u)} title="Edit" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                          <span className="material-symbols-outlined text-[18px]">edit</span>
+                        </button>
+                        <button onClick={() => handleDelete(u.id)} title="Delete" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : (
              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -124,7 +187,7 @@ export default function LibraryUnits() {
                 <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">
                   {loading ? (
                     <tr><td colSpan={4} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading units...</td></tr>
-                  ) : units.map((u) => (
+                  ) : visibleUnits.map((u: any) => (
                     <tr key={u.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
                       <td className="py-6 pl-4">
                         <p className="font-extrabold text-zinc-900 dark:text-zinc-100 leading-tight">{u.translated_name || u.name}</p>
@@ -151,6 +214,7 @@ export default function LibraryUnits() {
                 </tbody>
               </table>
             </div>
+            )}
           </section>
       </AppLayout>
 

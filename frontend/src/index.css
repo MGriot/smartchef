@@ -217,3 +217,124 @@
     animation: spin-slow 3s linear infinite;
   }
 }
+
+/* ── Print ──────────────────────────────────────────────────────────────
+   A recipe printed from the kitchen screen, and a shopping list printed to
+   carry to the shop. Both are "take this page away from the device", so the
+   rules are the same: drop every control and every decorative surface, put
+   the content on white, and stop the browser breaking a step or an
+   ingredient group across two sheets.
+
+   Opt-out rather than opt-in: anything interactive is marked .no-print at
+   the call site. That way a component added later prints by default
+   (readable but plain) instead of silently vanishing from the page. */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    /* The app's own screen type scale is tuned for a backlit panel; on paper
+       it prints large and wastes sheets. */
+    font-size: 11pt;
+  }
+
+  /* App chrome. The sticky headers in particular would otherwise repeat
+     their backdrop on every page. */
+  header,
+  nav,
+  footer,
+  aside,
+  .no-print,
+  [data-no-print] {
+    display: none !important;
+  }
+
+  /* Decorative surfaces cost ink and add nothing on paper. */
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    text-shadow: none !important;
+    background-image: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Cards/panels become plain blocks rather than floating rounded tiles. */
+  .sc-panel,
+  .print-flat {
+    background: #fff !important;
+    border-color: #ddd !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Scroll containers must not clip their own content on paper — a
+     max-height that makes sense on screen would print one visible row and
+     silently drop the rest. */
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-auto,
+  .overflow-hidden {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  /* Keep a step, an ingredient group or a shopping aisle whole. */
+  .print-keep-together {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-break-before {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  /* Shown only on paper — the title block a printed page needs and the
+     screen already has in its own header. */
+  .print-only {
+    display: revert !important;
+  }
+
+  /* Ink-saving: photos are opt-in on paper. A recipe's cover is worth
+     printing; a decorative avatar or an icon tile is not. */
+  img:not(.print-image) {
+    display: none !important;
+  }
+
+  a {
+    text-decoration: none !important;
+    color: #000 !important;
+  }
+
+  /* Links to elsewhere in the app are meaningless once printed, but a
+     source URL is worth carrying. */
+  a[href^="http"].print-url::after {
+    content: " (" attr(href) ")";
+    font-size: 9pt;
+    color: #555;
+  }
+
+  input[type="checkbox"] {
+    /* Printers drop unchecked native checkboxes; an explicit box is what
+       makes a shopping list tickable with a pen. */
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    width: 11pt !important;
+    height: 11pt !important;
+    border: 1pt solid #000 !important;
+    border-radius: 2pt !important;
+    display: inline-block !important;
+    vertical-align: middle;
+  }
+}
+
+/* Off-screen by default; the print block above reveals it. */
+.print-only {
+  display: none;
+}
