@@ -221,6 +221,7 @@ package
 package_2
 padding
 pages
+paid
 password
 pattern
 pause
@@ -244,6 +245,7 @@ policy
 poll
 pool
 post
+power
 preview
 print
 priority
