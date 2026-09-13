@@ -154,9 +154,33 @@ jobs:
             gh release download "$tag" --dir repo --pattern '*.apk' --clobber || true
           done
           ls -la repo/
-          count=$(find repo -name '*.apk' | wc -l)
-          echo "apks: $count"
-          [ "$count" -gt 0 ] || { echo "::error::No APKs found on any release - nothing to publish"; exit 1; }
+
+      # Android identifies an app by its signing key, so a repo that serves
+      # two differently-signed builds of the same package hands users an
+      # upgrade that cannot install. The v1.0.0 and v1.1.0 APKs were signed
+      # with the shared Android DEBUG key (and carry android:debuggable), so
+      # they are dropped here rather than published. This is a fingerprint
+      # comparison, not a filename check: an APK signed with anything other
+      # than the release key never reaches the index, whatever it is called.
+      - name: Keep only APKs signed with the release key
+        env:
+          RELEASE_CERT_SHA256: da08d61580d673c7ceb1390e40f80bb71b156541870b5173c63fbb7441b68313
+        run: |
+          cd fdroid-repo
+          kept=0
+          for apk in repo/*.apk; do
+            [ -e "$apk" ] || continue
+            got=$(apksigner verify --print-certs "$apk" 2>/dev/null                   | grep -m1 -i 'certificate SHA-256 digest'                   | awk -F': ' '{print $2}' | tr -d ' ')
+            if [ "$got" = "$RELEASE_CERT_SHA256" ]; then
+              echo "keep  $(basename "$apk")"
+              kept=$((kept+1))
+            else
+              echo "drop  $(basename "$apk")  (signer ${got:-none})"
+              rm -f "$apk"
+            fi
+          done
+          echo "apks kept: $kept"
+          [ "$kept" -gt 0 ] || { echo "::error::No release-signed APK found. Is RELEASE_CERT_SHA256 still the app's signing certificate?"; exit 1; }
 
       - name: Build and sign the index
         run: |
