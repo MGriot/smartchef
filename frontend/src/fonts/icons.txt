@@ -178,6 +178,7 @@ lightbulb
 link
 list
 lists
+living
 local_fire_department
 location_off
 location_on
@@ -263,6 +264,7 @@ remove
 reorder
 repeat
 replay
+reply
 report
 resize
 restaurant

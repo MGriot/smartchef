@@ -21,17 +21,27 @@
 // filesystem (electronFs()/gitfs.ts) and Android's folder access
 // (SafMirror) reaches the git server directly — no proxy needed at all.
 //
-// Whole-request/whole-response, not streamed, on both platforms — see
-// each bridge's own header for why. isomorphic-git's GitHttpRequest.body
-// is an async iterator; drained into one buffer here before crossing to
-// native code, then the native response is wrapped back into a
-// single-chunk async iterator on the way out, satisfying isomorphic-git's
-// expected shape without either side needing true streaming.
+// Requests still cross whole: isomorphic-git's GitHttpRequest.body is an
+// async iterator, drained into one buffer here before going to native code.
+//
+// RESPONSES no longer do, on Android. They used to be wrapped back into a
+// single-chunk async iterator, which was fine right up until the request
+// that matters most — a new device's FIRST fetch, which has no local
+// history to negotiate against and so receives a pack covering the whole
+// repository (~16 MB on a real library). One base64 field in one JSON
+// message meant that response existed five or six times over in large
+// contiguous allocations across Java and the WebView, and the renderer was
+// killed partway through: the app died on the first-run profile check with
+// nothing thrown and nothing logged, because the JS awaiting it never ran
+// again. GitHttpPlugin.java now spills a large response to a file and this
+// walks it back in bounded slices (spilledBody.ts). Small responses — every
+// ref advertisement, every push ack — still cross inline as before.
 // ════════════════════════════════════════════════════════════════════════
 
 import type { GitHttpRequest, GitHttpResponse, HttpClient } from 'isomorphic-git';
 import { isElectron, electronHttpRequest } from '../electronBridge';
 import { GitHttp } from '../gitHttpBridge';
+import { spilledBodyChunks } from '../spilledBody';
 
 async function drainBody(body: AsyncIterableIterator<Uint8Array> | undefined): Promise<Uint8Array | undefined> {
   if (!body) return undefined;
@@ -63,10 +73,21 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
+/** Built in fixed-size pieces rather than one character at a time. The
+ *  per-character `binary += String.fromCharCode(bytes[i])` this replaces is
+ *  quadratic in practice once the body is megabytes rather than kilobytes —
+ *  a push of a first-run pack spent longer here, allocating and discarding
+ *  progressively longer strings, than it did on the network. 8 KB per
+ *  apply() call stays well inside the argument-count limit that makes the
+ *  obvious `String.fromCharCode(...bytes)` throw on a large array. */
+const BASE64_CHUNK_BYTES = 8192;
+
 function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  const pieces: string[] = [];
+  for (let i = 0; i < bytes.length; i += BASE64_CHUNK_BYTES) {
+    pieces.push(String.fromCharCode(...bytes.subarray(i, i + BASE64_CHUNK_BYTES)));
+  }
+  return btoa(pieces.join(''));
 }
 
 /** Neither native bridge below imposes any deadline of its own, so a remote
@@ -85,8 +106,19 @@ function bytesToBase64(bytes: Uint8Array): string {
  *  the promise but does not abort the in-flight native request. That is
  *  enough for what actually matters here — the queue is released and the
  *  next operation proceeds — but the socket may linger until the OS gives
- *  up on it. */
-const REQUEST_TIMEOUT_MS = 60_000;
+ *  up on it.
+ *
+ *  Raised from 60s once response bodies started streaming to a file: the
+ *  native call now spans the whole download rather than returning as soon
+ *  as the body is buffered, and the request that matters most — a new
+ *  device's first fetch, which has no local history to negotiate against
+ *  and so pulls the entire repository — is legitimately a multi-megabyte
+ *  transfer over whatever connection a phone happens to have. Timing that
+ *  out is worse than waiting: the caller treats a failed probe as "this
+ *  library has no profiles" and offers to create one, which is how a
+ *  device ends up minting a duplicate profile on a library that already
+ *  has the user in it. */
+const REQUEST_TIMEOUT_MS = 180_000;
 
 function withTimeout<T>(work: Promise<T>, url: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -119,7 +151,9 @@ async function request(req: GitHttpRequest): Promise<GitHttpResponse> {
     headers: res.headers,
     statusCode: res.statusCode,
     statusMessage: res.statusMessage,
-    body: singleChunk(base64ToBytes(res.body)),
+    body: res.bodyFile
+      ? spilledBodyChunks(res.bodyFile, res.bodyLength)
+      : singleChunk(base64ToBytes(res.body ?? '')),
   };
 }
 

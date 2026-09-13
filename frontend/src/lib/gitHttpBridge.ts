@@ -30,8 +30,27 @@ export interface GitHttpPlugin {
     statusCode: number;
     statusMessage: string;
     headers: Record<string, string>;
-    body: string; // base64
+    /** base64 — present only for a response small enough to cross inline
+     *  (see GitHttpPlugin.java's INLINE_MAX_BYTES). */
+    body?: string;
+    /** Set instead of `body` for a large response: the native side has
+     *  streamed it to a file in the app cache, and the caller must read it
+     *  with readBodyChunk() and then releaseBody() it. This is what keeps a
+     *  full-history pack — ~16 MB on a real library, and always fetched
+     *  whole on a device's FIRST sync — from being base64'd and
+     *  JSON-serialized across the bridge in one piece, which killed the
+     *  WebView renderer outright. */
+    bodyFile?: string;
+    bodyLength: number;
   }>;
+  /** One bounded slice of a spilled body. Returns fewer bytes than asked
+   *  for at the end of the file, and `bytesRead: 0` past it. */
+  readBodyChunk(opts: { path: string; offset: number; length: number }): Promise<{
+    data: string; // base64
+    bytesRead: number;
+  }>;
+  /** Deletes a spilled body. Succeeds if it is already gone. */
+  releaseBody(opts: { path: string }): Promise<void>;
 }
 
 export const GitHttp = registerPlugin<GitHttpPlugin>('GitHttp');
@@ -63,6 +82,11 @@ export async function androidGeocode(q: string, limit = 1): Promise<GeocodeResul
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=${max}&q=${encodeURIComponent(query)}`;
     const res = await GitHttp.request({ url, method: 'GET', headers: { 'User-Agent': 'SmartChef/1.0 (self-hosted recipe app)' } });
     if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`Nominatim error ${res.statusCode}`);
+    // `body` rather than `bodyFile`: a Nominatim answer for one query is a
+    // few KB, far under the plugin's inline threshold, so it never spills.
+    // Treated as "no match" rather than asserted, since the field is now
+    // optional — this function's contract is already best-effort.
+    if (!res.body) return [];
     const raw = JSON.parse(new TextDecoder().decode(base64ToBytes(res.body))) as Array<{ lat: string; lon: string; display_name: string }>;
     const results: GeocodeResult[] = raw.map((r) => ({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), displayName: r.display_name }));
     geocodeCache.set(key, results);

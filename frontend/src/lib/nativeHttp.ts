@@ -56,7 +56,18 @@ export async function nativeHttpRequest(req: NativeHttpRequest): Promise<NativeH
     // — unlike Electron's IPC, which structured-clones a Uint8Array as-is.
     ...(req.body ? { body: bytesToBase64(req.body) } : {}),
   });
-  return { statusCode: res.statusCode, headers: res.headers, body: base64ToBytes(res.body) };
+  // A large response is spilled to a file by the plugin rather than
+  // returned inline — see spilledBody.ts. Uncommon here (a provider's JSON
+  // is usually well under the threshold) but not impossible: an image- or
+  // audio-carrying reply, or a long generation, can cross it, and before
+  // this branch existed that came back as `undefined` and failed as an
+  // unhelpful decode error rather than reading the body that was waiting
+  // on disk.
+  if (res.bodyFile) {
+    const { readSpilledBody } = await import('./spilledBody');
+    return { statusCode: res.statusCode, headers: res.headers, body: await readSpilledBody(res.bodyFile, res.bodyLength) };
+  }
+  return { statusCode: res.statusCode, headers: res.headers, body: base64ToBytes(res.body ?? '') };
 }
 
 /** POST a JSON body and read a JSON response, the shape every LLM provider
