@@ -49,21 +49,39 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   const [folderProfiles, setFolderProfiles] = useState<StandaloneProfile[] | null>(null);
   const [activatingProfileId, setActivatingProfileId] = useState<string | null>(null);
   const [forceCreateNew, setForceCreateNew] = useState(false);
+  // Why the profile probe came back empty, when it came back empty because
+  // something failed rather than because the library really has nobody in
+  // it yet. Surfaced rather than swallowed — see checkForExistingProfiles().
+  const [probeFailure, setProbeFailure] = useState<string | null>(null);
 
   const checkForExistingProfiles = async () => {
     setCheckingFolder(true);
+    setProbeFailure(null);
     try {
       const { initLocalSchema } = await import('../db/local');
       await initLocalSchema();
       const { syncNow } = await import('../lib/sync/gitSync');
-      // Best-effort — an unreachable/slow folder shouldn't block onboarding,
-      // it just means we fall back to "create a new profile" below.
-      await syncNow().catch(() => {});
+      // Still best-effort — an unreachable or slow remote must not block
+      // onboarding — but no longer *silently* so. Swallowing this outright
+      // made a failed first sync indistinguishable from a genuinely empty
+      // library, so the next screen confidently offered "create a profile"
+      // and the device minted a second copy of a person the library already
+      // had. The distinction is only reportable, not recoverable: the user
+      // can still continue either way.
+      let syncError: string | null = null;
+      await syncNow().catch((err: unknown) => {
+        syncError = err instanceof Error ? err.message : String(err);
+      });
       const { listStandaloneProfiles } = await import('../lib/standalone');
       const profiles = await listStandaloneProfiles();
       setFolderProfiles(profiles);
-    } catch {
+      // Only worth raising when it actually changes what the user is about
+      // to do: profiles that did arrive are proof enough that the remote
+      // was read, whatever else went wrong later in the cycle.
+      if (syncError && profiles.length === 0) setProbeFailure(syncError);
+    } catch (err) {
       setFolderProfiles([]);
+      setProbeFailure(err instanceof Error ? err.message : String(err));
     } finally {
       setCheckingFolder(false);
     }
@@ -91,6 +109,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   // or submitting would wire up sync against a folder the user thought
   // they'd backed out of.
   const handleRemoveSyncFolder = async () => {
+    setProbeFailure(null);
     setSyncFolderName(null);
     setFolderProfiles(null);
     setForceCreateNew(false);
@@ -141,6 +160,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   // handleRemoveSyncFolder — falls back to 'folder' mode (the default)
   // rather than leaving sync mode pointed at a now-cleared git remote.
   const handleRemoveGitRemote = async () => {
+    setProbeFailure(null);
     setGitRemoteConfigured(null);
     setConnectionTestResult(null);
     setFolderProfiles(null);
@@ -444,7 +464,24 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
             </div>
 
             {checkingFolder && (
-              <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium text-center py-4">Checking this folder for existing profiles…</p>
+              <div className="py-4 space-y-1">
+                <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium text-center">Checking this folder for existing profiles…</p>
+                {/* A first sync has no local history to negotiate against,
+                    so it pulls the whole repository — genuinely slow on a
+                    phone, and previously indistinguishable from a hang. */}
+                <p className="text-xs text-zinc-400 dark:text-zinc-600 text-center">The first sync downloads the whole library, so this can take a minute.</p>
+              </div>
+            )}
+
+            {!checkingFolder && probeFailure && (
+              <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-4 space-y-2">
+                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Couldn't read this library</p>
+                <p className="text-xs text-amber-800 dark:text-amber-300/80">{probeFailure}</p>
+                <p className="text-xs text-amber-800 dark:text-amber-300/80">
+                  If other devices already share it, go back and check the address and token rather than creating a profile here — a
+                  new profile made now would be a second copy of someone the library may already have.
+                </p>
+              </div>
             )}
 
             {!checkingFolder && showExistingProfilesPicker && (

@@ -68,10 +68,22 @@ export function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
+/** Built in fixed-size pieces rather than one character at a time. The
+ *  per-character `binary += String.fromCharCode(bytes[i])` this replaces
+ *  reallocates a progressively longer string on every byte, which is fine
+ *  for the few-KB entity JSON this mostly handles and catastrophic for the
+ *  one case that is neither small nor optional: the packfile a first sync
+ *  fetches, which isomorphic-git then writes straight back through here.
+ *  8 KB per apply() stays inside the argument-count limit that makes the
+ *  obvious `String.fromCharCode(...bytes)` throw on a large array. */
+const BASE64_CHUNK_BYTES = 8192;
+
 export function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  const pieces: string[] = [];
+  for (let i = 0; i < bytes.length; i += BASE64_CHUNK_BYTES) {
+    pieces.push(String.fromCharCode(...bytes.subarray(i, i + BASE64_CHUNK_BYTES)));
+  }
+  return btoa(pieces.join(''));
 }
 
 class NotFoundError extends Error {
@@ -156,6 +168,49 @@ async function readFile(path: string, options?: unknown): Promise<string | Uint8
   }
 }
 
+/** Above this, a binary write goes across in slices instead of one piece.
+ *
+ *  MUST stay a multiple of 3. Base64 encodes in 3-byte groups, so slicing
+ *  anywhere else makes every piece but the last end in `=` padding, and
+ *  appending those produces a file that is silently longer and wrong
+ *  rather than one that fails loudly. 786,432 = 3 × 262,144. */
+const BINARY_CHUNK_BYTES = 768 * 1024;
+
+/** Writes a large binary file in bounded pieces.
+ *
+ *  Same reasoning as nativeHttpClient.ts's read path, in the other
+ *  direction: a fetched packfile is ~16 MB on a real library, and handing
+ *  that to Filesystem.writeFile() in one call means a ~22 MB base64 string,
+ *  Capacitor's JSON serialization of it, and the native side's decode, all
+ *  live at once — on top of whatever the fetch that produced it is still
+ *  holding.
+ *
+ *  Assembled under a `.part` name and renamed at the end so a failure
+ *  partway through cannot leave a truncated object or pack sitting at the
+ *  real path, where git would later read it as corrupt rather than absent. */
+async function writeBinaryInChunks(p: string, bytes: Uint8Array): Promise<void> {
+  const tmp = `${p}.part`;
+  try {
+    for (let offset = 0; offset < bytes.length; offset += BINARY_CHUNK_BYTES) {
+      const slice = bytes.subarray(offset, offset + BINARY_CHUNK_BYTES);
+      const data = bytesToBase64(slice);
+      if (offset === 0) {
+        await Filesystem.writeFile({ path: tmp, directory: BASE_DIR, data, recursive: true });
+      } else {
+        await Filesystem.appendFile({ path: tmp, directory: BASE_DIR, data });
+      }
+    }
+    // Filesystem.rename() does not promise to replace an existing
+    // destination, and git does rewrite some paths (a ref, a re-fetched
+    // pack) — so clear it first. Best-effort: not existing is the norm.
+    await Filesystem.deleteFile({ path: p, directory: BASE_DIR }).catch(() => {});
+    await Filesystem.rename({ from: tmp, to: p, directory: BASE_DIR });
+  } catch (err) {
+    await Filesystem.deleteFile({ path: tmp, directory: BASE_DIR }).catch(() => {});
+    throw err;
+  }
+}
+
 async function writeFile(path: string, data: string | Uint8Array, _options?: unknown): Promise<void> {
   if (isElectron()) {
     await electronFs().writeFile(path, data);
@@ -164,6 +219,8 @@ async function writeFile(path: string, data: string | Uint8Array, _options?: unk
   const p = normalize(path);
   if (typeof data === 'string') {
     await Filesystem.writeFile({ path: p, directory: BASE_DIR, data, encoding: Encoding.UTF8, recursive: true });
+  } else if (data.length > BINARY_CHUNK_BYTES) {
+    await writeBinaryInChunks(p, data);
   } else {
     await Filesystem.writeFile({ path: p, directory: BASE_DIR, data: bytesToBase64(data), recursive: true });
   }
