@@ -46,6 +46,11 @@ function gitCalls(source: string): Array<{ method: string; args: string }> {
  *  deliberately throws its clone away afterwards. */
 const OBJECT_READING = new Set([
   'readBlob', 'listFiles', 'findMergeBase', 'statusMatrix', 'log', 'add', 'readTree', 'walk',
+  // The transport and packing calls matter just as much and were missed on
+  // the first pass: push and packObjects read every object they send, fetch
+  // walks local history to negotiate, and gitPacking verifies the pack it
+  // just wrote one object at a time.
+  'readObject', 'packObjects', 'indexPack', 'fetch', 'push', 'clone',
 ]);
 
 const FILES = [
@@ -53,6 +58,8 @@ const FILES = [
   'lib/sync/imageSync.ts',
   'lib/sync/gitSync.ts',
   'lib/sync/firstRunProbe.ts',
+  'lib/sync/gitRemoteTransport.ts',
+  'lib/sync/gitPacking.ts',
 ];
 
 describe('every object-reading git call passes the shared cache', () => {
@@ -75,7 +82,7 @@ describe('every object-reading git call passes the shared cache', () => {
     // Guards against the regex silently matching nothing after a refactor,
     // which would make every assertion above vacuously true.
     const found = FILES.flatMap((rel) => gitCalls(read(rel))).filter((c) => OBJECT_READING.has(c.method));
-    expect(found.length).toBeGreaterThanOrEqual(8);
+    expect(found.length).toBeGreaterThanOrEqual(14);
   });
 });
 
@@ -103,5 +110,38 @@ describe('the cache is dropped where it would go stale', () => {
     const tail = probe.slice(probe.indexOf('} finally {'));
     expect(tail).toContain('removeRecursively(dir)');
     expect(tail).toContain('resetGitCache()');
+  });
+});
+
+// ── The one place a shared cache would be WRONG ────────────────────────
+// gitPacking verifies its new pack by reading every object back AFTER
+// moving the loose copies into quarantine — the check is only meaningful
+// because the loose copy is gone, so a successful read can only have come
+// from the pack. A cache populated during the pack-building phase holds
+// exactly those objects, so reusing it there would turn the proof into a
+// memory lookup: the pack would "verify" without being read, and the prune
+// that follows deletes the only real copies.
+describe('the packing verification cache is separate on purpose', () => {
+  const source = read('lib/sync/gitPacking.ts');
+
+  it('does not verify with the cache used to build the pack', () => {
+    const verifyCall = source.slice(source.indexOf('const verified ='), source.indexOf('if (!verified)'));
+    expect(verifyCall).toContain('cache: verifyCache');
+    expect(verifyCall).not.toContain('packPhaseCache');
+    expect(verifyCall).not.toContain('gitCache()');
+  });
+
+  it('creates the verification cache after the quarantine move, not before', () => {
+    const quarantineAt = source.indexOf('const quarantined =');
+    const verifyCacheAt = source.indexOf('const verifyCache =');
+    expect(quarantineAt).toBeGreaterThan(-1);
+    expect(verifyCacheAt).toBeGreaterThan(quarantineAt);
+  });
+
+  it('never reaches for the module-level cache in this file at all', () => {
+    // The module cache is reset by gitSync before packing, but nothing
+    // stops a future edit from populating it here; keeping this file off it
+    // entirely is the simpler invariant to hold.
+    expect(source).not.toContain('gitCache()');
   });
 });
