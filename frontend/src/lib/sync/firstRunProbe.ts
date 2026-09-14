@@ -60,6 +60,22 @@ export interface ProbedProfile {
   role?: string;
 }
 
+/** What the probe is doing right now, so the setup screen can say so.
+ *  A spinner with no phase and no numbers is indistinguishable from a
+ *  wedged app — which is exactly how this was reported. */
+export type ProbePhase =
+  | { kind: 'connecting' }
+  | { kind: 'downloading'; loaded: number; total: number }
+  | { kind: 'reading' };
+
+/** Bounds the whole probe, not one HTTP request (nativeHttpClient.ts has
+ *  its own 180s per-request deadline). Without this, anything that stalls
+ *  short of a socket timeout — a stuck read, a pathologically slow link —
+ *  leaves the setup screen spinning with no way out but force-quitting.
+ *  Generous, because it should only ever fire on something genuinely
+ *  broken: the measured happy path is a couple of seconds. */
+const PROBE_TIMEOUT_MS = 120_000;
+
 export interface FirstRunProbeResult {
   /** false when this sync mode has no fast path and the caller should fall
    *  back to a full sync — not a failure. */
@@ -114,11 +130,30 @@ function toProbedProfile(id: string, json: Record<string, unknown>): ProbedProfi
  *  header for why it clones rather than syncing, and why it must not
  *  reuse the merge path. */
 export async function probeFirstRunProfiles(
-  onProgress?: (loaded: number, total: number) => void
+  onPhase?: (phase: ProbePhase) => void
 ): Promise<FirstRunProbeResult> {
   if ((await getSyncMode()) !== 'git-remote') return { supported: false, profiles: [] };
   const config = await getGitRemoteConfig();
   if (!config?.url) return { supported: false, profiles: [] };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Timed out after ${PROBE_TIMEOUT_MS / 1000}s while reading the library's profiles.`)),
+      PROBE_TIMEOUT_MS
+    );
+  });
+  try {
+    return await Promise.race([probeInner(config, onPhase), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function probeInner(
+  config: NonNullable<Awaited<ReturnType<typeof getGitRemoteConfig>>>,
+  onPhase?: (phase: ProbePhase) => void
+): Promise<FirstRunProbeResult> {
 
   const { dir, gitdir } = await probeCloneDirs();
   // A probe from an interrupted previous attempt would make clone() fail on
@@ -126,9 +161,15 @@ export async function probeFirstRunProfiles(
   await removeRecursively(dir);
 
   try {
-    const oid = await shallowCloneTip(dir, gitdir, config, onProgress);
+    onPhase?.({ kind: 'connecting' });
+    const startedAt = Date.now();
+    const oid = await shallowCloneTip(dir, gitdir, config, (loaded, total) =>
+      onPhase?.({ kind: 'downloading', loaded, total }));
+    console.info(`[smartchef/probe] clone finished in ${Date.now() - startedAt}ms`);
     if (!oid) return { supported: true, profiles: [] }; // reachable, but nothing synced into it yet
 
+    onPhase?.({ kind: 'reading' });
+    const readingAt = Date.now();
     const files = await git.listFiles({ fs: gitfs, dir, gitdir, ref: oid, cache: gitCache() });
     const ids = files
       .filter((f) => f.startsWith('profiles/') && f.endsWith('.json'))
@@ -148,6 +189,7 @@ export async function probeFirstRunProfiles(
       }
     }
     profiles.sort((a, b) => a.name.localeCompare(b.name));
+    console.info(`[smartchef/probe] read ${profiles.length} profile(s) from ${files.length} files in ${Date.now() - readingAt}ms`);
     return { supported: true, profiles };
   } finally {
     await removeRecursively(dir);

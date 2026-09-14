@@ -197,3 +197,61 @@ describe('the throwaway clone', () => {
     expect(order).toContain('clone');
   });
 });
+
+// ── Saying what it is doing ─────────────────────────────────────────────
+// The slow case was reported as "maybe it is blocked", which it was not —
+// there was simply nothing on screen to distinguish a working download from
+// a wedged one. These pin the two things that make that answerable: phases
+// reaching the caller, and a bound on how long it can sit there at all.
+describe('progress reporting', () => {
+  it('reports connecting, then downloading bytes, then reading', async () => {
+    shallowCloneTip.mockImplementation(async (_d: string, _g: string, _c: unknown, onProgress: (l: number, t: number) => void) => {
+      onProgress(1024, 4096);
+      onProgress(4096, 4096);
+      return 'abc123';
+    });
+    listFiles.mockResolvedValue(['profiles/p1.json']);
+    readBlob.mockResolvedValue(blobOf({ name: 'Ana' }));
+
+    const phases: unknown[] = [];
+    await probeFirstRunProfiles((p) => phases.push(p));
+
+    expect(phases).toEqual([
+      { kind: 'connecting' },
+      { kind: 'downloading', loaded: 1024, total: 4096 },
+      { kind: 'downloading', loaded: 4096, total: 4096 },
+      { kind: 'reading' },
+    ]);
+  });
+
+  it('works without a callback, since the probe has other callers', async () => {
+    listFiles.mockResolvedValue([]);
+    await expect(probeFirstRunProfiles()).resolves.toEqual({ supported: true, profiles: [] });
+  });
+});
+
+describe('the overall deadline', () => {
+  it('rejects rather than spinning forever when the clone never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      shallowCloneTip.mockReturnValue(new Promise(() => {})); // never settles
+      const pending = probeFirstRunProfiles();
+      const assertion = expect(pending).rejects.toThrow(/Timed out after 120s/);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears its timer on success, so a finished probe holds nothing open', async () => {
+    vi.useFakeTimers();
+    try {
+      listFiles.mockResolvedValue([]);
+      await probeFirstRunProfiles();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

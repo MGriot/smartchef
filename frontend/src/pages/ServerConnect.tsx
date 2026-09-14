@@ -6,6 +6,19 @@ import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { ResolvedImage } from '../components/CoverImage';
 
+/** Turns a probe phase into something worth reading. Bytes are shown
+ *  rather than a bare percentage because on a slow link the numbers moving
+ *  at all is the reassurance; a percentage that sits at 0 is not. */
+function probeStatusLine(phase: import('../lib/sync/firstRunProbe').ProbePhase | null): string {
+  if (!phase) return 'Checking this library for existing profiles…';
+  if (phase.kind === 'connecting') return 'Connecting to the git server…';
+  if (phase.kind === 'reading') return 'Reading the profiles…';
+  const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+  return phase.total > 0
+    ? `Downloading… ${mb(phase.loaded)} of ${mb(phase.total)} MB`
+    : `Downloading… ${mb(phase.loaded)} MB`;
+}
+
 interface ServerConnectProps {
   onConnected: () => void;
 }
@@ -53,10 +66,16 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   // something failed rather than because the library really has nobody in
   // it yet. Surfaced rather than swallowed — see checkForExistingProfiles().
   const [probeFailure, setProbeFailure] = useState<string | null>(null);
+  // What the probe is doing, so this screen can say so. A bare spinner is
+  // indistinguishable from a wedged app, which is how the slow case got
+  // reported — the fix for "is it stuck?" is being able to see that it
+  // isn't, and where it stopped when it is.
+  const [probePhase, setProbePhase] = useState<import('../lib/sync/firstRunProbe').ProbePhase | null>(null);
 
   const checkForExistingProfiles = async () => {
     setCheckingFolder(true);
     setProbeFailure(null);
+    setProbePhase(null);
     try {
       const { initLocalSchema } = await import('../db/local');
       await initLocalSchema();
@@ -73,7 +92,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       // `supported: false`.
       let syncError: string | null = null;
       const { probeFirstRunProfiles, importProbedProfiles } = await import('../lib/sync/firstRunProbe');
-      const probe = await probeFirstRunProfiles().catch((err: unknown) => {
+      const probe = await probeFirstRunProfiles(setProbePhase).catch((err: unknown) => {
         syncError = err instanceof Error ? err.message : String(err);
         return null;
       });
@@ -101,6 +120,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       setProbeFailure(err instanceof Error ? err.message : String(err));
     } finally {
       setCheckingFolder(false);
+      setProbePhase(null);
     }
   };
 
@@ -481,8 +501,16 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
             </div>
 
             {checkingFolder && (
-              <div className="py-4 space-y-1">
-                <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium text-center">Checking this folder for existing profiles…</p>
+              <div className="py-4 space-y-2">
+                <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium text-center">{probeStatusLine(probePhase)}</p>
+                {probePhase?.kind === 'downloading' && probePhase.total > 0 && (
+                  <div className="h-1.5 w-full rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-[width] duration-300"
+                      style={{ width: `${Math.min(100, Math.round((probePhase.loaded / probePhase.total) * 100))}%` }}
+                    />
+                  </div>
+                )}
                 {/* This step is deliberately small now — see
                     firstRunProbe.ts. It used to run a whole sync here,
                     which on a phone was indistinguishable from a hang. */}
