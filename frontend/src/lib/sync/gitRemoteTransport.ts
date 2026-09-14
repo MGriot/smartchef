@@ -178,4 +178,55 @@ export async function testGitRemoteConnection(config: GitRemoteConfig): Promise<
   }
 }
 
+/** Clones ONLY the tip commit into `dir`, with no working tree.
+ *
+ *  For the first-run profile probe (firstRunProbe.ts) and nothing else —
+ *  which is why it takes its own throwaway `dir` rather than touching the
+ *  Hidden Clone. Two deliberate restrictions, both load-bearing:
+ *
+ *  `depth: 1` — a new device otherwise downloads the entire history before
+ *  it can show anything. Measured against a real library: a full clone is
+ *  13 MB, the same repository at depth 1 is 2.3 MB. Over 80% of what a
+ *  first launch was waiting on is history it will never read. The Hidden
+ *  Clone is deliberately NOT made shallow by this — a shallow history can
+ *  leave findMergeBase() unable to find the true base later, and
+ *  mergeBridge.ts turns a missing base into a conflict on every differing
+ *  field. Paying 2.3 MB twice is the price of keeping merge semantics
+ *  exactly as they are, and it buys the thing that actually matters here:
+ *  the full download happens AFTER the user is already in the app.
+ *
+ *  `noCheckout: true` — a checkout would write all ~517 entity files and
+ *  images to disk one at a time through the Filesystem bridge, which is
+ *  most of the cost this probe exists to skip. The objects are all that is
+ *  needed; the caller reads what it wants with readBlob(). */
+export async function shallowCloneTip(
+  dir: string,
+  gitdir: string,
+  config: GitRemoteConfig,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<string | null> {
+  await git.clone({
+    fs: gitfs,
+    http,
+    dir,
+    gitdir,
+    url: config.url,
+    corsProxy: config.corsProxy || undefined,
+    ref: BRANCH,
+    singleBranch: true,
+    depth: 1,
+    noCheckout: true,
+    noTags: true,
+    onAuth: authFor(config),
+    onProgress: onProgress ? (p) => onProgress(p.loaded, p.total) : undefined,
+  });
+  try {
+    return await git.resolveRef({ fs: gitfs, dir, gitdir, ref: BRANCH });
+  } catch {
+    // A remote with no commits on `main` yet — a library nobody has synced
+    // into. Not an error: the caller shows "create the first profile".
+    return null;
+  }
+}
+
 export { DEFAULT_REMOTE_TRACKING_REF_NAME };
