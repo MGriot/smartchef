@@ -37,6 +37,7 @@
 
 import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
+import { gitCache } from './gitCache';
 import { DEFAULT_REMOTE_TRACKING_REF_NAME } from './gitObjectTransport';
 import { nativeHttpClient as http } from './nativeHttpClient';
 import type { GitRemoteConfig } from './syncSettings';
@@ -86,6 +87,7 @@ export async function fetchGitRemote(
   const result = await git.fetch({
     fs: gitfs,
     http,
+    cache: gitCache(),
     dir,
     gitdir,
     url: config.url,
@@ -141,6 +143,7 @@ export async function pushGitRemote(dir: string, gitdir: string, config: GitRemo
   // applies that already-established safety net at the git-protocol
   // level, not a bypass of it.
   const result = await git.push({
+    cache: gitCache(),
     fs: gitfs,
     http,
     dir,
@@ -208,6 +211,7 @@ export async function shallowCloneTip(
   await git.clone({
     fs: gitfs,
     http,
+    cache: gitCache(),
     dir,
     gitdir,
     url: config.url,

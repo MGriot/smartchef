@@ -115,14 +115,18 @@ export async function packLooseObjectsAfterPush(fs: GitPlumbingFs, dir: string, 
   if (loosePaths.length < GC_MIN_LOOSE_OBJECTS) return { packed: 0 };
 
   const oids = loosePaths.map(oidFromObjectPath);
-  const { packfile } = await git.packObjects({ fs: { promises: fs }, dir, gitdir, oids, write: false });
+  // Two SEPARATE caches in this function, and the separation is a
+  // correctness requirement, not tidiness — see the verification cache
+  // below for why they must not be one.
+  const packPhaseCache = {};
+  const { packfile } = await git.packObjects({ fs: { promises: fs }, dir, gitdir, oids, write: false, cache: packPhaseCache });
   if (!packfile || packfile.length === 0) return { packed: 0 };
 
   const packHash = await sha1Hex(packfile);
   const packFilepath = `.git/objects/pack/pack-gc-${packHash}.pack`;
   if (!(await existsLocally(fs, dir, packFilepath))) {
     await fs.writeFile(`${dir}/${packFilepath}`, packfile);
-    await git.indexPack({ fs: { promises: fs }, dir, gitdir, filepath: packFilepath });
+    await git.indexPack({ fs: { promises: fs }, dir, gitdir, filepath: packFilepath, cache: packPhaseCache });
   }
   // If the pack already existed, fall through to verify+prune anyway —
   // covers a previous run that built the pack but crashed (or the app was
@@ -170,10 +174,25 @@ export async function packLooseObjectsAfterPush(fs: GitPlumbingFs, dir: string, 
   // successful read here can only have come from genuinely walking
   // objects/pack/*.idx.
   const fullyQuarantined = quarantined.length === loosePaths.length;
+  // A FRESH cache, deliberately not packPhaseCache and deliberately not the
+  // module-level one. The paragraph above is explicit that this check is
+  // only meaningful because the loose copies were just moved away, so a
+  // successful read can only have come from the pack. A cache populated
+  // before that move holds those very objects, and reusing it here would
+  // turn the proof into a lookup of what was already in memory — the pack
+  // would "verify" without being read at all, and the prune that follows
+  // would delete the only real copies.
+  //
+  // Within this loop, though, sharing matters enormously: every read is by
+  // construction a pack read, there are at least GC_MIN_LOOSE_OBJECTS of
+  // them, and without a cache each one re-reads and re-indexes the pack
+  // that was just written — on Android, once per object across the
+  // Capacitor bridge. See gitCache.ts for the measurements.
+  const verifyCache = {};
   const verified = fullyQuarantined && (
     await mapWithConcurrency(oids, TRANSFER_CONCURRENCY, async (oid) => {
       try {
-        await git.readObject({ fs: { promises: fs }, dir, gitdir, oid });
+        await git.readObject({ fs: { promises: fs }, dir, gitdir, oid, cache: verifyCache });
         return true;
       } catch (err) {
         console.warn(`SmartChef: GC pack verification failed for oid ${oid}:`, err);
