@@ -48,6 +48,7 @@
 
 import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
+import { gitCache, resetGitCache } from './gitCache';
 import { getHiddenCloneDir } from './hiddenClone';
 import { getSyncMode, getGitRemoteConfig } from './syncSettings';
 import { shallowCloneTip } from './gitRemoteTransport';
@@ -128,7 +129,7 @@ export async function probeFirstRunProfiles(
     const oid = await shallowCloneTip(dir, gitdir, config, onProgress);
     if (!oid) return { supported: true, profiles: [] }; // reachable, but nothing synced into it yet
 
-    const files = await git.listFiles({ fs: gitfs, dir, gitdir, ref: oid });
+    const files = await git.listFiles({ fs: gitfs, dir, gitdir, ref: oid, cache: gitCache() });
     const ids = files
       .filter((f) => f.startsWith('profiles/') && f.endsWith('.json'))
       .map((f) => f.slice('profiles/'.length, -'.json'.length));
@@ -136,7 +137,7 @@ export async function probeFirstRunProfiles(
     const profiles: ProbedProfile[] = [];
     for (const id of ids) {
       try {
-        const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid, filepath: `profiles/${id}.json` });
+        const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid, filepath: `profiles/${id}.json`, cache: gitCache() });
         const parsed = toProbedProfile(id, JSON.parse(new TextDecoder().decode(blob)) as Record<string, unknown>);
         if (parsed) profiles.push(parsed);
       } catch (err) {
@@ -150,6 +151,9 @@ export async function probeFirstRunProfiles(
     return { supported: true, profiles };
   } finally {
     await removeRecursively(dir);
+    // The clone this cached objects from is now deleted, so anything held
+    // for it is both stale and dead weight before the real sync starts.
+    resetGitCache();
   }
 }
 
