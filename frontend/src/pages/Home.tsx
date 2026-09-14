@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getSyncStatus, subscribeSyncStatus, hasEverCompletedSync } from '../lib/sync/syncStatus';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
@@ -118,6 +119,26 @@ const Home: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
   const contentLang = useStore((s) => s.contentLang);
+
+  // First-run setup now lets someone in as soon as their profile is known
+  // (lib/sync/firstRunProbe.ts), so on a new device the library is still
+  // downloading while this screen is already up. Without this the gallery
+  // would sit empty and silent, then stay stale once the recipes landed.
+  const [syncStatus, setSyncStatus] = useState(() => getSyncStatus());
+  // null until known. Deliberately not seeded from `running`: App.tsx starts
+  // the first sync AFTER first paint, so at mount nothing is running yet on
+  // exactly the device this banner is for, and seeding from it would mean
+  // the banner never appeared at all.
+  const [everSynced, setEverSynced] = useState<boolean | null>(null);
+  useEffect(() => {
+    void hasEverCompletedSync().then(setEverSynced);
+    return subscribeSyncStatus((next) => {
+      setSyncStatus(next);
+      // A completed cycle retires the banner for good on this device.
+      if (!next.running) setEverSynced(true);
+    });
+  }, []);
+  const stillFillingIn = syncStatus.running && everSynced === false;
 
   useEffect(() => {
     const langQuery = contentLang ? `?lang=${contentLang}` : '';
@@ -242,7 +263,9 @@ const Home: React.FC = () => {
 
   useEffect(() => {
     fetchCollections();
-  }, []);
+    // appliedRevision only moves when a sync wrote something, so this is a
+    // refetch on real change rather than on every tick.
+  }, [syncStatus.appliedRevision]);
 
   const handleCreateCollection = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -293,11 +316,25 @@ const Home: React.FC = () => {
         setLoading(false);
       }
     })();
-  }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, seasonalOnly, sortBy]);
+  }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, seasonalOnly, sortBy, syncStatus.appliedRevision]);
 
   return (
     <AppLayout>
       <div className="px-8 lg:px-12 py-10 max-w-[1400px] mx-auto">
+
+          {stillFillingIn && (
+            <div className="mb-6 flex items-center gap-3 rounded-2xl bg-primary/5 border border-primary/20 px-4 py-3">
+              <span className="material-symbols-outlined text-primary animate-spin text-[20px]">progress_activity</span>
+              <div>
+                <p className="text-sm font-bold text-on-surface">Still downloading your library</p>
+                <p className="text-xs text-secondary">
+                  {recipes.length > 0
+                    ? 'More recipes will appear here as they arrive.'
+                    : 'Your recipes will appear here as they arrive — you can keep using the app meanwhile.'}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Hero heading */}
           <div className="mb-10 animate-fade-in-up">

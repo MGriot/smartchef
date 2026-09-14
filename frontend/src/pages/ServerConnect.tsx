@@ -60,18 +60,35 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
     try {
       const { initLocalSchema } = await import('../db/local');
       await initLocalSchema();
-      const { syncNow } = await import('../lib/sync/gitSync');
-      // Still best-effort — an unreachable or slow remote must not block
-      // onboarding — but no longer *silently* so. Swallowing this outright
-      // made a failed first sync indistinguishable from a genuinely empty
-      // library, so the next screen confidently offered "create a profile"
-      // and the device minted a second copy of a person the library already
-      // had. The distinction is only reportable, not recoverable: the user
-      // can still continue either way.
+      // Answering "who is using this device?" needs six small JSON files,
+      // not the whole library. Against a git remote, probe for exactly
+      // those — a tip-only clone, no merge, no working tree — and let the
+      // recipes, ingredients and images arrive on the ordinary background
+      // sync once the user is already in. See lib/sync/firstRunProbe.ts,
+      // including why this must not be done by merging profiles first.
+      //
+      // Folder mode has no equivalent fast path (no network to save, and
+      // gitObjectTransport.ts copies objects rather than fetching a pack),
+      // so it still does the full sync here and says so by reporting
+      // `supported: false`.
       let syncError: string | null = null;
-      await syncNow().catch((err: unknown) => {
+      const { probeFirstRunProfiles, importProbedProfiles } = await import('../lib/sync/firstRunProbe');
+      const probe = await probeFirstRunProfiles().catch((err: unknown) => {
         syncError = err instanceof Error ? err.message : String(err);
+        return null;
       });
+
+      if (probe?.supported) {
+        await importProbedProfiles(probe.profiles);
+      } else if (probe) {
+        const { syncNow } = await import('../lib/sync/gitSync');
+        // Still best-effort — an unreachable or slow folder must not block
+        // onboarding — but no longer *silently* so (see below).
+        await syncNow().catch((err: unknown) => {
+          syncError = err instanceof Error ? err.message : String(err);
+        });
+      }
+
       const { listStandaloneProfiles } = await import('../lib/standalone');
       const profiles = await listStandaloneProfiles();
       setFolderProfiles(profiles);
@@ -466,10 +483,10 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
             {checkingFolder && (
               <div className="py-4 space-y-1">
                 <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium text-center">Checking this folder for existing profiles…</p>
-                {/* A first sync has no local history to negotiate against,
-                    so it pulls the whole repository — genuinely slow on a
-                    phone, and previously indistinguishable from a hang. */}
-                <p className="text-xs text-zinc-400 dark:text-zinc-600 text-center">The first sync downloads the whole library, so this can take a minute.</p>
+                {/* This step is deliberately small now — see
+                    firstRunProbe.ts. It used to run a whole sync here,
+                    which on a phone was indistinguishable from a hang. */}
+                <p className="text-xs text-zinc-400 dark:text-zinc-600 text-center">Only the profiles are fetched now — your recipes download in the background once you're in.</p>
               </div>
             )}
 

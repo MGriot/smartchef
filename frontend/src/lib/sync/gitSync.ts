@@ -38,12 +38,13 @@ import { createElectronRemoteTransport } from './electronRemoteTransport';
 import { createAndroidRemoteTransport } from './androidRemoteTransport';
 import { getMirrorState, setSyncPauseReason } from './androidMirror';
 import { mergeRemoteIntoLocal } from './mergeBridge';
+import { reportSyncStarted, reportSyncFinished, LAST_SYNC_KEY } from './syncStatus';
 import { copyImagesIntoClone, materializeImagesFromCommit } from './imageSync';
 import { IMAGES_SUBDIR } from '../localImages';
 
 const DEVICE_ID_KEY = 'smartchef.sync.deviceId';
 const DEVICE_NAME_KEY = 'smartchef.sync.deviceName';
-const LAST_SYNC_KEY = 'smartchef.sync.lastSyncAt';
+
 
 // Same reasoning as the superseded design: writeEntityFile() fires once
 // per row during a bulk import, each independently touching the Hidden
@@ -661,8 +662,27 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
   return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, pushedObjects, pulledObjects, failedEntities, entityScanCounts };
 }
 
+/** Wrapped so every caller — the startup watcher, the interval tick, a
+ *  resume, the Sync Now button — publishes the same status. That matters
+ *  more than it used to: first-run setup now lets someone into the app
+ *  after the profile probe (firstRunProbe.ts) while the library itself is
+ *  still arriving, so a screen showing an empty gallery needs to be able to
+ *  say "still downloading" and to refill itself when entities land. */
 export function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
-  return serialize(() => syncNowInternal(onProgress), 'syncNow');
+  return serialize(async () => {
+    reportSyncStarted();
+    let applied = 0;
+    try {
+      const result = await syncNowInternal(onProgress);
+      applied = result.applied;
+      return result;
+    } finally {
+      // In a finally so a failed cycle clears `running` too — otherwise one
+      // unreachable-remote tick would leave a "still downloading" banner up
+      // for the rest of the session.
+      reportSyncFinished(applied);
+    }
+  }, 'syncNow');
 }
 
 export interface RepairResult {

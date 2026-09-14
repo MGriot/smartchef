@@ -83,7 +83,13 @@ describe('packLooseObjectsAfterPush', () => {
     expect(result).toEqual({ packed: 0 });
   });
 
-  it('packs and prunes loose objects once past the threshold, and every commit stays fully readable afterward', { timeout: 20000 }, async () => {
+  // 60s, not 20s: this genuinely packs, verifies and prunes hundreds of
+  // real objects on disk, which takes ~21s on its own — so the old ceiling
+  // left no headroom at all, and the test began failing purely because
+  // other files were added to the suite and competed for the machine. The
+  // work here is legitimately slow; the timeout is not what should be
+  // policing it.
+  it('packs and prunes loose objects once past the threshold, and every commit stays fully readable afterward', { timeout: 60000 }, async () => {
     const { dir, gitdir } = await makeTempRepo();
     tempDirs.push(dir);
     const headOid = await commitManyFiles(dir, gitdir, 70);
