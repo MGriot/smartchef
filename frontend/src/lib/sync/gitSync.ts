@@ -27,6 +27,7 @@
 import * as git from 'isomorphic-git';
 import { Preferences } from '@capacitor/preferences';
 import { gitfs } from '../gitfs';
+import { gitCache, resetGitCache } from './gitCache';
 import { isElectron } from '../electronBridge';
 import { ensureHiddenCloneInitialized, resetHiddenCloneInitFlag } from './hiddenClone';
 import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_NAME, type RemoteTransport, type TransferProgress } from './gitObjectTransport';
@@ -212,12 +213,12 @@ async function commitNowInternal(): Promise<boolean> {
   }
 
   const statusStartedAt = performance.now();
-  const matrix = await git.statusMatrix({ fs: gitfs, dir, gitdir, filepaths: COMMITTED_DIRS });
+  const matrix = await git.statusMatrix({ fs: gitfs, dir, gitdir, filepaths: COMMITTED_DIRS, cache: gitCache() });
   logIfSlow('commit statusMatrix', statusStartedAt, `${matrix.length} files`);
   const changed = matrix.some(([, head, workdir, stage]) => !(head === 1 && workdir === 1 && stage === 1));
   if (!changed) return false;
 
-  await git.add({ fs: gitfs, dir, gitdir, filepath: COMMITTED_DIRS });
+  await git.add({ fs: gitfs, dir, gitdir, filepath: COMMITTED_DIRS, cache: gitCache() });
   const id = await getDeviceId();
   const changedCount = matrix.filter(([, head, workdir]) => head !== workdir).length;
   await git.commit({
@@ -558,6 +559,9 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
         // — see gitPacking.ts's own docstring for why that makes this
         // the safe moment to prune). Best-effort and non-fatal, same as
         // the bundle write just above.
+        // Invalidated first: packing replaces packs and deletes the loose
+        // objects it absorbed, so a cached index from before it is stale.
+        resetGitCache();
         await packLooseObjectsAfterPush(gitfs.promises, dir, gitdir).catch((err) =>
           console.warn('SmartChef: packing local objects failed:', err)
         );
@@ -626,6 +630,9 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
         // folder mode's, just reached through the real git protocol
         // instead of pushObjectsAndRefs()'s own per-object check. See
         // gitPacking.ts's docstring for the full safety argument.
+        // Invalidated first: packing replaces packs and deletes the loose
+        // objects it absorbed, so a cached index from before it is stale.
+        resetGitCache();
         await packLooseObjectsAfterPush(gitfs.promises, dir, gitdir).catch((err) =>
           console.warn('SmartChef: packing local objects failed:', err)
         );
@@ -671,6 +678,12 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
 export function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
   return serialize(async () => {
     reportSyncStarted();
+    // Bracketed rather than left to live for the session: the cache holds
+    // the packfile it has read (~13 MB after a first fetch), and gitPacking
+    // can rewrite the object store underneath it. One cycle re-reads the
+    // pack once; what this avoids is re-reading it per object, ~1,200 times,
+    // within a single merge — see gitCache.ts for the measurements.
+    resetGitCache();
     let applied = 0;
     try {
       const result = await syncNowInternal(onProgress);
@@ -681,6 +694,7 @@ export function syncNow(onProgress?: (progress: TransferProgress) => void): Prom
       // unreachable-remote tick would leave a "still downloading" banner up
       // for the rest of the session.
       reportSyncFinished(applied);
+      resetGitCache();
     }
   }, 'syncNow');
 }
@@ -756,7 +770,7 @@ export async function getSyncHistory(limit = 50): Promise<SyncCommit[]> {
   const { dir, gitdir } = await ensureHiddenCloneInitialized();
   let commits;
   try {
-    commits = await git.log({ fs: gitfs, dir, gitdir, depth: limit, includeChanges: true });
+    commits = await git.log({ fs: gitfs, dir, gitdir, depth: limit, includeChanges: true, cache: gitCache() });
   } catch {
     return []; // no commits yet
   }

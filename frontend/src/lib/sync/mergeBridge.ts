@@ -25,6 +25,7 @@
 
 import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
+import { gitCache } from './gitCache';
 import { mergeEntity } from '../structuredMerge';
 import { entityExists, createEntity, applyEntityMergeResult, getMergeableFieldNames } from '../../services/conflicts.local';
 import { mapWithConcurrency, TRANSFER_CONCURRENCY } from './gitObjectTransport';
@@ -58,7 +59,7 @@ const ENTITY_DIRS: Array<{ dirName: string; entityType: string }> = [
 async function readEntityJson(dir: string, gitdir: string, oid: string | null, filepath: string): Promise<Record<string, unknown> | null> {
   if (!oid) return null;
   try {
-    const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid, filepath });
+    const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid, filepath, cache: gitCache() });
     return JSON.parse(new TextDecoder().decode(blob)) as Record<string, unknown>;
   } catch (err) {
     // Absent at this commit (never existed there) is expected and silent
@@ -187,12 +188,12 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
   if (localOid === remoteOid) return result;
 
   const baseOid: string | null = localOid
-    ? (await git.findMergeBase({ fs: gitfs, dir, gitdir, oids: [localOid, remoteOid] }))[0] ?? null
+    ? (await git.findMergeBase({ fs: gitfs, dir, gitdir, oids: [localOid, remoteOid], cache: gitCache() }))[0] ?? null
     : null;
 
   const [localFiles, remoteFiles] = await Promise.all([
-    localOid ? git.listFiles({ fs: gitfs, dir, gitdir, ref: localOid }) : Promise.resolve([]),
-    git.listFiles({ fs: gitfs, dir, gitdir, ref: remoteOid }),
+    localOid ? git.listFiles({ fs: gitfs, dir, gitdir, ref: localOid, cache: gitCache() }) : Promise.resolve([]),
+    git.listFiles({ fs: gitfs, dir, gitdir, ref: remoteOid, cache: gitCache() }),
   ]);
   const remoteFileSet = new Set(remoteFiles);
 

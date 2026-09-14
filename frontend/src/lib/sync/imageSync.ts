@@ -25,6 +25,7 @@
 
 import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
+import { gitCache } from './gitCache';
 import { defaultImageFs, IMAGES_SUBDIR, type ImageFs } from '../localImages';
 
 /** How many files to copy before yielding back to the event loop. Both
@@ -161,7 +162,7 @@ export async function materializeImagesFromCommit(
 
   let files: string[];
   try {
-    files = await git.listFiles({ fs: gitfs, dir, gitdir, ref: oid });
+    files = await git.listFiles({ fs: gitfs, dir, gitdir, ref: oid, cache: gitCache() });
   } catch (err) {
     console.error('SmartChef: could not list files in the merged commit for image sync:', err);
     return result;
@@ -180,7 +181,7 @@ export async function materializeImagesFromCommit(
     if (!needsLocal && !needsClone) continue;
 
     try {
-      const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid, filepath: relPath });
+      const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid, filepath: relPath, cache: gitCache() });
       if (needsClone) await gitfs.promises.writeFile(`${dir}/${relPath}`, blob);
       if (needsLocal) await fs.writeFile(relPath, blob);
       result.copied++;
