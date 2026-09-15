@@ -297,6 +297,7 @@ settings
 shadow
 shapes
 share
+shield_person
 shift
 shop
 shopping_cart
