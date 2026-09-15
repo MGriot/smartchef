@@ -60,6 +60,9 @@ export interface ProbedProfile {
   name: string;
   avatarUrl?: string;
   role?: string;
+  /** Only used to decide who the admin is when nobody is marked as one —
+   *  see applyAdminFallback(). Not shown anywhere. */
+  createdAt?: string;
 }
 
 /** What the probe is doing right now, so the setup screen can say so.
@@ -130,7 +133,33 @@ function toProbedProfile(id: string, json: Record<string, unknown>): ProbedProfi
     name,
     avatarUrl: typeof json.avatar_url === 'string' ? json.avatar_url : undefined,
     role: typeof json.role === 'string' ? json.role : undefined,
+    createdAt: typeof json.created_at === 'string' ? json.created_at : undefined,
   };
+}
+
+/** Marks the earliest-created profile as admin when none of them says it is.
+ *
+ *  Not a guess — it is the same rule the rest of the app already settles on
+ *  from two directions: profiles.local.ts makes the first profile ever
+ *  created an admin, and initLocalSchema() promotes the earliest surviving
+ *  profile whenever a library ends up with no admin at all.
+ *
+ *  It matters here because `role` is a later addition, so a profile whose
+ *  entity file was written before it exists carries no role at all — and
+ *  this library's one live profile is exactly that. Without this, the
+ *  picker would show the owner of the library as an ordinary user, and
+ *  importProbedProfiles() would write them in as one; initLocalSchema()
+ *  would then quietly promote them on the NEXT launch, so the admin-only
+ *  screens were missing exactly once, on the run where someone is most
+ *  likely to go looking for them. */
+function applyAdminFallback(profiles: ProbedProfile[]): ProbedProfile[] {
+  if (profiles.length === 0) return profiles;
+  if (profiles.some((p) => p.role === 'admin')) return profiles;
+  // Undated records sort last: a real timestamp is better evidence of
+  // "first" than the absence of one.
+  const earliest = [...profiles].sort((a, b) =>
+    (a.createdAt ?? '￿').localeCompare(b.createdAt ?? '￿'))[0];
+  return profiles.map((p) => (p.id === earliest.id ? { ...p, role: 'admin' } : p));
 }
 
 /** Reads the library's profiles without merging anything. See the module
@@ -185,9 +214,10 @@ async function probeInner(
           console.error(`SmartChef: could not parse profile ${id} from the host API:`, err);
         }
       }
-      profiles.sort((a, b) => a.name.localeCompare(b.name));
-      console.info(`[smartchef/probe] host API returned ${profiles.length} profile(s) in ${Date.now() - startedAt}ms`);
-      return { supported: true, profiles };
+      const resolved = applyAdminFallback(profiles);
+      resolved.sort((a, b) => a.name.localeCompare(b.name));
+      console.info(`[smartchef/probe] host API returned ${resolved.length} profile(s) in ${Date.now() - startedAt}ms`);
+      return { supported: true, profiles: resolved };
     }
   } catch (err) {
     // Rate limited, a token without the right scope, an API that moved —
@@ -240,9 +270,10 @@ async function probeInner(
         console.error(`SmartChef: could not read profile ${id} during first-run probe:`, err);
       }
     }
-    profiles.sort((a, b) => a.name.localeCompare(b.name));
-    console.info(`[smartchef/probe] read ${profiles.length} profile(s) from ${files.length} files in ${Date.now() - readingAt}ms`);
-    return { supported: true, profiles };
+    const resolved = applyAdminFallback(profiles);
+    resolved.sort((a, b) => a.name.localeCompare(b.name));
+    console.info(`[smartchef/probe] read ${resolved.length} profile(s) from ${files.length} files in ${Date.now() - readingAt}ms`);
+    return { supported: true, profiles: resolved };
   } finally {
     await removeRecursively(dir);
     // The clone this cached objects from is now deleted, so anything held

@@ -346,3 +346,91 @@ describe('the host contents API fast path', () => {
     expect(shallowCloneTip).not.toHaveBeenCalled();
   });
 });
+
+// ── Who is the admin ────────────────────────────────────────────────────
+// `role` is a later addition, so a profile whose entity file was written
+// before it exists carries no role at all — which is the case for the one
+// live profile in the real library this was built against. Without a
+// fallback the picker shows the owner as an ordinary user, and they are
+// imported as one; initLocalSchema() then promotes them on the NEXT launch,
+// so the admin-only screens are missing exactly once, on the run where
+// someone is most likely to go looking for them.
+describe('resolving the admin flag', () => {
+  it('marks the earliest-created profile admin when none says it is', async () => {
+    listDirectoryFiles.mockResolvedValue([
+      { path: 'profiles/newer.json', text: JSON.stringify({ name: 'Bea', created_at: '2026-03-01 10:00:00' }) },
+      { path: 'profiles/older.json', text: JSON.stringify({ name: 'Ana', created_at: '2026-01-01 10:00:00' }) },
+    ]);
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    expect(profiles.find((p) => p.name === 'Ana')?.role).toBe('admin');
+    expect(profiles.find((p) => p.name === 'Bea')?.role).toBeUndefined();
+  });
+
+  it('leaves an explicit admin alone and promotes nobody else', async () => {
+    listDirectoryFiles.mockResolvedValue([
+      { path: 'profiles/a.json', text: JSON.stringify({ name: 'Ana', created_at: '2026-01-01 10:00:00', role: 'user' }) },
+      { path: 'profiles/b.json', text: JSON.stringify({ name: 'Bea', created_at: '2026-03-01 10:00:00', role: 'admin' }) },
+    ]);
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    expect(profiles.find((p) => p.name === 'Bea')?.role).toBe('admin');
+    // Ana is older but explicitly a user — the fallback must not override
+    // a library that has already decided.
+    expect(profiles.find((p) => p.name === 'Ana')?.role).toBe('user');
+  });
+
+  it('sorts records with no created_at last rather than treating them as first', async () => {
+    listDirectoryFiles.mockResolvedValue([
+      { path: 'profiles/undated.json', text: JSON.stringify({ name: 'Undated' }) },
+      { path: 'profiles/dated.json', text: JSON.stringify({ name: 'Dated', created_at: '2026-05-01 10:00:00' }) },
+    ]);
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    // A real timestamp is better evidence of "first" than the absence of one.
+    expect(profiles.find((p) => p.name === 'Dated')?.role).toBe('admin');
+  });
+
+  it('applies on the clone path too, not only the API fast path', async () => {
+    listDirectoryFiles.mockResolvedValue(null); // unrecognised host → clone
+    listFiles.mockResolvedValue(['profiles/p1.json']);
+    readBlob.mockResolvedValue(blobOf({ name: 'Solo', created_at: '2026-01-01 10:00:00' }));
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    expect(profiles[0].role).toBe('admin');
+  });
+
+  it('carries the avatar through unchanged, whatever shape it is', async () => {
+    // Two real shapes in this library: a bundled asset path and, on older
+    // records, an inline data URI. Neither is resolved here — the picker
+    // renders both through ResolvedImage.
+    listDirectoryFiles.mockResolvedValue([
+      { path: 'profiles/a.json', text: JSON.stringify({ name: 'Asset', avatar_url: '/assets/chef-5-C7tcP2r_.jpeg' }) },
+      { path: 'profiles/b.json', text: JSON.stringify({ name: 'Inline', avatar_url: 'data:image/svg+xml,%3csvg%3e' }) },
+    ]);
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    expect(profiles.find((p) => p.name === 'Asset')?.avatarUrl).toBe('/assets/chef-5-C7tcP2r_.jpeg');
+    expect(profiles.find((p) => p.name === 'Inline')?.avatarUrl).toBe('data:image/svg+xml,%3csvg%3e');
+  });
+
+  it('does not offer a profile that was deleted, even if it was the admin', async () => {
+    // The tombstoned duplicates in the real library are exactly this shape.
+    listDirectoryFiles.mockResolvedValue([
+      { path: 'profiles/dead.json', text: JSON.stringify({ name: 'Old', role: 'admin', deleted_at: '2026-09-06 19:35:44' }) },
+      { path: 'profiles/live.json', text: JSON.stringify({ name: 'Current', created_at: '2026-01-01 10:00:00' }) },
+    ]);
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    expect(profiles.map((p) => p.name)).toEqual(['Current']);
+    // …and with the only admin gone, the survivor becomes one rather than
+    // leaving the library with no admin at all.
+    expect(profiles[0].role).toBe('admin');
+  });
+});

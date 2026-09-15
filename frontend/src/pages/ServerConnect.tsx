@@ -559,6 +559,18 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                         )}
                       </span>
                       <span className="font-bold text-zinc-900 dark:text-zinc-100">{p.name}</span>
+                      {/* Shown because a household library can have several
+                          people with similar names, and which one you are
+                          decides whether the admin-only screens appear at
+                          all — see applyAdminFallback() in firstRunProbe.ts
+                          for how this is resolved when a profile predates
+                          the role field entirely. */}
+                      {p.role === 'admin' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider">
+                          <span className="material-symbols-outlined text-[12px]">shield_person</span>
+                          Admin
+                        </span>
+                      )}
                       {activatingProfileId === p.id && <span className="material-symbols-outlined text-primary animate-spin ml-auto text-lg">sync</span>}
                     </button>
                   ))}
