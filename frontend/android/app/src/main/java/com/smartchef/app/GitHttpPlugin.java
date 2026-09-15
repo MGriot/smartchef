@@ -118,18 +118,52 @@ public class GitHttpPlugin extends Plugin {
         return file;
     }
 
-    /** Copies `in` to `out`, returning how many bytes moved. A fixed 8 KB
-     *  transfer buffer, so this is flat in memory no matter the size —
-     *  which is the whole point of spilling to a file at all. */
-    private static long copyStream(@NonNull InputStream in, @NonNull OutputStream out) throws IOException {
+    /** How often to tell the renderer how far along a download is. Time-
+     *  based rather than byte-based: on a slow link a byte interval goes
+     *  quiet for seconds at a time, which is exactly when someone is most
+     *  likely to conclude the app has hung. */
+    private static final long PROGRESS_INTERVAL_MS = 250;
+
+    /** Copies `in` to `out`, returning how many bytes moved, and reports
+     *  progress as it goes. A fixed 8 KB transfer buffer, so this is flat
+     *  in memory no matter the size — the whole point of spilling to a
+     *  file at all.
+     *
+     *  The progress events matter more than they look: the renderer gets
+     *  the response only once this method has finished, so without them
+     *  isomorphic-git cannot report anything either (its own progress comes
+     *  from sideband messages it parses while READING the body, which by
+     *  then is already downloaded). A first-run clone consequently showed
+     *  "connecting" for its whole duration and was reported as a hang. */
+    private long copyStreamReportingProgress(@NonNull InputStream in, @NonNull OutputStream out,
+                                             String url, long contentLength) throws IOException {
         byte[] chunk = new byte[8192];
         long total = 0;
         int read;
+        long lastReportAt = 0;
         while ((read = in.read(chunk)) != -1) {
             out.write(chunk, 0, read);
             total += read;
+            long now = System.currentTimeMillis();
+            if (now - lastReportAt >= PROGRESS_INTERVAL_MS) {
+                lastReportAt = now;
+                emitProgress(url, total, contentLength);
+            }
         }
+        emitProgress(url, total, contentLength); // final, exact figure
         return total;
+    }
+
+    private void emitProgress(String url, long loaded, long total) {
+        JSObject event = new JSObject();
+        event.put("url", url != null ? url : "");
+        event.put("loaded", loaded);
+        // -1 from getContentLength() means the server is using chunked
+        // encoding and has not said how big this is — which GitHub does for
+        // upload-pack. Normalised to 0 so the renderer shows bytes counting
+        // up without a progress bar, rather than a bar stuck at -100%.
+        event.put("total", Math.max(0, total));
+        notifyListeners("gitHttpProgress", event);
     }
 
     private static byte[] readFully(@NonNull File file, int length) throws IOException {
@@ -184,8 +218,9 @@ public class GitHttpPlugin extends Plugin {
                 //noinspection ResultOfMethodCallIgnored
                 spill.createNewFile();
             } else {
+                long contentLength = conn.getContentLengthLong();
                 try (InputStream in = responseStream; OutputStream out = new FileOutputStream(spill)) {
-                    length = copyStream(in, out);
+                    length = copyStreamReportingProgress(in, out, conn.getURL().toString(), contentLength);
                 }
             }
 

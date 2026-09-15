@@ -11,12 +11,22 @@ import { ResolvedImage } from '../components/CoverImage';
  *  at all is the reassurance; a percentage that sits at 0 is not. */
 function probeStatusLine(phase: import('../lib/sync/firstRunProbe').ProbePhase | null): string {
   if (!phase) return 'Checking this library for existing profiles…';
-  if (phase.kind === 'connecting') return 'Connecting to the git server…';
-  if (phase.kind === 'reading') return 'Reading the profiles…';
   const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
-  return phase.total > 0
-    ? `Downloading… ${mb(phase.loaded)} of ${mb(phase.total)} MB`
-    : `Downloading… ${mb(phase.loaded)} MB`;
+  switch (phase.kind) {
+    case 'connecting':
+      return 'Connecting…';
+    case 'downloading':
+      return phase.total > 0
+        ? `Downloading… ${mb(phase.loaded)} of ${mb(phase.total)} MB`
+        : `Downloading… ${mb(phase.loaded)} MB`;
+    // Named rather than folded into "downloading": on a phone this is
+    // usually the longest part, and calling it a download while nothing
+    // downloads is how the previous version read as a hang.
+    case 'preparing':
+      return 'Unpacking the library…';
+    case 'reading':
+      return 'Reading the profiles…';
+  }
 }
 
 interface ServerConnectProps {

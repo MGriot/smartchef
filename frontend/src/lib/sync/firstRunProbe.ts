@@ -52,6 +52,8 @@ import { gitCache, resetGitCache } from './gitCache';
 import { getHiddenCloneDir } from './hiddenClone';
 import { getSyncMode, getGitRemoteConfig } from './syncSettings';
 import { shallowCloneTip } from './gitRemoteTransport';
+import { listDirectoryFiles } from './hostContentsApi';
+import { observeDownloadProgress } from '../gitHttpBridge';
 
 export interface ProbedProfile {
   id: string;
@@ -66,6 +68,11 @@ export interface ProbedProfile {
 export type ProbePhase =
   | { kind: 'connecting' }
   | { kind: 'downloading'; loaded: number; total: number }
+  /** The bytes are in; isomorphic-git is hashing every object in the pack.
+   *  Its own onProgress cannot report this, and on a phone it is usually
+   *  the longest part — so it gets a name rather than hiding inside
+   *  whatever phase happened to be showing. Only the clone path reaches it. */
+  | { kind: 'preparing' }
   | { kind: 'reading' };
 
 /** Bounds the whole probe, not one HTTP request (nativeHttpClient.ts has
@@ -155,16 +162,61 @@ async function probeInner(
   onPhase?: (phase: ProbePhase) => void
 ): Promise<FirstRunProbeResult> {
 
+  // ── Fast path: ask the host for the five files ──────────────────────
+  // A depth-1 clone is the cheapest thing GIT will do; it is not the
+  // cheapest thing available. GitHub and GitLab will simply hand over a
+  // directory — 5.6 KB and no packfile against the real library, versus
+  // 2.1 MB and indexing ~500 objects in JS. Tried first, and never fatal:
+  // an unrecognised host returns null and a failure falls through to the
+  // clone below, which is still correct, just slower.
+  onPhase?.({ kind: 'connecting' });
+  try {
+    const startedAt = Date.now();
+    const files = await listDirectoryFiles(config, 'profiles');
+    if (files) {
+      onPhase?.({ kind: 'reading' });
+      const profiles: ProbedProfile[] = [];
+      for (const file of files) {
+        const id = file.path.replace(/^profiles\//, '').replace(/\.json$/, '');
+        try {
+          const parsed = toProbedProfile(id, JSON.parse(file.text) as Record<string, unknown>);
+          if (parsed) profiles.push(parsed);
+        } catch (err) {
+          console.error(`SmartChef: could not parse profile ${id} from the host API:`, err);
+        }
+      }
+      profiles.sort((a, b) => a.name.localeCompare(b.name));
+      console.info(`[smartchef/probe] host API returned ${profiles.length} profile(s) in ${Date.now() - startedAt}ms`);
+      return { supported: true, profiles };
+    }
+  } catch (err) {
+    // Rate limited, a token without the right scope, an API that moved —
+    // none of which should cost the user their setup when git still works.
+    console.warn('SmartChef: host contents API unavailable, falling back to a shallow clone:', err);
+  }
+
   const { dir, gitdir } = await probeCloneDirs();
   // A probe from an interrupted previous attempt would make clone() fail on
   // an already-populated directory.
   await removeRecursively(dir);
 
   try {
-    onPhase?.({ kind: 'connecting' });
+    // isomorphic-git's own onProgress is driven by the server's sideband
+    // messages, which it parses WHILE reading the response body — but the
+    // native transport downloads the whole body before the renderer sees a
+    // byte of it, so nothing can fire until the work is already done. That
+    // is why the phase used to sit on "connecting" for the entire
+    // operation. The bytes are reported by the layer that actually has
+    // them: the native plugin, as it streams the response to disk.
     const startedAt = Date.now();
-    const oid = await shallowCloneTip(dir, gitdir, config, (loaded, total) =>
-      onPhase?.({ kind: 'downloading', loaded, total }));
+    const stopWatching = observeDownloadProgress((loaded, total) =>
+      onPhase?.({ kind: total > 0 && loaded >= total ? 'preparing' : 'downloading', loaded, total }));
+    let oid: string | null;
+    try {
+      oid = await shallowCloneTip(dir, gitdir, config);
+    } finally {
+      stopWatching();
+    }
     console.info(`[smartchef/probe] clone finished in ${Date.now() - startedAt}ms`);
     if (!oid) return { supported: true, profiles: [] }; // reachable, but nothing synced into it yet
 
