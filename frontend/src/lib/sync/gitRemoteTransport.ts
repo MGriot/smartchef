@@ -205,8 +205,7 @@ export async function testGitRemoteConnection(config: GitRemoteConfig): Promise<
 export async function shallowCloneTip(
   dir: string,
   gitdir: string,
-  config: GitRemoteConfig,
-  onProgress?: (loaded: number, total: number) => void
+  config: GitRemoteConfig
 ): Promise<string | null> {
   await git.clone({
     fs: gitfs,
@@ -222,7 +221,12 @@ export async function shallowCloneTip(
     noCheckout: true,
     noTags: true,
     onAuth: authFor(config),
-    onProgress: onProgress ? (p) => onProgress(p.loaded, p.total) : undefined,
+    // No onProgress: isomorphic-git's own progress comes from sideband
+    // messages it parses while reading the response body, and this app's
+    // transport hands it a body native code has already downloaded whole —
+    // so it could only ever fire after the wait was over. Real byte
+    // progress comes from the native side instead, via
+    // gitHttpBridge.ts's observeDownloadProgress().
   });
   try {
     return await git.resolveRef({ fs: gitfs, dir, gitdir, ref: BRANCH });

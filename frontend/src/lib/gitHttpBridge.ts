@@ -51,9 +51,52 @@ export interface GitHttpPlugin {
   }>;
   /** Deletes a spilled body. Succeeds if it is already gone. */
   releaseBody(opts: { path: string }): Promise<void>;
+  /** Download progress, emitted by the native side while it streams a
+   *  response to disk. See observeDownloadProgress() below for why this
+   *  has to come from there and cannot come from isomorphic-git. */
+  addListener(
+    eventName: 'gitHttpProgress',
+    listener: (event: { url: string; loaded: number; total: number }) => void
+  ): Promise<{ remove: () => Promise<void> }>;
 }
 
 export const GitHttp = registerPlugin<GitHttpPlugin>('GitHttp');
+
+/** Reports bytes as the native side downloads a response.
+ *
+ *  This exists because isomorphic-git's own onProgress cannot do the job
+ *  here. Its progress comes from the server's sideband messages, which it
+ *  parses WHILE reading the response body — but this app's transport hands
+ *  the renderer a response that native code has already downloaded in
+ *  full, so nothing can fire until the work is finished. A first-run clone
+ *  therefore showed "connecting" for its entire duration, which is
+ *  indistinguishable from being stuck, and was reported as exactly that.
+ *
+ *  Electron has no equivalent: its IPC handler resolves with the whole
+ *  body too, and there is no plugin event channel. Returning a no-op
+ *  unsubscribe there keeps callers branch-free — the phases they show just
+ *  stay coarse, which on a desktop is not what anyone is waiting on.
+ *
+ *  Returns an unsubscribe function; call it when the operation ends, or a
+ *  later download will keep driving a screen that has moved on. */
+export function observeDownloadProgress(
+  onProgress: (loaded: number, total: number) => void
+): () => void {
+  let removePromise: Promise<{ remove: () => Promise<void> }> | null = null;
+  let cancelled = false;
+  try {
+    removePromise = GitHttp.addListener('gitHttpProgress', (e) => {
+      if (!cancelled) onProgress(e.loaded, e.total);
+    });
+  } catch {
+    // No plugin here (Electron, or a test double without addListener).
+    return () => {};
+  }
+  return () => {
+    cancelled = true;
+    void removePromise?.then((h) => h.remove()).catch(() => {});
+  };
+}
 
 interface GeocodeResult { lat: number; lng: number; displayName: string }
 

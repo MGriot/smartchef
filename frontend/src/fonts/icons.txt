@@ -87,6 +87,7 @@ distance
 dns
 docs
 document_scanner
+domain
 done
 download
 download_done

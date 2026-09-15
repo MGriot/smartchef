@@ -25,6 +25,10 @@ const readdir = vi.fn();
 const statMock = vi.fn();
 const unlink = vi.fn();
 const rmdir = vi.fn();
+const listDirectoryFiles = vi.fn();
+/** Whatever the probe is currently subscribed with, so a test can drive
+ *  native download progress the way GitHttpPlugin.java does. */
+let downloadProgressListener: ((loaded: number, total: number) => void) | null = null;
 
 vi.mock('isomorphic-git', () => ({
   listFiles: (...a: unknown[]) => listFiles(...a),
@@ -44,6 +48,11 @@ vi.mock('./syncSettings', () => ({
   getGitRemoteConfig: (...a: unknown[]) => getGitRemoteConfig(...a),
 }));
 vi.mock('./gitRemoteTransport', () => ({ shallowCloneTip: (...a: unknown[]) => shallowCloneTip(...a) }));
+vi.mock('./hostContentsApi', () => ({ listDirectoryFiles: (...a: unknown[]) => listDirectoryFiles(...a) }));
+vi.mock('../gitHttpBridge', () => ({ observeDownloadProgress: (cb: (l: number, t: number) => void) => {
+  downloadProgressListener = cb;
+  return () => { downloadProgressListener = null; };
+} }));
 
 const { probeFirstRunProfiles } = await import('./firstRunProbe');
 
@@ -61,6 +70,10 @@ beforeEach(() => {
   statMock.mockReset().mockResolvedValue(null);
   unlink.mockReset().mockResolvedValue(undefined);
   rmdir.mockReset().mockResolvedValue(undefined);
+  // null = "not a host with a contents API", i.e. fall through to the
+  // shallow clone. That is the path most of these cases exercise.
+  listDirectoryFiles.mockReset().mockResolvedValue(null);
+  downloadProgressListener = null;
 });
 
 describe('sync modes without a fast path', () => {
@@ -204,10 +217,14 @@ describe('the throwaway clone', () => {
 // a wedged one. These pin the two things that make that answerable: phases
 // reaching the caller, and a bound on how long it can sit there at all.
 describe('progress reporting', () => {
-  it('reports connecting, then downloading bytes, then reading', async () => {
-    shallowCloneTip.mockImplementation(async (_d: string, _g: string, _c: unknown, onProgress: (l: number, t: number) => void) => {
-      onProgress(1024, 4096);
-      onProgress(4096, 4096);
+  it('reports bytes from the native download, then unpacking, then reading', async () => {
+    // Progress deliberately comes from the transport rather than from
+    // isomorphic-git: its own onProgress parses sideband messages while
+    // reading the body, and this app's body is already fully downloaded by
+    // then, so it could only ever fire after the wait was over.
+    shallowCloneTip.mockImplementation(async () => {
+      downloadProgressListener?.(1024, 4096);
+      downloadProgressListener?.(4096, 4096); // last byte in → unpacking
       return 'abc123';
     });
     listFiles.mockResolvedValue(['profiles/p1.json']);
@@ -219,9 +236,19 @@ describe('progress reporting', () => {
     expect(phases).toEqual([
       { kind: 'connecting' },
       { kind: 'downloading', loaded: 1024, total: 4096 },
-      { kind: 'downloading', loaded: 4096, total: 4096 },
+      { kind: 'preparing', loaded: 4096, total: 4096 },
       { kind: 'reading' },
     ]);
+  });
+
+  it('unsubscribes from download progress once the clone is done', async () => {
+    listFiles.mockResolvedValue([]);
+
+    await probeFirstRunProfiles();
+
+    // Left subscribed, a later download would keep driving a screen that
+    // has moved on.
+    expect(downloadProgressListener).toBeNull();
   });
 
   it('works without a callback, since the probe has other callers', async () => {
@@ -253,5 +280,69 @@ describe('the overall deadline', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── The host contents API fast path ────────────────────────────────────
+// A depth-1 clone is the cheapest thing git will do, not the cheapest
+// thing available: GitHub and GitLab hand over a directory for 5.6 KB with
+// no packfile, against 2.1 MB and indexing ~500 objects in JS. These pin
+// that it is preferred, that it is never fatal, and that an unrecognised
+// host still works the old way.
+describe('the host contents API fast path', () => {
+  it('is used when available, and skips the clone entirely', async () => {
+    listDirectoryFiles.mockResolvedValue([
+      { path: 'profiles/b.json', text: JSON.stringify({ name: 'Bea', role: 'admin' }) },
+      { path: 'profiles/a.json', text: JSON.stringify({ name: 'Ana' }) },
+    ]);
+
+    const { profiles, supported } = await probeFirstRunProfiles();
+
+    expect(supported).toBe(true);
+    expect(profiles.map((p) => p.name)).toEqual(['Ana', 'Bea']);
+    expect(shallowCloneTip).not.toHaveBeenCalled();
+  });
+
+  it('applies the same deletion and no-name rules as the clone path', async () => {
+    listDirectoryFiles.mockResolvedValue([
+      { path: 'profiles/gone.json', text: JSON.stringify({ name: 'Removed', deleted_at: '2026-01-01T00:00:00Z' }) },
+      { path: 'profiles/blank.json', text: JSON.stringify({ role: 'user' }) },
+      { path: 'profiles/ok.json', text: JSON.stringify({ name: 'Real' }) },
+    ]);
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    expect(profiles.map((p) => p.name)).toEqual(['Real']);
+  });
+
+  it('does not let one malformed file cost the others', async () => {
+    listDirectoryFiles.mockResolvedValue([
+      { path: 'profiles/bad.json', text: 'not json at all' },
+      { path: 'profiles/good.json', text: JSON.stringify({ name: 'Fine' }) },
+    ]);
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    expect(profiles.map((p) => p.name)).toEqual(['Fine']);
+  });
+
+  it('falls back to the clone when the API fails, rather than giving up', async () => {
+    // Rate limiting, a token missing a scope, an endpoint that moved —
+    // none of which should cost someone their setup when git still works.
+    listDirectoryFiles.mockRejectedValue(new Error('403 rate limited'));
+    listFiles.mockResolvedValue(['profiles/p1.json']);
+    readBlob.mockResolvedValue(blobOf({ name: 'FromClone' }));
+
+    const { profiles } = await probeFirstRunProfiles();
+
+    expect(shallowCloneTip).toHaveBeenCalled();
+    expect(profiles.map((p) => p.name)).toEqual(['FromClone']);
+  });
+
+  it('treats an empty profiles directory as an empty library, not a failure', async () => {
+    listDirectoryFiles.mockResolvedValue([]);
+
+    expect(await probeFirstRunProfiles()).toEqual({ supported: true, profiles: [] });
+    expect(shallowCloneTip).not.toHaveBeenCalled();
   });
 });
