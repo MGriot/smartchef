@@ -81,6 +81,14 @@ function authHeaders(host: Host, config: GitRemoteConfig): Record<string, string
     : { 'PRIVATE-TOKEN': config.token };
 }
 
+/** A non-2xx answer, with its status kept so callers can branch on it
+ *  rather than pattern-matching a message. */
+class HttpStatusError extends Error {
+  constructor(readonly url: string, readonly status: number) {
+    super(`${url} answered ${status}`);
+  }
+}
+
 async function getText(url: string, headers: Record<string, string>): Promise<string> {
   const res = await nativeHttpRequest({
     url,
@@ -92,7 +100,7 @@ async function getText(url: string, headers: Record<string, string>): Promise<st
     timeoutMs: REQUEST_TIMEOUT_MS,
   });
   if (res.statusCode < 200 || res.statusCode >= 300) {
-    throw new Error(`${url} answered ${res.statusCode}`);
+    throw new HttpStatusError(url, res.statusCode);
   }
   return new TextDecoder().decode(res.body);
 }
@@ -100,21 +108,57 @@ async function getText(url: string, headers: Record<string, string>): Promise<st
 interface GitHubEntry { name: string; path: string; type: string; download_url: string | null }
 interface GitLabEntry { name: string; path: string; type: string }
 
+export interface DirectoryListing {
+  files: RemoteFile[];
+  /** A token was configured and the host refused it, but the repository
+   *  could still be read anonymously. Worth telling the user about:
+   *  reading a public repository needs no credentials, so onboarding
+   *  carries on fine, but every UPLOAD from this device will fail. */
+  tokenRejected: boolean;
+}
+
 /** Lists and downloads every file directly inside `dirPath`.
  *
  *  Returns null — rather than throwing — when the host is not one this
  *  understands, so the caller can tell "no shortcut available" apart from
  *  "the shortcut failed", and fall back rather than give up. A directory
- *  that genuinely does not exist yet comes back as an empty array: a
- *  library nobody has added a profile to is a real, non-error state. */
+ *  that genuinely does not exist yet comes back as an empty listing: a
+ *  library nobody has added a profile to is a real, non-error state.
+ *
+ *  ── When the host rejects the token ──
+ *  GitHub does not fall back to anonymous access when a request carries a
+ *  bad credential: an invalid, expired or revoked token gets 401 on the
+ *  API and 404 on raw downloads, even for a PUBLIC repository that would
+ *  have answered 200 with no token at all. Measured against the real
+ *  library. Before this retry that sent every such device down the slow
+ *  clone path — and, while the native layer was also corrupting large
+ *  responses, into a hang — for a repository it could read perfectly well.
+ *  So a rejected token is retried once without credentials, and the
+ *  rejection is reported rather than silently worked around. */
 export async function listDirectoryFiles(
   config: GitRemoteConfig,
   dirPath: string
-): Promise<RemoteFile[] | null> {
+): Promise<DirectoryListing | null> {
   const host = detectHost(config.url);
   if (!host) return null;
-  const headers = authHeaders(host, config);
 
+  const authed = authHeaders(host, config);
+  try {
+    return { files: await listWith(host, dirPath, authed), tokenRejected: false };
+  } catch (err) {
+    const rejected =
+      Object.keys(authed).length > 0 &&
+      err instanceof HttpStatusError &&
+      (err.status === 401 || err.status === 403);
+    if (!rejected) throw err;
+    // A private repository will fail here too, and that failure propagates
+    // to the caller exactly as before — this only rescues the case where the
+    // credentials were the only problem.
+    return { files: await listWith(host, dirPath, {}), tokenRejected: true };
+  }
+}
+
+async function listWith(host: Host, dirPath: string, headers: Record<string, string>): Promise<RemoteFile[]> {
   if (host.kind === 'github') {
     const listUrl = `${host.apiBase}/repos/${host.owner}/${host.repo}/contents/${dirPath}?ref=${BRANCH}`;
     let entries: GitHubEntry[];
@@ -122,7 +166,7 @@ export async function listDirectoryFiles(
       entries = JSON.parse(await getText(listUrl, headers)) as GitHubEntry[];
     } catch (err) {
       // 404 is the expected shape for "no profiles directory yet".
-      if (err instanceof Error && /answered 404/.test(err.message)) return [];
+      if (err instanceof HttpStatusError && err.status === 404) return [];
       throw err;
     }
     if (!Array.isArray(entries)) return [];
@@ -138,7 +182,7 @@ export async function listDirectoryFiles(
   try {
     entries = JSON.parse(await getText(treeUrl, headers)) as GitLabEntry[];
   } catch (err) {
-    if (err instanceof Error && /answered 404/.test(err.message)) return [];
+    if (err instanceof HttpStatusError && err.status === 404) return [];
     throw err;
   }
   if (!Array.isArray(entries)) return [];

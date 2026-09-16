@@ -70,21 +70,60 @@ async function getDb(): Promise<SQLiteDBConnection> {
 // last commits, a power cut cannot corrupt the database — which is the right
 // trade for a local, single-user, git-replicated library.
 //
-// `false` as execute()'s 2nd arg is load-bearing, not tidiness: SQLite
-// documents PRAGMA journal_mode as a no-op while a transaction is pending,
-// and execute() wraps itself in one by default. Left at the default this
-// silently does nothing — the same trap dropDanglingForeignKeys() below
-// already documents having fallen into with PRAGMA foreign_keys.
-async function applyWriteJournalPragmas(database: SQLiteDBConnection): Promise<void> {
+// ── How the pragma has to be issued, per platform ─────────────────────────
+// This shipped in 1.1.2 using execute() only, and on ANDROID IT NEVER
+// APPLIED. The Android plugin runs execute() through
+// SQLiteDatabase.execSQL(), which refuses any statement that returns rows —
+// and `PRAGMA journal_mode=WAL` returns the new mode — failing with "Queries
+// can be performed using SQLiteDatabase query or rawQuery methods only".
+// The try/catch that keeps the database opening swallowed that into a
+// console.warn, so Android stayed on a rollback journal with FULL sync, the
+// platform that needed the change most. Found on an emulator against the
+// real plugin; query() works there.
+//
+// query() is not universal either: better-sqlite3 on Electron can refuse
+// query() for a statement that returns no rows, which `synchronous=NORMAL`
+// does not. Hence query first, execute() as the fallback — with `false` as
+// execute()'s second argument, because SQLite ignores journal_mode inside a
+// pending transaction and execute() otherwise wraps itself in one.
+//
+// And the result is read back rather than assumed: a pragma a platform
+// accepts but ignores would otherwise be exactly as silent as the failure
+// above.
+async function runPragma(database: SQLiteDBConnection, statement: string): Promise<void> {
   try {
-    await database.execute('PRAGMA journal_mode=WAL', false);
-    await database.execute('PRAGMA synchronous=NORMAL', false);
+    await database.query(statement, []);
+  } catch {
+    await database.execute(statement, false);
+  }
+}
+
+export async function applyWriteJournalPragmas(database: SQLiteDBConnection): Promise<{ journalMode: string | null; synchronous: number | null }> {
+  try {
+    await runPragma(database, 'PRAGMA journal_mode=WAL');
+    await runPragma(database, 'PRAGMA synchronous=NORMAL');
   } catch (err) {
-    // A platform that refuses either pragma keeps the old (slow, but
-    // correct) defaults rather than failing to open the database at all —
-    // this runs inside the one code path every screen depends on.
+    // A platform that refuses both forms keeps the old (slow, but correct)
+    // defaults rather than failing to open the database at all — this runs
+    // inside the one code path every screen depends on.
     console.warn('SmartChef: could not apply SQLite journal pragmas:', err);
   }
+
+  let journalMode: string | null = null;
+  let synchronous: number | null = null;
+  try {
+    const jm = await database.query('PRAGMA journal_mode', []);
+    journalMode = String((jm.values?.[0] as Record<string, unknown> | undefined)?.journal_mode ?? '') || null;
+    const sy = await database.query('PRAGMA synchronous', []);
+    const raw = (sy.values?.[0] as Record<string, unknown> | undefined)?.synchronous;
+    synchronous = typeof raw === 'number' ? raw : raw != null ? Number(raw) : null;
+  } catch {
+    // Reading back is diagnostic only; never fatal.
+  }
+  if (journalMode && journalMode.toLowerCase() !== 'wal') {
+    console.warn(`SmartChef: SQLite is running with journal_mode=${journalMode}, not WAL — writes will be slow on this device`);
+  }
+  return { journalMode, synchronous };
 }
 
 // ── Postgres → SQLite text translation ────────────────────────────────────

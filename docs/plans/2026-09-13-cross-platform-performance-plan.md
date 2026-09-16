@@ -209,3 +209,22 @@ card. The thumbnail item from the previous plan is still open and is what fixes 
   (requested language, full per-language array, JSON array columns, search filter).
 
 562 tests pass, typecheck clean.
+
+---
+
+## Correction (2026-09-16): WAL never applied on Android until 1.2.1
+
+The "shipped" WAL change above used `execute()` only. The Android plugin runs
+`execute()` through `SQLiteDatabase.execSQL()`, which refuses any statement that
+returns rows — and `PRAGMA journal_mode=WAL` returns the new mode — failing with
+*"Queries can be performed using SQLiteDatabase query or rawQuery methods only."*
+The deliberate try/catch that keeps the database opening swallowed that into a
+`console.warn`, so **Android stayed on a rollback journal with `synchronous=FULL`
+from 1.1.2 through 1.2.0** — the platform this change was most needed on. Only
+Electron got the ~40× write improvement described above.
+
+Found on an emulator with a debug build, confirmed against the real plugin
+(`execute` → error, `query` → `wal`), and fixed in 1.2.1: `query()` first,
+`execute()` as the fallback (better-sqlite3 can refuse `query()` for a no-row
+pragma), and the resulting mode read back rather than assumed. Verified on the
+device afterwards: `journal_mode = wal`, `synchronous = 1`.

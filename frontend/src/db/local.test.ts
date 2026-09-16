@@ -93,21 +93,104 @@ describe('db/local.ts SQLite access serialization', () => {
 
 // ── Write durability ──────────────────────────────────────────────────────
 // Both platforms' plugins leave SQLite on journal_mode=delete +
-// synchronous=FULL, and neither ever batches: the plugin wraps every single
-// run() in its own BEGIN/COMMIT. Measured, that is ~5ms per write statement
-// against ~0.12ms under WAL — and because everything above shares one queue,
-// a sync merge's write burst is paid by whatever read is waiting behind it.
-// So this asserts the pragmas are issued at all, and that they are issued
-// UNWRAPPED: SQLite documents PRAGMA journal_mode as a no-op while a
-// transaction is pending, and execute() wraps itself in one by default, so
-// passing `false` is the whole point rather than a detail.
+// synchronous=FULL, and neither ever batches. Measured, that is ~5ms per
+// write statement against ~0.12ms under WAL — and because everything above
+// shares one queue, a sync merge's write burst is paid by whatever read is
+// waiting behind it.
+//
+// This shipped in 1.1.2 through execute() only and NEVER APPLIED ON ANDROID:
+// the Android plugin runs execute() via SQLiteDatabase.execSQL(), which
+// refuses a statement that returns rows, and `journal_mode=WAL` returns one.
+// The failure was swallowed by design, so nothing noticed until an emulator
+// run showed the warning. These fakes model each platform's actual refusal
+// rather than a plugin that accepts everything, which is what let it through.
 describe('journal pragmas', () => {
-  it('puts the connection into WAL with synchronous=NORMAL, outside a transaction', async () => {
-    await query('SELECT 1'); // any call opens the connection
+  type Row = Record<string, unknown>;
 
-    expect(executed).toEqual([
-      { sql: 'PRAGMA journal_mode=WAL', transaction: false },
-      { sql: 'PRAGMA synchronous=NORMAL', transaction: false },
-    ]);
+  /** A connection whose query()/execute() behave like one real platform. */
+  function fakeConnection(opts: {
+    queryRefuses?: (sql: string) => boolean;
+    executeRefuses?: (sql: string) => boolean;
+  }) {
+    const state = { journal_mode: 'delete', synchronous: 2 };
+    const calls: Array<{ via: 'query' | 'execute'; sql: string; transaction?: unknown }> = [];
+    const apply = (sql: string) => {
+      const m = /PRAGMA (\w+)=(\w+)/.exec(sql);
+      if (m?.[1] === 'journal_mode') state.journal_mode = m[2].toLowerCase();
+      if (m?.[1] === 'synchronous') state.synchronous = m[2] === 'NORMAL' ? 1 : 2;
+    };
+    return {
+      calls,
+      state,
+      async query(sql: string): Promise<{ values: Row[] }> {
+        calls.push({ via: 'query', sql });
+        if (opts.queryRefuses?.(sql)) throw new Error('This statement does not return data');
+        if (sql === 'PRAGMA journal_mode') return { values: [{ journal_mode: state.journal_mode }] };
+        if (sql === 'PRAGMA synchronous') return { values: [{ synchronous: state.synchronous }] };
+        apply(sql);
+        return { values: sql.includes('journal_mode=') ? [{ journal_mode: state.journal_mode }] : [] };
+      },
+      async execute(sql: string, transaction?: boolean): Promise<void> {
+        calls.push({ via: 'execute', sql, transaction });
+        if (opts.executeRefuses?.(sql)) {
+          throw new Error('Queries can be performed using SQLiteDatabase query or rawQuery methods only.');
+        }
+        apply(sql);
+      },
+    };
+  }
+
+  it('applies WAL on Android, where execute() refuses a pragma that returns rows', async () => {
+    const { applyWriteJournalPragmas } = await import('./local');
+    const db = fakeConnection({ executeRefuses: (sql) => sql.includes('journal_mode') });
+
+    const result = await applyWriteJournalPragmas(db as never);
+
+    expect(result).toEqual({ journalMode: 'wal', synchronous: 1 });
+    // The shipped version used only execute() here, and this is the call
+    // Android refuses.
+    expect(db.calls.find((c) => c.via === 'execute' && c.sql.includes('journal_mode'))).toBeUndefined();
+  });
+
+  it('falls back to execute() outside a transaction where query() refuses a no-row pragma', async () => {
+    // better-sqlite3 on Electron can refuse query() for a statement that
+    // returns nothing, which `synchronous=NORMAL` does not.
+    const { applyWriteJournalPragmas } = await import('./local');
+    const db = fakeConnection({ queryRefuses: (sql) => sql === 'PRAGMA synchronous=NORMAL' });
+
+    const result = await applyWriteJournalPragmas(db as never);
+
+    expect(result.synchronous).toBe(1);
+    // `false` is load-bearing: SQLite ignores these pragmas inside a pending
+    // transaction, and execute() otherwise wraps itself in one.
+    expect(db.calls).toContainEqual({ via: 'execute', sql: 'PRAGMA synchronous=NORMAL', transaction: false });
+  });
+
+  it('reads the mode back instead of assuming the pragma took effect', async () => {
+    const { applyWriteJournalPragmas } = await import('./local');
+    // Accepts the statement but changes nothing — as silent as the original
+    // failure, unless the result is checked.
+    const db = fakeConnection({});
+    db.query = async (sql: string) => {
+      if (sql === 'PRAGMA journal_mode') return { values: [{ journal_mode: 'delete' }] };
+      if (sql === 'PRAGMA synchronous') return { values: [{ synchronous: 2 }] };
+      return { values: [] };
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await applyWriteJournalPragmas(db as never);
+
+    expect(result).toEqual({ journalMode: 'delete', synchronous: 2 });
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('not WAL'))).toBe(true);
+    warn.mockRestore();
+  });
+
+  it('never throws, so a refusing platform still opens the database', async () => {
+    const { applyWriteJournalPragmas } = await import('./local');
+    const db = fakeConnection({ queryRefuses: () => true, executeRefuses: () => true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(applyWriteJournalPragmas(db as never)).resolves.toBeDefined();
+    warn.mockRestore();
   });
 });

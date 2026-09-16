@@ -38,7 +38,21 @@ export async function* spilledBodyChunks(path: string, length: number): AsyncIte
   try {
     let offset = 0;
     while (offset < length) {
-      const { data, bytesRead } = await GitHttp.readBodyChunk({ path, offset, length: BODY_CHUNK_BYTES });
+      const chunk = await GitHttp.readBodyChunk({ path, offset, length: BODY_CHUNK_BYTES });
+      const { data, bytesRead } = chunk;
+      // The native side echoes the offset it actually read from. This check
+      // exists because that went wrong silently for eight releases: Java
+      // read every chunk from offset 0 (Capacitor's getLong() ignores an
+      // Integer-typed JSON number), so a large response came back as its
+      // first megabyte repeated — no error anywhere, just a corrupt pack
+      // that isomorphic-git then spun on until the WebView stopped
+      // responding. Older native builds do not echo it, hence the undefined
+      // allowance; a MISMATCH is never tolerated.
+      if (chunk.offset !== undefined && chunk.offset !== offset) {
+        throw new Error(
+          `SmartChef: native layer read offset ${chunk.offset} when asked for ${offset} — refusing to return corrupted data`
+        );
+      }
       // A short read before the declared length means the file was
       // truncated under us; stopping silently here would hand the caller a
       // half response, which surfaces much later as a confusing parse error.

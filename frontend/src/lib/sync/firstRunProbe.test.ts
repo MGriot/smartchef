@@ -28,7 +28,7 @@ const rmdir = vi.fn();
 const listDirectoryFiles = vi.fn();
 /** Whatever the probe is currently subscribed with, so a test can drive
  *  native download progress the way GitHttpPlugin.java does. */
-let downloadProgressListener: ((loaded: number, total: number) => void) | null = null;
+let downloadProgressListener: ((loaded: number, total: number, done: boolean) => void) | null = null;
 
 vi.mock('isomorphic-git', () => ({
   listFiles: (...a: unknown[]) => listFiles(...a),
@@ -49,7 +49,7 @@ vi.mock('./syncSettings', () => ({
 }));
 vi.mock('./gitRemoteTransport', () => ({ shallowCloneTip: (...a: unknown[]) => shallowCloneTip(...a) }));
 vi.mock('./hostContentsApi', () => ({ listDirectoryFiles: (...a: unknown[]) => listDirectoryFiles(...a) }));
-vi.mock('../gitHttpBridge', () => ({ observeDownloadProgress: (cb: (l: number, t: number) => void) => {
+vi.mock('../gitHttpBridge', () => ({ observeDownloadProgress: (cb: (l: number, t: number, d: boolean) => void) => {
   downloadProgressListener = cb;
   return () => { downloadProgressListener = null; };
 } }));
@@ -222,9 +222,13 @@ describe('progress reporting', () => {
     // isomorphic-git: its own onProgress parses sideband messages while
     // reading the body, and this app's body is already fully downloaded by
     // then, so it could only ever fire after the wait was over.
+    // Modelled on GitHub's real upload-pack response: chunked, so total is
+    // 0 throughout. The first version switched to "unpacking" on
+    // `loaded >= total`, which never became true — the screen sat on
+    // "Downloading… 2.1 MB" through everything after the last byte.
     shallowCloneTip.mockImplementation(async () => {
-      downloadProgressListener?.(1024, 4096);
-      downloadProgressListener?.(4096, 4096); // last byte in → unpacking
+      downloadProgressListener?.(900_000, 0, false);
+      downloadProgressListener?.(2_208_754, 0, true); // native side says the body is complete
       return 'abc123';
     });
     listFiles.mockResolvedValue(['profiles/p1.json']);
@@ -235,8 +239,8 @@ describe('progress reporting', () => {
 
     expect(phases).toEqual([
       { kind: 'connecting' },
-      { kind: 'downloading', loaded: 1024, total: 4096 },
-      { kind: 'preparing', loaded: 4096, total: 4096 },
+      { kind: 'downloading', loaded: 900_000, total: 0 },
+      { kind: 'preparing' },
       { kind: 'reading' },
     ]);
   });
@@ -291,10 +295,10 @@ describe('the overall deadline', () => {
 // host still works the old way.
 describe('the host contents API fast path', () => {
   it('is used when available, and skips the clone entirely', async () => {
-    listDirectoryFiles.mockResolvedValue([
+    listDirectoryFiles.mockResolvedValue({ files: [
       { path: 'profiles/b.json', text: JSON.stringify({ name: 'Bea', role: 'admin' }) },
       { path: 'profiles/a.json', text: JSON.stringify({ name: 'Ana' }) },
-    ]);
+    ], tokenRejected: false });
 
     const { profiles, supported } = await probeFirstRunProfiles();
 
@@ -304,11 +308,11 @@ describe('the host contents API fast path', () => {
   });
 
   it('applies the same deletion and no-name rules as the clone path', async () => {
-    listDirectoryFiles.mockResolvedValue([
+    listDirectoryFiles.mockResolvedValue({ files: [
       { path: 'profiles/gone.json', text: JSON.stringify({ name: 'Removed', deleted_at: '2026-01-01T00:00:00Z' }) },
       { path: 'profiles/blank.json', text: JSON.stringify({ role: 'user' }) },
       { path: 'profiles/ok.json', text: JSON.stringify({ name: 'Real' }) },
-    ]);
+    ], tokenRejected: false });
 
     const { profiles } = await probeFirstRunProfiles();
 
@@ -316,10 +320,10 @@ describe('the host contents API fast path', () => {
   });
 
   it('does not let one malformed file cost the others', async () => {
-    listDirectoryFiles.mockResolvedValue([
+    listDirectoryFiles.mockResolvedValue({ files: [
       { path: 'profiles/bad.json', text: 'not json at all' },
       { path: 'profiles/good.json', text: JSON.stringify({ name: 'Fine' }) },
-    ]);
+    ], tokenRejected: false });
 
     const { profiles } = await probeFirstRunProfiles();
 
@@ -340,9 +344,9 @@ describe('the host contents API fast path', () => {
   });
 
   it('treats an empty profiles directory as an empty library, not a failure', async () => {
-    listDirectoryFiles.mockResolvedValue([]);
+    listDirectoryFiles.mockResolvedValue({ files: [], tokenRejected: false });
 
-    expect(await probeFirstRunProfiles()).toEqual({ supported: true, profiles: [] });
+    expect(await probeFirstRunProfiles()).toEqual({ supported: true, profiles: [], tokenRejected: false });
     expect(shallowCloneTip).not.toHaveBeenCalled();
   });
 });
@@ -357,10 +361,10 @@ describe('the host contents API fast path', () => {
 // someone is most likely to go looking for them.
 describe('resolving the admin flag', () => {
   it('marks the earliest-created profile admin when none says it is', async () => {
-    listDirectoryFiles.mockResolvedValue([
+    listDirectoryFiles.mockResolvedValue({ files: [
       { path: 'profiles/newer.json', text: JSON.stringify({ name: 'Bea', created_at: '2026-03-01 10:00:00' }) },
       { path: 'profiles/older.json', text: JSON.stringify({ name: 'Ana', created_at: '2026-01-01 10:00:00' }) },
-    ]);
+    ], tokenRejected: false });
 
     const { profiles } = await probeFirstRunProfiles();
 
@@ -369,10 +373,10 @@ describe('resolving the admin flag', () => {
   });
 
   it('leaves an explicit admin alone and promotes nobody else', async () => {
-    listDirectoryFiles.mockResolvedValue([
+    listDirectoryFiles.mockResolvedValue({ files: [
       { path: 'profiles/a.json', text: JSON.stringify({ name: 'Ana', created_at: '2026-01-01 10:00:00', role: 'user' }) },
       { path: 'profiles/b.json', text: JSON.stringify({ name: 'Bea', created_at: '2026-03-01 10:00:00', role: 'admin' }) },
-    ]);
+    ], tokenRejected: false });
 
     const { profiles } = await probeFirstRunProfiles();
 
@@ -383,10 +387,10 @@ describe('resolving the admin flag', () => {
   });
 
   it('sorts records with no created_at last rather than treating them as first', async () => {
-    listDirectoryFiles.mockResolvedValue([
+    listDirectoryFiles.mockResolvedValue({ files: [
       { path: 'profiles/undated.json', text: JSON.stringify({ name: 'Undated' }) },
       { path: 'profiles/dated.json', text: JSON.stringify({ name: 'Dated', created_at: '2026-05-01 10:00:00' }) },
-    ]);
+    ], tokenRejected: false });
 
     const { profiles } = await probeFirstRunProfiles();
 
@@ -408,10 +412,10 @@ describe('resolving the admin flag', () => {
     // Two real shapes in this library: a bundled asset path and, on older
     // records, an inline data URI. Neither is resolved here — the picker
     // renders both through ResolvedImage.
-    listDirectoryFiles.mockResolvedValue([
+    listDirectoryFiles.mockResolvedValue({ files: [
       { path: 'profiles/a.json', text: JSON.stringify({ name: 'Asset', avatar_url: '/assets/chef-5-C7tcP2r_.jpeg' }) },
       { path: 'profiles/b.json', text: JSON.stringify({ name: 'Inline', avatar_url: 'data:image/svg+xml,%3csvg%3e' }) },
-    ]);
+    ], tokenRejected: false });
 
     const { profiles } = await probeFirstRunProfiles();
 
@@ -421,10 +425,10 @@ describe('resolving the admin flag', () => {
 
   it('does not offer a profile that was deleted, even if it was the admin', async () => {
     // The tombstoned duplicates in the real library are exactly this shape.
-    listDirectoryFiles.mockResolvedValue([
+    listDirectoryFiles.mockResolvedValue({ files: [
       { path: 'profiles/dead.json', text: JSON.stringify({ name: 'Old', role: 'admin', deleted_at: '2026-09-06 19:35:44' }) },
       { path: 'profiles/live.json', text: JSON.stringify({ name: 'Current', created_at: '2026-01-01 10:00:00' }) },
-    ]);
+    ], tokenRejected: false });
 
     const { profiles } = await probeFirstRunProfiles();
 
@@ -432,5 +436,18 @@ describe('resolving the admin flag', () => {
     // …and with the only admin gone, the survivor becomes one rather than
     // leaving the library with no admin at all.
     expect(profiles[0].role).toBe('admin');
+  });
+});
+
+describe('a rejected token', () => {
+  it('is passed through to the caller so the setup screen can say so', async () => {
+    listDirectoryFiles.mockResolvedValue({ files: [{ path: 'profiles/a.json', text: JSON.stringify({ name: 'Ana' }) }], tokenRejected: true });
+
+    const result = await probeFirstRunProfiles();
+
+    expect(result.tokenRejected).toBe(true);
+    // …and onboarding still gets its profiles, on the fast path.
+    expect(result.profiles.map((p) => p.name)).toEqual(['Ana']);
+    expect(shallowCloneTip).not.toHaveBeenCalled();
   });
 });

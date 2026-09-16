@@ -91,6 +91,9 @@ export interface FirstRunProbeResult {
    *  back to a full sync — not a failure. */
   supported: boolean;
   profiles: ProbedProfile[];
+  /** The configured token was refused but the library was still readable
+   *  without it. Onboarding can continue; uploads from this device cannot. */
+  tokenRejected?: boolean;
 }
 
 /** Sibling of the Hidden Clone rather than a child of it: everything under
@@ -199,10 +202,13 @@ async function probeInner(
   // an unrecognised host returns null and a failure falls through to the
   // clone below, which is still correct, just slower.
   onPhase?.({ kind: 'connecting' });
+  let tokenRejected = false;
   try {
     const startedAt = Date.now();
-    const files = await listDirectoryFiles(config, 'profiles');
-    if (files) {
+    const listing = await listDirectoryFiles(config, 'profiles');
+    if (listing) {
+      const { files } = listing;
+      tokenRejected = listing.tokenRejected;
       onPhase?.({ kind: 'reading' });
       const profiles: ProbedProfile[] = [];
       for (const file of files) {
@@ -217,7 +223,7 @@ async function probeInner(
       const resolved = applyAdminFallback(profiles);
       resolved.sort((a, b) => a.name.localeCompare(b.name));
       console.info(`[smartchef/probe] host API returned ${resolved.length} profile(s) in ${Date.now() - startedAt}ms`);
-      return { supported: true, profiles: resolved };
+      return { supported: true, profiles: resolved, tokenRejected };
     }
   } catch (err) {
     // Rate limited, a token without the right scope, an API that moved —
@@ -239,8 +245,12 @@ async function probeInner(
     // operation. The bytes are reported by the layer that actually has
     // them: the native plugin, as it streams the response to disk.
     const startedAt = Date.now();
-    const stopWatching = observeDownloadProgress((loaded, total) =>
-      onPhase?.({ kind: total > 0 && loaded >= total ? 'preparing' : 'downloading', loaded, total }));
+    // `done` rather than `loaded >= total`: GitHub sends upload-pack with
+    // chunked encoding, so total is 0 and that comparison never became
+    // true — the screen stayed on "Downloading… 2.1 MB" through all the
+    // work that happens after the last byte arrives.
+    const stopWatching = observeDownloadProgress((loaded, total, done) =>
+      onPhase?.(done && loaded > 1024 * 64 ? { kind: 'preparing' } : { kind: 'downloading', loaded, total }));
     let oid: string | null;
     try {
       oid = await shallowCloneTip(dir, gitdir, config);

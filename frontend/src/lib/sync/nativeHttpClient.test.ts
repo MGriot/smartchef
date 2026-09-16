@@ -322,3 +322,57 @@ describe('a response the native side spilled to a file', () => {
     expect(elapsed).toBeLessThan(5000);
   });
 });
+
+// ── The native side reading from the wrong place ────────────────────────
+// Shipped in 1.1.3 and live until 1.2.1: GitHttpPlugin.java read `offset`
+// with Capacitor's PluginCall.getLong(), which returns the value only when it
+// is already a java.lang.Long — and a JS number under 2^31 arrives as an
+// Integer. So every chunk was read from byte 0. A 2.2 MB pack came back as its
+// first megabyte three times over, with no error anywhere, and isomorphic-git
+// spun on the corrupt pack until the WebView stopped responding — which is
+// what "stuck on setup" was for everyone with a token the host refused.
+//
+// Every fake above honours the offset it is given, which is precisely why
+// none of them caught it. This one does not. Proven on a real device first:
+// reading offset 600000 of a 603 KB download returned the bytes at offset 0.
+describe('a native layer that ignores the requested offset', () => {
+  it('fails loudly instead of handing over repeated bytes', async () => {
+    const body = pseudoRandomBytes(2_500_000);
+    releaseBodyMock.mockResolvedValue(undefined);
+    readBodyChunkMock.mockImplementation((opts: { offset: number; length: number }) => {
+      const slice = body.subarray(0, opts.length); // the bug: always from the start
+      return Promise.resolve({ data: bigBytesToBase64(slice), bytesRead: slice.length, offset: 0 });
+    });
+    gitHttpRequestMock.mockResolvedValue({
+      url: 'https://example.com/repo.git/git-upload-pack',
+      statusCode: 200, statusMessage: 'OK', headers: {},
+      bodyFile: '/cache/git-http-bodies/wrongoffset', bodyLength: body.length,
+    });
+
+    const res = await nativeHttpClient.request({ url: 'https://example.com/repo.git/git-upload-pack' });
+
+    await expect(drain(res.body)).rejects.toThrow(/read offset 0 when asked for 1048576/);
+    // …and it still cleans up after itself.
+    expect(releaseBodyMock).toHaveBeenCalledWith({ path: '/cache/git-http-bodies/wrongoffset' });
+  });
+
+  it('accepts a native layer that echoes the offset it was asked for', async () => {
+    const body = pseudoRandomBytes(2_500_000);
+    releaseBodyMock.mockResolvedValue(undefined);
+    readBodyChunkMock.mockImplementation((opts: { offset: number; length: number }) => {
+      const slice = body.subarray(opts.offset, opts.offset + opts.length);
+      return Promise.resolve({ data: bigBytesToBase64(slice), bytesRead: slice.length, offset: opts.offset });
+    });
+    gitHttpRequestMock.mockResolvedValue({
+      url: 'https://example.com/repo.git/git-upload-pack',
+      statusCode: 200, statusMessage: 'OK', headers: {},
+      bodyFile: '/cache/git-http-bodies/rightoffset', bodyLength: body.length,
+    });
+
+    const res = await nativeHttpClient.request({ url: 'https://example.com/repo.git/git-upload-pack' });
+    const got = await drain(res.body);
+
+    expect(got.length).toBe(body.length);
+    expect(firstMismatch(got, body)).toBe(-1);
+  });
+});

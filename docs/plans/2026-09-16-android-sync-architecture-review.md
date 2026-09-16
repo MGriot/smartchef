@@ -242,3 +242,37 @@ reaches the filesystem, not about git being the wrong model.
 4. Checkout-and-import for bulk hydration, with profiles first and progress per
    type.
 5. Revisit the snapshot idea only if first-run is still unsatisfying after 2–4.
+
+---
+
+## Update (2026-09-16, later): the "stuck on setup" reports had a different root cause
+
+Testing 1.2.0 on an emulator with a debug build found the actual reason Android
+devices hung on first-run setup, and it was not the cost model above.
+
+**Every HTTP response over 512 KB was corrupted on Android from 1.1.3 to 1.2.0.**
+`GitHttpPlugin.readBodyChunk()` read its offset with Capacitor's
+`PluginCall.getLong()`, which returns the value only when it is already a
+`java.lang.Long`. A JavaScript number under 2³¹ arrives as an `Integer`, so the
+default `0` was returned for every call and every chunk was read from the start
+of the file. A 2.2 MB pack came back as its first megabyte three times over;
+isomorphic-git then spun on the corrupt pack and the WebView's JavaScript thread
+stopped responding entirely — which is also why the probe's 120-second timeout
+never fired, and why the Account page showed an empty profile name (its query
+never got a turn). Proven on the device: reading offset 600 000 of a 603 KB
+download returned the bytes at offset 0.
+
+It only bit devices that took the clone path, and a device took the clone path
+when **GitHub rejected its access token**: an invalid token gets 401 from the
+contents API even on a public repository that answers 200 anonymously. That is
+why setup worked with no token and hung with one.
+
+Fixed in 1.2.1 — `optLong()` on the native side, the offset echoed back and
+verified in JS so any future mismatch fails loudly, and a rejected token retried
+anonymously and reported. Verified end to end on the emulator with a rejected
+token: picker in ~14 s (previously never), a full background sync importing all
+292 ingredients and 44 recipes with the JavaScript thread responsive throughout,
+and the push correctly refused with the actionable message.
+
+The earlier releases' fixes in this area (object cache, progress labels, the
+host-API fast path) were each real, but each was chasing a symptom of this.
