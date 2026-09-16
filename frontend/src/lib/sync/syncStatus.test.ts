@@ -16,6 +16,7 @@ const {
   subscribeSyncStatus,
   reportSyncStarted,
   reportSyncFinished,
+  stalePush,
 } = await import('./syncStatus');
 
 beforeEach(() => {
@@ -90,5 +91,47 @@ describe('appliedRevision', () => {
 
     // Never decreases, and the finish is distinguishable from the start.
     expect(seen[1]).toBe(seen[0] + 1);
+  });
+});
+
+// ── Detecting a device that receives but never sends ────────────────────
+// The failure this exists for: a desktop completed sync cycles for a week —
+// fetching correctly the whole time — while every push was rejected for
+// credentials. lastSyncAt kept advancing, so nothing looked wrong. A push
+// timestamp that stops advancing is the signal that does not lie.
+describe('stalePush', () => {
+  const hoursAgo = (n: number) => new Date(Date.now() - n * 3600_000).toISOString();
+
+  it('flags a device that has synced recently but not pushed in days', () => {
+    expect(stalePush(hoursAgo(0), hoursAgo(24 * 7))).toBe(true);
+  });
+
+  it('says nothing about a device pushing normally', () => {
+    // A healthy device advances the push timestamp on every cycle it has
+    // commits for, so these two stay close together.
+    expect(stalePush(hoursAgo(0), hoursAgo(0))).toBe(false);
+    expect(stalePush(hoursAgo(0), hoursAgo(2))).toBe(false);
+  });
+
+  it('tolerates a quiet day before complaining', () => {
+    expect(stalePush(hoursAgo(0), hoursAgo(23))).toBe(false);
+    expect(stalePush(hoursAgo(0), hoursAgo(25))).toBe(true);
+  });
+
+  it('stays silent when the device has never pushed', () => {
+    // Deliberate: a device that has genuinely never had anything to send
+    // would otherwise be accused of failing on its first launch. The pause
+    // banner covers that case, with the actual reason.
+    expect(stalePush(hoursAgo(0), null)).toBe(false);
+  });
+
+  it('stays silent before the first completed sync', () => {
+    expect(stalePush(null, hoursAgo(100))).toBe(false);
+    expect(stalePush(null, null)).toBe(false);
+  });
+
+  it('does not treat an unparseable timestamp as a failure', () => {
+    expect(stalePush('not a date', hoursAgo(100))).toBe(false);
+    expect(stalePush(hoursAgo(0), 'not a date')).toBe(false);
   });
 });

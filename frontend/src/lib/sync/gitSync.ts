@@ -385,20 +385,26 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
   const failedEntities: Array<{ entityType: string; entityId: string; error: string }> = [];
   const entityScanCounts: Record<string, { remoteFiles: number; localFiles: number }> = {};
 
-  // Android's "sync paused — folder access lost" banner (Account.tsx,
-  // driven by androidMirror.ts's pause-reason state) predates this
-  // rewrite and still reads that same state — it just isn't androidMirror.ts
-  // itself producing it anymore for this code path, so a real transport
-  // failure here needs to keep reporting into it. Electron has no
-  // equivalent UI (no separate mirror step to pause), so this is a no-op
-  // there — matches FolderSyncCard.refreshPauseReason()'s existing guard.
+  // The "sync paused" banner (Account.tsx, driven by androidMirror.ts's
+  // pause-reason state) predates this rewrite and still reads that same
+  // state — it just isn't androidMirror.ts itself producing it anymore for
+  // this code path.
+  //
+  // This used to early-return on Electron, on the reasoning that Electron
+  // has no separate mirror step to pause. That was wrong, and expensively
+  // so: the state is plain Preferences and the banner is ordinary markup,
+  // so both work identically on desktop — the guard was the only thing
+  // stopping it. The cost was a desktop that failed to push for a week
+  // while showing nothing at all, ending up 82 commits ahead of its remote
+  // with every image it had migrated still sitting on the one machine. A
+  // sync that cannot report its own failure is worse than one that fails
+  // loudly, on every platform.
   // Judged over the whole push+pull pair, not each call individually: a
   // pull that "succeeds" only because RemoteTransport.exists() swallows a
   // permission error into `false` (see androidRemoteTransport.ts) must not
   // paper over a push that genuinely failed moments earlier in the same
   // cycle — the banner should only clear once both sides are healthy.
   async function reportTransportOutcome(ok: boolean, err?: unknown): Promise<void> {
-    if (isElectron()) return;
     await setSyncPauseReason(ok ? null : err instanceof Error ? err.message : 'Sync transport failed');
   }
 
@@ -546,6 +552,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
       }
       pushedObjects += pushResult.objectsUploaded;
       if (!pushResult.conflict) {
+        await recordSuccessfulPush();
         // Best-effort: keeps the Sync Folder's one-file catch-up fresh for
         // whichever device next hits an incomplete listing. Never allowed
         // to fail the sync itself — see gitBundleTransport.ts's own
@@ -625,6 +632,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
         break;
       }
       if (pushResult.pushed) {
+        await recordSuccessfulPush();
         // A successful git.push() means the remote now has every object
         // reachable from the pushed ref — same "safe to prune" moment as
         // folder mode's, just reached through the real git protocol
@@ -675,6 +683,28 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
  *  after the profile probe (firstRunProbe.ts) while the library itself is
  *  still arriving, so a screen showing an empty gallery needs to be able to
  *  say "still downloading" and to refill itself when entities land. */
+// ── When a push last actually landed ──────────────────────────────────────
+// The pause banner above only survives until something clears it, so a
+// failure that happens, gets retried, and fails again leaves no lasting
+// trace beyond a console line. This does: a push timestamp that stops
+// advancing is durable, cheap, and exactly the signal that would have made
+// a week of silently-failing pushes obvious on the first day. Deliberately
+// separate from LAST_SYNC_KEY, which advances whenever a cycle completes —
+// including cycles that fetched perfectly and pushed nothing at all, which
+// is the state that hid this.
+const LAST_PUSH_KEY = 'smartchef.sync.lastPushAt';
+
+async function recordSuccessfulPush(): Promise<void> {
+  await Preferences.set({ key: LAST_PUSH_KEY, value: new Date().toISOString() });
+}
+
+/** null on a device that has never pushed — a fresh install, or one whose
+ *  pushes have been failing since it was set up. */
+export async function getLastPushAt(): Promise<string | null> {
+  const { value } = await Preferences.get({ key: LAST_PUSH_KEY });
+  return value ?? null;
+}
+
 export function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
   return serialize(async () => {
     reportSyncStarted();

@@ -81,3 +81,25 @@ export function reportSyncFinished(appliedEntities: number): void {
     appliedRevision: appliedEntities > 0 ? status.appliedRevision + 1 : status.appliedRevision,
   });
 }
+
+/** True when this device is still completing sync cycles but its uploads
+ *  have stopped landing.
+ *
+ *  Deliberately requires a real gap between the two timestamps rather than
+ *  treating "never pushed" as stale: a device that has genuinely never had
+ *  anything to send would otherwise be accused of failing on its first
+ *  launch. That case is covered by the pause banner instead, which now
+ *  carries the actual reason.
+ *
+ *  A day of tolerance, because a healthy device advances the push timestamp
+ *  on every cycle it has commits for — so anything approaching 24 hours
+ *  behind is not a quiet period, it is a device whose pushes are failing. */
+export const STALE_PUSH_MS = 24 * 60 * 60 * 1000;
+
+export function stalePush(lastSyncAt: string | null, lastPushAt: string | null): boolean {
+  if (!lastSyncAt || !lastPushAt) return false;
+  const synced = Date.parse(lastSyncAt);
+  const pushed = Date.parse(lastPushAt);
+  if (Number.isNaN(synced) || Number.isNaN(pushed)) return false;
+  return synced - pushed > STALE_PUSH_MS;
+}
