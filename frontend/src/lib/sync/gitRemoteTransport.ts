@@ -68,6 +68,47 @@ async function ensureRemoteConfigured(dir: string, gitdir: string, config: GitRe
   await git.addRemote({ fs: gitfs, dir, gitdir, remote: REMOTE_NAME, url: config.url, force: true });
 }
 
+/** Turns isomorphic-git's transport errors into something that says what to
+ *  do about them.
+ *
+ *  This matters most for the case that actually happened: fetching a PUBLIC
+ *  repository needs no credentials at all, so a device with no token
+ *  configured syncs down perfectly and fails every push with 401 — which
+ *  reads, from the outside, as "sync works" right up until you notice
+ *  nothing has reached the remote in a week. The raw error is an opaque
+ *  HttpError; this names the cause and the fix. */
+function describeTransportError(err: unknown, action: 'fetch' | 'push'): Error {
+  const status =
+    typeof err === 'object' && err !== null && 'data' in err
+      ? (err as { data?: { statusCode?: number } }).data?.statusCode
+      : undefined;
+  const raw = err instanceof Error ? err.message : String(err);
+
+  if (status === 401 || /401|Unauthorized/i.test(raw)) {
+    return new Error(
+      action === 'push'
+        ? 'The git server rejected this device’s credentials, so nothing has been uploaded. Reading a public ' +
+          'repository needs no token, but writing to one does — add a personal access token with write access in ' +
+          'Account → Folder Sync.'
+        : 'The git server rejected this device’s credentials. Add a personal access token in Account → Folder Sync.'
+    );
+  }
+  if (status === 403) {
+    return new Error(
+      `The git server accepted this device’s token but refused the ${action}. The token is most likely missing ` +
+      'write access to this repository — on GitHub that is the `repo` scope, or `Contents: read and write` for a ' +
+      'fine-grained token.'
+    );
+  }
+  if (status === 404) {
+    return new Error(
+      'The git server could not find this repository. Check the URL, and — if it is private — that this device’s ' +
+      'token can see it, since a private repository is reported as missing rather than forbidden.'
+    );
+  }
+  return err instanceof Error ? err : new Error(raw);
+}
+
 export interface GitRemoteFetchResult {
   /** false when the remote has no commits on `main` yet — a brand-new
    *  empty repo, not an error (same meaning as gitObjectTransport.ts's
@@ -84,7 +125,9 @@ export async function fetchGitRemote(
 ): Promise<GitRemoteFetchResult> {
   await ensureRemoteConfigured(dir, gitdir, config);
 
-  const result = await git.fetch({
+  let result;
+  try {
+    result = await git.fetch({
     fs: gitfs,
     http,
     cache: gitCache(),
@@ -98,8 +141,11 @@ export async function fetchGitRemote(
     singleBranch: true,
     tags: false,
     onAuth: authFor(config),
-    onProgress: onProgress ? (p) => onProgress(p.loaded, p.total) : undefined,
-  });
+      onProgress: onProgress ? (p) => onProgress(p.loaded, p.total) : undefined,
+    });
+  } catch (err) {
+    throw describeTransportError(err, 'fetch');
+  }
 
   return { fetched: result.fetchHead !== null, remoteOid: result.fetchHead };
 }
@@ -142,7 +188,9 @@ export async function pushGitRemote(dir: string, gitdir: string, config: GitRemo
   // of git ancestry (gitObjectTransport.ts). Forcing here is what actually
   // applies that already-established safety net at the git-protocol
   // level, not a bypass of it.
-  const result = await git.push({
+  let result;
+  try {
+    result = await git.push({
     cache: gitCache(),
     fs: gitfs,
     http,
@@ -153,9 +201,12 @@ export async function pushGitRemote(dir: string, gitdir: string, config: GitRemo
     remote: REMOTE_NAME,
     ref: BRANCH,
     remoteRef: BRANCH,
-    force: true,
-    onAuth: authFor(config),
-  });
+      force: true,
+      onAuth: authFor(config),
+    });
+  } catch (err) {
+    throw describeTransportError(err, 'push');
+  }
 
   if (!result.ok) {
     return { pushed: false, conflict: true };

@@ -53,6 +53,7 @@ class
 clear
 close
 cloud
+cloud_off
 code
 collections
 collections_bookmark

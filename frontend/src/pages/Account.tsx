@@ -4,6 +4,7 @@ import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
 import { useTranslation } from 'react-i18next';
+import { stalePush } from '../lib/sync/syncStatus';
 import { useLanguages } from '../hooks/useLanguages';
 import { isValidLanguageCode, languageLabel, normalizeLanguageCode } from '../lib/languages';
 import type { ThemeMode } from '../store/app.store';
@@ -418,6 +419,10 @@ function FolderSyncCard() {
   const [savingName, setSavingName] = useState(false);
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [pauseReason, setPauseReason] = useState<string | null>(null);
+  // Distinct from lastSyncAt, which advances whenever a cycle COMPLETES —
+  // including one that fetched perfectly and pushed nothing, which is
+  // exactly the state that hid a week of failed pushes.
+  const [lastPushAt, setLastPushAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [resyncingAll, setResyncingAll] = useState(false);
   const [resyncProgress, setResyncProgress] = useState<{ phase: string; done: number; total: number } | null>(null);
@@ -433,10 +438,19 @@ function FolderSyncCard() {
     setDevices(await listDeviceRecords());
   };
 
-  const refreshPauseReason = async () => {
-    if (electron) return; // Electron has no separate mirror step to pause
-    const { getSyncPauseReason } = await import('../lib/sync/androidMirror');
-    setPauseReason(await getSyncPauseReason());
+  // No platform guard: this used to early-return on Electron, on the
+  // reasoning that desktop has no separate mirror step to pause. The state
+  // is plain Preferences and the banner below is ordinary markup, so both
+  // work identically there — and the guard is what let a desktop fail to
+  // push for a week while showing nothing at all.
+  const refreshSyncHealth = async () => {
+    const [{ getSyncPauseReason }, { getLastPushAt }] = await Promise.all([
+      import('../lib/sync/androidMirror'),
+      import('../lib/sync/gitSync'),
+    ]);
+    const [reason, pushedAt] = await Promise.all([getSyncPauseReason(), getLastPushAt()]);
+    setPauseReason(reason);
+    setLastPushAt(pushedAt);
   };
 
   useEffect(() => {
@@ -452,6 +466,7 @@ function FolderSyncCard() {
       const { getLastSyncAt, getDeviceId, getDeviceName } = await import('../lib/sync/gitSync');
       const { getSyncMode, getGitRemoteConfig, getSyncInterval } = await import('../lib/sync/syncSettings');
       setLastSyncAt(await getLastSyncAt());
+      await refreshSyncHealth();
       setDeviceId(await getDeviceId());
       const name = await getDeviceName();
       setDeviceNameState(name);
@@ -496,8 +511,8 @@ function FolderSyncCard() {
       const r = await syncNow((p) => setProgress(p));
       setResult(r);
       setLastSyncAt(r.lastSyncAt);
-      if (syncMode === 'folder') await Promise.all([refreshDevices(), refreshPauseReason()]);
-      else await refreshPauseReason();
+      if (syncMode === 'folder') await Promise.all([refreshDevices(), refreshSyncHealth()]);
+      else await refreshSyncHealth();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sync failed');
     } finally {
@@ -745,9 +760,22 @@ function FolderSyncCard() {
 
       <div className="space-y-5">
         {pauseReason && (
-          <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-4 py-3 flex items-start gap-2">
+          <p className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
             Sync paused — {pauseReason}
+          </p>
+        )}
+
+        {/* Shown whether or not anything is currently failing: a push time
+            that has stopped advancing is the durable signal, where the
+            banner above only lasts until something clears it. */}
+        {stalePush(lastSyncAt, lastPushAt) && (
+          <p className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 rounded-xl px-4 py-3 flex items-start gap-2">
+            <span className="material-symbols-outlined text-[16px] shrink-0">cloud_off</span>
+            <span>
+              This device is receiving changes but not sending them — its last successful upload was{' '}
+              {new Date(lastPushAt!).toLocaleString()}. Anything created here since then is still only on this device.
+            </span>
           </p>
         )}
 
