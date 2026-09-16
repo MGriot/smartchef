@@ -48,6 +48,10 @@ export interface GitHttpPlugin {
   readBodyChunk(opts: { path: string; offset: number; length: number }): Promise<{
     data: string; // base64
     bytesRead: number;
+    /** The offset the native side actually read from, echoed so a
+     *  mismatch can be caught — see spilledBody.ts. Absent on native
+     *  builds older than 1.2.1. */
+    offset?: number;
   }>;
   /** Deletes a spilled body. Succeeds if it is already gone. */
   releaseBody(opts: { path: string }): Promise<void>;
@@ -56,7 +60,7 @@ export interface GitHttpPlugin {
    *  has to come from there and cannot come from isomorphic-git. */
   addListener(
     eventName: 'gitHttpProgress',
-    listener: (event: { url: string; loaded: number; total: number }) => void
+    listener: (event: { url: string; loaded: number; total: number; done?: boolean }) => void
   ): Promise<{ remove: () => Promise<void> }>;
 }
 
@@ -80,13 +84,13 @@ export const GitHttp = registerPlugin<GitHttpPlugin>('GitHttp');
  *  Returns an unsubscribe function; call it when the operation ends, or a
  *  later download will keep driving a screen that has moved on. */
 export function observeDownloadProgress(
-  onProgress: (loaded: number, total: number) => void
+  onProgress: (loaded: number, total: number, done: boolean) => void
 ): () => void {
   let removePromise: Promise<{ remove: () => Promise<void> }> | null = null;
   let cancelled = false;
   try {
     removePromise = GitHttp.addListener('gitHttpProgress', (e) => {
-      if (!cancelled) onProgress(e.loaded, e.total);
+      if (!cancelled) onProgress(e.loaded, e.total, e.done === true);
     });
   } catch {
     // No plugin here (Electron, or a test double without addListener).

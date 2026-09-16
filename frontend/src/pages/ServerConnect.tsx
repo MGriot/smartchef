@@ -81,11 +81,18 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   // reported — the fix for "is it stuck?" is being able to see that it
   // isn't, and where it stopped when it is.
   const [probePhase, setProbePhase] = useState<import('../lib/sync/firstRunProbe').ProbePhase | null>(null);
+  // The host refused the token but the library was readable without it —
+  // reported rather than silently worked around, because reading a public
+  // repository needs no credentials while every upload from this device
+  // will fail until it is fixed. That exact gap once hid a week of failed
+  // pushes on a desktop.
+  const [tokenRejected, setTokenRejected] = useState(false);
 
   const checkForExistingProfiles = async () => {
     setCheckingFolder(true);
     setProbeFailure(null);
     setProbePhase(null);
+    setTokenRejected(false);
     try {
       const { initLocalSchema } = await import('../db/local');
       await initLocalSchema();
@@ -108,6 +115,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       });
 
       if (probe?.supported) {
+        setTokenRejected(probe.tokenRejected === true);
         await importProbedProfiles(probe.profiles);
       } else if (probe) {
         const { syncNow } = await import('../lib/sync/gitSync');
@@ -208,6 +216,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   // rather than leaving sync mode pointed at a now-cleared git remote.
   const handleRemoveGitRemote = async () => {
     setProbeFailure(null);
+    setTokenRejected(false);
     setGitRemoteConfigured(null);
     setConnectionTestResult(null);
     setFolderProfiles(null);
@@ -525,6 +534,18 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                     firstRunProbe.ts. It used to run a whole sync here,
                     which on a phone was indistinguishable from a hang. */}
                 <p className="text-xs text-zinc-400 dark:text-zinc-600 text-center">Only the profiles are fetched now — your recipes download in the background once you're in.</p>
+              </div>
+            )}
+
+            {!checkingFolder && tokenRejected && (
+              <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-4 space-y-1">
+                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Your access token was rejected</p>
+                <p className="text-xs text-amber-800 dark:text-amber-300/80">
+                  The library could still be read because the repository is public, so you can carry on — but this device
+                  won’t be able to upload anything until the token is fixed. It may be mistyped, expired or revoked, or missing
+                  write access (<code>repo</code>, or <code>Contents: read and write</code> for a fine-grained token). You can
+                  change it later in Account → Folder Sync.
+                </p>
               </div>
             )}
 

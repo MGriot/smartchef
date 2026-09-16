@@ -147,17 +147,22 @@ public class GitHttpPlugin extends Plugin {
             long now = System.currentTimeMillis();
             if (now - lastReportAt >= PROGRESS_INTERVAL_MS) {
                 lastReportAt = now;
-                emitProgress(url, total, contentLength);
+                emitProgress(url, total, contentLength, false);
             }
         }
-        emitProgress(url, total, contentLength); // final, exact figure
+        emitProgress(url, total, contentLength, true); // final, exact figure
         return total;
     }
 
-    private void emitProgress(String url, long loaded, long total) {
+    private void emitProgress(String url, long loaded, long total, boolean done) {
         JSObject event = new JSObject();
         event.put("url", url != null ? url : "");
         event.put("loaded", loaded);
+        // Explicit, because `loaded >= total` cannot say it: GitHub sends
+        // upload-pack chunked, total is unknown, and the screen used to sit
+        // on "Downloading… 2.1 MB" through everything that happens after the
+        // last byte arrives.
+        event.put("done", done);
         // -1 from getContentLength() means the server is using chunked
         // encoding and has not said how big this is — which GitHub does for
         // upload-pack. Normalised to 0 so the renderer shows bytes counting
@@ -268,14 +273,28 @@ public class GitHttpPlugin extends Plugin {
     public void readBodyChunk(PluginCall call) {
         try {
             File file = resolveSpillFile(call.getString("path"));
-            long offset = call.getLong("offset", 0L);
-            int length = call.getInt("length", INLINE_MAX_BYTES);
+            // NOT call.getLong(). Capacitor's PluginCall.getLong() returns
+            // the value only when it is already a java.lang.Long, and a
+            // JavaScript number small enough to fit an int — every offset
+            // below 2 GB — arrives in the JSON as an Integer. getLong()
+            // therefore silently returned the 0L default for every call, so
+            // each chunk was read from the START of the file: a 2.2 MB pack
+            // came back as its first megabyte three times over, isomorphic-git
+            // parsed garbage, and the WebView renderer spun on it with no
+            // timer able to fire. JSONObject.optLong() accepts any numeric
+            // type. The same trap applies to anything numeric read here.
+            long offset = call.getData().optLong("offset", 0L);
+            int length = call.getData().optInt("length", INLINE_MAX_BYTES);
             if (offset < 0 || length <= 0) throw new IOException("Bad offset/length");
 
             long remaining = file.length() - offset;
             int toRead = remaining <= 0 ? 0 : (int) Math.min((long) length, remaining);
 
             JSObject ret = new JSObject();
+            // Echoed back so the renderer can check it got the slice it
+            // asked for. The bug above corrupted data without failing; with
+            // this, any future mismatch fails loudly at the first chunk.
+            ret.put("offset", offset);
             if (toRead == 0) {
                 ret.put("data", "");
                 ret.put("bytesRead", 0);

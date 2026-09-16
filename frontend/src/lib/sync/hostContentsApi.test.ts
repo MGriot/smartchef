@@ -74,7 +74,7 @@ describe('listDirectoryFiles on GitHub', () => {
 
     const files = await listDirectoryFiles(config, 'profiles');
 
-    expect(files).toEqual([{ path: 'profiles/a.json', text: '{"name":"Ana"}' }]);
+    expect(files).toEqual({ files: [{ path: 'profiles/a.json', text: '{"name":"Ana"}' }], tokenRejected: false });
     const listUrl = (nativeHttpRequest.mock.calls[0][0] as { url: string }).url;
     expect(listUrl).toBe('https://api.github.com/repos/MGriot/SmartChefSync-/contents/profiles?ref=main');
   });
@@ -111,7 +111,7 @@ describe('listDirectoryFiles on GitHub', () => {
     // caller must not fall back to a clone that would find nothing either.
     nativeHttpRequest.mockResolvedValue({ statusCode: 404, headers: {}, body: new Uint8Array() });
 
-    await expect(listDirectoryFiles(config, 'profiles')).resolves.toEqual([]);
+    await expect(listDirectoryFiles(config, 'profiles')).resolves.toEqual({ files: [], tokenRejected: false });
   });
 
   it('propagates a real failure so the caller can fall back to git', async () => {
@@ -134,7 +134,7 @@ describe('listDirectoryFiles on GitLab', () => {
 
     const files = await listDirectoryFiles(config, 'profiles');
 
-    expect(files).toEqual([{ path: 'profiles/a.json', text: '{"name":"Ana"}' }]);
+    expect(files).toEqual({ files: [{ path: 'profiles/a.json', text: '{"name":"Ana"}' }], tokenRejected: false });
     const urls = nativeHttpRequest.mock.calls.map((c) => (c[0] as { url: string }).url);
     expect(urls[0]).toContain('/projects/group%2Fsub%2Frecipes/repository/tree');
     expect(urls[1]).toContain('/repository/files/profiles%2Fa.json/raw?ref=main');
@@ -162,5 +162,86 @@ describe('an unrecognised host', () => {
 
     expect(result).toBeNull();
     expect(nativeHttpRequest).not.toHaveBeenCalled();
+  });
+});
+
+// ── A token the host refuses ────────────────────────────────────────────
+// GitHub does not fall back to anonymous access when a request carries a bad
+// credential. Measured against the real public library: an invalid token
+// gets 401 from the contents API and 404 from raw downloads, where no token
+// at all gets 200. Before the retry below, every device with a stale token
+// went down the slow clone path for a repository it could read perfectly
+// well — which is exactly the device that got stuck on setup.
+describe('when the host rejects the configured token', () => {
+  const config = { url: 'https://github.com/MGriot/SmartChefSync-', username: null, token: 'ghp_expired', corsProxy: null };
+  const unauthorised = { statusCode: 401, headers: {}, body: new Uint8Array() };
+
+  function authed(call: unknown[]): boolean {
+    return 'Authorization' in (call[0] as { headers: Record<string, string> }).headers;
+  }
+
+  it('retries without credentials and still reads a public repository', async () => {
+    nativeHttpRequest.mockImplementation(async (req: { url: string; headers: Record<string, string> }) => {
+      if (req.headers.Authorization) return unauthorised;
+      return req.url.includes('/contents/')
+        ? jsonResponse([{ name: 'a.json', path: 'profiles/a.json', type: 'file', download_url: 'https://raw.test/a.json' }])
+        : textResponse('{"name":"Ana"}');
+    });
+
+    const result = await listDirectoryFiles(config, 'profiles');
+
+    expect(result?.files).toEqual([{ path: 'profiles/a.json', text: '{"name":"Ana"}' }]);
+  });
+
+  it('reports the rejection instead of quietly working around it', async () => {
+    // Reading needs no token, so onboarding carries on — but every upload
+    // from this device will fail, and that needs saying.
+    nativeHttpRequest.mockImplementation(async (req: { headers: Record<string, string> }) =>
+      req.headers.Authorization ? unauthorised : jsonResponse([]));
+
+    const result = await listDirectoryFiles(config, 'profiles');
+
+    expect(result?.tokenRejected).toBe(true);
+  });
+
+  it('does not send the rejected token again on the file downloads', async () => {
+    // GitHub answers 404 on raw.githubusercontent.com for a bad token, which
+    // would otherwise look like missing files.
+    nativeHttpRequest.mockImplementation(async (req: { url: string; headers: Record<string, string> }) => {
+      if (req.headers.Authorization) return req.url.includes('raw') ? { statusCode: 404, headers: {}, body: new Uint8Array() } : unauthorised;
+      return req.url.includes('/contents/')
+        ? jsonResponse([{ name: 'a.json', path: 'profiles/a.json', type: 'file', download_url: 'https://raw.test/a.json' }])
+        : textResponse('{"name":"Ana"}');
+    });
+
+    await listDirectoryFiles(config, 'profiles');
+
+    const downloads = nativeHttpRequest.mock.calls.filter((c) => (c[0] as { url: string }).url.includes('raw.test'));
+    expect(downloads.length).toBe(1);
+    expect(authed(downloads[0])).toBe(false);
+  });
+
+  it('still fails for a private repository, where anonymous reads are refused too', async () => {
+    // The retry must only rescue "the credentials were the only problem" —
+    // not paper over a repository this device genuinely cannot see.
+    nativeHttpRequest.mockResolvedValue(unauthorised);
+
+    await expect(listDirectoryFiles(config, 'profiles')).rejects.toThrow(/401/);
+  });
+
+  it('does not retry when no token was configured in the first place', async () => {
+    nativeHttpRequest.mockResolvedValue(unauthorised);
+
+    await expect(listDirectoryFiles({ ...config, token: null }, 'profiles')).rejects.toThrow(/401/);
+    expect(nativeHttpRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports no rejection when the token works', async () => {
+    nativeHttpRequest.mockResolvedValue(jsonResponse([]));
+
+    const result = await listDirectoryFiles(config, 'profiles');
+
+    expect(result?.tokenRejected).toBe(false);
+    expect(authed(nativeHttpRequest.mock.calls[0])).toBe(true);
   });
 });
