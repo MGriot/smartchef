@@ -5,6 +5,9 @@ import { initStandaloneProfile, activateStandaloneProfile, type StandaloneProfil
 import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { ResolvedImage } from '../components/CoverImage';
+import { RemoteAccessNotice } from '../components/RemoteAccessNotice';
+import { checkTokenShape } from '../lib/sync/tokenShape';
+import type { RemoteAccessResult } from '../lib/sync/remoteAccessProbe';
 
 /** Turns a probe phase into something worth reading. Bytes are shown
  *  rather than a bare percentage because on a slow link the numbers moving
@@ -61,8 +64,9 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   const [gitRemoteToken, setGitRemoteToken] = useState('');
   const [gitRemoteCorsProxy, setGitRemoteCorsProxy] = useState('');
   const [showCorsProxy, setShowCorsProxy] = useState(false);
+  const tokenShapeProblem = checkTokenShape(gitRemoteUrl, gitRemoteToken);
   const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionTestResult, setConnectionTestResult] = useState<'ok' | string | null>(null);
+  const [connectionTestResult, setConnectionTestResult] = useState<RemoteAccessResult | null>(null);
   const [savingGitRemote, setSavingGitRemote] = useState(false);
 
   // A folder someone else's device already wrote profiles into — offered
@@ -176,14 +180,18 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
     setTestingConnection(true);
     setConnectionTestResult(null);
     try {
-      const { testGitRemoteConnection } = await import('../lib/sync/gitRemoteTransport');
-      const err = await testGitRemoteConnection({
-        url: gitRemoteUrl.trim(),
-        username: gitRemoteUsername.trim() || null,
-        token: gitRemoteToken.trim() || null,
-        corsProxy: gitRemoteCorsProxy.trim() || null,
-      });
-      setConnectionTestResult(err ?? 'ok');
+      const { probeGitRemoteAccess } = await import('../lib/sync/remoteAccessProbe');
+      // Unlike Account's copy of this handler, the token here is always
+      // whatever is in the field — this form has no "leave blank to keep"
+      // state to fall back through.
+      setConnectionTestResult(
+        await probeGitRemoteAccess({
+          url: gitRemoteUrl.trim(),
+          username: gitRemoteUsername.trim() || null,
+          token: gitRemoteToken.trim() || null,
+          corsProxy: gitRemoteCorsProxy.trim() || null,
+        })
+      );
     } finally {
       setTestingConnection(false);
     }
@@ -436,6 +444,14 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                         placeholder="Personal access token / password"
                         className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                       />
+                      {/* Advisory only — Continue stays enabled. See
+                          tokenShape.ts for why a hard block is worse. */}
+                      {tokenShapeProblem && (
+                        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                          <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
+                          {tokenShapeProblem.message}
+                        </p>
+                      )}
                     </div>
                   </div>
                   {showCorsProxy ? (
@@ -455,9 +471,19 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                     </button>
                   )}
                   {connectionTestResult && (
-                    <p className={`text-xs font-medium flex items-start gap-2 ${connectionTestResult === 'ok' ? 'text-emerald-700' : 'text-red-600'}`}>
-                      <span className="material-symbols-outlined text-[16px] shrink-0">{connectionTestResult === 'ok' ? 'check_circle' : 'error'}</span>
-                      {connectionTestResult === 'ok' ? 'Reachable — credentials accepted.' : connectionTestResult}
+                    <p
+                      className={`text-xs font-medium flex items-start gap-2 ${
+                        connectionTestResult.kind === 'writable'
+                          ? 'text-emerald-700'
+                          : connectionTestResult.kind === 'not-found' || connectionTestResult.kind === 'unreachable'
+                            ? 'text-red-600'
+                            : 'text-amber-700 dark:text-amber-300'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[16px] shrink-0">
+                        {connectionTestResult.kind === 'writable' ? 'check_circle' : 'warning'}
+                      </span>
+                      {connectionTestResult.message}
                     </p>
                   )}
                   {error && <p className="text-xs text-red-600 font-medium">{error}</p>}
@@ -538,15 +564,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
             )}
 
             {!checkingFolder && tokenRejected && (
-              <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-4 space-y-1">
-                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Your access token was rejected</p>
-                <p className="text-xs text-amber-800 dark:text-amber-300/80">
-                  The library could still be read because the repository is public, so you can carry on — but this device
-                  won’t be able to upload anything until the token is fixed. It may be mistyped, expired or revoked, or missing
-                  write access (<code>repo</code>, or <code>Contents: read and write</code> for a fine-grained token). You can
-                  change it later in Account → Folder Sync.
-                </p>
-              </div>
+              <RemoteAccessNotice kind="token-rejected" hint="You can change it later in Account → Folder Sync." />
             )}
 
             {!checkingFolder && probeFailure && (

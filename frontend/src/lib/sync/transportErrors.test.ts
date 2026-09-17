@@ -66,6 +66,15 @@ describe('a push rejected for credentials', () => {
     );
   });
 
+  it('names the GitHub token prefixes, so a token from the wrong service is self-diagnosing', async () => {
+    // The real failure was a Google OAuth token in the GitHub token field.
+    // "Mistyped, expired or revoked" sends someone to re-check a token that
+    // was never a GitHub credential; naming the shape ends that in a glance.
+    pushMock.mockRejectedValue(httpError(401));
+
+    await expect(pushGitRemote('/d', '/d/.git', config)).rejects.toThrow(/ghp_ or github_pat_/);
+  });
+
   it('names the missing scope on a 403 rather than the raw error', async () => {
     pushMock.mockRejectedValue(httpError(403));
 
@@ -113,5 +122,11 @@ describe('a fetch rejected for credentials', () => {
     fetchMock.mockRejectedValue(httpError(401));
 
     await expect(fetchGitRemote('/d', '/d/.git', config)).rejects.not.toThrow(/uploaded/);
+  });
+
+  it('names the token prefixes on the fetch path too', async () => {
+    fetchMock.mockRejectedValue(httpError(401));
+
+    await expect(fetchGitRemote('/d', '/d/.git', config)).rejects.toThrow(/ghp_ or github_pat_/);
   });
 });

@@ -22,7 +22,7 @@ vi.mock('isomorphic-git', () => ({
   addRemote: (...args: unknown[]) => addRemoteMock(...args),
 }));
 
-import { fetchGitRemote, pushGitRemote, testGitRemoteConnection } from './gitRemoteTransport';
+import { fetchGitRemote, pushGitRemote, gitBasicCredentials } from './gitRemoteTransport';
 import type { GitRemoteConfig } from './syncSettings';
 
 beforeEach(() => {
@@ -220,16 +220,32 @@ describe('ensureRemoteConfigured (via fetchGitRemote/pushGitRemote)', () => {
   });
 });
 
-describe('testGitRemoteConnection', () => {
-  it('returns null when the remote answers successfully', async () => {
-    getRemoteInfoMock.mockResolvedValue({ refs: {} });
-
-    expect(await testGitRemoteConnection(baseConfig)).toBeNull();
+// testGitRemoteConnection() used to be tested here. It is gone: built on
+// git.getRemoteInfo(), it could not send credentials to a public repo at
+// all (isomorphic-git only offers them after a 401, which a public
+// upload-pack advertisement never returns), so it reported success for
+// tokens it had never transmitted. remoteAccessProbe.test.ts covers its
+// replacement.
+describe('gitBasicCredentials', () => {
+  // Exported so remoteAccessProbe.ts can build the same Basic header by
+  // hand. If these two ever disagree, "Test Connection" starts answering a
+  // different question than sync asks — the exact class of bug that let a
+  // Google OAuth token sit in the GitHub token field for a week.
+  it('has nothing to offer when no token is configured', () => {
+    expect(gitBasicCredentials(baseConfig)).toBeNull();
   });
 
-  it('returns the error message when the remote is unreachable or rejects auth', async () => {
-    getRemoteInfoMock.mockRejectedValue(new Error('401 Unauthorized'));
+  it('defaults the username to the token itself, matching the https://<token>@ shorthand GitHub documents', () => {
+    expect(gitBasicCredentials({ ...baseConfig, token: 'ghp_secret' })).toEqual({
+      username: 'ghp_secret',
+      password: 'ghp_secret',
+    });
+  });
 
-    expect(await testGitRemoteConnection(baseConfig)).toBe('401 Unauthorized');
+  it('uses an explicit username when one is set', () => {
+    expect(gitBasicCredentials({ ...baseConfig, username: 'alice', token: 'ghp_secret' })).toEqual({
+      username: 'alice',
+      password: 'ghp_secret',
+    });
   });
 });

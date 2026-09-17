@@ -15,7 +15,33 @@ import type { StandaloneProfile } from '../lib/standalone';
 import type { MigrationSummary } from '../lib/storageMigration';
 import type { SyncResult } from '../lib/sync/gitSync';
 import type { TransferProgress } from '../lib/sync/gitObjectTransport';
-import type { SyncInterval, SyncIntervalUnit } from '../lib/sync/syncSettings';
+import type { SyncInterval, SyncIntervalUnit, GitRemoteAccessProblem } from '../lib/sync/syncSettings';
+import type { RemoteAccessKind, RemoteAccessResult } from '../lib/sync/remoteAccessProbe';
+import { RemoteAccessNotice } from '../components/RemoteAccessNotice';
+import { checkTokenShape } from '../lib/sync/tokenShape';
+
+// How each verdict reads. Only 'writable' is a success; the amber group is
+// "this works for reading and will never upload", which is precisely the
+// state that used to render as a green "credentials accepted".
+const TEST_RESULT_TONE: Record<RemoteAccessKind, string> = {
+  writable: 'text-emerald-700',
+  'read-only': 'text-amber-700 dark:text-amber-300',
+  'token-rejected': 'text-amber-700 dark:text-amber-300',
+  'no-credentials': 'text-amber-700 dark:text-amber-300',
+  'malformed-token': 'text-amber-700 dark:text-amber-300',
+  'not-found': 'text-red-600',
+  unreachable: 'text-red-600',
+};
+
+const TEST_RESULT_ICON: Record<RemoteAccessKind, string> = {
+  writable: 'check_circle',
+  'read-only': 'warning',
+  'token-rejected': 'warning',
+  'no-credentials': 'warning',
+  'malformed-token': 'warning',
+  'not-found': 'error',
+  unreachable: 'error',
+};
 
 interface SyncPeer {
   deviceId: string;
@@ -405,10 +431,18 @@ function FolderSyncCard() {
   const [gitRemoteTokenConfigured, setGitRemoteTokenConfigured] = useState(false);
   const [gitRemoteTokenTouched, setGitRemoteTokenTouched] = useState(false);
   const [gitRemoteCorsProxy, setGitRemoteCorsProxy] = useState('');
+  // Recomputed on every keystroke, but only once the field has been
+  // touched — a stored token this build cannot judge must not light up a
+  // warning the user did not cause.
+  const tokenShapeProblem = gitRemoteTokenTouched ? checkTokenShape(gitRemoteUrl, gitRemoteToken) : null;
   const [showCorsProxy, setShowCorsProxy] = useState(false);
   const [savingGitRemote, setSavingGitRemote] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionTestResult, setConnectionTestResult] = useState<'ok' | string | null>(null);
+  const [connectionTestResult, setConnectionTestResult] = useState<RemoteAccessResult | null>(null);
+  // Loaded from Preferences rather than component state: the screen that
+  // DETECTS a rejected token is first-run setup, which has no way to fix
+  // it. This is where it gets fixed, so this is where it has to be shown.
+  const [accessProblem, setAccessProblem] = useState<GitRemoteAccessProblem | null>(null);
   const [intervalValue, setIntervalValueState] = useState(5);
   const [intervalUnit, setIntervalUnitState] = useState<SyncIntervalUnit>('minutes');
   const [savingInterval, setSavingInterval] = useState(false);
@@ -444,13 +478,19 @@ function FolderSyncCard() {
   // work identically there — and the guard is what let a desktop fail to
   // push for a week while showing nothing at all.
   const refreshSyncHealth = async () => {
-    const [{ getSyncPauseReason }, { getLastPushAt }] = await Promise.all([
+    const [{ getSyncPauseReason }, { getLastPushAt }, { getGitRemoteAccessProblem }] = await Promise.all([
       import('../lib/sync/androidMirror'),
       import('../lib/sync/gitSync'),
+      import('../lib/sync/syncSettings'),
     ]);
-    const [reason, pushedAt] = await Promise.all([getSyncPauseReason(), getLastPushAt()]);
+    const [reason, pushedAt, problem] = await Promise.all([
+      getSyncPauseReason(),
+      getLastPushAt(),
+      getGitRemoteAccessProblem(),
+    ]);
     setPauseReason(reason);
     setLastPushAt(pushedAt);
+    setAccessProblem(problem);
   };
 
   useEffect(() => {
@@ -657,14 +697,23 @@ function FolderSyncCard() {
     setTestingConnection(true);
     setConnectionTestResult(null);
     try {
-      const { testGitRemoteConnection } = await import('../lib/sync/gitRemoteTransport');
-      const err = await testGitRemoteConnection({
+      const [{ probeGitRemoteAccess, persistableProblem }, { getGitRemoteConfig, setGitRemoteAccessProblem }] =
+        await Promise.all([import('../lib/sync/remoteAccessProbe'), import('../lib/sync/syncSettings')]);
+      // Falls back to the SAVED token when the field was left blank. Passing
+      // null here — which is what this did — is how the button managed to
+      // test anonymously and then report "credentials accepted" about a
+      // token it had never sent.
+      const saved = await getGitRemoteConfig();
+      const result = await probeGitRemoteAccess({
         url: gitRemoteUrl.trim(),
         username: gitRemoteUsername.trim() || null,
-        token: gitRemoteTokenTouched ? (gitRemoteToken.trim() || null) : null,
+        token: gitRemoteTokenTouched ? (gitRemoteToken.trim() || null) : (saved?.token ?? null),
         corsProxy: gitRemoteCorsProxy.trim() || null,
       });
-      setConnectionTestResult(err ?? 'ok');
+      setConnectionTestResult(result);
+      const problem = persistableProblem(result);
+      await setGitRemoteAccessProblem(problem);
+      setAccessProblem(problem);
     } finally {
       setTestingConnection(false);
     }
@@ -766,6 +815,11 @@ function FolderSyncCard() {
           </p>
         )}
 
+        {/* Survives a reload and a restart, unlike pauseReason: a device
+            that can read but not write never fails loudly enough to set
+            one. */}
+        <RemoteAccessNotice kind={accessProblem} />
+
         {/* Shown whether or not anything is currently failing: a push time
             that has stopped advancing is the durable signal, where the
             banner above only lasts until something clears it. */}
@@ -857,6 +911,14 @@ function FolderSyncCard() {
                 touched={gitRemoteTokenTouched}
                 onChange={(v, t) => { setGitRemoteToken(v); setGitRemoteTokenTouched(t); }}
               />
+              {/* Advisory only — Save stays enabled. See tokenShape.ts for
+                  why a hard block would be the worse failure. */}
+              {tokenShapeProblem && (
+                <p className="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
+                  {tokenShapeProblem.message}
+                </p>
+              )}
             </div>
             {showCorsProxy ? (
               <div>
@@ -880,9 +942,9 @@ function FolderSyncCard() {
               </button>
             )}
             {connectionTestResult && (
-              <p className={`text-xs font-medium flex items-start gap-2 ${connectionTestResult === 'ok' ? 'text-emerald-700' : 'text-red-600'}`}>
-                <span className="material-symbols-outlined text-[16px] shrink-0">{connectionTestResult === 'ok' ? 'check_circle' : 'error'}</span>
-                {connectionTestResult === 'ok' ? 'Reachable — credentials accepted.' : connectionTestResult}
+              <p className={`text-xs font-medium flex items-start gap-2 ${TEST_RESULT_TONE[connectionTestResult.kind]}`}>
+                <span className="material-symbols-outlined text-[16px] shrink-0">{TEST_RESULT_ICON[connectionTestResult.kind]}</span>
+                {connectionTestResult.message}
               </p>
             )}
             <div className="flex gap-2 flex-wrap">

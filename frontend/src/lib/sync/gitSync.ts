@@ -34,7 +34,13 @@ import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_NAM
 import { writeBundleIfStale, tryCatchUpFromBundle } from './gitBundleTransport';
 import { packLooseObjectsAfterPush } from './gitPacking';
 import { fetchGitRemote, pushGitRemote } from './gitRemoteTransport';
-import { getSyncMode, getGitRemoteConfig, getSyncIntervalMinutes, type GitRemoteConfig } from './syncSettings';
+import {
+  getSyncMode,
+  getGitRemoteConfig,
+  getSyncIntervalMinutes,
+  setGitRemoteAccessProblem,
+  type GitRemoteConfig,
+} from './syncSettings';
 import { createElectronRemoteTransport } from './electronRemoteTransport';
 import { createAndroidRemoteTransport } from './androidRemoteTransport';
 import { getMirrorState, setSyncPauseReason } from './androidMirror';
@@ -696,6 +702,12 @@ const LAST_PUSH_KEY = 'smartchef.sync.lastPushAt';
 
 async function recordSuccessfulPush(): Promise<void> {
   await Preferences.set({ key: LAST_PUSH_KEY, value: new Date().toISOString() });
+  // A push that actually landed is the only honest all-clear there is: it
+  // proves write access empirically, where every other signal in this app
+  // only ever proved the remote could be READ. Clearing it here means a
+  // user who fixes their token sees the banner go away by itself, without
+  // having to find the Test Connection button.
+  await setGitRemoteAccessProblem(null);
 }
 
 /** null on a device that has never pushed — a fresh install, or one whose
