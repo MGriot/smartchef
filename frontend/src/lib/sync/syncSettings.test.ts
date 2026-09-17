@@ -22,6 +22,7 @@ vi.mock('@capacitor/preferences', () => ({
 import {
   getSyncMode, setSyncMode,
   getGitRemoteConfig, setGitRemoteConfig, clearGitRemoteConfig,
+  getGitRemoteAccessProblem, setGitRemoteAccessProblem,
   getSyncInterval, setSyncInterval, getSyncIntervalMinutes, syncIntervalToMinutes,
   DEFAULT_SYNC_INTERVAL, MIN_SYNC_INTERVAL_MINUTES,
 } from './syncSettings';
@@ -138,5 +139,62 @@ describe('sync interval', () => {
   it('getSyncIntervalMinutes() is the minutes-only view gitSync.ts\'s watcher uses', async () => {
     await setSyncInterval({ value: 1, unit: 'weeks' });
     expect(await getSyncIntervalMinutes()).toBe(7 * 24 * 60);
+  });
+});
+
+describe('the remembered reason this device cannot upload', () => {
+  // Persisted rather than held in component state because the screen that
+  // DETECTS a rejected token (first-run setup) is not the screen that can
+  // fix it (Account -> Folder Sync).
+  const remote = { url: 'https://github.com/me/recipes.git', username: null, corsProxy: null };
+
+  it('round-trips a problem', async () => {
+    await setGitRemoteAccessProblem('token-rejected');
+    expect(await getGitRemoteAccessProblem()).toBe('token-rejected');
+  });
+
+  it('reports null when nothing has gone wrong, or nothing has checked yet', async () => {
+    expect(await getGitRemoteAccessProblem()).toBeNull();
+  });
+
+  it('ignores a value this build does not recognise', async () => {
+    // An older build, or a hand-edited preference. A bad value here would
+    // drive the banner copy lookup to undefined.
+    store.set('smartchef.sync.gitRemote.accessProblem', 'something-else');
+    expect(await getGitRemoteAccessProblem()).toBeNull();
+  });
+
+  it('clears the problem when a new token is saved, since it has not been judged yet', async () => {
+    await setGitRemoteAccessProblem('token-rejected');
+
+    await setGitRemoteConfig({ ...remote, token: 'ghp_new' });
+
+    expect(await getGitRemoteAccessProblem()).toBeNull();
+  });
+
+  it('clears it when the token is deliberately removed', async () => {
+    await setGitRemoteAccessProblem('token-rejected');
+
+    await setGitRemoteConfig({ ...remote, token: null });
+
+    expect(await getGitRemoteAccessProblem()).toBeNull();
+  });
+
+  it('leaves it alone when a save did not touch the token', async () => {
+    // token: undefined is the settings form's leave-blank-to-keep path.
+    // The stored token is unchanged, so the warning is still accurate.
+    await setGitRemoteAccessProblem('token-rejected');
+
+    await setGitRemoteConfig({ ...remote, corsProxy: 'https://cors.test' });
+
+    expect(await getGitRemoteAccessProblem()).toBe('token-rejected');
+  });
+
+  it('is forgotten along with the rest of the remote config', async () => {
+    await setGitRemoteAccessProblem('read-only');
+
+    await clearGitRemoteConfig();
+
+    expect(await getGitRemoteAccessProblem()).toBeNull();
   });
 });

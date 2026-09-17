@@ -50,7 +50,7 @@ import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
 import { gitCache, resetGitCache } from './gitCache';
 import { getHiddenCloneDir } from './hiddenClone';
-import { getSyncMode, getGitRemoteConfig } from './syncSettings';
+import { getSyncMode, getGitRemoteConfig, setGitRemoteAccessProblem } from './syncSettings';
 import { shallowCloneTip } from './gitRemoteTransport';
 import { listDirectoryFiles } from './hostContentsApi';
 import { observeDownloadProgress } from '../gitHttpBridge';
@@ -209,6 +209,13 @@ async function probeInner(
     if (listing) {
       const { files } = listing;
       tokenRejected = listing.tokenRejected;
+      // Remembered, not just returned. This is the only place in the app
+      // that detects a rejected token WITHOUT needing a pending push, but
+      // it runs on the setup screen — which cannot fix anything, since the
+      // token field that matters lives in Account -> Folder Sync. Before
+      // this line the warning was shown once, during onboarding, and then
+      // never again while every upload silently failed.
+      await setGitRemoteAccessProblem(tokenRejected ? 'token-rejected' : null);
       onPhase?.({ kind: 'reading' });
       const profiles: ProbedProfile[] = [];
       for (const file of files) {

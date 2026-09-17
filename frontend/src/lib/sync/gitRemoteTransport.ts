@@ -45,13 +45,27 @@ import type { GitRemoteConfig } from './syncSettings';
 const REMOTE_NAME = 'sync-folder';
 const BRANCH = 'main';
 
+/** The one place that decides what credentials this app presents to a git
+ *  server.
+ *
+ *  Exported because remoteAccessProbe.ts has to build the SAME Basic auth
+ *  header by hand (isomorphic-git will not send one until challenged — see
+ *  that module's header). If the probe derived credentials its own way, it
+ *  could pass while real syncs failed, or vice versa, and the "Test
+ *  Connection" button would be lying again in a new way.
+ *
+ *  Most providers (GitHub, GitLab, self-hosted git-http-backend with Basic
+ *  Auth) accept any non-empty username alongside a PAT/password — default
+ *  to the token itself when no username was given, matching GitHub's own
+ *  documented `https://<token>@github.com/...` shorthand. */
+export function gitBasicCredentials(config: GitRemoteConfig): { username: string; password: string } | null {
+  if (!config.token) return null;
+  return { username: config.username || config.token, password: config.token };
+}
+
 function authFor(config: GitRemoteConfig) {
-  if (!config.token) return undefined;
-  // Most providers (GitHub, GitLab, self-hosted git-http-backend with
-  // Basic Auth) accept any non-empty username alongside a PAT/password —
-  // default to the token itself when no username was given, matching
-  // GitHub's own documented `https://<token>@github.com/...` shorthand.
-  return () => ({ username: config.username || config.token!, password: config.token! });
+  const credentials = gitBasicCredentials(config);
+  return credentials ? () => credentials : undefined;
 }
 
 // git.fetch()'s remote/url params are enough to reach the server, but its
@@ -84,13 +98,24 @@ function describeTransportError(err: unknown, action: 'fetch' | 'push'): Error {
       : undefined;
   const raw = err instanceof Error ? err.message : String(err);
 
+  // Names the token prefixes deliberately: the failure this text exists for
+  // turned out to be a token from an ENTIRELY DIFFERENT SERVICE pasted into
+  // the field (a Google OAuth token, `AQ.Ab8RN6…`). "Mistyped, expired or
+  // revoked" sends someone to re-check a token that was never a GitHub
+  // credential in the first place; naming the shape ends that hunt in one
+  // glance. tokenShape.ts now catches this before a request is even made,
+  // but this path still covers hosts that check cannot judge.
+  const badTokenHint =
+    'The token may be mistyped, expired or revoked — or not a GitHub token at all: GitHub tokens begin ghp_ or ' +
+    'github_pat_.';
+
   if (status === 401 || /401|Unauthorized/i.test(raw)) {
     return new Error(
       action === 'push'
         ? 'The git server rejected this device’s credentials, so nothing has been uploaded. Reading a public ' +
-          'repository needs no token, but writing to one does — add a personal access token with write access in ' +
-          'Account → Folder Sync.'
-        : 'The git server rejected this device’s credentials. Add a personal access token in Account → Folder Sync.'
+          `repository needs no token, but writing to one does. ${badTokenHint} Fix it in Account → Folder Sync.`
+        : `The git server rejected this device’s credentials. ${badTokenHint} Add a personal access token with ` +
+          'write access in Account → Folder Sync.'
     );
   }
   if (status === 403) {
@@ -214,23 +239,19 @@ export async function pushGitRemote(dir: string, gitdir: string, config: GitRemo
   return { pushed: true };
 }
 
-/** Quick reachability/auth check for the settings UI — "Test Connection"
- *  button, not part of the regular sync cycle. Resolves to an error
- *  message on failure, null on success (fetches nothing, just confirms
- *  the server answers and credentials are accepted). */
-export async function testGitRemoteConnection(config: GitRemoteConfig): Promise<string | null> {
-  try {
-    await git.getRemoteInfo({
-      http,
-      url: config.url,
-      corsProxy: config.corsProxy || undefined,
-      onAuth: authFor(config),
-    });
-    return null;
-  } catch (err) {
-    return err instanceof Error ? err.message : 'Could not reach this git remote';
-  }
-}
+// The "Test Connection" check used to live here as testGitRemoteConnection(),
+// built on git.getRemoteInfo(). It has been replaced by
+// remoteAccessProbe.ts's probeGitRemoteAccess(), because getRemoteInfo()
+// could not do the job it claimed to:
+//
+// isomorphic-git's GitRemoteHTTP.discover() sends its FIRST request with no
+// Authorization header and only calls onAuth after the server answers 401.
+// Against a public repository, `git-upload-pack` answers 200 immediately —
+// so the configured token was never transmitted, and the button reported
+// "credentials accepted" about credentials it had not sent. It returned
+// `string | null`, which gave the UI no way to tell "reachable" from "this
+// device can actually upload" either. Both are fixed by a probe that issues
+// its own request and returns a discriminated result.
 
 /** Clones ONLY the tip commit into `dir`, with no working tree.
  *

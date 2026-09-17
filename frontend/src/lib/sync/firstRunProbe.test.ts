@@ -43,9 +43,11 @@ vi.mock('../gitfs', () => ({
   } },
 }));
 vi.mock('./hiddenClone', () => ({ getHiddenCloneDir: async () => '/sync-clone' }));
+const setGitRemoteAccessProblem = vi.fn();
 vi.mock('./syncSettings', () => ({
   getSyncMode: (...a: unknown[]) => getSyncMode(...a),
   getGitRemoteConfig: (...a: unknown[]) => getGitRemoteConfig(...a),
+  setGitRemoteAccessProblem: (...a: unknown[]) => setGitRemoteAccessProblem(...a),
 }));
 vi.mock('./gitRemoteTransport', () => ({ shallowCloneTip: (...a: unknown[]) => shallowCloneTip(...a) }));
 vi.mock('./hostContentsApi', () => ({ listDirectoryFiles: (...a: unknown[]) => listDirectoryFiles(...a) }));
@@ -446,6 +448,9 @@ describe('a rejected token', () => {
     const result = await probeFirstRunProfiles();
 
     expect(result.tokenRejected).toBe(true);
+    // Remembered, not just returned: this screen cannot fix a token, and
+    // Account -> Folder Sync — which can — never learned about it before.
+    expect(setGitRemoteAccessProblem).toHaveBeenCalledWith('token-rejected');
     // …and onboarding still gets its profiles, on the fast path.
     expect(result.profiles.map((p) => p.name)).toEqual(['Ana']);
     expect(shallowCloneTip).not.toHaveBeenCalled();

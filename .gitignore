@@ -1,7 +1,12 @@
 node_modules/
 dist/
+# Widened after a live GitHub token was found sitting in " (2).env" — a
+# browser's duplicate-download name, which ".env" and ".env.local" did not
+# match. Any stray copy is now ignored; the checked-in template is not.
 .env
-.env.local
+.env.*
+*.env
+!.env.example
 *.log
 .DS_Store
 backend/uploads/

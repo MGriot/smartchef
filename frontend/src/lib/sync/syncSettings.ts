@@ -35,6 +35,13 @@ const GIT_REMOTE_USERNAME_KEY = 'smartchef.sync.gitRemote.username';
 // settings UI, not silently glossed over.
 const GIT_REMOTE_TOKEN_KEY = 'smartchef.sync.gitRemote.token';
 const GIT_REMOTE_CORS_PROXY_KEY = 'smartchef.sync.gitRemote.corsProxy';
+// Why this device cannot upload, as learned by whichever check noticed
+// first. Persisted rather than held in component state because the screen
+// that DETECTS the problem (first-run setup, ServerConnect) is not the
+// screen that can FIX it (Account -> Folder Sync) — before this, a rejected
+// token was announced once during onboarding and then never mentioned
+// again, while every push silently failed.
+const GIT_REMOTE_ACCESS_PROBLEM_KEY = 'smartchef.sync.gitRemote.accessProblem';
 const INTERVAL_VALUE_KEY = 'smartchef.sync.interval.value';
 const INTERVAL_UNIT_KEY = 'smartchef.sync.interval.unit';
 // Superseded by the value/unit pair above, kept only to read from: a
@@ -92,6 +99,11 @@ export async function setGitRemoteConfig(config: GitRemoteConfigInput): Promise<
   if (config.token !== undefined) {
     if (config.token) await Preferences.set({ key: GIT_REMOTE_TOKEN_KEY, value: config.token });
     else await Preferences.remove({ key: GIT_REMOTE_TOKEN_KEY });
+    // A token the user just retyped has not been judged yet, so whatever
+    // the last one was found guilty of no longer applies. Deliberately
+    // inside this branch: a save that left the token untouched
+    // (token === undefined) must not clear a still-accurate warning.
+    await Preferences.remove({ key: GIT_REMOTE_ACCESS_PROBLEM_KEY });
   }
   if (config.corsProxy) await Preferences.set({ key: GIT_REMOTE_CORS_PROXY_KEY, value: config.corsProxy });
   else await Preferences.remove({ key: GIT_REMOTE_CORS_PROXY_KEY });
@@ -103,7 +115,48 @@ export async function clearGitRemoteConfig(): Promise<void> {
     Preferences.remove({ key: GIT_REMOTE_USERNAME_KEY }),
     Preferences.remove({ key: GIT_REMOTE_TOKEN_KEY }),
     Preferences.remove({ key: GIT_REMOTE_CORS_PROXY_KEY }),
+    Preferences.remove({ key: GIT_REMOTE_ACCESS_PROBLEM_KEY }),
   ]);
+}
+
+/** Why this device cannot upload to the configured git remote.
+ *
+ *  Every value here means "reads may well be working, writes are not" —
+ *  which is precisely the failure mode that went unnoticed: fetching a
+ *  PUBLIC repository needs no credentials at all, so a device with a bad
+ *  token syncs down perfectly and fails every push. */
+export type GitRemoteAccessProblem =
+  /** A token is configured and the server refused it outright. */
+  | 'token-rejected'
+  /** The server accepted the token but will not let it write. */
+  | 'read-only'
+  /** No token configured at all — fine for reading a public repo, fatal for
+   *  every push. */
+  | 'no-credentials'
+  /** Cannot be a credential for this host — caught locally, before any
+   *  request went out. See tokenShape.ts. */
+  | 'malformed-token';
+
+const ACCESS_PROBLEMS: readonly GitRemoteAccessProblem[] = [
+  'token-rejected',
+  'read-only',
+  'no-credentials',
+  'malformed-token',
+];
+
+/** null when this device has no known upload problem — either everything
+ *  works, or nothing has checked yet. */
+export async function getGitRemoteAccessProblem(): Promise<GitRemoteAccessProblem | null> {
+  const { value } = await Preferences.get({ key: GIT_REMOTE_ACCESS_PROBLEM_KEY });
+  // Checked against the union rather than trusted: an older build (or a hand-edited
+  // preference) could hold a string this union no longer contains, and a
+  // bad value here would drive the banner's copy lookup to undefined.
+  return ACCESS_PROBLEMS.includes(value as GitRemoteAccessProblem) ? (value as GitRemoteAccessProblem) : null;
+}
+
+export async function setGitRemoteAccessProblem(problem: GitRemoteAccessProblem | null): Promise<void> {
+  if (problem) await Preferences.set({ key: GIT_REMOTE_ACCESS_PROBLEM_KEY, value: problem });
+  else await Preferences.remove({ key: GIT_REMOTE_ACCESS_PROBLEM_KEY });
 }
 
 export type SyncIntervalUnit = 'minutes' | 'hours' | 'days' | 'weeks' | 'months';
