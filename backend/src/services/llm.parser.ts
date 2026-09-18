@@ -8,6 +8,7 @@ import type { LLMParseMedia, LLMParseRequest, LLMParseResult } from "@shared/typ
 import { queryOne } from "../db/pool";
 import { decrypt } from "./crypto.service";
 import { callAnthropic, callGemini, callOpenAI } from "./llm.providers";
+import { loadImportCatalog, type ImportCatalog } from "./importCatalog.service";
 
 // undici's default headersTimeout/bodyTimeout (300s) fires independently of
 // any AbortSignal passed to fetch() — on CPU-only local inference a single
@@ -28,7 +29,8 @@ function resolveOllamaUrl(accountOverride?: string | null): string {
   return accountOverride?.trim() || OLLAMA_URL;
 }
 
-const SYSTEM_PROMPT = `Sei un assistente specializzato nell'analisi di ricette culinarie.
+// ══════════ BEGIN TWIN BLOCK: base prompt ══════════
+const SYSTEM_PROMPT_BASE = `Sei un assistente specializzato nell'analisi di ricette culinarie.
 Il tuo compito è estrarre informazioni strutturate da testi o pagine web di ricette.
 Rispondi ESCLUSIVAMENTE con un oggetto JSON valido, senza testo aggiuntivo.
 
@@ -49,6 +51,7 @@ Il JSON deve avere questa struttura:
   "ingredients": [
     {
       "name": "string",
+      "catalogName": "string | null (nome della voce di catalogo corrispondente; null se nessuna corrisponde)",
       "quantity": "number | null",
       "quantityText": "string | null",
       "unit": "string | null",
@@ -80,11 +83,11 @@ Il JSON deve avere questa struttura:
 
 Regole:
 - restTimeMin è il tempo di attesa/riposo (lievitazione, marinatura, raffreddamento) separato dal tempo di preparazione attiva
-- tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari (es. "forno", "planetaria", "frullatore"), nomi brevi e generici
+- tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari, con nomi brevi, generici e IN INGLESE (es. "Oven", "Stand Mixer", "Blender"), qualunque sia la lingua della ricetta
 - storageInstructions è come conservare gli avanzi ("Come conservare"), tips sono consigli generali distinti dalla description — entrambi null se non menzionati
 - groupName (negli ingredienti) è un'intestazione breve e opzionale sotto cui questo ingrediente è raggruppato, es. "Per il condimento" — impostalo SOLO quando la ricetta originale raggruppa visivamente gli ingredienti in sezioni etichettate; altrimenti lascialo null. Non inventare raggruppamenti assenti nella fonte
 - isOptional (negli ingredienti) è true quando la ricetta presenta quell'ingrediente come facoltativo o a piacere (es. "facoltativo", "se gradito", "optional", "per guarnire", "q.b. a piacere"); altrimenti false. Non dedurlo dal fatto che una quantità sia vaga
-- techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step (es. "Rosolare", "Brasare"), nomi brevi, stesso criterio di "tools"
+- techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step, con nomi brevi e IN INGLESE (es. "Sauté", "Braise"), stesso criterio di "tools"
 - ingredients (negli step) è l'elenco degli ingredienti che QUEL passaggio usa. Il campo name deve essere copiato ESATTAMENTE come compare nella lista "ingredients" principale, altrimenti il collegamento viene scartato. Metti quantity/unit SOLO quando il passaggio usa una parte dichiarata dell'ingrediente (es. "metà dello zucchero" su 100 g -> quantity 50, unit "g"); se il passaggio usa semplicemente l'ingrediente, lascia quantity e unit a null. Non elencare ingredienti che quel passaggio non nomina né usa, e non inventarne di assenti dalla lista principale
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
@@ -93,6 +96,154 @@ Regole:
 - Aggiungi warnings per informazioni ambigue o mancanti
 - imageUrl: usa SOLO un URL che compare letteralmente nel contenuto (incluso quello proposto come "Immagine di copertina della pagina"), mai inventato. Deve mostrare il piatto finito: scarta loghi, avatar, banner pubblicitari e icone. null se non ce n'è uno adatto
 - confidence deve riflettere quanto sei sicuro dell'estrazione (1.0 = perfetto)`;
+// ══════════ END TWIN BLOCK: base prompt ══════════
+
+// ══════════ BEGIN TWIN BLOCK: catalog prompt ══════════
+// Everything between these markers is PROMPT, not runtime, and is copied
+// byte-for-byte between backend/src/services/llm.parser.ts and
+// frontend/src/services/llmParser.local.ts. A drift here is a silent
+// behaviour fork between server and standalone mode, so
+// llmParser.promptParity.test.ts compares the two blocks character by
+// character. Edit both, or edit neither.
+
+/** Providers that get the ingredient list too.
+ *
+ *  Ollama is excluded on purpose, and not to save money. Neither callOllama
+ *  sets `options.num_ctx`, so a request runs against Ollama's default
+ *  context window (2048 on most builds, 4096 on newer ones) — and the base
+ *  prompt plus a 6 000-character recipe already fills most of it. Ollama
+ *  does not error when a request overflows; it drops the oldest tokens and
+ *  answers from what is left, so a ~2 000-token ingredient list would buy
+ *  worse extraction while looking like it worked. Tools and techniques
+ *  together are ~320 tokens, which fits — and they are where the
+ *  duplication this feature exists to stop actually hurts (see the
+ *  "Bollitura next to Boil" note in services/techniques.local.ts).
+ *
+ *  If you ever want ingredients here: set num_ctx explicitly on the Ollama
+ *  call first, then cap the list at roughly 120. */
+const CATALOG_INGREDIENTS_PROVIDERS = ["anthropic", "gemini", "openai"];
+
+/** One catalog entry as the model sees it: `Butter (Burro)` when the
+ *  content language has a translation recorded, plain `Butter` when it
+ *  doesn't. The parenthesised half exists so the model can RECOGNIZE the
+ *  row in a recipe written in that language; the rule text below tells it
+ *  to echo back only the half outside the parentheses, which is what makes
+ *  the echoed name land as an exact match against the catalog's base name. */
+function renderCatalogEntry(entry: { name: string; translatedName: string | null }): string {
+  const translated = entry.translatedName?.trim();
+  if (!translated || translated.toLowerCase() === entry.name.trim().toLowerCase()) return entry.name;
+  return `${entry.name} (${translated})`;
+}
+
+/** The catalog as this provider actually receives it. The tiering lives
+ *  here, in one function, rather than being decided once for the prompt
+ *  and again for the validation — those two answering differently is
+ *  exactly the bug that would let an Ollama parse have a claim accepted
+ *  against an ingredient list it was never shown. */
+function catalogSentTo(catalog: ImportCatalog | null, provider: string): ImportCatalog | null {
+  if (!catalog) return null;
+  if (CATALOG_INGREDIENTS_PROVIDERS.includes(provider)) return catalog;
+  return { ...catalog, ingredients: [] };
+}
+
+/** The library vocabulary appended to the system prompt, or '' when there
+ *  is nothing to append. An empty library returning '' is deliberate: a
+ *  fresh install then gets exactly the prompt it got before this feature
+ *  existed, which is the cheapest regression guard available. */
+export function catalogSection(catalog: ImportCatalog | null, provider: string): string {
+  const sent = catalogSentTo(catalog, provider);
+  if (!sent) return "";
+  const lists: string[] = [];
+  if (sent.ingredients.length) {
+    lists.push(`Ingredienti: ${sent.ingredients.map(renderCatalogEntry).join(", ")}`);
+  }
+  if (sent.tools.length) {
+    lists.push(`Strumenti: ${sent.tools.map(renderCatalogEntry).join(", ")}`);
+  }
+  if (sent.techniques.length) {
+    lists.push(`Tecniche: ${sent.techniques.map(renderCatalogEntry).join(", ")}`);
+  }
+  if (!lists.length) return "";
+
+  return `
+Catalogo della libreria dell'utente — voci GIÀ esistenti, da riusare:
+${lists.join("\n")}
+
+Regole sul catalogo:
+- Ogni voce è scritta come "NomeCatalogo (traduzione)". Il nome da usare è SEMPRE quello FUORI dalle parentesi, copiato carattere per carattere; la parte tra parentesi serve solo a farti riconoscere la voce e non va mai scritta in output
+- catalogName (negli ingredienti) è il nome della voce di catalogo a cui quell'ingrediente corrisponde, copiato ESATTAMENTE dall'elenco sopra; null se nessuna voce corrisponde. Il campo name resta la dicitura della ricetta originale ("burro morbido a temperatura ambiente") e non va mai sostituito con il nome di catalogo
+- tools e techniques (negli step): quando la voce esiste a catalogo scrivi ESATTAMENTE il nome di catalogo al posto della dicitura della ricetta; solo se non esiste conia un nome nuovo, breve, generico e in inglese
+- Non forzare gli abbinamenti: se un ingrediente, uno strumento o una tecnica NON è nel catalogo, lascia catalogName a null (o conia un nome nuovo) invece di scegliere la voce "più vicina". "Margarina" non è "Butter", "Padella in ghisa" non è "Teglia"
+- Il campo name degli ingredienti negli step va copiato dal campo name della lista principale, MAI da catalogName`;
+}
+
+/** The system prompt for one parse: the fixed rules, plus whatever the
+ *  user's library already knows. */
+export function buildSystemPrompt(catalog: ImportCatalog | null, provider: string): string {
+  return `${SYSTEM_PROMPT_BASE}${catalogSection(catalog, provider)}`;
+}
+
+/** The set of names we actually put in the prompt, normalized the same way
+ *  the fuzzy matcher normalizes (lowercase, strip diacritics and
+ *  punctuation) so "Crème fraîche" and "creme fraiche" are one key. */
+function catalogNameSet(catalog: ImportCatalog | null): Set<string> {
+  const set = new Set<string>();
+  if (!catalog) return set;
+  for (const entry of catalog.ingredients) set.add(normalizeCatalogName(entry.name));
+  return set;
+}
+
+function normalizeCatalogName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim();
+}
+
+/** Validation, not trust.
+ *
+ *  A model asked to pick from a list will sometimes answer with something
+ *  that was never on it — a plausible-sounding ingredient it knows about,
+ *  or the recipe's own wording echoed back as though it were a catalog
+ *  entry. Either one, left alone, would be auto-selected in the Review
+ *  Matches step and quietly fold a distinct ingredient into an existing
+ *  row. So every claim is checked against the catalog THIS request
+ *  actually sent, and anything else is dropped to null, which simply puts
+ *  that ingredient back on the fuzzy-matching path it took before.
+ *
+ *  This lives here rather than in the UI because the parse functions are
+ *  the only place that holds both the catalog and the response. */
+export function dropUnknownCatalogNames<
+  T extends { ingredients: Array<{ name: string; catalogName?: string | null }>; warnings: string[] }
+>(result: T, catalog: ImportCatalog | null, provider: string): T {
+  // catalogSentTo(), not `catalog` — on a tier that withholds the
+  // ingredient list, every claim the model makes about it is a guess, and
+  // a guess that happens to name a real row is still a guess. Dropping it
+  // puts that ingredient back on the fuzzy-matching path, which is exactly
+  // where it was before this feature existed.
+  const known = catalogNameSet(catalogSentTo(catalog, provider));
+  const dropped: string[] = [];
+  for (const ing of result.ingredients) {
+    const claim = ing.catalogName?.trim();
+    if (!claim) {
+      ing.catalogName = null;
+      continue;
+    }
+    if (!known.has(normalizeCatalogName(claim))) {
+      dropped.push(`"${claim}" (${ing.name})`);
+      ing.catalogName = null;
+    }
+  }
+  if (dropped.length) {
+    result.warnings.push(
+      `Ignorate corrispondenze inventate dal modello, assenti dalla libreria: ${dropped.join(", ")}`
+    );
+  }
+  return result;
+}
+// ══════════ END TWIN BLOCK: catalog prompt ══════════
 
 /**
  * Blocca fetch verso host interni/privati: un URL da importare arriva
@@ -418,7 +569,7 @@ function assertMediaSupported(provider: string, media: LLMParseMedia): void {
 
 /**
  * Chiama Ollama con un system prompt arbitrario — usato sia per il parsing
- * ricette (SYSTEM_PROMPT) sia per la traduzione contenuti ricetta.
+ * ricette (SYSTEM_PROMPT_BASE) sia per la traduzione contenuti ricetta.
  */
 async function callOllama(
   content: string,
@@ -482,6 +633,17 @@ interface LLMAccountConfig {
  * error handling unchanged. Generic over systemPrompt/content so it's
  * reusable for both recipe parsing and recipe-content translation.
  */
+/** Which provider a parse will actually use, read before the call so the
+ *  prompt can be tiered for it (see CATALOG_INGREDIENTS_PROVIDERS). One
+ *  extra `LIMIT 1` against `account` per parse, which is nothing next to
+ *  the model call that follows. */
+export async function getConfiguredProvider(): Promise<string> {
+  const account = await queryOne<{ llm_provider: string }>(
+    `SELECT llm_provider FROM account LIMIT 1`
+  );
+  return account?.llm_provider ?? "ollama";
+}
+
 export async function callConfiguredProvider(
   content: string,
   systemPrompt: string,
@@ -611,6 +773,11 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
     ingredients: Array.isArray(parsed.ingredients)
       ? parsed.ingredients.map((ing: any, i: number) => ({
           name: ing.name ?? `Ingrediente ${i + 1}`,
+          // The library entry the model claims this corresponds to.
+          // Trusted no further than this: dropUnknownCatalogNames() checks
+          // it against the catalog actually sent before anything acts on it.
+          catalogName:
+            typeof ing.catalogName === "string" && ing.catalogName.trim() ? ing.catalogName.trim() : null,
           quantity: typeof ing.quantity === "number" ? ing.quantity : undefined,
           quantityText: ing.quantityText ?? undefined,
           unit: ing.unit ?? undefined,
@@ -652,7 +819,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
 }
 
 /** What to tell the model about a file it is being handed. The prompt
- *  itself stays SYSTEM_PROMPT — this only names the medium, so the model
+ *  itself stays SYSTEM_PROMPT_BASE — this only names the medium, so the model
  *  treats a transcript-shaped input as a recipe being dictated rather than
  *  as prose to summarize. Italian, like the system prompt, and for the same
  *  reason: the two are read together, and the unit-normalization rule is
@@ -671,6 +838,18 @@ const MEDIA_INSTRUCTION: Record<MediaKind, string> = {
  * Entry point principale del parser LLM
  */
 export async function parseRecipeWithLLM(req: LLMParseRequest): Promise<LLMParseResult> {
+  // Loaded once per parse and reused by both branches below: the prompt
+  // tells the model which ingredients/tools/techniques this library
+  // already knows, and dropUnknownCatalogNames() then checks its answers
+  // against the very same list.
+  const provider = await getConfiguredProvider();
+  const catalog: ImportCatalog | null = await loadImportCatalog(req.lang).catch((err) => {
+    // A catalog that fails to load must not take the import down with it —
+    // without one the parse behaves exactly as it did before this existed.
+    console.warn("Import catalog unavailable, parsing without it:", err);
+    return null;
+  });
+  const systemPrompt = buildSystemPrompt(catalog, provider);
   // A file goes up alongside the prompt rather than being flattened to text
   // first. The client's own OCR (frontend/src/services/migration/ocr.ts) is
   // still the right tool for a clean scan of printed text — free, offline,
@@ -690,7 +869,11 @@ export async function parseRecipeWithLLM(req: LLMParseRequest): Promise<LLMParse
 
 Note aggiuntive dall'utente:
 ${extra}` : ""}`;
-    return parseJsonResponse(await callConfiguredProvider(prompt, SYSTEM_PROMPT, req.media));
+    return dropUnknownCatalogNames(
+      parseJsonResponse(await callConfiguredProvider(prompt, systemPrompt, req.media)),
+      catalog,
+      provider
+    );
   }
 
   let content: string;
@@ -714,8 +897,12 @@ ${extra}` : ""}`;
     content = req.input;
   }
 
-  const rawResponse = await callConfiguredProvider(`Analizza questa ricetta:\n\n${content}`, SYSTEM_PROMPT);
-  const result = parseJsonResponse(rawResponse, req.inputType === "url" ? req.input : undefined);
+  const rawResponse = await callConfiguredProvider(`Analizza questa ricetta:\n\n${content}`, systemPrompt);
+  const result = dropUnknownCatalogNames(
+    parseJsonResponse(rawResponse, req.inputType === "url" ? req.input : undefined),
+    catalog,
+    provider
+  );
 
   if (req.inputType === "url") {
     result.sourceUrl = req.input;

@@ -13,6 +13,16 @@ import { parseAmount } from '../lib/ingredientAmount';
 
 export interface TemplateParseIngredient {
   name: string;
+  /** The library entry the model says this ingredient corresponds to,
+   *  copied verbatim from the catalog in the prompt — or null when nothing
+   *  in the library fits. `name` keeps the recipe's own wording either
+   *  way, which is what the review step shows and what the steps
+   *  cross-reference.
+   *
+   *  AI path only. The text template, the structured-data extractor and
+   *  the migration adapters never set it, so `undefined` has to keep
+   *  meaning "no claim" everywhere downstream — see lib/importMatching.ts. */
+  catalogName?: string | null;
   quantity?: number;
   quantityText?: string;
   unit?: string;

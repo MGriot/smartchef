@@ -634,6 +634,9 @@ recipeRouter.post("/parse", parseBodyParser, async (req: Request, res: Response)
           fileName: z.string().optional(),
         })
         .optional(),
+      // Which language to label the library catalog in when it is handed
+      // to the model — see importCatalog.service.ts.
+      lang: z.string().optional(),
     })
     .refine((v) => v.inputType === "media" || v.input.trim().length > 0, {
       message: "Paste a recipe or a link first.",

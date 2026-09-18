@@ -269,6 +269,12 @@ export interface LLMParseRequest {
   /** Required when inputType is "media". `input` then carries whatever
    *  extra context the user typed (or "" for none), not the recipe. */
   media?: LLMParseMedia;
+  /** The app's content language. Decides which language the library
+   *  catalog sent to the model is labelled in (importCatalog.service.ts),
+   *  so a recipe written in that language can be recognized against it.
+   *  Optional: without it the catalog is sent base-name-only, which is
+   *  what the legacy /llm/parse route does. */
+  lang?: string;
 }
 
 export interface LLMParseResult {
@@ -287,6 +293,13 @@ export interface LLMParseResult {
   tips?: string | null;
   ingredients: Array<{
     name: string;
+    /** The library entry the model says this ingredient corresponds to,
+     *  copied verbatim from the catalog in the prompt — or null when
+     *  nothing in the library fits and a new ingredient is wanted. `name`
+     *  keeps the recipe's own wording either way. AI path only, and
+     *  already validated against the catalog actually sent (see
+     *  dropUnknownCatalogNames), so an entry here really does exist. */
+    catalogName?: string | null;
     quantity?: number;
     quantityText?: string;
     unit?: string;

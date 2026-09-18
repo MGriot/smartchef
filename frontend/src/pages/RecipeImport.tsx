@@ -16,6 +16,7 @@ import { extractPdfText } from '../services/migration/pdfText';
 import { readImageText, ocrLanguageFor, OCR_MODEL_MB, type OcrProgress } from '../services/migration/ocr';
 import { proposeMatches, ProposedMatches } from '../services/matchSuggestions';
 import { matchUnitId, type MatchSuggestion } from '../lib/fuzzyMatch';
+import { defaultResolution, mergeSuggestions, type Resolution } from '../lib/importMatching';
 import { repairIngredientAmount } from '../lib/ingredientAmount';
 import { checkMediaForProvider } from '../lib/llmMedia';
 import { matchStepIngredients, linkIngredientsInText } from '../lib/stepRefs';
@@ -56,16 +57,6 @@ interface Unit {
   id: string;
   symbol: string;
   name: string;
-}
-
-// The Review Matches step's per-item resolution: either "use this existing
-// library row" or "create a new one" (ingredients also need a category).
-type Resolution = { choice: 'existing'; id: string; name: string } | { choice: 'new'; categoryId?: string };
-
-function defaultResolution(suggestions: MatchSuggestion[]): Resolution {
-  const top = suggestions[0];
-  if (top && top.score > 0.7) return { choice: 'existing', id: top.id, name: top.name };
-  return { choice: 'new' };
 }
 
 /** The file's bytes as bare base64 (no `data:` prefix).
@@ -385,13 +376,33 @@ export default function RecipeImport() {
     const ingredientNames = d.ingredients.map((i) => i.name);
     const toolNames = d.tools;
     const techNames = [...new Set(d.steps.flatMap((s) => s.techniques ?? []))];
-    const matches = await proposeMatches(ingredientNames, toolNames, techNames, lang || undefined);
-    setSuggestions(matches);
-    setIngredientRes(ingredientNames.map((n) => defaultResolution(matches.ingredients[n] || [])));
+    // The library entry the model said each ingredient corresponds to, if
+    // any. Scored as an EXTRA probe alongside the recipe's own wording,
+    // never instead of it: the claim is already known to name a real row
+    // (dropUnknownCatalogNames ran in the parser), but naming a real row
+    // is not the same as being right about it, so both opinions reach the
+    // user. Tools and techniques need none of this — the model writes the
+    // catalog name straight into those arrays, which are scored as-is.
+    const claims = d.ingredients.map((i) => i.catalogName?.trim() || null);
+    const probes = [...new Set([...ingredientNames, ...claims.filter((c): c is string => !!c)])];
+    const matches = await proposeMatches(probes, toolNames, techNames, lang || undefined);
+    // Re-keyed by the recipe's wording so everything downstream — the
+    // review rows, the confidence lookup in handleConfirmAndCreate — keeps
+    // addressing suggestions by the same key it always has.
+    const byIngredientName: Record<string, MatchSuggestion[]> = {};
+    d.ingredients.forEach((ing, i) => {
+      const claim = claims[i];
+      byIngredientName[ing.name] = mergeSuggestions(
+        matches.ingredients[ing.name] ?? [],
+        claim ? matches.ingredients[claim] ?? [] : []
+      );
+    });
+    setSuggestions({ ...matches, ingredients: byIngredientName });
+    setIngredientRes(ingredientNames.map((n) => defaultResolution(byIngredientName[n] || [])));
     setToolRes(toolNames.map((n) => defaultResolution(matches.tools[n] || [])));
     setTechniqueNames(techNames);
     setTechniqueRes(techNames.map((n) => defaultResolution(matches.techniques[n] || [])));
-    if (ingredientNames.some((n) => defaultResolution(matches.ingredients[n] || []).choice === 'new')) {
+    if (ingredientNames.some((n) => defaultResolution(byIngredientName[n] || []).choice === 'new')) {
       loadCategoriesOnce();
     }
   };
@@ -456,7 +467,7 @@ export default function RecipeImport() {
       const res = await apiFetch('/api/recipes/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: inputVal, inputType: sourceType }),
+        body: JSON.stringify({ input: inputVal, inputType: sourceType, lang: contentLang || undefined }),
         // LLM parsing on CPU-only inference can take minutes — well above
         // apiFetch's default 10s native timeout. Backend itself allows up
         // to 600s for the Ollama call; stay just above that.
@@ -766,7 +777,7 @@ export default function RecipeImport() {
       const res = await apiFetch('/api/recipes/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: '', inputType: 'media', media }),
+        body: JSON.stringify({ input: '', inputType: 'media', media, lang: contentLang || undefined }),
         // Same ceiling as the text path: a local vision model on CPU is
         // slower reading an image than it is reading prose, not faster.
         timeoutMs: 650_000,
@@ -854,6 +865,17 @@ export default function RecipeImport() {
               />
               <span className="text-zinc-700 dark:text-zinc-300">{s.name}</span>
               <span className="text-zinc-400 dark:text-zinc-500">({Math.round(s.score * 100)}%)</span>
+              {/* A row the AI named as the library match, which string
+                  similarity would not have found on its own — "planetaria"
+                  for an existing "Stand Mixer". Worth flagging precisely
+                  because it is pre-selected: the same mechanism that saves
+                  a click on a right answer would otherwise fold a genuinely
+                  different ingredient into an existing row unseen. */}
+              {s.viaCatalog && (
+                <span className="text-[10px] font-bold uppercase tracking-wide text-primary bg-primary/10 rounded px-1.5 py-0.5">
+                  {t('import.aiSuggestedMatch')}
+                </span>
+              )}
             </label>
           ))}
           <label className="flex items-center gap-2 text-xs cursor-pointer">

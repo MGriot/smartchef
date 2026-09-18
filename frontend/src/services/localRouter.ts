@@ -80,7 +80,10 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     // configured (Account -> AI Provider, stored per-device by
     // lib/llmSettings.ts), including a local Ollama.
     const { parseRecipeLocally } = await import('./llmParser.local');
-    return { status: 200, data: await parseRecipeLocally({ input, inputType, media: body.media }) };
+    // `lang` decides which language the library catalog in the prompt is
+    // labelled in — see importCatalog.local.ts.
+    const lang = typeof body.lang === 'string' && body.lang.trim() ? body.lang.trim() : undefined;
+    return { status: 200, data: await parseRecipeLocally({ input, inputType, media: body.media, lang }) };
   }
 
   if (!id) {
