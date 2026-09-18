@@ -120,6 +120,25 @@ ipcMain.handle('smartchef-pick-sync-folder', async () => {
   return result.filePaths[0];
 });
 
+// SmartChef: native "save this file somewhere" dialog, for the encrypted
+// Setup File (frontend/src/lib/setupConfigFile.ts). Deliberately a real
+// dialog rather than the renderer's Blob + <a download> trick that
+// BackupCard uses: the app is served from a custom protocol here, and the
+// same trick is a silent no-op on Android (no DownloadListener is
+// registered on the WebView), so one shared code path was never on offer
+// anyway. Returns the chosen path, or null if the user cancelled.
+ipcMain.handle('smartchef-save-file', async (_event, suggestedName: string, contents: string) => {
+  const win = myCapacitorApp.getMainWindow();
+  const result = await dialog.showSaveDialog(win, {
+    title: 'Save your SmartChef setup file',
+    defaultPath: path.join(app.getPath('documents'), suggestedName),
+    properties: ['createDirectory', 'showOverwriteConfirmation'],
+  });
+  if (result.canceled || !result.filePath) return null;
+  await fs.promises.writeFile(result.filePath, contents, 'utf8');
+  return result.filePath;
+});
+
 // Local Storage's base directory (wayfinder ticket 03, standalone-storage-
 // sync map) — the live SQLite db (relocated here via electron/
 // capacitor.config.ts's electronWindowsLocation/electronMacLocation/

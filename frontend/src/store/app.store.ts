@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import i18n from "../i18n";
+import { adoptUiLangForAccount } from "../lib/uiLanguage";
 
 interface Recipe {
   id: string;
@@ -90,8 +92,11 @@ interface AppStore {
   sidebarOpen: boolean;
   toggleSidebar: () => void;
 
-  // i18n: the language used to fetch translated recipe/ingredient content
-  // (separate from the UI chrome locale, though they're set together today)
+  // i18n: the language used to fetch translated recipe/ingredient content.
+  // Separate from the UI chrome locale, which lives in lib/uiLanguage.ts —
+  // the header picker still moves both at once (the friendly default), but
+  // Account → Languages can now set the interface on its own, and both are
+  // stored per account.
   contentLang: string;
   setContentLang: (lang: string) => void;
 
@@ -129,6 +134,12 @@ export const useStore = create<AppStore>((set, get) => ({
     const langKey = contentLangKey(account.id);
     const contentLang = localStorage.getItem(langKey) || get().contentLang;
     localStorage.setItem(langKey, contentLang);
+    // The UI language gets the same inherit-once treatment. i18n/index.ts
+    // resolved a language at module init from the device-wide bootstrap key,
+    // because no account existed yet; now that one does, switch to whatever
+    // THIS account chose (or hand it the device default, once).
+    const uiLang = adoptUiLangForAccount(account.id);
+    if (uiLang !== i18n.language) void i18n.changeLanguage(uiLang);
     const cartKey = shoppingCartKey(account.id);
     const shoppingCart = loadShoppingCart(cartKey);
     set({ account, contentLang, shoppingCart });

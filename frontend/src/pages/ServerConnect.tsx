@@ -8,6 +8,8 @@ import { ResolvedImage } from '../components/CoverImage';
 import { RemoteAccessNotice } from '../components/RemoteAccessNotice';
 import { checkTokenShape } from '../lib/sync/tokenShape';
 import type { RemoteAccessResult } from '../lib/sync/remoteAccessProbe';
+import { ImportSetupFileDialog } from '../components/SetupFileDialog';
+import type { AppliedSetup } from '../lib/setupFileTransfer';
 
 /** Turns a probe phase into something worth reading. Bytes are shown
  *  rather than a bare percentage because on a slow link the numbers moving
@@ -44,6 +46,14 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
   const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Setup File (lib/setupConfigFile.ts): the whole point of the feature is
+  // the SECOND device, so the offer belongs here, on the screen that device
+  // opens on — not buried in a settings page it has to finish onboarding to
+  // reach. It only appears on this first-run screen, so a configured device
+  // is never asked about it again.
+  const [importingSetup, setImportingSetup] = useState(false);
+  const [importedSetup, setImportedSetup] = useState<AppliedSetup | null>(null);
 
   // wayfinder ticket 07 (standalone-storage-sync map, Variant A — combined
   // single screen): the sync-folder offer lives inline in this same form,
@@ -219,6 +229,25 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
     }
   };
 
+  /** A Setup File has just written this device's sync settings. Everything
+   *  after that is the path handleSaveGitRemote() already takes: show what
+   *  was configured, then go straight to looking for profiles the other
+   *  device has already synced, so this one lands on "pick who you are"
+   *  instead of being asked to invent a duplicate profile. */
+  const handleSetupImported = async (applied: AppliedSetup) => {
+    setImportedSetup(applied);
+    setError(null);
+    setMode('standalone');
+    if (applied.mode === 'git-remote' && applied.remoteUrl) {
+      setGitRemoteConfigured(applied.remoteUrl);
+      setShowGitForm(false);
+      await checkForExistingProfiles();
+    }
+    // Folder mode carries no folder (it can't — see setupConfigFile.ts), so
+    // there is nothing to probe yet: the standalone screen's own folder
+    // picker is the next step, and it runs the same check once chosen.
+  };
+
   // Same "the picker already persisted the choice" reasoning as
   // handleRemoveSyncFolder — falls back to 'folder' mode (the default)
   // rather than leaving sync mode pointed at a now-cleared git remote.
@@ -356,6 +385,17 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                 <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">No server, no account — everything stays on this device</span>
               </span>
             </button>
+            <button
+              type="button"
+              onClick={() => setImportingSetup(true)}
+              className="w-full flex items-center gap-4 p-5 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-2xl text-left transition-colors"
+            >
+              <span className="material-symbols-outlined text-2xl text-primary">key</span>
+              <span>
+                <span className="block font-bold text-zinc-900 dark:text-zinc-100 text-sm">I have a setup file</span>
+                <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Exported from a device you already set up — fills in the sync settings for you</span>
+              </span>
+            </button>
           </div>
         )}
 
@@ -392,6 +432,20 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
         {mode === 'standalone' && (
           <>
             <BackButton />
+
+            {importedSetup && (
+              <div className="flex items-start gap-3 p-4 rounded-2xl bg-primary/5 border border-primary/15 mb-5">
+                <span className="material-symbols-outlined text-primary">key</span>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Setup file applied</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 break-words">
+                    {importedSetup.mode === 'git-remote'
+                      ? `Syncing through ${importedSetup.remoteUrl}${importedSetup.hasToken ? '' : ' — no access token was included, so you may need to add one later'}.`
+                      : 'Folder mode. A folder can’t travel in a setup file, so pick this device’s own below.'}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-5 mb-5">
               <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Sync across your devices</p>
@@ -685,6 +739,12 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
           </>
         )}
       </div>
+
+      <ImportSetupFileDialog
+        open={importingSetup}
+        onClose={() => setImportingSetup(false)}
+        onImported={(applied) => void handleSetupImported(applied)}
+      />
     </div>
   );
 }

@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
-import { useLanguages } from '../hooks/useLanguages';
-import { hasUiBundle } from '../lib/languages';
+import { useLanguages, useUiAndContentLanguage } from '../hooks/useLanguages';
 import OfflineBanner from './OfflineBanner';
 import CoverImage from './CoverImage';
 
@@ -27,15 +26,29 @@ interface AppLayoutProps {
 // shop for it, log what you cooked. The two maintenance surfaces come last,
 // since Import is occasional (the header's Create Recipe covers the common
 // case) and Library is upkeep rather than daily use.
-const NAV_LINKS: { to: string; labelKey: string }[] = [
+//
+// `secondary` is about horizontal budget, not importance. Eight links, a
+// Create Recipe button, a language picker and an avatar need roughly 1340px
+// laid out flat — but the nav appeared from `lg` (1024px). In the 300px in
+// between, flex items shrink below their own content, the labels wrap, and
+// `min-h-[65px]` lets the header grow into a second row: the cramped,
+// two-line header this fixes. It bites hardest in Italian, French and
+// Spanish, whose labels are the longest ("Lista della Spesa", "Liste de
+// Courses") — i.e. exactly where an English-speaking dev is least likely to
+// see it.
+//
+// So the three least-frequent destinations hold back until `xl`, where the
+// budget is real. Nothing becomes unreachable: the menu button stays visible
+// until `xl` too, and its panel always lists every link.
+const NAV_LINKS: { to: string; labelKey: string; secondary?: boolean }[] = [
   { to: '/', labelKey: 'nav.gallery' },
   { to: '/atlas', labelKey: 'nav.atlas' },
   { to: '/planner', labelKey: 'nav.planner' },
   { to: '/pantry', labelKey: 'nav.pantry' },
   { to: '/shopping', labelKey: 'nav.shoppingList' },
-  { to: '/history', labelKey: 'nav.history' },
-  { to: '/import', labelKey: 'nav.import' },
-  { to: '/library/ingredients', labelKey: 'nav.library' },
+  { to: '/history', labelKey: 'nav.history', secondary: true },
+  { to: '/import', labelKey: 'nav.import', secondary: true },
+  { to: '/library/ingredients', labelKey: 'nav.library', secondary: true },
 ];
 
 const IDLE_LINK = "flex items-center gap-3 px-4 py-3 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-xl font-semibold text-sm transition-all group";
@@ -54,8 +67,7 @@ function LibraryLink({ to, icon, label, active }: { to: string; icon: string; la
 const DEFAULT_AVATAR = '/chef.svg';
 
 export default function AppLayout({ children, librarySection, sidebarExtra, headerActions }: AppLayoutProps) {
-  const { t, i18n } = useTranslation();
-  const setContentLang = useStore((s) => s.setContentLang);
+  const { t } = useTranslation();
   // The picker reflects the CONTENT language now, not i18n.language: those
   // two can legitimately differ once a user adds a language with no UI bundle.
   const contentLang = useStore((s) => s.contentLang);
@@ -63,28 +75,18 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Below the `lg` breakpoint the header's own nav links are hidden (no
-  // room for them) — this dropdown is their only way to reach anything
-  // other than Home/Planner/Account on a phone, so it must close itself
-  // whenever a link inside it is actually followed.
+  // Below `lg` the header's own nav links are hidden entirely, and between
+  // `lg` and `xl` only the primary five show (see NAV_LINKS) — so this
+  // dropdown is the only way to reach the rest until `xl`, and it must close
+  // itself whenever a link inside it is actually followed.
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
   const { languages } = useLanguages();
 
-  const handleLanguageChange = (code: string) => {
-    // A user-added language has no translation bundle, so switching the
-    // interface to it would just fall back to English — losing the UI
-    // language the user had, to no benefit. For those, only the content
-    // language moves: recipes are read and written in the new language while
-    // the interface stays where it was. The bundled four behave as before.
-    if (hasUiBundle(code)) {
-      i18n.changeLanguage(code);
-      localStorage.setItem('smartchef.uiLang', code);
-    }
-    setContentLang(code);
-  };
+  // Shared with the recipe page's own picker — see useUiAndContentLanguage().
+  const handleLanguageChange = useUiAndContentLanguage();
 
   // Both the Library top-level link and the individual library sub-pages
   // (Ingredients/Tools/Units) should light up "Library" as the active tab.
@@ -96,51 +98,62 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-outfit">
       <OfflineBanner />
+      {/* The horizontal padding has to be classes rather than the inline
+          style it used to be, because an inline style can't have breakpoints
+          — and a flat 2rem per side costs 64px of a 360px phone screen. The
+          arbitrary values keep the safe-area floor the inline style gave.
+          paddingTop stays inline: it has no responsive variant to express. */}
       <header
-        className="min-h-[65px] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between px-8 sticky top-0 z-50"
-        style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'max(2rem, env(safe-area-inset-left))', paddingRight: 'max(2rem, env(safe-area-inset-right))' }}
+        className="min-h-[65px] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 sticky top-0 z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))]"
+        style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
-        <div className="flex items-center gap-4 lg:gap-12">
+        <div className="flex items-center gap-3 lg:gap-6 xl:gap-10 min-w-0">
           <button
             type="button"
             onClick={() => setMobileMenuOpen((v) => !v)}
             aria-label={t('common.menu')}
             aria-expanded={mobileMenuOpen}
-            className="lg:hidden w-9 h-9 -ml-1.5 flex items-center justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 active:scale-95 transition-all shrink-0"
+            className="xl:hidden w-9 h-9 -ml-1.5 flex items-center justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 active:scale-95 transition-all shrink-0"
           >
             <span className="material-symbols-outlined">{mobileMenuOpen ? 'close' : 'menu'}</span>
           </button>
-          <Link to="/" className="text-2xl font-black text-primary tracking-tight">SmartChef</Link>
-          <nav className="hidden lg:flex items-center gap-8">
+          <Link to="/" className="text-xl lg:text-2xl font-black text-primary tracking-tight shrink-0">SmartChef</Link>
+          <nav className="hidden lg:flex items-center gap-4 xl:gap-6 2xl:gap-8">
             {NAV_LINKS.map((link) => (
               <Link
                 key={link.to}
                 to={link.to}
-                className={
+                // whitespace-nowrap + shrink-0 are the actual fix for the
+                // two-line header: without them a flex item is free to shrink
+                // under its own content and let the label wrap.
+                className={`whitespace-nowrap shrink-0 ${link.secondary ? 'hidden xl:inline' : ''} ${
                   isActive(link.to)
                     ? "text-primary font-bold text-sm border-b-2 border-primary pb-0.5 transition-colors"
                     : "text-zinc-400 dark:text-zinc-500 font-medium text-sm hover:text-primary transition-colors"
-                }
+                }`}
               >
                 {t(link.labelKey)}
               </Link>
             ))}
           </nav>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-3 xl:gap-4 shrink-0">
           {headerActions}
+          {/* Icon-only until xl, where the label fits without squeezing the
+              nav. `title` carries the same text for a hover or long-press. */}
           <Link
             to="/recipe/new"
-            className="hidden sm:flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-full font-bold text-xs shadow-sm shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
+            title={t('nav.createRecipe')}
+            className="hidden sm:flex items-center gap-1.5 px-3 xl:px-4 py-2 bg-primary text-white rounded-full font-bold text-xs shadow-sm shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95 whitespace-nowrap"
           >
             <span className="material-symbols-outlined text-[16px]">add</span>
-            {t('nav.createRecipe')}
+            <span className="hidden xl:inline">{t('nav.createRecipe')}</span>
           </Link>
           <select
             value={contentLang}
             onChange={(e) => handleLanguageChange(e.target.value)}
             aria-label={t('common.language')}
-            className="text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-3 pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+            className="max-w-[6.5rem] xl:max-w-none truncate text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-2.5 pr-6 xl:pl-3 xl:pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
           >
             {languages.map((l) => (
               <option key={l.code} value={l.code}>{l.label}</option>
@@ -157,7 +170,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
       </header>
 
       {mobileMenuOpen && (
-        <nav className="lg:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm">
+        <nav className="xl:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm">
           <Link
             to="/recipe/new"
             className="flex items-center gap-3 px-4 py-3 bg-primary text-white rounded-xl font-bold text-sm mb-2"

@@ -4,9 +4,14 @@ import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
 import { useTranslation } from 'react-i18next';
+// Module-level helpers below take `t` as a parameter rather than reaching
+// for a singleton: they are plain functions, not components, so there is no
+// hook to call — and passing it keeps them re-rendering with the language.
+import type { TFunction } from 'i18next';
 import { stalePush } from '../lib/sync/syncStatus';
 import { useLanguages } from '../hooks/useLanguages';
 import { isValidLanguageCode, languageLabel, normalizeLanguageCode } from '../lib/languages';
+import { persistUiLang } from '../lib/uiLanguage';
 import type { ThemeMode } from '../store/app.store';
 import { apiFetch, isNative, getServerUrl } from '../lib/api';
 import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
@@ -19,6 +24,8 @@ import type { SyncInterval, SyncIntervalUnit, GitRemoteAccessProblem } from '../
 import type { RemoteAccessKind, RemoteAccessResult } from '../lib/sync/remoteAccessProbe';
 import { RemoteAccessNotice } from '../components/RemoteAccessNotice';
 import { checkTokenShape } from '../lib/sync/tokenShape';
+import { ExportSetupFileDialog, ImportSetupFileDialog } from '../components/SetupFileDialog';
+import type { AppliedSetup } from '../lib/setupFileTransfer';
 
 // How each verdict reads. Only 'writable' is a success; the amber group is
 // "this works for reading and will never upload", which is precisely the
@@ -70,27 +77,29 @@ interface SyncSummary {
   conflicts: string[];
 }
 
-const SYNC_SUMMARY_LABELS: Record<keyof Omit<SyncSummary, 'conflicts'>, string> = {
-  categories: 'categories', tools: 'tools', techniques: 'techniques', tags: 'tags',
-  ingredients: 'ingredients', recipes: 'recipes',
-};
+// The entity types a sync cycle counts. Only the KEYS are listed here — the
+// words come from `account.entity.*`, which is plural-aware, so "1 recipe"
+// reads correctly in every language rather than being pluralised by an `s`
+// this file appends itself.
+const SYNC_SUMMARY_TYPES = ['categories', 'tools', 'techniques', 'tags', 'ingredients', 'recipes'] as const;
 
 function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
-  const changes = (Object.keys(SYNC_SUMMARY_LABELS) as Array<keyof typeof SYNC_SUMMARY_LABELS>)
-    .map((key) => ({ key, count: summary[key], label: SYNC_SUMMARY_LABELS[key] }))
+  const { t } = useTranslation();
+  const changes = SYNC_SUMMARY_TYPES
+    .map((key) => ({ key, count: summary[key] }))
     .filter((c) => c.count > 0);
 
   return (
     <div className="mt-4 p-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl space-y-2">
       {changes.length === 0 && (summary.conflicts ?? []).length === 0 ? (
-        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">Nothing changed — already up to date.</p>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">{t('account.sync.nothingChanged')}</p>
       ) : (
         <>
           {changes.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {changes.map((c) => (
                 <span key={c.key} className="px-2.5 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-[11px] font-bold text-zinc-600 dark:text-zinc-400">
-                  {c.count} {c.label}
+                  {t(`account.entity.${c.key}`, { count: c.count })}
                 </span>
               ))}
             </div>
@@ -111,7 +120,10 @@ function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
   );
 }
 
-const ENTITY_TYPE_LABEL_PLURAL: Record<string, string> = {
+/** The singular entity names Structured Merge reports against, mapped to
+ *  the plural-aware `account.entity.*` keys. An unknown type falls back to
+ *  its own raw name rather than being guessed at with an English "s". */
+const ENTITY_TYPE_KEY: Record<string, string> = {
   recipe: 'recipes', ingredient: 'ingredients', tool: 'tools', tag: 'tags', technique: 'techniques', profile: 'profiles',
 };
 
@@ -119,10 +131,13 @@ const ENTITY_TYPE_LABEL_PLURAL: Record<string, string> = {
  *  pulled in, since a bare count doesn't say whether it was recipes,
  *  ingredients, or something else. Empty string (not "0 changes") when
  *  there's nothing to break down, so callers fall back to a plain count. */
-function formatAppliedByType(byType: Partial<Record<string, number>>): string {
+function formatAppliedByType(t: TFunction, byType: Partial<Record<string, number>>): string {
   return Object.entries(byType)
     .filter(([, count]) => (count ?? 0) > 0)
-    .map(([type, count]) => `${count} ${count === 1 ? type : (ENTITY_TYPE_LABEL_PLURAL[type] ?? `${type}s`)}`)
+    .map(([type, count]) => {
+      const key = ENTITY_TYPE_KEY[type];
+      return key ? t(`account.entity.${key}`, { count }) : `${count} ${type}`;
+    })
     .join(', ');
 }
 
@@ -138,14 +153,14 @@ function formatScanCounts(counts: Record<string, { remoteFiles: number; localFil
     .join(', ');
 }
 
-function formatRelativeTime(iso: string): string {
+function formatRelativeTime(t: TFunction, iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1) return t('account.time.justNow');
+  if (mins < 60) return t('account.time.minutesAgo', { count: mins });
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  return `${Math.round(hours / 24)} day(s) ago`;
+  if (hours < 24) return t('account.time.hoursAgo', { count: hours });
+  return t('account.time.daysAgo', { count: Math.round(hours / 24) });
 }
 
 interface DisplayConflict {
@@ -158,8 +173,8 @@ interface DisplayConflict {
   entityName: string;
 }
 
-function conflictValuePreview(value: unknown): string {
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+function conflictValuePreview(t: TFunction, value: unknown): string {
+  if (Array.isArray(value)) return t('account.conflicts.itemCount', { count: value.length });
   return String(value);
 }
 
@@ -169,11 +184,12 @@ type LineDiffOp = { type: 'same' | 'removed' | 'added'; text: string };
  *  green background, instead of a plain badge — the ask being "make the
  *  differences easier to actually see," not just technically present. */
 function LineDiffView({ ops }: { ops: LineDiffOp[] }) {
+  const { t } = useTranslation();
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden font-mono text-xs">
       <div className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-3 text-[10px] font-sans font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
-        <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400"><span className="w-2 h-2 rounded-sm bg-red-500 inline-block" />mine only</span>
-        <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />theirs only</span>
+        <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400"><span className="w-2 h-2 rounded-sm bg-red-500 inline-block" />{t('account.conflicts.mineOnly')}</span>
+        <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />{t('account.conflicts.theirsOnly')}</span>
       </div>
       <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
         {ops.map((op, i) => (
@@ -196,6 +212,7 @@ function LineDiffView({ ops }: { ops: LineDiffOp[] }) {
 }
 
 function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict; onResolve: (chosen: 'local' | 'remote') => void }) {
+  const { t } = useTranslation();
   const [ops, setOps] = useState<LineDiffOp[] | null>(null);
   const [unsupported, setUnsupported] = useState(false);
   const isArrayField = Array.isArray(conflict.localValue) || Array.isArray(conflict.remoteValue);
@@ -238,17 +255,17 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-zinc-200 dark:border-zinc-700">
           <div className="text-xs text-zinc-600 dark:text-zinc-400 font-medium">
-            <span className="font-black text-zinc-800 dark:text-zinc-200">mine:</span> {conflictValuePreview(conflict.localValue)}
+            <span className="font-black text-zinc-800 dark:text-zinc-200">{t('account.conflicts.mineLabel')}</span> {conflictValuePreview(t, conflict.localValue)}
             <span className="mx-2 text-zinc-300 dark:text-zinc-600">|</span>
-            <span className="font-black text-zinc-800 dark:text-zinc-200">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
+            <span className="font-black text-zinc-800 dark:text-zinc-200">{t('account.conflicts.theirsLabel')}</span> {conflictValuePreview(t, conflict.remoteValue)}
           </div>
           <div className="flex gap-2 shrink-0">
-            <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">Mine</button>
-            <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Theirs</button>
+            <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">{t('account.conflicts.mine')}</button>
+            <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">{t('account.conflicts.theirs')}</button>
           </div>
         </div>
         <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-          No per-row identity for this field, so only a count can be shown here — not a line-by-line diff. Picking one side replaces the whole list with it.
+          {t('account.conflicts.noPerRowIdentity')}
         </p>
       </div>
     );
@@ -259,11 +276,11 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
       <div className="space-y-2">
         <LineDiffView ops={ops ?? []} />
         <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">Keep mine</button>
-          <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Keep theirs</button>
+          <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">{t('account.conflicts.keepMine')}</button>
+          <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">{t('account.conflicts.keepTheirs')}</button>
         </div>
         <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-          Picking one side replaces the whole list with it — this diff is just to help you decide, not a per-line merge.
+          {t('account.conflicts.wholeListReplaced')}
         </p>
       </div>
     );
@@ -272,13 +289,13 @@ function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict;
   return (
     <div className="flex items-center justify-between gap-3 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-zinc-200 dark:border-zinc-700">
       <div className="text-xs text-zinc-600 dark:text-zinc-400 font-medium">
-        <span className="font-black text-zinc-800 dark:text-zinc-200">mine:</span> {conflictValuePreview(conflict.localValue)}
+        <span className="font-black text-zinc-800 dark:text-zinc-200">{t('account.conflicts.mineLabel')}</span> {conflictValuePreview(t, conflict.localValue)}
         <span className="mx-2 text-zinc-300 dark:text-zinc-600">|</span>
-        <span className="font-black text-zinc-800 dark:text-zinc-200">theirs:</span> {conflictValuePreview(conflict.remoteValue)}
+        <span className="font-black text-zinc-800 dark:text-zinc-200">{t('account.conflicts.theirsLabel')}</span> {conflictValuePreview(t, conflict.remoteValue)}
       </div>
       <div className="flex gap-2 shrink-0">
-        <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">Mine</button>
-        <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">Theirs</button>
+        <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">{t('account.conflicts.mine')}</button>
+        <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">{t('account.conflicts.theirs')}</button>
       </div>
     </div>
   );
@@ -292,12 +309,13 @@ function ConflictEntityGroup({
   onOpenField: (fieldName: string) => void;
   onResolve: (id: string, chosen: 'local' | 'remote') => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm font-black text-zinc-800 dark:text-zinc-200">{entityConflicts[0].entityName}</p>
         <span className="px-2.5 py-0.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-full text-[10px] font-black text-zinc-500 dark:text-zinc-400 capitalize">
-          {entityConflicts[0].entityType} · {entityConflicts.length} conflict{entityConflicts.length === 1 ? '' : 's'}
+          {entityConflicts[0].entityType} · {t('account.conflicts.conflictCount', { count: entityConflicts.length })}
         </span>
       </div>
       <div className="flex flex-wrap gap-1.5 mb-3">
@@ -326,6 +344,7 @@ function ConflictEntityGroup({
  *  diverged on both sides (see applyEntityMergeResult()); this card
  *  renders nothing only when there's nothing actually pending. */
 function ConflictsCard() {
+  const { t } = useTranslation();
   const [conflicts, setConflicts] = useState<DisplayConflict[] | null>(null);
   const [openField, setOpenField] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -363,7 +382,7 @@ function ConflictsCard() {
       const resolved = await resolveConflict(id, chosen);
       if (resolved) await applyResolvedConflict(resolved);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not resolve conflict');
+      setError(err instanceof Error ? err.message : t('account.conflicts.couldNotResolve'));
     }
     await refresh();
   };
@@ -379,9 +398,9 @@ function ConflictsCard() {
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
-      <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-1">Needs Your Attention</h2>
+      <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-1">{t('account.conflicts.heading')}</h2>
       <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mb-4">
-        {groups.size} item{groups.size === 1 ? '' : 's'} changed differently on two devices.
+        {t('account.conflicts.subtitle', { count: groups.size })}
       </p>
       {error && <p className="text-sm text-red-600 font-medium mb-3">{error}</p>}
       <div className="space-y-3">
@@ -416,6 +435,7 @@ function formatSyncInterval(interval: SyncInterval): string {
 }
 
 function FolderSyncCard() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [standalone, setStandalone] = useState(false);
   const [electron, setElectron] = useState(false);
@@ -466,10 +486,41 @@ function FolderSyncCard() {
   const [result, setResult] = useState<SyncResult | null>(null);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Setup File (lib/setupConfigFile.ts) — everything above, in one encrypted
+  // file, so a second device doesn't mean retyping a repo URL and a token.
+  const [exportingSetup, setExportingSetup] = useState(false);
+  const [importingSetup, setImportingSetup] = useState(false);
+  const [setupImported, setSetupImported] = useState<AppliedSetup | null>(null);
 
   const refreshDevices = async () => {
     const { listDeviceRecords } = await import('../lib/sync/gitSync');
     setDevices(await listDeviceRecords());
+  };
+
+  /** Re-reads exactly what a Setup File import can change, so the card shows
+   *  the imported values instead of the ones it loaded at mount. */
+  const reloadSyncSettings = async () => {
+    const { getSyncMode, getGitRemoteConfig, getSyncInterval } = await import('../lib/sync/syncSettings');
+    const [mode, interval, gitRemoteConfig] = await Promise.all([
+      getSyncMode(),
+      getSyncInterval(),
+      getGitRemoteConfig(),
+    ]);
+    setSyncModeState(mode);
+    setIntervalValueState(interval.value);
+    setIntervalUnitState(interval.unit);
+    setGitRemoteUrl(gitRemoteConfig?.url ?? '');
+    setGitRemoteUsername(gitRemoteConfig?.username ?? '');
+    setGitRemoteCorsProxy(gitRemoteConfig?.corsProxy ?? '');
+    setShowCorsProxy(!!gitRemoteConfig?.corsProxy);
+    setGitRemoteTokenConfigured(!!gitRemoteConfig?.token);
+    // An imported token is a brand-new credential, so any problem recorded
+    // against the previous one is stale: keep it off the screen until this
+    // device has actually tried the new one.
+    setGitRemoteToken('');
+    setGitRemoteTokenTouched(false);
+    setConnectionTestResult(null);
+    await refreshSyncHealth();
   };
 
   // No platform guard: this used to early-return on Electron, on the
@@ -554,7 +605,7 @@ function FolderSyncCard() {
       if (syncMode === 'folder') await Promise.all([refreshDevices(), refreshSyncHealth()]);
       else await refreshSyncHealth();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sync failed');
+      setError(err instanceof Error ? err.message : t('account.folderSync.syncFailed'));
     } finally {
       setSyncing(false);
       setProgress(null);
@@ -608,7 +659,7 @@ function FolderSyncCard() {
       setResyncProgress(null);
       await handleSyncNow();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not resync all data');
+      setError(err instanceof Error ? err.message : t('account.folderSync.couldNotResync'));
     } finally {
       setResyncingAll(false);
       setResyncProgress(null);
@@ -640,7 +691,7 @@ function FolderSyncCard() {
         setError(`${outcome.failedEntities.length} item(s) still couldn't be repaired — see the console for details.`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not repair local data');
+      setError(err instanceof Error ? err.message : t('account.folderSync.couldNotRepair'));
     } finally {
       setRepairing(false);
     }
@@ -662,7 +713,7 @@ function FolderSyncCard() {
         await handleSyncNow();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not change folder');
+      setError(err instanceof Error ? err.message : t('account.folderSync.couldNotChangeFolder'));
     } finally {
       setChoosingFolder(false);
     }
@@ -678,7 +729,7 @@ function FolderSyncCard() {
       setSavedDeviceName(trimmed);
       await handleSyncNow(); // so devices/<id>.json and the list below reflect it right away
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save device name');
+      setError(err instanceof Error ? err.message : t('account.folderSync.couldNotSaveDeviceName'));
     } finally {
       setSavingName(false);
     }
@@ -741,7 +792,7 @@ function FolderSyncCard() {
       await resyncAllLocalData();
       await handleSyncNow();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save git remote settings');
+      setError(err instanceof Error ? err.message : t('account.folderSync.couldNotSaveGitRemote'));
     } finally {
       setSavingGitRemote(false);
     }
@@ -773,9 +824,11 @@ function FolderSyncCard() {
       <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Sync</h2>
+            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.syncHeading')}</h2>
             <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
-              {lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Never synced yet'}
+              {lastSyncAt
+                ? t('account.folderSync.lastSyncedAt', { when: new Date(lastSyncAt).toLocaleString() })
+                : t('account.folderSync.neverSynced')}
             </p>
           </div>
           <button
@@ -785,11 +838,11 @@ function FolderSyncCard() {
             className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-2xl font-black text-sm hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
           >
             <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
-            {syncing ? 'Syncing…' : 'Sync Now'}
+            {syncing ? t('account.folderSync.syncing') : t('account.folderSync.syncNow')}
           </button>
         </div>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          Only an admin profile can change where this library syncs to, its credentials, or its devices.
+          {t('account.folderSync.adminOnlyNote')}
         </p>
         {error && <p className="mt-4 text-sm text-red-600 font-medium">{error}</p>}
       </div>
@@ -800,9 +853,13 @@ function FolderSyncCard() {
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Folder Sync</h2>
+          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.heading')}</h2>
+          {/* Trans-free on purpose: the emphasis is decoration, and splitting
+              the sentence into three translatable fragments to keep it would
+              make the whole thing harder to translate than it is to read. */}
           <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
-            Choose how this device exchanges changes with your others — a plain synced folder, or a real git server.
+            {t('account.folderSync.subtitle')}{' '}
+            {t('account.folderSync.subtitleCrossRef', { card: t('account.storageMode.heading') })}
           </p>
         </div>
       </div>
@@ -811,7 +868,7 @@ function FolderSyncCard() {
         {pauseReason && (
           <p className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
-            Sync paused — {pauseReason}
+            {t('account.folderSync.syncPaused', { reason: pauseReason })}
           </p>
         )}
 
@@ -826,26 +883,23 @@ function FolderSyncCard() {
         {stalePush(lastSyncAt, lastPushAt) && (
           <p className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] shrink-0">cloud_off</span>
-            <span>
-              This device is receiving changes but not sending them — its last successful upload was{' '}
-              {new Date(lastPushAt!).toLocaleString()}. Anything created here since then is still only on this device.
-            </span>
+            <span>{t('account.folderSync.stalePush', { when: new Date(lastPushAt!).toLocaleString() })}</span>
           </p>
         )}
 
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Sync Mode</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.syncMode')}</label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => handleSelectMode('folder')}
               className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'folder' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
             >
-              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">Folder</p>
+              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.modeFolder')}</p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
                 {electron
-                  ? 'A folder inside OneDrive/Drive/Syncthing.'
-                  : 'A Drive/OneDrive/Syncthing SAF folder.'}
+                  ? t('account.folderSync.modeFolderHintDesktop')
+                  : t('account.folderSync.modeFolderHintAndroid')}
               </p>
             </button>
             <button
@@ -853,8 +907,8 @@ function FolderSyncCard() {
               onClick={() => handleSelectMode('git-remote')}
               className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'git-remote' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
             >
-              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">Git Remote</p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">GitHub, GitLab, or a self-hosted git server.</p>
+              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.modeGitRemote')}</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{t('account.folderSync.modeGitRemoteHint')}</p>
             </button>
           </div>
         </div>
@@ -862,8 +916,8 @@ function FolderSyncCard() {
         {syncMode === 'folder' ? (
           <div className="flex gap-8 flex-wrap">
             <div className="min-w-0">
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Sync Folder</p>
-              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? 'None chosen yet'}</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.syncFolder')}</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? t('account.folderSync.noFolderChosen')}</p>
             </div>
             <div className="self-end">
               <button
@@ -873,14 +927,14 @@ function FolderSyncCard() {
                 className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-base">folder_open</span>
-                {choosingFolder ? 'Choosing…' : folderPath ? 'Change Folder' : 'Choose Folder'}
+                {choosingFolder ? t('account.folderSync.choosing') : folderPath ? t('account.folderSync.changeFolder') : t('account.folderSync.chooseFolder')}
               </button>
             </div>
           </div>
         ) : (
           <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-5">
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Repository URL</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.repositoryUrl')}</label>
               <input
                 type="text"
                 value={gitRemoteUrl}
@@ -889,23 +943,23 @@ function FolderSyncCard() {
                 className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
               />
               <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
-                An empty private repo works fine — GitHub, GitLab, or any self-hosted git-http server your other devices can also reach.
+                {t('account.folderSync.repositoryUrlHint')}
               </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Username</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.username')}</label>
                 <input
                   type="text"
                   value={gitRemoteUsername}
                   onChange={(e) => setGitRemoteUsername(e.target.value)}
-                  placeholder="Usually optional with a token"
+                  placeholder={t('account.folderSync.usernamePlaceholder')}
                   className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                 />
               </div>
               <ProviderKeyInput
-                label="Access Token"
-                placeholder="Personal access token / password"
+                label={t('account.folderSync.accessToken')}
+                placeholder={t('account.folderSync.accessTokenPlaceholder')}
                 value={gitRemoteToken}
                 hasKey={gitRemoteTokenConfigured}
                 touched={gitRemoteTokenTouched}
@@ -922,23 +976,21 @@ function FolderSyncCard() {
             </div>
             {showCorsProxy ? (
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">CORS Proxy (rarely needed)</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.corsProxy')}</label>
                 <input
                   type="text"
                   value={gitRemoteCorsProxy}
                   onChange={(e) => setGitRemoteCorsProxy(e.target.value)}
-                  placeholder="Leave blank unless you have a specific reason to set one"
+                  placeholder={t('account.folderSync.corsProxyPlaceholder')}
                   className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                 />
                 <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
-                  This app reaches GitHub/GitLab/self-hosted servers directly through native code on both Windows and
-                  Android, not the browser — so unlike most git-in-the-browser tools, no CORS proxy is needed here at all,
-                  including for GitHub/GitLab. Leave this blank.
+                  {t('account.folderSync.corsProxyHint')}
                 </p>
               </div>
             ) : (
               <button type="button" onClick={() => setShowCorsProxy(true)} className="text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400">
-                + Advanced: CORS proxy (not needed for GitHub/GitLab — this app connects directly)
+                {t('account.folderSync.corsProxyToggle')}
               </button>
             )}
             {connectionTestResult && (
@@ -955,7 +1007,7 @@ function FolderSyncCard() {
                 className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 <span className={`material-symbols-outlined text-base ${testingConnection ? 'animate-spin' : ''}`}>wifi_tethering</span>
-                {testingConnection ? 'Testing…' : 'Test Connection'}
+                {testingConnection ? t('account.folderSync.testing') : t('account.folderSync.testConnection')}
               </button>
               <button
                 type="button"
@@ -964,14 +1016,14 @@ function FolderSyncCard() {
                 className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-black text-xs hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-base">{savingGitRemote ? 'sync' : 'save'}</span>
-                {savingGitRemote ? 'Saving…' : 'Save & Sync'}
+                {savingGitRemote ? t('common.saving') : t('account.folderSync.saveAndSync')}
               </button>
             </div>
           </div>
         )}
 
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Automatic Sync</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.automaticSync')}</label>
           <div className="flex items-center gap-2 flex-wrap">
             {SYNC_INTERVAL_PRESETS.map((preset) => {
               const active = intervalValue === preset.value && intervalUnit === preset.unit;
@@ -1006,20 +1058,55 @@ function FolderSyncCard() {
                 disabled={savingInterval}
                 className="bg-zinc-50 dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold px-2 py-1.5 text-xs disabled:opacity-50"
               >
-                <option value="minutes">minutes</option>
-                <option value="hours">hours</option>
-                <option value="days">days</option>
-                <option value="weeks">weeks</option>
-                <option value="months">months</option>
+                <option value="minutes">{t('account.folderSync.unitMinutes')}</option>
+                <option value="hours">{t('account.folderSync.unitHours')}</option>
+                <option value="days">{t('account.folderSync.unitDays')}</option>
+                <option value="weeks">{t('account.folderSync.unitWeeks')}</option>
+                <option value="months">{t('account.folderSync.unitMonths')}</option>
               </select>
             </div>
           </div>
-          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">How often SmartChef checks for changes automatically, besides on app resume and "Sync Now".</p>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.automaticSyncHint')}</p>
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.setupFile.label')}</label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setExportingSetup(true)}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-black text-xs hover:bg-zinc-800 transition-all active:scale-[0.98]"
+            >
+              <span className="material-symbols-outlined text-base">lock</span>
+              {t('account.setupFile.exportButton')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSetupImported(null); setImportingSetup(true); }}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
+            >
+              <span className="material-symbols-outlined text-base">upload_file</span>
+              {t('account.setupFile.importButton')}
+            </button>
+          </div>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
+            {t('account.setupFile.hint')}
+          </p>
+          {setupImported && (
+            <p className="text-xs font-bold text-primary mt-2">
+              {t('account.setupFile.applied', {
+                what: setupImported.mode === 'git-remote'
+                  ? `${t('account.folderSync.modeGitRemote')} — ${setupImported.remoteUrl}`
+                  : t('account.setupFile.appliedFolderMode'),
+              })}
+              {setupImported.needsSyncFolder && ` ${t('account.setupFile.appliedNeedsFolder')}`}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Device Name</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.deviceName')}</label>
           <div className="flex gap-2">
             <input
               type="text"
@@ -1035,27 +1122,27 @@ function FolderSyncCard() {
 
         <div className="flex gap-8 flex-wrap self-end pb-1">
           <div>
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">This Device</p>
+            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.thisDevice')}</p>
             <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{deviceId ?? '—'}</p>
           </div>
           <div>
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Last Sync</p>
-            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : 'Never'}</p>
+            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.lastSync')}</p>
+            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : t('account.folderSync.never')}</p>
           </div>
         </div>
         </div>
 
         {syncMode === 'folder' && devices.length > 0 && (
           <div>
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Known Devices</p>
+            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.knownDevices')}</p>
             <div className="space-y-1.5">
               {devices.map((d) => (
                 <div key={d.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
                   <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">
                     {d.deviceName}
-                    {d.deviceId === deviceId && <span className="text-zinc-400 dark:text-zinc-500 font-medium"> (this device)</span>}
+                    {d.deviceId === deviceId && <span className="text-zinc-400 dark:text-zinc-500 font-medium"> {t('account.folderSync.thisDeviceSuffix')}</span>}
                   </span>
-                  <span className="text-xs text-zinc-400 dark:text-zinc-500">{formatRelativeTime(d.lastSyncAt)}</span>
+                  <span className="text-xs text-zinc-400 dark:text-zinc-500">{formatRelativeTime(t, d.lastSyncAt)}</span>
                 </div>
               ))}
             </div>
@@ -1063,7 +1150,7 @@ function FolderSyncCard() {
         )}
         {syncMode === 'git-remote' && (
           <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            Known-devices tracking isn't available in Git Remote mode yet — check "History" below for recent activity instead.
+            {t('account.folderSync.knownDevicesUnavailable')}
           </p>
         )}
 
@@ -1071,7 +1158,7 @@ function FolderSyncCard() {
         {resyncingAll && resyncProgress && (
           <div className="space-y-1">
             <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-              Resyncing {resyncProgress.phase} — {resyncProgress.done}/{resyncProgress.total}
+              {t('account.folderSync.resyncProgress', { phase: resyncProgress.phase, done: resyncProgress.done, total: resyncProgress.total })}
             </p>
             <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
               <div
@@ -1082,12 +1169,13 @@ function FolderSyncCard() {
           </div>
         )}
         {resyncingAll && !resyncProgress && !syncing && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Preparing to resync…</p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{t('account.folderSync.preparingResync')}</p>
         )}
         {syncing && progress && (
           <div className="space-y-1">
             <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-              {progress.phase === 'push' ? 'Uploading to the Sync Folder' : 'Downloading from the Sync Folder'} — {progress.done}/{progress.total} object{progress.total === 1 ? '' : 's'}
+              {progress.phase === 'push' ? t('account.folderSync.uploading') : t('account.folderSync.downloading')}{' — '}
+              {t('account.folderSync.objectProgress', { done: progress.done, count: progress.total })}
             </p>
             <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
               <div
@@ -1099,25 +1187,29 @@ function FolderSyncCard() {
         )}
         {!syncing && result && (
           <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-            {result.pushedObjects > 0 && `Uploaded ${result.pushedObjects} object${result.pushedObjects === 1 ? '' : 's'}. `}
-            {result.pulledObjects > 0 && `Downloaded ${result.pulledObjects} object${result.pulledObjects === 1 ? '' : 's'}. `}
-            {result.pushedObjects === 0 && result.pulledObjects === 0 && 'Nothing to upload or download — already in sync. '}
+            {result.pushedObjects > 0 && `${t('account.folderSync.uploadedObjects', { count: result.pushedObjects })} `}
+            {result.pulledObjects > 0 && `${t('account.folderSync.downloadedObjects', { count: result.pulledObjects })} `}
+            {result.pushedObjects === 0 && result.pulledObjects === 0 && `${t('account.folderSync.nothingTransferred')} `}
             {result.applied > 0
-              ? `Applied ${formatAppliedByType(result.appliedByType) || `${result.applied} change${result.applied === 1 ? '' : 's'}`} from other devices.`
-              : 'Nothing new from other devices.'}
-            {result.committed ? ' Your own changes were committed.' : ''}
-            {result.conflicts > 0 ? ` ${result.conflicts} field${result.conflicts === 1 ? '' : 's'} need${result.conflicts === 1 ? 's' : ''} your review.` : ''}
+              ? t('account.folderSync.appliedFromOthers', {
+                  what: formatAppliedByType(t, result.appliedByType) || t('account.folderSync.changeCount', { count: result.applied }),
+                })
+              : t('account.folderSync.nothingNew')}
+            {result.committed ? ` ${t('account.folderSync.ownChangesCommitted')}` : ''}
+            {result.conflicts > 0 ? ` ${t('account.folderSync.fieldsNeedReview', { count: result.conflicts })}` : ''}
           </p>
         )}
         {!syncing && result && result.failedEntities.length > 0 && (
           <p className="text-xs text-red-600 font-medium">
-            {result.failedEntities.length} item{result.failedEntities.length === 1 ? '' : 's'} from other devices couldn't be
-            saved here ({result.failedEntities.map((f) => f.entityType).join(', ')}) — try Repair Local Data below.
+            {t('account.folderSync.failedEntities', {
+              count: result.failedEntities.length,
+              types: result.failedEntities.map((f) => f.entityType).join(', '),
+            })}
           </p>
         )}
         {!syncing && result && Object.keys(result.entityScanCounts).length > 0 && (
           <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">
-            Scan (remote↓/local↑): {formatScanCounts(result.entityScanCounts)}
+            {t('account.folderSync.scanCounts')} {formatScanCounts(result.entityScanCounts)}
           </p>
         )}
         {!repairing && repairMessage && <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{repairMessage}</p>}
@@ -1130,27 +1222,27 @@ function FolderSyncCard() {
             className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
           >
             <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
-            {syncing ? 'Syncing…' : 'Sync Now'}
+            {syncing ? t('account.folderSync.syncing') : t('account.folderSync.syncNow')}
           </button>
           <button
             type="button"
             onClick={handleResyncAll}
             disabled={resyncingAll || syncing}
-            title="Re-serializes every recipe, ingredient, tool, tag, technique, and profile this device has and pushes them all — use after updating if something looks missing on the other end, not needed for routine syncing"
+            title={t('account.folderSync.resyncAllHint')}
             className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
           >
             <span className={`material-symbols-outlined text-lg ${resyncingAll ? 'animate-spin' : ''}`}>refresh</span>
-            {resyncingAll ? 'Resyncing…' : 'Resync All'}
+            {resyncingAll ? t('account.folderSync.resyncing') : t('account.folderSync.resyncAll')}
           </button>
           <button
             type="button"
             onClick={handleRepairLocalStorage}
             disabled={repairing || syncing || resyncingAll}
-            title="Re-applies this device's own sync history onto its local data — fixes an item whose ingredients/steps/tools went missing after syncing, without needing anything from another device"
+            title={t('account.folderSync.repairHint')}
             className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
           >
             <span className={`material-symbols-outlined text-lg ${repairing ? 'animate-spin' : ''}`}>build</span>
-            {repairing ? 'Repairing…' : 'Repair Local Data'}
+            {repairing ? t('account.folderSync.repairing') : t('account.folderSync.repairLocalData')}
           </button>
           <button
             type="button"
@@ -1158,15 +1250,30 @@ function FolderSyncCard() {
             className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
           >
             <span className="material-symbols-outlined text-lg">history</span>
-            History
+            {t('account.folderSync.history')}
           </button>
         </div>
       </div>
+
+      <ExportSetupFileDialog
+        open={exportingSetup}
+        onClose={() => setExportingSetup(false)}
+        deviceName={savedDeviceName || deviceId}
+      />
+      <ImportSetupFileDialog
+        open={importingSetup}
+        onClose={() => setImportingSetup(false)}
+        onImported={(applied) => {
+          setSetupImported(applied);
+          void reloadSyncSettings();
+        }}
+      />
     </div>
   );
 }
 
 function OfflineDownloadsCard() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [count, setCount] = useState<number | null>(null);
 
@@ -1181,9 +1288,13 @@ function OfflineDownloadsCard() {
       className="w-full flex items-center justify-between gap-4 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 text-left hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
     >
       <div>
-        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Offline Downloads</h2>
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.offlineDownloads.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
-          {count === null ? 'Loading…' : count === 0 ? 'No recipes downloaded for offline viewing yet.' : `${count} recipe${count === 1 ? '' : 's'} downloaded for offline viewing.`}
+          {count === null
+            ? t('common.loading')
+            : count === 0
+              ? t('account.offlineDownloads.empty')
+              : t('account.offlineDownloads.count', { count })}
         </p>
       </div>
       <span className="material-symbols-outlined text-zinc-400 dark:text-zinc-500">chevron_right</span>
@@ -1192,6 +1303,7 @@ function OfflineDownloadsCard() {
 }
 
 function SyncCard() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1215,11 +1327,11 @@ function SyncCard() {
     try {
       const res = await apiFetch('/api/sync-folder/sync-now', { method: 'POST' });
       const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Sync failed');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('account.folderSync.syncFailed'));
       setLastSummary(json.data.imported);
       await fetchStatus();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sync failed');
+      setError(err instanceof Error ? err.message : t('account.folderSync.syncFailed'));
     } finally {
       setSyncing(false);
     }
@@ -1231,15 +1343,15 @@ function SyncCard() {
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Multi-Device Sync</h2>
+          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.multiDeviceSync.heading')}</h2>
           <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
             {status.enabled
-              ? 'Backs up and merges your library through a shared folder.'
-              : 'Disabled — enable via SYNC_ENABLED in this instance\'s .env, then restart.'}
+              ? t('account.multiDeviceSync.enabledSubtitle')
+              : t('account.multiDeviceSync.disabledSubtitle')}
           </p>
         </div>
         <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${status.enabled ? 'bg-primary/10 text-primary' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}`}>
-          {status.enabled ? 'Enabled' : 'Disabled'}
+          {status.enabled ? t('account.multiDeviceSync.enabled') : t('account.multiDeviceSync.disabled')}
         </span>
       </div>
 
@@ -1247,25 +1359,25 @@ function SyncCard() {
         <div className="space-y-5">
           <div className="flex gap-8">
             <div>
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">This Device</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.thisDevice')}</p>
               <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{status.deviceName}</p>
             </div>
             <div>
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Last Sync</p>
-              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{status.lastSyncAt ? formatRelativeTime(status.lastSyncAt) : 'Never'}</p>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.lastSync')}</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{status.lastSyncAt ? formatRelativeTime(t, status.lastSyncAt) : t('account.folderSync.never')}</p>
             </div>
           </div>
 
           <div>
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Known Devices</p>
+            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.knownDevices')}</p>
             {!status.peers || status.peers.length === 0 ? (
-              <p className="text-sm text-zinc-400 dark:text-zinc-500">No other devices seen yet.</p>
+              <p className="text-sm text-zinc-400 dark:text-zinc-500">{t('account.multiDeviceSync.noPeers')}</p>
             ) : (
               <div className="space-y-1.5">
                 {status.peers.map((p) => (
                   <div key={p.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
                     <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">{p.deviceName}</span>
-                    <span className="text-xs text-zinc-400 dark:text-zinc-500">{formatRelativeTime(p.lastSeenAt)}</span>
+                    <span className="text-xs text-zinc-400 dark:text-zinc-500">{formatRelativeTime(t, p.lastSeenAt)}</span>
                   </div>
                 ))}
               </div>
@@ -1280,7 +1392,7 @@ function SyncCard() {
             className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
           >
             <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
-            {syncing ? 'Syncing…' : 'Sync Now'}
+            {syncing ? t('account.folderSync.syncing') : t('account.folderSync.syncNow')}
           </button>
           {lastSummary && <SyncSummaryPanel summary={lastSummary} />}
         </div>
@@ -1310,10 +1422,10 @@ const PROVIDER_LABELS: Record<string, string> = {
 // this in one place is what makes the card below "one relevant field,
 // however the provider needs it configured" instead of every provider's
 // key sitting on screen regardless of which one is actually selected.
-const PROVIDER_KEY_META: Record<string, { label: string; placeholder: string }> = {
-  anthropic: { label: 'Claude (Anthropic) API Key', placeholder: 'sk-ant-...' },
-  gemini: { label: 'Google Gemini API Key', placeholder: 'AIza...' },
-  openai: { label: 'OpenAI API Key', placeholder: 'sk-...' },
+const PROVIDER_KEY_META: Record<string, { labelKey: string; placeholder: string }> = {
+  anthropic: { labelKey: 'account.llm.keyAnthropic', placeholder: 'sk-ant-...' },
+  gemini: { labelKey: 'account.llm.keyGemini', placeholder: 'AIza...' },
+  openai: { labelKey: 'account.llm.keyOpenai', placeholder: 'sk-...' },
 };
 
 function ProviderKeyInput({
@@ -1322,6 +1434,7 @@ function ProviderKeyInput({
   label: string; placeholder: string; value: string; hasKey: boolean; touched: boolean;
   onChange: (value: string, touched: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div>
       <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{label}</label>
@@ -1330,7 +1443,7 @@ function ProviderKeyInput({
           type="password"
           value={value}
           onChange={(e) => onChange(e.target.value, true)}
-          placeholder={hasKey && !touched ? '•••••••• (configured — leave blank to keep)' : placeholder}
+          placeholder={hasKey && !touched ? t('account.llm.keyConfigured') : placeholder}
           className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4 pr-24"
         />
         {hasKey && !touched && (
@@ -1339,7 +1452,7 @@ function ProviderKeyInput({
             onClick={() => onChange('', true)}
             className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-red-600 transition-colors"
           >
-            Remove
+            {t('account.llm.removeKey')}
           </button>
         )}
       </div>
@@ -1351,6 +1464,7 @@ const PROVIDER_KEY_STATE_KEYS = ['anthropic', 'gemini', 'openai'] as const;
 type CloudProvider = (typeof PROVIDER_KEY_STATE_KEYS)[number];
 
 function LlmProviderCard() {
+  const { t } = useTranslation();
   const [provider, setProvider] = useState('ollama');
   const [hasKey, setHasKey] = useState<Record<CloudProvider, boolean>>({ anthropic: false, gemini: false, openai: false });
   const [keyValue, setKeyValue] = useState<Record<CloudProvider, string>>({ anthropic: '', gemini: '', openai: '' });
@@ -1377,7 +1491,7 @@ function LlmProviderCard() {
       // showing its defaults (provider "ollama", no key) as if that were
       // the saved configuration, so the only sign anything was wrong came
       // later, from Save.
-      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load the provider settings'))
+      .catch((err) => setError(err instanceof Error ? err.message : t('account.llm.couldNotLoad')))
       .finally(() => setLoaded(true));
   }, []);
 
@@ -1397,7 +1511,7 @@ function LlmProviderCard() {
         body: JSON.stringify(body),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Failed to save');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('common.failedToSave'));
       setHasKey((prev) => {
         const next = { ...prev };
         for (const p of PROVIDER_KEY_STATE_KEYS) if (keyTouched[p]) next[p] = !!keyValue[p];
@@ -1413,7 +1527,7 @@ function LlmProviderCard() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : t('common.failedToSave'));
     } finally {
       setSaving(false);
     }
@@ -1426,22 +1540,21 @@ function LlmProviderCard() {
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
-        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">AI Provider</h2>
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.llm.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
-          Choose what powers Smart Import's recipe parsing — local Ollama (free, private, slower
-          on CPU-only hardware) or a cloud provider (faster/higher quality, billed by them directly).
+          {t('account.llm.subtitle')}
         </p>
       </div>
 
       <div className="space-y-5">
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Provider</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.llm.provider')}</label>
           <select
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
             className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4 appearance-none cursor-pointer"
           >
-            <option value="ollama">Local (Ollama) — default, private</option>
+            <option value="ollama">{t('account.llm.providerOllama')}</option>
             <option value="anthropic">Anthropic (Claude)</option>
             <option value="gemini">Google (Gemini)</option>
             <option value="openai">OpenAI (ChatGPT)</option>
@@ -1451,8 +1564,7 @@ function LlmProviderCard() {
         {cloudProvider && (
           <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] shrink-0">info</span>
-            Recipe text/URLs you import will be sent to {PROVIDER_LABELS[provider]}'s servers for processing.
-            Local (Ollama) keeps everything on this device.
+            {t('account.llm.cloudWarning', { provider: PROVIDER_LABELS[provider] })}
           </p>
         )}
 
@@ -1461,7 +1573,7 @@ function LlmProviderCard() {
             showing all four regardless of what's actually in use. */}
         {cloudProvider ? (
           <ProviderKeyInput
-            label={PROVIDER_KEY_META[cloudProvider].label}
+            label={t(PROVIDER_KEY_META[cloudProvider].labelKey)}
             placeholder={PROVIDER_KEY_META[cloudProvider].placeholder}
             value={keyValue[cloudProvider]}
             hasKey={hasKey[cloudProvider]}
@@ -1473,16 +1585,16 @@ function LlmProviderCard() {
           />
         ) : (
           <div>
-            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Ollama URL</label>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.llm.ollamaUrl')}</label>
             <input
               type="text"
               value={ollamaUrl}
               onChange={(e) => setOllamaUrl(e.target.value)}
-              placeholder="http://localhost:11434 (default — leave blank unless Ollama runs elsewhere)"
+              placeholder={t('account.llm.ollamaUrlPlaceholder')}
               className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
             />
             <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">
-              Only needed if Ollama runs on a different host or port — e.g. another machine on your network.
+              {t('account.llm.ollamaUrlHint')}
             </p>
           </div>
         )}
@@ -1495,7 +1607,7 @@ function LlmProviderCard() {
           className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
-          {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
+          {saving ? t('common.saving') : saved ? t('common.saved') : t('common.save')}
         </button>
       </div>
     </div>
@@ -1503,14 +1615,15 @@ function LlmProviderCard() {
 }
 
 function ManageUsersCard() {
+  const { t } = useTranslation();
   return (
     <Link
       to="/manage-users"
       className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
     >
       <div>
-        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Manage Users</h2>
-        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Add or review who can log into this instance.</p>
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.manageUsers.heading')}</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('account.manageUsers.subtitle')}</p>
       </div>
       <span className="material-symbols-outlined text-zinc-300 dark:text-zinc-600">chevron_right</span>
     </Link>
@@ -1518,6 +1631,7 @@ function ManageUsersCard() {
 }
 
 function BackupCard() {
+  const { t } = useTranslation();
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1530,7 +1644,7 @@ function BackupCard() {
     try {
       const res = await apiFetch('/api/backup/export', { timeoutMs: 120_000 });
       const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Export failed');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('account.backup.exportFailed'));
       const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1541,7 +1655,7 @@ function BackupCard() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Export failed');
+      setError(err instanceof Error ? err.message : t('account.backup.exportFailed'));
     } finally {
       setExporting(false);
     }
@@ -1557,7 +1671,7 @@ function BackupCard() {
       try {
         snapshot = JSON.parse(text);
       } catch {
-        throw new Error('That file is not valid JSON.');
+        throw new Error(t('account.backup.notValidJson'));
       }
       const res = await apiFetch('/api/backup/import', {
         method: 'POST',
@@ -1566,10 +1680,10 @@ function BackupCard() {
         timeoutMs: 60_000,
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Restore failed');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('account.backup.restoreFailed'));
       setLastSummary(json.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Restore failed');
+      setError(err instanceof Error ? err.message : t('account.backup.restoreFailed'));
     } finally {
       setRestoring(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1579,11 +1693,9 @@ function BackupCard() {
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
-        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Backup &amp; Restore</h2>
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.backup.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
-          Download your whole library as a single file — save it wherever you like, including a
-          cloud-synced folder. Restoring merges it back in (newest wins per item), it won't wipe
-          anything.
+          {t('account.backup.subtitle')}
         </p>
       </div>
 
@@ -1597,7 +1709,7 @@ function BackupCard() {
           <span className={`material-symbols-outlined text-lg ${exporting ? 'animate-spin' : ''}`}>
             {exporting ? 'sync' : 'download'}
           </span>
-          {exporting ? 'Exporting…' : 'Export Backup'}
+          {exporting ? t('account.backup.exporting') : t('account.backup.exportButton')}
         </button>
 
         <button
@@ -1609,7 +1721,7 @@ function BackupCard() {
           <span className={`material-symbols-outlined text-lg ${restoring ? 'animate-spin' : ''}`}>
             {restoring ? 'sync' : 'upload_file'}
           </span>
-          {restoring ? 'Restoring…' : 'Restore from Backup'}
+          {restoring ? t('account.backup.restoring') : t('account.backup.restoreButton')}
         </button>
         <input
           ref={fileInputRef}
@@ -1627,6 +1739,7 @@ function BackupCard() {
 }
 
 function StandaloneProfileCard() {
+  const { t } = useTranslation();
   const setAccount = useStore((s) => s.setAccount);
   const account = useStore((s) => s.account);
   const [name, setName] = useState('');
@@ -1664,7 +1777,7 @@ function StandaloneProfileCard() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save name');
+      setError(err instanceof Error ? err.message : t('account.profile.couldNotSaveName'));
     } finally {
       setSaving(false);
     }
@@ -1690,7 +1803,7 @@ function StandaloneProfileCard() {
   return (
     <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
       <div>
-        <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Name</label>
+        <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.name')}</label>
         <input
           type="text"
           value={name}
@@ -1698,11 +1811,11 @@ function StandaloneProfileCard() {
           className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
         />
         <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">
-          No password in offline mode — this device's data is already private to you. Used to label recipes you create and cooks you log.
+          {t('account.profile.noPasswordHint')}
         </p>
       </div>
       <div>
-        <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Avatar</label>
+        <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.avatar')}</label>
         {AVATAR_PRESETS.length > 0 && (
           <div className="flex flex-wrap gap-3 mb-4">
             {AVATAR_PRESETS.map((preset) => (
@@ -1717,7 +1830,7 @@ function StandaloneProfileCard() {
             ))}
           </div>
         )}
-        <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">or use your own image</span>
+        <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.ownImage')}</span>
         <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
       </div>
       {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
@@ -1728,15 +1841,15 @@ function StandaloneProfileCard() {
           className="px-8 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
-          {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
+          {saving ? t('common.saving') : saved ? t('common.saved') : t('account.profile.saveChanges')}
         </button>
         <button
           type="button"
           onClick={handleLogout}
-          title="Back to “who's cooking?” — pick another profile or add a new one"
+          title={t('account.profile.logOutHint')}
           className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
         >
-          Log Out
+          {t('account.profile.logOut')}
         </button>
       </div>
     </form>
@@ -1748,6 +1861,7 @@ function StandaloneProfileCard() {
  *  Renders nothing for a non-admin active profile (same gating pattern as
  *  `{!standalone && account?.role === 'admin' && <ManageUsersCard />}` below). */
 function AllProfilesCard() {
+  const { t } = useTranslation();
   const [activeProfile, setActiveProfile] = useState<StandaloneProfile | null>(null);
   const [profiles, setProfiles] = useState<StandaloneProfile[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -1776,14 +1890,14 @@ function AllProfilesCard() {
       await setProfileRole(p.id, role);
       reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not change role');
+      setError(err instanceof Error ? err.message : t('account.profiles.couldNotChangeRole'));
     } finally {
       setBusyId(null);
     }
   };
 
   const handleDelete = async (p: StandaloneProfile) => {
-    if (!window.confirm(`Remove ${p.name}? Recipes and ingredients they created stay untouched — this only removes their profile from the picker.`)) return;
+    if (!window.confirm(t('account.profiles.confirmRemove', { name: p.name }))) return;
     setBusyId(p.id);
     setError(null);
     try {
@@ -1791,7 +1905,7 @@ function AllProfilesCard() {
       await removeProfile(p.id);
       reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not remove profile');
+      setError(err instanceof Error ? err.message : t('account.profiles.couldNotRemove'));
     } finally {
       setBusyId(null);
     }
@@ -1813,7 +1927,7 @@ function AllProfilesCard() {
       setAdding(false);
       reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create profile');
+      setError(err instanceof Error ? err.message : t('account.profiles.couldNotCreate'));
     } finally {
       setCreating(false);
     }
@@ -1825,8 +1939,8 @@ function AllProfilesCard() {
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Profiles</h2>
-          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Everyone who's set up a profile on this shared library.</p>
+          <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.profiles.heading')}</h2>
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('account.profiles.subtitle')}</p>
         </div>
         {!adding && (
           <button
@@ -1835,29 +1949,28 @@ function AllProfilesCard() {
             className="flex items-center gap-1.5 shrink-0 px-4 py-2 bg-primary text-white rounded-full text-xs font-black hover:bg-primary/90 transition-colors"
           >
             <span className="material-symbols-outlined text-[16px]">person_add</span>
-            Add Profile
+            {t('account.profiles.addProfile')}
           </button>
         )}
       </div>
       {adding && (
         <form onSubmit={handleCreate} className="sc-panel p-5 mb-4 space-y-4">
           <div>
-            <label className="sc-label mb-2">Name</label>
+            <label className="sc-label mb-2">{t('account.profile.name')}</label>
             <input
               type="text"
               autoFocus
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g. Sara"
+              placeholder={t('account.profiles.namePlaceholder')}
               className="sc-field-inset"
             />
             <p className="sc-hint mt-2">
-              Added as a regular user — promote them below afterward if they should be an admin.
-              They pick this profile from “who's cooking?” on any device sharing this library.
+              {t('account.profiles.addHint')}
             </p>
           </div>
           <div>
-            <label className="sc-label mb-2">Avatar</label>
+            <label className="sc-label mb-2">{t('account.profile.avatar')}</label>
             {AVATAR_PRESETS.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-3">
                 {AVATAR_PRESETS.map((preset) => (
@@ -1880,21 +1993,21 @@ function AllProfilesCard() {
               onClick={() => { setAdding(false); setNewName(''); setError(null); }}
               className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={creating || !newName.trim()}
               className="flex-[2] py-3 rounded-2xl bg-primary text-white font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
             >
-              {creating ? 'Adding…' : 'Add Profile'}
+              {creating ? t('account.profiles.adding') : t('account.profiles.addProfile')}
             </button>
           </div>
         </form>
       )}
 
       {profiles === null ? (
-        <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading…</p>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500">{t('common.loading')}</p>
       ) : (
         <div className="space-y-2">
           {profiles.map((p) => {
@@ -1910,20 +2023,26 @@ function AllProfilesCard() {
                   )}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">{p.name}{isSelf ? ' (you)' : ''}</p>
+                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">{p.name}{isSelf ? ` ${t('account.profiles.youSuffix')}` : ''}</p>
                 </div>
                 <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shrink-0 ${p.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'}`}>
-                  {p.role}
+                  {p.role === 'admin' ? t('account.profiles.roleAdmin') : t('account.profiles.roleUser')}
                 </span>
                 {!isSelf && (
                   <button
                     type="button"
                     onClick={() => handlePromote(p, p.role === 'admin' ? 'user' : 'admin')}
                     disabled={busyId === p.id || (p.role === 'admin' && isLastAdmin)}
-                    title={p.role === 'admin' && isLastAdmin ? "Can't demote the last admin" : p.role === 'admin' ? `Demote ${p.name} to user` : `Promote ${p.name} to admin`}
+                    title={
+                      p.role === 'admin' && isLastAdmin
+                        ? t('account.profiles.cannotDemoteLastAdmin')
+                        : p.role === 'admin'
+                          ? t('account.profiles.demoteHint', { name: p.name })
+                          : t('account.profiles.promoteHint', { name: p.name })
+                    }
                     className="px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase tracking-widest hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0 disabled:opacity-50"
                   >
-                    {busyId === p.id ? '…' : p.role === 'admin' ? 'Demote' : 'Promote'}
+                    {busyId === p.id ? '…' : p.role === 'admin' ? t('account.profiles.demote') : t('account.profiles.promote')}
                   </button>
                 )}
                 {!isSelf && (
@@ -1931,7 +2050,7 @@ function AllProfilesCard() {
                     type="button"
                     onClick={() => handleDelete(p)}
                     disabled={busyId === p.id || (p.role === 'admin' && isLastAdmin)}
-                    title={p.role === 'admin' && isLastAdmin ? "Can't delete the last admin" : `Remove ${p.name}`}
+                    title={p.role === 'admin' && isLastAdmin ? t('account.profiles.cannotDeleteLastAdmin') : t('account.profiles.removeHint', { name: p.name })}
                     className="w-8 h-8 rounded-full bg-red-50 text-red-400 flex items-center justify-center hover:bg-red-100 transition-colors shrink-0 disabled:opacity-50"
                   >
                     <span className="material-symbols-outlined text-sm">{busyId === p.id ? 'sync' : 'delete'}</span>
@@ -1959,6 +2078,7 @@ function AllProfilesCard() {
  *  returns to the profile picker; moving the library is this card, and it
  *  copies the data across instead of silently leaving it behind. */
 function StorageModeCard() {
+  const { t } = useTranslation();
   const account = useStore((s) => s.account);
   const [standalone, setStandalone] = useState<boolean | null>(null);
   const [serverUrl, setServerUrlState] = useState<string | null>(null);
@@ -2004,7 +2124,7 @@ function StorageModeCard() {
       setSummary((await migrate()) as SyncSummary);
       setMode('done');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not move the library');
+      setError(err instanceof Error ? err.message : t('account.storageMode.couldNotMove'));
     } finally {
       setStage(null);
       setBusy(false);
@@ -2025,10 +2145,9 @@ function StorageModeCard() {
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
-        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Where your library lives</h2>
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.storageMode.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
-          Admin only. Moving it <strong className="text-zinc-600 dark:text-zinc-300">copies</strong> everything
-          across and merges it in — the side you are leaving is never emptied, so you can always switch back.
+          {t('account.storageMode.subtitle')}
         </p>
       </div>
 
@@ -2036,10 +2155,10 @@ function StorageModeCard() {
         <span className="material-symbols-outlined text-primary">{standalone ? 'smartphone' : 'dns'}</span>
         <div className="min-w-0">
           <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-            {standalone ? 'Offline on this device' : 'Connected to a server'}
+            {standalone ? t('account.storageMode.currentOffline') : t('account.storageMode.currentServer')}
           </p>
           <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">
-            {standalone ? 'Local storage, optionally mirrored through a Sync Folder' : (serverUrl || 'this origin')}
+            {standalone ? t('account.storageMode.currentOfflineHint') : (serverUrl || t('account.storageMode.thisOrigin'))}
           </p>
         </div>
       </div>
@@ -2051,18 +2170,15 @@ function StorageModeCard() {
           className="flex items-center gap-2 px-6 py-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-2xl font-black text-sm hover:opacity-90 transition-all active:scale-[0.98]"
         >
           <span className="material-symbols-outlined text-lg">swap_horiz</span>
-          {standalone ? 'Move to a server' : 'Move to offline storage'}
+          {standalone ? t('account.storageMode.moveToServer') : t('account.storageMode.moveToOffline')}
         </button>
       )}
 
       {mode === 'toServer' && (
         <form onSubmit={handleToServer} className="sc-panel p-5 space-y-4">
-          <p className="sc-hint">
-            Sign in as an admin on the destination server. This device&apos;s library is copied up and merged in,
-            then this device starts using the server. Its offline copy stays on disk untouched.
-          </p>
+          <p className="sc-hint">{t('account.storageMode.toServerHint')}</p>
           <div>
-            <label className="sc-label mb-2">Server address</label>
+            <label className="sc-label mb-2">{t('account.storageMode.serverAddress')}</label>
             <input
               type="url" value={url} onChange={(e) => setUrl(e.target.value)}
               placeholder="https://smartchef.your-tailnet.ts.net"
@@ -2071,36 +2187,33 @@ function StorageModeCard() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="sc-label mb-2">Username</label>
+              <label className="sc-label mb-2">{t('account.folderSync.username')}</label>
               <input
                 type="text" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())}
                 autoCapitalize="none" className="sc-field-inset"
               />
             </div>
             <div>
-              <label className="sc-label mb-2">Password</label>
+              <label className="sc-label mb-2">{t('account.storageMode.password')}</label>
               <input
                 type="password" value={password} onChange={(e) => setPassword(e.target.value)}
                 className="sc-field-inset"
               />
             </div>
           </div>
-          <p className="sc-hint">
-            Photos stored as files on this device are referenced by path, so they will not follow the recipes
-            up. Everything else — recipes, ingredients, tools, techniques, tags, categories — does.
-          </p>
+          <p className="sc-hint">{t('account.storageMode.photosNote')}</p>
           <div className="flex gap-3">
             <button
               type="button" onClick={reset} disabled={busy}
               className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="submit" disabled={busy || !url.trim() || !username.trim() || !password}
               className="flex-[2] py-3 rounded-2xl bg-primary text-white font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
             >
-              {busy ? (stage ?? 'Moving…') : 'Copy library and switch'}
+              {busy ? (stage ?? t('account.storageMode.moving')) : t('account.storageMode.copyAndSwitch')}
             </button>
           </div>
         </form>
@@ -2108,23 +2221,19 @@ function StorageModeCard() {
 
       {mode === 'toOffline' && (
         <div className="sc-panel p-5 space-y-4">
-          <p className="sc-hint">
-            The server&apos;s whole library is downloaded onto this device and this device switches to offline
-            storage. Nothing is removed from the server — other devices keep using it exactly as before.
-            You will be asked who you are (&ldquo;who&apos;s cooking?&rdquo;) once it is done.
-          </p>
+          <p className="sc-hint">{t('account.storageMode.toOfflineHint')}</p>
           <div className="flex gap-3">
             <button
               type="button" onClick={reset} disabled={busy}
               className="flex-1 py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button" onClick={handleToOffline} disabled={busy}
               className="flex-[2] py-3 rounded-2xl bg-primary text-white font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
             >
-              {busy ? (stage ?? 'Moving…') : 'Copy library and switch'}
+              {busy ? (stage ?? t('account.storageMode.moving')) : t('account.storageMode.copyAndSwitch')}
             </button>
           </div>
         </div>
@@ -2133,7 +2242,7 @@ function StorageModeCard() {
       {mode === 'done' && (
         <div className="sc-panel p-5 space-y-4">
           <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-            Done — this device now keeps your library {standalone ? 'on the server' : 'offline'}.
+            {standalone ? t('account.storageMode.doneOnServer') : t('account.storageMode.doneOffline')}
           </p>
           {summary && <SyncSummaryPanel summary={summary} />}
           <button
@@ -2141,7 +2250,7 @@ function StorageModeCard() {
             onClick={finish}
             className="w-full py-3 rounded-2xl bg-primary text-white font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98]"
           >
-            Restart SmartChef
+            {t('account.storageMode.restart')}
           </button>
         </div>
       )}
@@ -2151,21 +2260,22 @@ function StorageModeCard() {
   );
 }
 
-const THEME_OPTIONS: { mode: ThemeMode; label: string; icon: string }[] = [
-  { mode: 'light', label: 'Light', icon: 'light_mode' },
-  { mode: 'dark', label: 'Dark', icon: 'dark_mode' },
-  { mode: 'system', label: 'System', icon: 'contrast' },
+const THEME_OPTIONS: { mode: ThemeMode; labelKey: string; icon: string }[] = [
+  { mode: 'light', labelKey: 'account.appearance.light', icon: 'light_mode' },
+  { mode: 'dark', labelKey: 'account.appearance.dark', icon: 'dark_mode' },
+  { mode: 'system', labelKey: 'account.appearance.system', icon: 'contrast' },
 ];
 
 function AppearanceCard() {
+  const { t } = useTranslation();
   const themeMode = useStore((s) => s.themeMode);
   const setThemeMode = useStore((s) => s.setThemeMode);
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
-        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Appearance</h2>
-        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">Choose how SmartChef looks on this device.</p>
+        <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.appearance.heading')}</h2>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('account.appearance.subtitle')}</p>
       </div>
       <div className="flex gap-2 bg-zinc-50 dark:bg-zinc-950 rounded-2xl p-1.5">
         {THEME_OPTIONS.map((opt) => (
@@ -2180,7 +2290,7 @@ function AppearanceCard() {
             }`}
           >
             <span className="material-symbols-outlined text-[16px]">{opt.icon}</span>
-            {opt.label}
+            {t(opt.labelKey)}
           </button>
         ))}
       </div>
@@ -2189,12 +2299,27 @@ function AppearanceCard() {
 }
 
 function LanguagesCard() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { languages, add, remove } = useLanguages();
   const contentLang = useStore((s) => s.contentLang);
   const setContentLang = useStore((s) => s.setContentLang);
+  const accountId = useStore((s) => s.account?.id);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // The header picker moves the interface and the content language together,
+  // which is the right default for the common case. This is the escape
+  // hatch for the case it doesn't cover: reading recipes in one language
+  // while keeping the app's own chrome in another. Stored per account
+  // (lib/uiLanguage.ts), so two profiles sharing a device each keep theirs.
+  const uiLang = languages.some((l) => l.hasUiBundle && l.code === i18n.language)
+    ? i18n.language
+    : 'en';
+
+  const handleUiLangChange = (code: string) => {
+    if (!persistUiLang(code, accountId)) return;
+    void i18n.changeLanguage(code);
+  };
 
   const custom = languages.filter((l) => !l.hasUiBundle);
   const preview = isValidLanguageCode(draft) ? languageLabel(draft) : null;
@@ -2227,6 +2352,24 @@ function LanguagesCard() {
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('languages.subtitle')}</p>
       </div>
 
+      <div className="mb-6">
+        <label htmlFor="ui-language" className="sc-label mb-2 block">{t('languages.interfaceLabel')}</label>
+        <select
+          id="ui-language"
+          value={uiLang}
+          onChange={(e) => handleUiLangChange(e.target.value)}
+          className="w-full sm:max-w-xs border-none bg-zinc-50 dark:bg-zinc-950 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+        >
+          {languages.filter((l) => l.hasUiBundle).map((l) => (
+            <option key={l.code} value={l.code}>{l.label}</option>
+          ))}
+        </select>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-2 leading-relaxed">
+          {t('languages.interfaceHint')}
+        </p>
+      </div>
+
+      <p className="sc-label mb-2">{t('languages.contentHeading')}</p>
       <div className="flex flex-wrap gap-2 mb-5">
         {languages.map((l) => (
           <span
@@ -2288,6 +2431,7 @@ function LanguagesCard() {
 }
 
 export default function Account() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const account = useStore((s) => s.account);
   const setAccount = useStore((s) => s.setAccount);
@@ -2320,13 +2464,13 @@ export default function Account() {
         body: JSON.stringify(body),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : 'Failed to save');
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('common.failedToSave'));
       if (account) setAccount({ ...account, name, username: username.toLowerCase(), avatarUrl: avatarUrl || undefined });
       setPassword('');
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : t('common.failedToSave'));
     } finally {
       setSaving(false);
     }
@@ -2347,9 +2491,9 @@ export default function Account() {
             className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-sm font-bold mb-6 transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-            Back
+            {t('common.back')}
           </button>
-          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">Account</h1>
+          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">{t('common.account')}</h1>
         </div>
 
       {/* Identity spans the full width: the avatar picker is fourteen
@@ -2359,7 +2503,7 @@ export default function Account() {
       ) : (
       <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Name</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.name')}</label>
           <input
             type="text"
             value={name}
@@ -2368,7 +2512,7 @@ export default function Account() {
           />
         </div>
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Username</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.username')}</label>
           <input
             type="text"
             autoCapitalize="none"
@@ -2378,7 +2522,7 @@ export default function Account() {
           />
         </div>
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Avatar</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.avatar')}</label>
           <div className="flex flex-wrap gap-3 mb-4">
             {AVATAR_PRESETS.map((preset) => (
               <button
@@ -2391,11 +2535,11 @@ export default function Account() {
               </button>
             ))}
           </div>
-          <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">or use your own image</span>
+          <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.ownImage')}</span>
           <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
         </div>
         <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">New Password (leave blank to keep current)</label>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.serverAccount.newPassword')}</label>
           <input
             type="password"
             value={password}
@@ -2412,14 +2556,14 @@ export default function Account() {
             className="px-8 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
           >
             <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
-            {saving ? 'Saving…' : saved ? 'Saved' : 'Save Changes'}
+            {saving ? t('common.saving') : saved ? t('common.saved') : t('account.profile.saveChanges')}
           </button>
           <button
             type="button"
             onClick={handleLogout}
             className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
           >
-            Log Out
+            {t('account.profile.logOut')}
           </button>
         </div>
       </form>

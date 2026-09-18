@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addCustomLanguage,
+  hasUiBundle,
   listLanguages,
   removeCustomLanguage,
   type Language,
 } from '../lib/languages';
+import { persistUiLang } from '../lib/uiLanguage';
+import { useStore } from '../store/app.store';
 
 // Custom languages live in localStorage, which fires no event in the tab
 // that wrote them — so a picker in the header and the editor in Settings
@@ -60,4 +63,36 @@ export function useLanguages() {
   }, []);
 
   return { languages, add, remove };
+}
+
+/** The header/recipe-page language picker's own behaviour, in one place.
+ *
+ *  It used to be copy-pasted into AppLayout.tsx and RecipeDetail.tsx, and the
+ *  two copies had already drifted: only one of them checked hasUiBundle(), so
+ *  picking a user-added content language from a recipe page threw the whole
+ *  interface back to English with no way to tell what had happened.
+ *
+ *  A user-added language has no translation bundle, so switching the
+ *  interface to it would fall back to English — losing the UI language the
+ *  user had, to no benefit. For those, only the content language moves:
+ *  recipes are read and written in the new language while the interface stays
+ *  where it was. The bundled four behave as before, moving both at once,
+ *  which stays the friendly default; Account → Languages is where the
+ *  interface can be set on its own. */
+export function useUiAndContentLanguage() {
+  const { i18n } = useTranslation();
+  const setContentLang = useStore((s) => s.setContentLang);
+  const accountId = useStore((s) => s.account?.id);
+
+  return useCallback(
+    (code: string) => {
+      if (hasUiBundle(code)) {
+        void i18n.changeLanguage(code);
+        // Per account, not per device — see lib/uiLanguage.ts.
+        persistUiLang(code, accountId);
+      }
+      setContentLang(code);
+    },
+    [i18n, setContentLang, accountId],
+  );
 }

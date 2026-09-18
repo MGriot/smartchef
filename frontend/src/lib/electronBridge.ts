@@ -18,6 +18,7 @@ declare global {
   interface Window {
     smartchefElectron?: {
       pickSyncFolder: () => Promise<string | null>;
+      saveFile: (suggestedName: string, contents: string) => Promise<string | null>;
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
       geocode: (q: string, limit?: number) => Promise<Array<{ lat: number; lng: number; displayName: string }>>;
@@ -55,6 +56,19 @@ export async function pickSyncFolder(): Promise<string | null> {
     throw new Error('pickSyncFolder() is only available in the Electron app');
   }
   return window.smartchefElectron.pickSyncFolder();
+}
+
+/** Opens the native save dialog and writes `contents` wherever the user
+ *  chose. Resolves to the path written, or null if they cancelled.
+ *
+ *  Only present in builds shipped after the Setup File landed — an older
+ *  preload has no `saveFile`, and calling through would reject with an
+ *  opaque "no handler registered" from IPC, so it is checked explicitly. */
+export async function saveFileViaDialog(suggestedName: string, contents: string): Promise<string | null> {
+  if (!window.smartchefElectron?.saveFile) {
+    throw new Error('saveFileViaDialog() is only available in the Electron app');
+  }
+  return window.smartchefElectron.saveFile(suggestedName, contents);
 }
 
 /** Local Storage's absolute base directory on this device — where the live

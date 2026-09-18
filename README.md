@@ -32,7 +32,10 @@
 ## 📸 What it looks like
 
 The desktop shots are the Windows build running against a real library; the
-phone shots are the Android build on an emulator.
+phone shots are the Android build on an emulator. The responsive shots marked
+below are the same frontend rendered at desktop and phone viewports — same
+code, same library, without the Electron window frame or the emulator's
+status bar around it.
 
 ### The gallery
 
@@ -40,6 +43,29 @@ Every recipe, with its tags, times and difficulty. Filters, full-text search
 and collections sit above it.
 
 ![Recipe gallery](docs/images/01-gallery.png)
+
+The header keeps to one row at every width. Between roughly 1024px and
+1280px there is not room for all eight destinations *and* the actions, so the
+three least-frequent ones (History, Import, Library) stay in the menu until
+there is — rather than letting the labels wrap the header into two lines,
+which is what used to happen, and which was worst in Italian, French and
+Spanish where the labels are longest.
+
+![The header at a narrow desktop width](docs/images/07-header-compact.png)
+
+On a phone the gallery is one column, the search box gets its own row, and
+the filters open as a sheet that fits the screen instead of a fixed-width
+popover wider than the phone.
+
+<img src="docs/images/03-gallery-phone.png" width="300" alt="The gallery on a phone, in portrait" />
+<img src="docs/images/05-gallery-filters-phone.png" width="300" alt="The filters sheet on a phone" />
+
+The 2–7 column selector only appears where a multi-column grid actually
+applies — so it is there in landscape (and on a tablet in either
+orientation), and gone in phone portrait, where every setting did the same
+thing. Rotating back restores the column count you picked.
+
+![The gallery on a phone in landscape, with the column selector](docs/images/06-gallery-landscape-phone.png)
 
 ### A recipe
 
@@ -722,7 +748,7 @@ and is safe to run twice.
 
 ### First run: standalone vs. server
 
-On first launch, both apps ask **"Connect to a server"** (the Tailscale setup described below) or **"Use offline on this device."** Choosing offline asks for a display name and an optional avatar — no password, since each device's local data is already private to whoever holds the device.
+On first launch, both apps ask **"Connect to a server"** (the Tailscale setup described below), **"Use offline on this device,"** or **"I have a setup file."** Choosing offline asks for a display name and an optional avatar — no password, since each device's local data is already private to whoever holds the device. The third option is for a device joining a household that is already set up — see [Setup Files](#setup-files--configuring-a-second-device) below. It is offered only on this first-run screen, so a device that is already configured is never asked about it again.
 
 ### Household Profiles — more than one person sharing a standalone library
 
@@ -731,6 +757,9 @@ Standalone mode isn't limited to one name per device. **Profiles** (who's curren
 - **Creating the first profile**: the "Use offline on this device" screen asks for a name (+ optional avatar) and creates the first profile — same as any first-run today.
 - **Joining an existing household**: if you point a *new* device at a Sync Folder that already has profiles synced into it (choose the folder before finishing setup), the app syncs once and offers **"pick who you are"** instead of forcing a redundant new profile — pick an existing one, or still create a new one if this is genuinely a new person.
 - **Switching who's using a shared device**: Account → **Switch Profile** brings back the "Who's cooking?" picker without touching the local library, the Sync Folder, or any other profile — distinct from **Log Out**, which forgets this device's standalone setup entirely.
+- **Each profile keeps its own interface language**: Account → **Languages** → *Interface language*. Two people sharing one device no longer overwrite each other's choice, and the setting is remembered per profile rather than per device. It is separate from the **recipe language** (what recipes are read and written in), which was already per profile: the picker in the header still moves both at once, which is the right default, and this setting is the way to keep them apart — reading recipes in Italian with the app itself in English, say.
+
+![Interface language, per profile](docs/images/08-account-languages.png)
 
 ### Getting your existing recipes into a fresh standalone install
 
@@ -756,6 +785,20 @@ Under the hood, a Folder-mode Sync Folder is a **bare-style git remote** — it 
 Both modes run **Structured Merge** — a field-by-field three-way merge, not git's textual merge — to reconcile whatever changed on both sides since they last agreed. A field genuinely edited on both devices becomes a **Conflict**, surfaced in its own list (Account → Folder Sync) for you to resolve rather than silently auto-picked; everything else about that sync still finishes normally. Covers recipes (steps, ingredients, ingredient groups, tagged techniques included), ingredients, tools, tags, cooking techniques, and household profiles — deletions propagate as tombstones the same way any other edit does. Device-record tracking ("Known Devices") is Folder-mode-only for now; Git Remote mode doesn't show it.
 
 Once two devices are pointed at the same Sync Folder or git remote — however it got that way — Account → **Sync Now** pushes local changes and pulls in whatever changed elsewhere; a recipe created on one device shows up on the other the next time both sync. How often that happens automatically (besides on app resume and a manual Sync Now) is also configurable there, per device — a value plus a unit (minutes/hours/days/weeks/months, e.g. "every 3 days"), not just minutes. The full commit history is browsable on either device at Account → Folder Sync → **History**. See [`CONTEXT.md`](./CONTEXT.md) for the full glossary of these terms and [`docs/adr/`](./docs/adr/) for the architecture decisions behind them.
+
+### Setup Files — configuring a second device
+
+Pointing the *second* device at the same place as the first means reproducing what the first one already knows, and in Git Remote mode that includes an access token: forty-odd characters of opaque base62, typed on a phone. A **Setup File** carries it instead.
+
+Account → Folder Sync → **Export Setup File** asks for a passphrase and writes one file containing this device's Sync Mode, its auto-sync interval, and its repository URL, username and access token. On the other device, choose **"I have a setup file"** on the first-run screen (or Account → Folder Sync → **Use a Setup File** later), pick the file, type the same passphrase, and the sync settings are filled in. In Git Remote mode the app then goes straight on to look for profiles the other devices have already synced, so the new device lands on "pick who you are" rather than being asked to invent a duplicate profile.
+
+Three things worth knowing:
+
+- **The passphrase is the security.** The file is AES-256-GCM with the key derived from your passphrase, in a format only SmartChef parses. There is no recovery — a forgotten passphrase means exporting again from the original device. A deliberate design choice, not an oversight: the alternative (a key built into the app, so the file just opens) ships that key inside every APK and installer, which would mean a leaked file gives up a token with write access to your library. [ADR 0005](./docs/adr/0005-encrypted-setup-file.md) has the full argument.
+- **The Sync Folder is not in it.** A folder path on Windows and an Android folder permission are per-device handles that mean nothing anywhere else, so a Folder-mode device still picks its own folder after importing — the app says so rather than letting you discover it when nothing syncs.
+- **It contains no recipes.** A Setup File is configuration only; Backup & Restore is what moves a library.
+
+The file is a real secret for as long as it exists, and it is not deleted after import — configuring several devices from one file is the normal case — so delete it yourself when you are done.
 
 ---
 
@@ -833,7 +876,7 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Area | Description | Status |
 |------|-------------|--------|
 | Docker + DB schema + Matrioska Engine | Recursive portion scaling, nested sub-recipes | ✅ Complete |
-| Gallery — search, filters, sort, density | Search across title/description/ingredients, tag + ingredient-category filters, sort (recent/newest/oldest/A-Z), adjustable 2/3/4-column grid | ✅ Complete |
+| Gallery — search, filters, sort, density | Search across title/description/ingredients, tag + ingredient-category filters, sort (recent/newest/oldest/A-Z), adjustable 2–7 column grid. The column selector is shown only where a multi-column grid applies (landscape on a phone, either orientation on a tablet or desktop) rather than sitting inert in phone portrait; the filters open as a sheet that fits the screen below `sm`, instead of a fixed 380px popover wider than the phone | ✅ Complete |
 | Recipe editor | Ingredients (with optional sub-groups), steps (taggable with techniques), tools, storage instructions & tips, inline step↔ingredient references ("Bimby-style", live-scaled quantities), translations, ratings, ingredient substitutes, cook counter, delete. Both long lists fold: each ingredient/step card collapses to a one-line summary, the whole section folds, and "add another" sits at the bottom of the list rather than in the header. Every long-text box grows with its content (`AutoTextarea`) — measured in JS, because the one-line CSS answer (`field-sizing: content`) is inert in the Electron build's Chromium 114 and on older Android WebViews, which is the one place it was needed | ✅ Complete |
 | Dialog focus on old WebViews | Dialogs animate in from `opacity: 0`, and focusing the first field on that frame is accepted by Chromium 114 (what Electron 25 ships) without key events ever reaching it — the dialog looked focused and silently refused to type until something forced a focus re-commit, such as alt-tabbing away or taking a screenshot. `Modal` now waits for the entry animation to finish (`getAnimations()`, with a timeout fallback for `prefers-reduced-motion`) before focusing anything | ✅ Complete |
 | Inline step references | `{{ing:N}}` / `{{tool:id}}` / `{{tech:id}}` tokens expanded in the step text (`frontend/src/lib/stepRefs.ts`). A reference prints the amount **that step** uses — 500 g of the 620 g of flour, not the recipe's total — and `as=` re-labels it with any of the entity's synonyms, so a sentence can read "setaccia la farina" while still pointing at "Farina di grano tipo 00". `q=` with an empty value prints the name alone. The picker offers only what is still unspoken for at that step (with one click to see the rest) and shows what is left rather than the recipe total. The editor keeps the token's amount in step with the step's own ingredient row, and re-numbers every reference when an ingredient is deleted | ✅ Complete |
@@ -859,7 +902,7 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Ingredient seasonality | Per-ingredient in-season months set from the Library, a calendar-style browse page (Library → Seasonality), and a Gallery "in season" filter — an ingredient with no seasonality data never excludes a recipe | ✅ Complete |
 | Sub-recipe-as-ingredient | Pick an existing recipe as an ingredient line from the recipe editor UI; optional recipe "yield" field lets sub-recipe amounts be specified by weight/volume instead of only by servings | ✅ Complete |
 | Avatar presets | Original cartoon-chef SVGs, adaptively discovered from `frontend/src/assets/avatars/` (drop in a new file, no code change) | ✅ Complete |
-| i18n | EN/IT/FR/ES UI + content translations (recipes, steps, categories, units, tools, tags, ingredients); ingredient names auto-translated to match a recipe's language | ✅ Complete |
+| i18n | EN/IT/FR/ES UI + content translations (recipes, steps, categories, units, tools, tags, ingredients); ingredient names auto-translated to match a recipe's language. The Account/settings screen is included — it was ~2,500 lines of hardcoded English until every string moved into the `account.*` namespace, counts and relative times included, so "1 recipe" and "3 recipes" inflect per language instead of having an `s` appended | ✅ Complete |
 | PWA | Manifest, service worker, icons, installable — service worker only registers on web; the native Android build skips it (files are already bundled in the APK) | ✅ Complete |
 | MCP Server | Exposes the recipe library via Model Context Protocol (port 3002) | ✅ Complete |
 | Native Android app | Capacitor wrapper, Tailscale-based remote HTTPS access, offline read cache + write outbox, native back-gesture handling | ✅ Complete |
@@ -877,6 +920,10 @@ Both files explicitly point at the same Compose project (`name: docker` at the t
 | Ingredient varieties & synonyms | Optional "variety of" self-reference (e.g. Red Apple → Apple, purely organizational — no inherited fields) shown nested in the Library; optional alternate names (synonyms) on tags/ingredients/tools/techniques, matched by every existing name search | ✅ Complete |
 | Ingredients library UX | Grid/list view toggle (photo-forward cards vs. dense table) and a read-only detail card (photo, nutrition, seasonality, synonyms, translations, tags) separate from the edit form | ✅ Complete |
 | Git Remote sync mode | A second Folder Sync transport, chosen per device (Account → Folder Sync): a real git server (GitHub/GitLab/self-hosted) over git's actual push/fetch protocol instead of a file-sync-tool-mirrored folder — no ref races or listing truncation, since the server owns atomic ref updates natively; configurable auto-sync interval for both modes; see [ADR 0004](./docs/adr/0004-git-remote-sync-mode.md). Device-record tracking ("Known Devices") is Folder-mode-only for now | ✅ Complete |
+| Responsive chrome | The header holds one row at every width: below `lg` it is a menu button, between `lg` and `xl` the five primary destinations plus a menu for the rest, and the full eight from `xl` — replacing a flat `lg` cutover whose labels wrapped the header into two lines in the 1024–1280 band, worst in the languages with the longest labels. Phone layout fixes alongside it: safe-area padding on the fixed bottom nav (it is `fixed`, so it inherits none from `body`), a search field that no longer shrinks under its own content, and page padding that does not spend 64px of a 360px screen on margins | ✅ Complete |
+| Per-profile interface language | The UI language is stored per profile (`smartchef.<profileId>.uiLang`), matching what the recipe-content language already did, so two people sharing a device keep their own. Set from Account → Languages → *Interface language*; the header picker still moves interface and content language together as the friendly default. Consolidated two copies of the switch handler that had drifted — only one of them checked for a translation bundle, so picking a user-added language from a recipe page threw the whole interface back to English | ✅ Complete |
+| Setup File | One passphrase-encrypted file (AES-256-GCM over PBKDF2, app-specific container) carrying Sync Mode, auto-sync interval and the Git Remote URL/username/token to another device — offered on the first-run chooser and at Account → Folder Sync. Excludes the Sync Folder, which is a per-device native handle. Native save dialog on Windows; written through `@capacitor/filesystem` on Android, where the blob-download trick is a silent no-op. See [ADR 0005](./docs/adr/0005-encrypted-setup-file.md) | ✅ Complete |
+| Moving the library between offline and a server | Account → **Where your library lives** migrates in both directions, copying rather than moving so the side you leave is never emptied. Long present but unreachable in standalone mode: the boot path flattened every standalone profile's role to `user` when populating the account, so the admin-only card it is gated behind never rendered for anyone | ✅ Complete |
 | Legacy CRDT vector-clock P2P sync (`/api/sync/*`) | Endpoints respond, but no write path logs local edits — nothing real for peers to exchange. Superseded by folder-based sync; no field-level conflict-resolution UI exists (or is planned) for this path | ⚠️ Legacy, inert |
 
 ---

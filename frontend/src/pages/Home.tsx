@@ -6,6 +6,7 @@ import AppLayout from '../components/AppLayout';
 import RegionPicker from '../components/RegionPicker';
 import CoverImage from '../components/CoverImage';
 import { useStore } from '../store/app.store';
+import { useIsWideViewport } from '../hooks/useMediaQuery';
 import { apiFetch } from '../lib/api';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
@@ -174,13 +175,14 @@ const Home: React.FC = () => {
   }, [gridCols]);
   // Below the `sm` breakpoint the grid always stays single-column (cards
   // would get crushed otherwise) — gridCols only takes effect at/above it.
-  const [isDesktopViewport, setIsDesktopViewport] = useState(() => window.matchMedia('(min-width: 640px)').matches);
-  useEffect(() => {
-    const mql = window.matchMedia('(min-width: 640px)');
-    const handler = (e: MediaQueryListEvent) => setIsDesktopViewport(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
+  //
+  // On a phone that makes this gate, in practice, "is it turned sideways": a
+  // phone held upright is under 640px, so every column count did exactly the
+  // same thing there. The selector below is hidden in that case rather than
+  // sitting there showing a highlighted "3" that changes nothing — which is
+  // the whole of the "grid mode only works sideways" report. The stored
+  // preference is left alone, so rotating back restores the chosen count.
+  const isDesktopViewport = useIsWideViewport();
   const clearAllFilters = () => {
     setActiveTagFilters([]);
     setActiveCategoryFilters([]);
@@ -320,7 +322,10 @@ const Home: React.FC = () => {
 
   return (
     <AppLayout>
-      <div className="px-8 lg:px-12 py-10 max-w-[1400px] mx-auto">
+      {/* px-8 was costing 64px of a 360px phone screen; the bottom padding
+          clears the fixed mobile nav below, which previously overlapped the
+          last row of cards. */}
+      <div className="px-4 sm:px-8 lg:px-12 pt-6 sm:pt-10 pb-28 md:pb-10 max-w-[1400px] mx-auto">
 
           {stillFillingIn && (
             <div className="mb-6 flex items-center gap-3 rounded-2xl bg-primary/5 border border-primary/20 px-4 py-3">
@@ -421,8 +426,12 @@ const Home: React.FC = () => {
           <>
           {/* Search & Filter */}
           <div className="flex flex-wrap gap-3 items-center mb-6">
-            {/* Search — searches title, description, and ingredients */}
-            <div className="relative flex-1 max-w-xl">
+            {/* Search — searches title, description, and ingredients.
+                `flex-1` alone let this shrink under its own content before
+                anything wrapped, so on a phone the input collapsed to about
+                the width of its own magnifier icon. Full-width on its own
+                row below `sm`, sharing the row from `sm` up. */}
+            <div className="relative basis-full sm:basis-auto sm:flex-1 min-w-[12rem] max-w-full sm:max-w-xl">
               <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 text-[20px]">
                 search
               </span>
@@ -456,7 +465,12 @@ const Home: React.FC = () => {
               {showFilters && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
-                  <div className="absolute right-0 top-14 z-50 w-[380px] max-h-[70vh] overflow-y-auto bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-100 dark:border-zinc-800 p-6 space-y-5">
+                  {/* A flat 380px is wider than a 360px phone, and anchored
+                      `absolute right-0` it pushed the page into horizontal
+                      scroll. Below `sm` it becomes a bottom sheet pinned
+                      inside the viewport instead; from `sm` up it is the
+                      same anchored popover it always was. */}
+                  <div className="fixed inset-x-4 bottom-4 top-auto z-50 max-h-[75vh] overflow-y-auto bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-100 dark:border-zinc-800 p-6 space-y-5 sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-14 sm:w-[380px] sm:max-h-[70vh]">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('gallery.filters')}</p>
                       {activeFilterCount > 0 && (
@@ -565,7 +579,8 @@ const Home: React.FC = () => {
               {t('gallery.select')}
             </button>
 
-            {/* Grid density */}
+            {/* Grid density — only where a multi-column grid applies at all. */}
+            {isDesktopViewport && (
             <div className="flex items-center gap-0.5 bg-zinc-100/80 dark:bg-zinc-800/80 rounded-full p-1 shrink-0">
               {GRID_COL_CHOICES.map((n) => (
                 <button
@@ -580,6 +595,7 @@ const Home: React.FC = () => {
                 </button>
               ))}
             </div>
+            )}
           </div>
 
           {selectMode && (
@@ -792,7 +808,13 @@ const Home: React.FC = () => {
           gallery's scroll path and something the desktop build never pays at
           all. Solid at the same colors reads nearly identically and costs
           nothing. */}
-      <footer className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#fafaf5] dark:bg-zinc-950 rounded-t-3xl border-t border-outline-variant/15 shadow-[0_-4px_20px_rgba(0,0,0,0.04)]">
+      {/* Being `fixed`, this inherits neither body's own safe-area padding
+          (index.css) nor any ancestor's — so on a phone with a gesture bar
+          the hardcoded pb-6 put these labels underneath it. */}
+      <footer
+        className="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pt-3 bg-[#fafaf5] dark:bg-zinc-950 rounded-t-3xl border-t border-outline-variant/15 shadow-[0_-4px_20px_rgba(0,0,0,0.04)]"
+        style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
+      >
         <Link className="flex flex-col items-center justify-center text-primary" to="/">
           <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>home</span>
           <span className="text-[11px] font-bold mt-0.5">{t('bottomNav.home')}</span>
