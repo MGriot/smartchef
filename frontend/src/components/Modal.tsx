@@ -59,7 +59,8 @@ export default function Modal({
   footer?: React.ReactNode;
   children: React.ReactNode;
   /** When given, body + footer are wrapped in a <form>, so Enter submits and
-   *  a footer `type="submit"` button works without a form= attribute. */
+   *  a footer `type="submit"` button works without a form= attribute. The
+   *  native submit is already prevented before this is called. */
   onSubmit?: (e: React.FormEvent) => void;
   zIndex?: number;
   bodyClassName?: string;
@@ -214,7 +215,16 @@ export default function Modal({
         </div>
 
         {onSubmit ? (
-          <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <form
+            onSubmit={(e) => {
+              // Always stop the native submit here, not in each handler: one
+              // that forgets (SetupFileDialog did) reloads the page mid-await,
+              // which silently kills whatever the handler was about to do.
+              e.preventDefault();
+              onSubmit(e);
+            }}
+            className="flex min-h-0 flex-1 flex-col"
+          >
             {body}
           </form>
         ) : (
