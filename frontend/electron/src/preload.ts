@@ -17,6 +17,11 @@ require('./rt/electron-rt');
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('smartchefElectron', {
   pickSyncFolder: () => ipcRenderer.invoke('smartchef-pick-sync-folder'),
+  // Native save dialog for the encrypted Setup File — see the
+  // `smartchef-save-file` handler in electron/src/index.ts for why the
+  // renderer's own blob-download trick isn't used here.
+  saveFile: (suggestedName: string, contents: string) =>
+    ipcRenderer.invoke('smartchef-save-file', suggestedName, contents),
   // Local Storage (wayfinder ticket 03/05, standalone-storage-sync map) —
   // distinct from the sync folder above: this is where the live SQLite db
   // and content-addressed images actually live, not the (future) Hidden

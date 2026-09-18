@@ -708,6 +708,9 @@
   "languages": {
     "heading": "Languages",
     "subtitle": "Add a language to write recipes and translations in. The interface stays in one of the four it ships with.",
+    "interfaceLabel": "Interface language",
+    "interfaceHint": "The language the app itself is written in. Stored per person, so everyone sharing this device keeps their own. Picking a language from the header moves this and the recipe language together; set it here to keep them apart.",
+    "contentHeading": "Recipe languages",
     "add": "Add",
     "addLabel": "Language code",
     "codePlaceholder": "Language code, e.g. pt or pt-BR",

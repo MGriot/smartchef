@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
 import { listLanguages, languageLabel } from '../lib/languages';
-import { useLanguages } from '../hooks/useLanguages';
+import { useLanguages, useUiAndContentLanguage } from '../hooks/useLanguages';
 import { canPrint, printPage } from '../lib/print';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
@@ -444,14 +444,9 @@ const RecipeDetail: React.FC = () => {
   const { t, i18n } = useTranslation();
   const isOnline = useOnlineStatus();
   const contentLang = useStore((s) => s.contentLang);
-  const setContentLang = useStore((s) => s.setContentLang);
   const addToShoppingCart = useStore((s) => s.addToShoppingCart);
 
-  const handleLanguageChange = (code: string) => {
-    i18n.changeLanguage(code);
-    localStorage.setItem('smartchef.uiLang', code);
-    setContentLang(code);
-  };
+  const handleLanguageChange = useUiAndContentLanguage();
 
   const openCollectionPicker = async () => {
     setShowCollectionPicker(true);

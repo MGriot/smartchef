@@ -16,6 +16,10 @@ _Avoid_: sync directory, shared folder, mirror folder
 Which transport a device's Sync Engine uses to reach other devices — **Folder mode** (a Sync Folder, replicated by an external tool) or **Git Remote mode** (a real git server — GitHub, GitLab, or self-hosted — reached over git's own push/fetch protocol, no external tool involved). Chosen per device, independent of what mode any other device sharing the same history uses.
 _Avoid_: sync backend, sync target, transport type (when the context already makes "of what" obvious — use "Sync Mode" for the setting itself)
 
+**Setup File**:
+A single encrypted file carrying the *portable* part of one device's sync configuration — Sync Mode, auto-sync interval, and the Git Remote URL/username/token — so a second device can be configured without retyping an access token. Encrypted with a passphrase the user chooses (AES-256-GCM over PBKDF2), in a format only this app parses. Deliberately does **not** contain the Sync Folder, which is a per-device native handle and would be meaningless elsewhere; see [ADR 0005](./docs/adr/0005-encrypted-setup-file.md).
+_Avoid_: config file, backup (a Backup is the recipe library; a Setup File contains no recipes at all), credentials file
+
 **Sync Engine**:
 The component on each device that turns Local Storage changes into commits, pushes them to the Sync Folder, and pulls/merges other devices' commits back in.
 _Avoid_: gitSync, mirror engine

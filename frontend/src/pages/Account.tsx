@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { stalePush } from '../lib/sync/syncStatus';
 import { useLanguages } from '../hooks/useLanguages';
 import { isValidLanguageCode, languageLabel, normalizeLanguageCode } from '../lib/languages';
+import { persistUiLang } from '../lib/uiLanguage';
 import type { ThemeMode } from '../store/app.store';
 import { apiFetch, isNative, getServerUrl } from '../lib/api';
 import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
@@ -19,6 +20,8 @@ import type { SyncInterval, SyncIntervalUnit, GitRemoteAccessProblem } from '../
 import type { RemoteAccessKind, RemoteAccessResult } from '../lib/sync/remoteAccessProbe';
 import { RemoteAccessNotice } from '../components/RemoteAccessNotice';
 import { checkTokenShape } from '../lib/sync/tokenShape';
+import { ExportSetupFileDialog, ImportSetupFileDialog } from '../components/SetupFileDialog';
+import type { AppliedSetup } from '../lib/setupFileTransfer';
 
 // How each verdict reads. Only 'writable' is a success; the amber group is
 // "this works for reading and will never upload", which is precisely the
@@ -466,10 +469,41 @@ function FolderSyncCard() {
   const [result, setResult] = useState<SyncResult | null>(null);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Setup File (lib/setupConfigFile.ts) — everything above, in one encrypted
+  // file, so a second device doesn't mean retyping a repo URL and a token.
+  const [exportingSetup, setExportingSetup] = useState(false);
+  const [importingSetup, setImportingSetup] = useState(false);
+  const [setupImported, setSetupImported] = useState<AppliedSetup | null>(null);
 
   const refreshDevices = async () => {
     const { listDeviceRecords } = await import('../lib/sync/gitSync');
     setDevices(await listDeviceRecords());
+  };
+
+  /** Re-reads exactly what a Setup File import can change, so the card shows
+   *  the imported values instead of the ones it loaded at mount. */
+  const reloadSyncSettings = async () => {
+    const { getSyncMode, getGitRemoteConfig, getSyncInterval } = await import('../lib/sync/syncSettings');
+    const [mode, interval, gitRemoteConfig] = await Promise.all([
+      getSyncMode(),
+      getSyncInterval(),
+      getGitRemoteConfig(),
+    ]);
+    setSyncModeState(mode);
+    setIntervalValueState(interval.value);
+    setIntervalUnitState(interval.unit);
+    setGitRemoteUrl(gitRemoteConfig?.url ?? '');
+    setGitRemoteUsername(gitRemoteConfig?.username ?? '');
+    setGitRemoteCorsProxy(gitRemoteConfig?.corsProxy ?? '');
+    setShowCorsProxy(!!gitRemoteConfig?.corsProxy);
+    setGitRemoteTokenConfigured(!!gitRemoteConfig?.token);
+    // An imported token is a brand-new credential, so any problem recorded
+    // against the previous one is stale: keep it off the screen until this
+    // device has actually tried the new one.
+    setGitRemoteToken('');
+    setGitRemoteTokenTouched(false);
+    setConnectionTestResult(null);
+    await refreshSyncHealth();
   };
 
   // No platform guard: this used to early-return on Electron, on the
@@ -803,6 +837,8 @@ function FolderSyncCard() {
           <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Folder Sync</h2>
           <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
             Choose how this device exchanges changes with your others — a plain synced folder, or a real git server.
+            {' '}This is how <em>offline</em> devices reach each other; to move the library onto a server
+            instead (or back off one), see <strong className="text-zinc-600 dark:text-zinc-300">Where your library lives</strong>.
           </p>
         </div>
       </div>
@@ -1017,6 +1053,39 @@ function FolderSyncCard() {
           <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">How often SmartChef checks for changes automatically, besides on app resume and "Sync Now".</p>
         </div>
 
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Setup File</label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setExportingSetup(true)}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-black text-xs hover:bg-zinc-800 transition-all active:scale-[0.98]"
+            >
+              <span className="material-symbols-outlined text-base">lock</span>
+              Export Setup File
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSetupImported(null); setImportingSetup(true); }}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
+            >
+              <span className="material-symbols-outlined text-base">upload_file</span>
+              Use a Setup File
+            </button>
+          </div>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
+            Everything on this card except the sync folder itself — the mode, the interval, and the
+            repository URL, username and access token — in one passphrase-encrypted file, so setting
+            up your next device doesn&apos;t mean typing a token on a phone keyboard.
+          </p>
+          {setupImported && (
+            <p className="text-xs font-bold text-primary mt-2">
+              Applied: {setupImported.mode === 'git-remote' ? `Git Remote — ${setupImported.remoteUrl}` : 'Folder mode'}
+              {setupImported.needsSyncFolder && ' — now choose this device’s sync folder above.'}
+            </p>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div>
           <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">Device Name</label>
@@ -1162,6 +1231,20 @@ function FolderSyncCard() {
           </button>
         </div>
       </div>
+
+      <ExportSetupFileDialog
+        open={exportingSetup}
+        onClose={() => setExportingSetup(false)}
+        deviceName={savedDeviceName || deviceId}
+      />
+      <ImportSetupFileDialog
+        open={importingSetup}
+        onClose={() => setImportingSetup(false)}
+        onImported={(applied) => {
+          setSetupImported(applied);
+          void reloadSyncSettings();
+        }}
+      />
     </div>
   );
 }
@@ -2189,12 +2272,27 @@ function AppearanceCard() {
 }
 
 function LanguagesCard() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { languages, add, remove } = useLanguages();
   const contentLang = useStore((s) => s.contentLang);
   const setContentLang = useStore((s) => s.setContentLang);
+  const accountId = useStore((s) => s.account?.id);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // The header picker moves the interface and the content language together,
+  // which is the right default for the common case. This is the escape
+  // hatch for the case it doesn't cover: reading recipes in one language
+  // while keeping the app's own chrome in another. Stored per account
+  // (lib/uiLanguage.ts), so two profiles sharing a device each keep theirs.
+  const uiLang = languages.some((l) => l.hasUiBundle && l.code === i18n.language)
+    ? i18n.language
+    : 'en';
+
+  const handleUiLangChange = (code: string) => {
+    if (!persistUiLang(code, accountId)) return;
+    void i18n.changeLanguage(code);
+  };
 
   const custom = languages.filter((l) => !l.hasUiBundle);
   const preview = isValidLanguageCode(draft) ? languageLabel(draft) : null;
@@ -2227,6 +2325,24 @@ function LanguagesCard() {
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('languages.subtitle')}</p>
       </div>
 
+      <div className="mb-6">
+        <label htmlFor="ui-language" className="sc-label mb-2 block">{t('languages.interfaceLabel')}</label>
+        <select
+          id="ui-language"
+          value={uiLang}
+          onChange={(e) => handleUiLangChange(e.target.value)}
+          className="w-full sm:max-w-xs border-none bg-zinc-50 dark:bg-zinc-950 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+        >
+          {languages.filter((l) => l.hasUiBundle).map((l) => (
+            <option key={l.code} value={l.code}>{l.label}</option>
+          ))}
+        </select>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-2 leading-relaxed">
+          {t('languages.interfaceHint')}
+        </p>
+      </div>
+
+      <p className="sc-label mb-2">{t('languages.contentHeading')}</p>
       <div className="flex flex-wrap gap-2 mb-5">
         {languages.map((l) => (
           <span

@@ -708,6 +708,9 @@
   "languages": {
     "heading": "Langues",
     "subtitle": "Ajoutez une langue pour écrire vos recettes et traductions. L’interface reste dans l’une des quatre fournies.",
+    "interfaceLabel": "Langue de l'interface",
+    "interfaceHint": "La langue dans laquelle l'application elle-même est écrite. Enregistrée par personne, afin que chacun conserve la sienne sur un appareil partagé. Choisir une langue depuis l'en-tête déplace celle-ci et la langue des recettes ensemble ; réglez-la ici pour les séparer.",
+    "contentHeading": "Langues des recettes",
     "add": "Ajouter",
     "addLabel": "Code de langue",
     "codePlaceholder": "Code de langue, ex. pt ou pt-BR",

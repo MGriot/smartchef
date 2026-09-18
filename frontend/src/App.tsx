@@ -180,7 +180,15 @@ export default function App() {
           setAuth({ status: "needs-profile" });
           return;
         }
-        setAccount({ id: profile.id, username: profile.name, name: profile.name, role: "user", avatarUrl: profile.avatarUrl });
+        // The profile's OWN role, not a hardcoded "user". getActiveProfile()
+        // has always returned it (lib/standalone.ts) and profiles.local.ts
+        // makes the first profile in a library an admin — but flattening it
+        // to "user" here meant `account.role` was never 'admin' in standalone
+        // mode, so every surface gated on it silently rendered nothing. The
+        // visible casualty was Account.tsx's StorageModeCard ("Where your
+        // library lives"), i.e. the switch between offline and a server: it
+        // was there the whole time and no standalone device could see it.
+        setAccount({ id: profile.id, username: profile.name, name: profile.name, role: profile.role ?? "user", avatarUrl: profile.avatarUrl });
         setAuth({ status: "authenticated" });
       } catch (err) {
         console.error("SmartChef: startup check failed:", err);
