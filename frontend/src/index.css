@@ -49,8 +49,19 @@
     scroll-behavior: smooth;
     /* Backstop against a single overflowing element (e.g. a flex row
        whose child ignores its container's width) silently pushing the
-       whole page into horizontal scroll on narrow/native screens. */
-    overflow-x: hidden;
+       whole page into horizontal scroll on narrow/native screens.
+       `clip`, never `hidden`: `hidden` on body turns body into a scroll
+       container that never actually scrolls, and every `sticky` element
+       then sticks to it instead of the viewport — the header scrolled
+       away with the page on Android because of exactly that. */
+    overflow-x: clip;
+  }
+
+  /* Height of AppLayout's top bar including the status-bar strip it paints
+     on native. Anything positioned against the bar reads this rather than
+     hard-coding 65px, which was wrong as soon as the inset was non-zero. */
+  :root {
+    --app-header-h: calc(65px + env(safe-area-inset-top));
   }
 
   .dark html, .dark body {

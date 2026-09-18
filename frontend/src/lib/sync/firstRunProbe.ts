@@ -26,12 +26,12 @@
 // The obvious version — run the normal merge but only for the `profiles`
 // entry in mergeBridge.ts's ENTITY_DIRS, then do the rest later — silently
 // destroys data, and it is worth writing down so nobody "simplifies" this
-// back into it. gitSync.ts's applyMergeIfNeeded() COMMITS after a merge.
-// On the next cycle findMergeBase() then resolves to the remote oid
-// itself, so mergeEntity() compares remote against a base that already
-// equals it, concludes nothing changed, and every entity type skipped by
-// the first pass is never imported — on that sync or any future one. No
-// error, no conflict, just a permanently empty library.
+// back into it. gitSync.ts's applyMergeIfNeeded() commits a two-parent
+// merge commit after a merge (ADR 0006), making the remote an ancestor —
+// the next cycle sees it as already merged (isDescendent) and skips it
+// outright. Every entity type skipped by the first pass would never be
+// imported — on that sync or any future one. No error, no conflict, just a
+// permanently empty library.
 //
 // Reading blobs out of a throwaway clone touches none of that machinery:
 // no merge, no commit, no ref moved in the Hidden Clone. The full sync

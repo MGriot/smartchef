@@ -769,6 +769,11 @@ CREATE TABLE IF NOT EXISTS sync_conflicts (
   base_value    TEXT,
   local_value   TEXT,
   remote_value  TEXT,
+  -- Each side's entity updated_at when the conflict was recorded — what
+  -- the 'newest' conflict policy and the Conflicts card's "newer" badge
+  -- compare (ADR 0006).
+  local_updated_at  TEXT,
+  remote_updated_at TEXT,
   detected_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(entity_type, entity_id, field_name)
 );
@@ -1004,12 +1009,75 @@ export async function initLocalSchema(): Promise<void> {
       if (earliestId) await db.execute(`UPDATE profiles SET role='admin' WHERE id='${earliestId}'`);
     }
     await addColumnIfMissing(db, 'ingredients', 'plural_name', 'TEXT');
+    await addColumnIfMissing(db, 'sync_conflicts', 'local_updated_at', 'TEXT');
+    await addColumnIfMissing(db, 'sync_conflicts', 'remote_updated_at', 'TEXT');
     await addColumnIfMissing(db, 'ingredient_translations', 'plural_translation', 'TEXT');
     await dropDanglingForeignKeys(db);
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {
       await db.execute(SEED_SQL);
     }
+    await rekeyPortableIds(db);
   })();
   return initPromise;
+}
+
+// Categories and units used to be seeded with random ids per device, which
+// made the same "Frutta" or "g" a different row everywhere — impossible to
+// sync as an entity, and the reason synced ingredients all landed in
+// "Uncategorized". ADR 0006 gives them ids derived from the name/symbol
+// (services/syncExtras.local.ts), the same on every device. This moves
+// existing rows onto those ids, repointing everything that references
+// them. Runs every start and is a no-op once every row is re-keyed.
+function portableSlug(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'x';
+}
+
+async function rekeyPortableIds(db: SQLiteDBConnection): Promise<void> {
+  const categories = (await db.query(`SELECT id, name FROM ingredient_categories`)).values ?? [];
+  const takenCategoryIds = new Set(categories.map((c: { id: string }) => c.id));
+  for (const category of categories as Array<{ id: string; name: string }>) {
+    if (category.id.startsWith('cat-')) continue;
+    const target = `cat-${portableSlug(category.name)}`;
+    if (takenCategoryIds.has(target)) continue; // another row already owns that name's id
+    takenCategoryIds.add(target);
+    // The active-name unique index would reject a second "Frutta" while
+    // both rows exist, so the old row steps aside first.
+    await db.run(`UPDATE ingredient_categories SET name = name || ' (rekey ' || id || ')' WHERE id = ?`, [category.id]);
+    await db.run(
+      `INSERT INTO ingredient_categories (id, name, description, icon, color, sort_order, deleted_at, created_at, updated_at)
+       SELECT ?, ?, description, icon, color, sort_order, deleted_at, created_at, updated_at FROM ingredient_categories WHERE id = ?`,
+      [target, category.name, category.id]
+    );
+    await db.run(`UPDATE ingredients SET category_id = ? WHERE category_id = ?`, [target, category.id]);
+    await db.run(`UPDATE ingredient_category_translations SET category_id = ? WHERE category_id = ?`, [target, category.id]);
+    await db.run(`DELETE FROM ingredient_categories WHERE id = ?`, [category.id]);
+  }
+
+  const units = (await db.query(`SELECT id, name, symbol FROM units`)).values ?? [];
+  const takenUnitIds = new Set(units.map((u: { id: string }) => u.id));
+  for (const unit of units as Array<{ id: string; name: string; symbol: string }>) {
+    if (unit.id.startsWith('unit-')) continue;
+    const target = `unit-${portableSlug(unit.symbol)}`;
+    if (takenUnitIds.has(target)) continue;
+    takenUnitIds.add(target);
+    await db.run(`UPDATE units SET name = name || ' (rekey)', symbol = symbol || ' (rekey)' WHERE id = ?`, [unit.id]);
+    await db.run(
+      `INSERT INTO units (id, name, symbol, unit_type, base_unit_symbol, to_base_factor, system, created_at)
+       SELECT ?, ?, ?, unit_type, base_unit_symbol, to_base_factor, system, created_at FROM units WHERE id = ?`,
+      [target, unit.name, unit.symbol, unit.id]
+    );
+    for (const [table, column] of [
+      ['recipe_ingredients', 'unit_id'], ['recipes', 'yield_unit_id'], ['pantry_items', 'unit_id'],
+      ['shopping_list_items', 'unit_id'], ['unit_translations', 'unit_id'],
+    ]) {
+      await db.run(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, [target, unit.id]);
+    }
+    await db.run(`DELETE FROM units WHERE id = ?`, [unit.id]);
+  }
 }

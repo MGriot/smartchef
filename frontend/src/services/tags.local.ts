@@ -31,8 +31,8 @@ export async function syncTag(id: string): Promise<void> {
   try {
     const row = await queryOne<Record<string, unknown>>('SELECT * FROM tags WHERE id=$1', [id]);
     if (!row) return;
-    const { writeEntityFile } = await import('../lib/sync/gitSync');
-    await writeEntityFile('tags', id, row);
+    const [{ writeEntityFile }, { readExtraFields }] = await Promise.all([import('../lib/sync/gitSync'), import('./syncExtras.local')]);
+    await writeEntityFile('tags', id, { ...row, ...(await readExtraFields('tag', id, row)) });
   } catch (err) {
     console.error('SmartChef sync (tag) failed:', err);
   }

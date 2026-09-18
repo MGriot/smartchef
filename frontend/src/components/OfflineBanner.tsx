@@ -40,7 +40,6 @@ export default function OfflineBanner() {
   return (
     <div
       className={`px-4 py-2 text-center text-xs font-bold ${offline ? 'bg-amber-100 text-amber-800' : 'bg-primary/10 text-primary'}`}
-      style={{ paddingTop: `max(0.5rem, env(safe-area-inset-top))` }}
     >
       {offline
         ? pending > 0

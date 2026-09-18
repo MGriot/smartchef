@@ -4,6 +4,8 @@ import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
 import { useTranslation } from 'react-i18next';
+import ConflictsCard from '../components/sync/ConflictResolver';
+import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 // Module-level helpers below take `t` as a parameter rather than reaching
 // for a singleton: they are plain functions, not components, so there is no
 // hook to call — and passing it keeps them re-rendering with the language.
@@ -18,9 +20,9 @@ import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
 import { ResolvedImage } from '../components/CoverImage';
 import type { StandaloneProfile } from '../lib/standalone';
 import type { MigrationSummary } from '../lib/storageMigration';
-import type { SyncResult } from '../lib/sync/gitSync';
+import type { SyncResult, ReplacePreview } from '../lib/sync/gitSync';
 import type { TransferProgress } from '../lib/sync/gitObjectTransport';
-import type { SyncInterval, SyncIntervalUnit, GitRemoteAccessProblem } from '../lib/sync/syncSettings';
+import type { SyncInterval, SyncIntervalUnit, GitRemoteAccessProblem, ConflictPolicy } from '../lib/sync/syncSettings';
 import type { RemoteAccessKind, RemoteAccessResult } from '../lib/sync/remoteAccessProbe';
 import { RemoteAccessNotice } from '../components/RemoteAccessNotice';
 import { checkTokenShape } from '../lib/sync/tokenShape';
@@ -125,6 +127,7 @@ function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
  *  its own raw name rather than being guessed at with an English "s". */
 const ENTITY_TYPE_KEY: Record<string, string> = {
   recipe: 'recipes', ingredient: 'ingredients', tool: 'tools', tag: 'tags', technique: 'techniques', profile: 'profiles',
+  category: 'categories', unit: 'units',
 };
 
 /** "3 recipes, 5 ingredients" — the "which type" half of what a sync cycle
@@ -161,261 +164,6 @@ function formatRelativeTime(t: TFunction, iso: string): string {
   const hours = Math.round(mins / 60);
   if (hours < 24) return t('account.time.hoursAgo', { count: hours });
   return t('account.time.daysAgo', { count: Math.round(hours / 24) });
-}
-
-interface DisplayConflict {
-  id: string;
-  entityType: string;
-  entityId: string;
-  fieldName: string;
-  localValue: unknown;
-  remoteValue: unknown;
-  entityName: string;
-}
-
-function conflictValuePreview(t: TFunction, value: unknown): string {
-  if (Array.isArray(value)) return t('account.conflicts.itemCount', { count: value.length });
-  return String(value);
-}
-
-type LineDiffOp = { type: 'same' | 'removed' | 'added'; text: string };
-
-/** GitHub-style unified diff: a colored +/- gutter plus a full-row red/
- *  green background, instead of a plain badge — the ask being "make the
- *  differences easier to actually see," not just technically present. */
-function LineDiffView({ ops }: { ops: LineDiffOp[] }) {
-  const { t } = useTranslation();
-  return (
-    <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden font-mono text-xs">
-      <div className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-3 text-[10px] font-sans font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
-        <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400"><span className="w-2 h-2 rounded-sm bg-red-500 inline-block" />{t('account.conflicts.mineOnly')}</span>
-        <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />{t('account.conflicts.theirsOnly')}</span>
-      </div>
-      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-        {ops.map((op, i) => (
-          <div key={i} className={`flex ${op.type === 'removed' ? 'bg-red-50 dark:bg-red-950/30' : op.type === 'added' ? 'bg-emerald-50 dark:bg-emerald-950/30' : ''}`}>
-            <span
-              className={`w-7 shrink-0 text-center select-none font-black ${
-                op.type === 'removed' ? 'bg-red-100 text-red-500 dark:bg-red-900/40 dark:text-red-400' : op.type === 'added' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400' : 'text-zinc-300 dark:text-zinc-700'
-              }`}
-            >
-              {op.type === 'removed' ? '−' : op.type === 'added' ? '+' : ''}
-            </span>
-            <span className={`px-3 py-1 flex-1 whitespace-pre-wrap ${op.type === 'removed' ? 'text-red-800 dark:text-red-300' : op.type === 'added' ? 'text-emerald-800 dark:text-emerald-300' : 'text-zinc-600 dark:text-zinc-400'}`}>
-              {op.text}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ConflictFieldDiff({ conflict, onResolve }: { conflict: DisplayConflict; onResolve: (chosen: 'local' | 'remote') => void }) {
-  const { t } = useTranslation();
-  const [ops, setOps] = useState<LineDiffOp[] | null>(null);
-  const [unsupported, setUnsupported] = useState(false);
-  const isArrayField = Array.isArray(conflict.localValue) || Array.isArray(conflict.remoteValue);
-  // Every array-valued field — plain string/number lists (tags, regions,
-  // seasonal_months...), id-reference lists (toolIds, exclude_tag_ids...),
-  // and recipe's steps/ingredients row objects — goes through
-  // conflicts.local.ts's formatArrayFieldLines(), which resolves whatever
-  // it can into a readable line per item (ADR 0002 still applies: this is
-  // display only, not per-row merging). It only throws for an array of
-  // objects it hasn't been taught to format (e.g. recipe.sources) — that
-  // falls back to the plain count-only view below instead of crashing.
-  useEffect(() => {
-    let cancelled = false;
-    setOps(null);
-    setUnsupported(false);
-    if (!isArrayField) return;
-
-    (async () => {
-      try {
-        const [{ formatArrayFieldLines }, { diffLines }] = await Promise.all([
-          import('../services/conflicts.local'),
-          import('../lib/lineDiff'),
-        ]);
-        const [localLines, remoteLines] = await Promise.all([
-          formatArrayFieldLines(conflict.entityType, conflict.fieldName, conflict.localValue),
-          formatArrayFieldLines(conflict.entityType, conflict.fieldName, conflict.remoteValue),
-        ]);
-        if (!cancelled) setOps(diffLines(localLines, remoteLines));
-      } catch (err) {
-        console.error('ConflictFieldDiff: could not format array field for diff', err);
-        if (!cancelled) setUnsupported(true);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [conflict, isArrayField]);
-
-  if (isArrayField && unsupported) {
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-zinc-200 dark:border-zinc-700">
-          <div className="text-xs text-zinc-600 dark:text-zinc-400 font-medium">
-            <span className="font-black text-zinc-800 dark:text-zinc-200">{t('account.conflicts.mineLabel')}</span> {conflictValuePreview(t, conflict.localValue)}
-            <span className="mx-2 text-zinc-300 dark:text-zinc-600">|</span>
-            <span className="font-black text-zinc-800 dark:text-zinc-200">{t('account.conflicts.theirsLabel')}</span> {conflictValuePreview(t, conflict.remoteValue)}
-          </div>
-          <div className="flex gap-2 shrink-0">
-            <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">{t('account.conflicts.mine')}</button>
-            <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">{t('account.conflicts.theirs')}</button>
-          </div>
-        </div>
-        <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-          {t('account.conflicts.noPerRowIdentity')}
-        </p>
-      </div>
-    );
-  }
-
-  if (isArrayField) {
-    return (
-      <div className="space-y-2">
-        <LineDiffView ops={ops ?? []} />
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">{t('account.conflicts.keepMine')}</button>
-          <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">{t('account.conflicts.keepTheirs')}</button>
-        </div>
-        <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-          {t('account.conflicts.wholeListReplaced')}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center justify-between gap-3 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-zinc-200 dark:border-zinc-700">
-      <div className="text-xs text-zinc-600 dark:text-zinc-400 font-medium">
-        <span className="font-black text-zinc-800 dark:text-zinc-200">{t('account.conflicts.mineLabel')}</span> {conflictValuePreview(t, conflict.localValue)}
-        <span className="mx-2 text-zinc-300 dark:text-zinc-600">|</span>
-        <span className="font-black text-zinc-800 dark:text-zinc-200">{t('account.conflicts.theirsLabel')}</span> {conflictValuePreview(t, conflict.remoteValue)}
-      </div>
-      <div className="flex gap-2 shrink-0">
-        <button type="button" onClick={() => onResolve('local')} className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-[11px] font-black text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700">{t('account.conflicts.mine')}</button>
-        <button type="button" onClick={() => onResolve('remote')} className="px-2.5 py-1 bg-zinc-900 text-white rounded-lg text-[11px] font-black hover:bg-zinc-800">{t('account.conflicts.theirs')}</button>
-      </div>
-    </div>
-  );
-}
-
-function ConflictEntityGroup({
-  entityConflicts, openField, onOpenField, onResolve,
-}: {
-  entityConflicts: DisplayConflict[];
-  openField: string;
-  onOpenField: (fieldName: string) => void;
-  onResolve: (id: string, chosen: 'local' | 'remote') => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-sm font-black text-zinc-800 dark:text-zinc-200">{entityConflicts[0].entityName}</p>
-        <span className="px-2.5 py-0.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-full text-[10px] font-black text-zinc-500 dark:text-zinc-400 capitalize">
-          {entityConflicts[0].entityType} · {t('account.conflicts.conflictCount', { count: entityConflicts.length })}
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {entityConflicts.map((c) => (
-          <button
-            key={c.fieldName}
-            type="button"
-            onClick={() => onOpenField(c.fieldName)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${openField === c.fieldName ? 'bg-zinc-900 text-white' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}
-          >
-            {c.fieldName}
-          </button>
-        ))}
-      </div>
-      {entityConflicts.filter((c) => c.fieldName === openField).map((c) => (
-        <ConflictFieldDiff key={c.id} conflict={c} onResolve={(chosen) => onResolve(c.id, chosen)} />
-      ))}
-    </div>
-  );
-}
-
-/** wayfinder ticket 06 (standalone-storage-sync map) — entity-grouped
- *  Conflicts list (the prototyped Variant C), folded into production and
- *  wired to conflicts.local.ts's real data. mergeBridge.ts creates a
- *  sync_conflicts row whenever a real sync cycle finds a field genuinely
- *  diverged on both sides (see applyEntityMergeResult()); this card
- *  renders nothing only when there's nothing actually pending. */
-function ConflictsCard() {
-  const { t } = useTranslation();
-  const [conflicts, setConflicts] = useState<DisplayConflict[] | null>(null);
-  const [openField, setOpenField] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = async () => {
-    try {
-      const { listPendingConflicts, getEntityDisplayName } = await import('../services/conflicts.local');
-      const pending = await listPendingConflicts();
-      const withNames = await Promise.all(
-        pending.map(async (c) => ({
-          ...c,
-          entityName: (await getEntityDisplayName(c.entityType, c.entityId)) ?? `${c.entityType} ${c.entityId.slice(0, 8)}…`,
-        }))
-      );
-      setConflicts(withNames);
-    } catch (err) {
-      // Stays invisible (conflicts left null, same as the loading state)
-      // rather than showing an error card for a feature that's supposed to
-      // render nothing until there's something real to show — but at least
-      // doesn't crash the rest of the Account page over an unhandled
-      // rejection the way an unguarded refresh() would.
-      console.error('ConflictsCard: could not load pending conflicts', err);
-    }
-  };
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleResolve = async (id: string, chosen: 'local' | 'remote') => {
-    setError(null);
-    try {
-      const { resolveConflict, applyResolvedConflict } = await import('../services/conflicts.local');
-      const resolved = await resolveConflict(id, chosen);
-      if (resolved) await applyResolvedConflict(resolved);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('account.conflicts.couldNotResolve'));
-    }
-    await refresh();
-  };
-
-  if (!conflicts || conflicts.length === 0) return null;
-
-  const groups = new Map<string, DisplayConflict[]>();
-  for (const c of conflicts) {
-    const key = `${c.entityType}:${c.entityId}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(c);
-  }
-
-  return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
-      <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-1">{t('account.conflicts.heading')}</h2>
-      <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mb-4">
-        {t('account.conflicts.subtitle', { count: groups.size })}
-      </p>
-      {error && <p className="text-sm text-red-600 font-medium mb-3">{error}</p>}
-      <div className="space-y-3">
-        {[...groups.entries()].map(([key, entityConflicts]) => (
-          <ConflictEntityGroup
-            key={key}
-            entityConflicts={entityConflicts}
-            openField={openField[key] ?? entityConflicts[0].fieldName}
-            onOpenField={(fieldName) => setOpenField((s) => ({ ...s, [key]: fieldName }))}
-            onResolve={handleResolve}
-          />
-        ))}
-      </div>
-    </div>
-  );
 }
 
 const SYNC_INTERVAL_PRESETS: SyncInterval[] = [
@@ -482,6 +230,14 @@ function FolderSyncCard() {
   const [resyncProgress, setResyncProgress] = useState<{ phase: string; done: number; total: number } | null>(null);
   const [repairing, setRepairing] = useState(false);
   const [repairMessage, setRepairMessage] = useState<string | null>(null);
+  // ADR 0006: how a field both devices changed differently is settled.
+  const [conflictPolicy, setConflictPolicyState] = useState<ConflictPolicy>('newest');
+  // "Replace with synced data" — preview first, then an explicit confirm.
+  const [replacePreview, setReplacePreview] = useState<ReplacePreview | null>(null);
+  const [preparingReplace, setPreparingReplace] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const [replaceProgress, setReplaceProgress] = useState<{ done: number; total: number } | null>(null);
+  const [replaceMessage, setReplaceMessage] = useState<string | null>(null);
   const [choosingFolder, setChoosingFolder] = useState(false);
   const [result, setResult] = useState<SyncResult | null>(null);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
@@ -500,13 +256,15 @@ function FolderSyncCard() {
   /** Re-reads exactly what a Setup File import can change, so the card shows
    *  the imported values instead of the ones it loaded at mount. */
   const reloadSyncSettings = async () => {
-    const { getSyncMode, getGitRemoteConfig, getSyncInterval } = await import('../lib/sync/syncSettings');
-    const [mode, interval, gitRemoteConfig] = await Promise.all([
+    const { getSyncMode, getGitRemoteConfig, getSyncInterval, getConflictPolicy } = await import('../lib/sync/syncSettings');
+    const [mode, interval, gitRemoteConfig, policy] = await Promise.all([
       getSyncMode(),
       getSyncInterval(),
       getGitRemoteConfig(),
+      getConflictPolicy(),
     ]);
     setSyncModeState(mode);
+    setConflictPolicyState(policy);
     setIntervalValueState(interval.value);
     setIntervalUnitState(interval.unit);
     setGitRemoteUrl(gitRemoteConfig?.url ?? '');
@@ -694,6 +452,57 @@ function FolderSyncCard() {
       setError(err instanceof Error ? err.message : t('account.folderSync.couldNotRepair'));
     } finally {
       setRepairing(false);
+    }
+  };
+
+  const handleConflictPolicyChange = async (policy: ConflictPolicy) => {
+    setConflictPolicyState(policy);
+    const { setConflictPolicy } = await import('../lib/sync/syncSettings');
+    await setConflictPolicy(policy);
+    if (policy === 'newest') {
+      // Switching to automatic settles what is already waiting, too —
+      // otherwise the card would keep asking about the old backlog.
+      const { autoResolveConflictsNow } = await import('../lib/sync/gitSync');
+      await autoResolveConflictsNow();
+    }
+  };
+
+  const handlePrepareReplace = async () => {
+    setPreparingReplace(true);
+    setError(null);
+    setReplaceMessage(null);
+    try {
+      const { previewReplaceFromRemote } = await import('../lib/sync/gitSync');
+      setReplacePreview(await previewReplaceFromRemote());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('account.folderSync.replace.couldNotReplace'));
+    } finally {
+      setPreparingReplace(false);
+    }
+  };
+
+  const handleConfirmReplace = async () => {
+    setReplacePreview(null);
+    setReplacing(true);
+    setError(null);
+    setReplaceProgress(null);
+    try {
+      const { replaceLocalWithRemote } = await import('../lib/sync/gitSync');
+      const outcome = await replaceLocalWithRemote((done, total) => setReplaceProgress({ done, total }));
+      const applied = Object.values(outcome.applied).reduce((n, c) => n + c, 0);
+      setReplaceMessage(t('account.folderSync.replace.done', { count: applied, discarded: outcome.discarded }));
+      if (outcome.failedEntities.length > 0) {
+        setError(t('account.folderSync.failedEntities', {
+          count: outcome.failedEntities.length,
+          types: outcome.failedEntities.map((f) => f.entityType).join(', '),
+        }));
+      }
+      await refreshSyncHealth();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('account.folderSync.replace.couldNotReplace'));
+    } finally {
+      setReplacing(false);
+      setReplaceProgress(null);
     }
   };
 
@@ -1070,6 +879,31 @@ function FolderSyncCard() {
         </div>
 
         <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.conflictPolicy.label')}</label>
+          <div role="radiogroup" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(['newest', 'ask'] as ConflictPolicy[]).map((policy) => {
+              const active = conflictPolicy === policy;
+              return (
+                <button
+                  key={policy}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => handleConflictPolicyChange(policy)}
+                  className={`text-left rounded-2xl border-2 p-3 transition-colors ${active ? 'border-primary bg-primary/5' : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'}`}
+                >
+                  <span className="flex items-center gap-2 text-sm font-black text-zinc-900 dark:text-zinc-100">
+                    <span className="material-symbols-outlined text-[18px] text-primary">{policy === 'newest' ? 'auto_fix_high' : 'rule'}</span>
+                    {t(`account.folderSync.conflictPolicy.${policy}`)}
+                  </span>
+                  <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-1">{t(`account.folderSync.conflictPolicy.${policy}Hint`)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
           <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.setupFile.label')}</label>
           <div className="flex flex-wrap gap-2">
             <button
@@ -1196,6 +1030,7 @@ function FolderSyncCard() {
                 })
               : t('account.folderSync.nothingNew')}
             {result.committed ? ` ${t('account.folderSync.ownChangesCommitted')}` : ''}
+            {result.autoResolved > 0 ? ` ${t('account.folderSync.autoResolvedFields', { count: result.autoResolved })}` : ''}
             {result.conflicts > 0 ? ` ${t('account.folderSync.fieldsNeedReview', { count: result.conflicts })}` : ''}
           </p>
         )}
@@ -1213,6 +1048,14 @@ function FolderSyncCard() {
           </p>
         )}
         {!repairing && repairMessage && <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{repairMessage}</p>}
+        {replacing && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+            {replaceProgress
+              ? t('account.folderSync.replace.progress', { done: replaceProgress.done, total: replaceProgress.total })
+              : t('account.folderSync.replace.preparing')}
+          </p>
+        )}
+        {!replacing && replaceMessage && <p className="text-xs text-primary font-medium">{replaceMessage}</p>}
 
         <div className="flex gap-3 flex-wrap">
           <button
@@ -1253,7 +1096,63 @@ function FolderSyncCard() {
             {t('account.folderSync.history')}
           </button>
         </div>
+
+        {/* Deliberately apart from the everyday buttons above and styled as a
+            danger action: it discards this device's own library. */}
+        <div className="rounded-2xl border border-red-100 dark:border-red-900/40 bg-red-50/50 dark:bg-red-950/20 p-4 space-y-3">
+          <div>
+            <p className="text-sm font-black text-red-700 dark:text-red-300">{t('account.folderSync.replace.title')}</p>
+            <p className="text-xs text-red-700/80 dark:text-red-300/80 mt-1">{t('account.folderSync.replace.hint')}</p>
+          </div>
+          <button
+            type="button"
+            onClick={handlePrepareReplace}
+            disabled={preparingReplace || replacing || syncing || resyncingAll || repairing}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 rounded-2xl font-black text-sm hover:bg-red-50 dark:hover:bg-red-950/40 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
+            <span className={`material-symbols-outlined text-lg ${preparingReplace || replacing ? 'animate-spin' : ''}`}>{preparingReplace || replacing ? 'sync' : 'cloud_download'}</span>
+            {preparingReplace ? t('account.folderSync.replace.checking') : replacing ? t('account.folderSync.replace.replacing') : t('account.folderSync.replace.button')}
+          </button>
+        </div>
       </div>
+
+      <Modal
+        open={replacePreview !== null}
+        onClose={() => setReplacePreview(null)}
+        title={t('account.folderSync.replace.confirmTitle')}
+        subtitle={t('account.folderSync.replace.confirmSubtitle')}
+        footer={
+          <>
+            <ModalCancelButton onClick={() => setReplacePreview(null)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton type="button" onClick={handleConfirmReplace}>{t('account.folderSync.replace.confirm')}</ModalSubmitButton>
+          </>
+        }
+      >
+        {replacePreview && (
+          <div className="space-y-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                  <th className="text-left py-1.5" />
+                  <th className="text-right py-1.5">{t('account.folderSync.replace.thisDevice')}</th>
+                  <th className="text-right py-1.5">{t('account.folderSync.replace.synced')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {(Object.keys(replacePreview.remote) as Array<keyof ReplacePreview['remote']>).map((type) => (
+                  <tr key={type}>
+                    <td className="py-2 font-bold text-zinc-700 dark:text-zinc-300">{t(`account.conflicts.entityTypesPlural.${type}`)}</td>
+                    <td className="py-2 text-right tabular-nums text-zinc-500">{replacePreview.local[type]}</td>
+                    <td className="py-2 text-right tabular-nums font-black text-zinc-900 dark:text-zinc-100">{replacePreview.remote[type]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-sm text-red-600 dark:text-red-400 font-medium">{t('account.folderSync.replace.warning')}</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('account.folderSync.replace.kept')}</p>
+          </div>
+        )}
+      </Modal>
 
       <ExportSetupFileDialog
         open={exportingSetup}

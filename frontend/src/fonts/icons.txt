@@ -54,6 +54,7 @@ class
 clear
 close
 cloud
+cloud_download
 cloud_off
 code
 collections

@@ -195,16 +195,15 @@ export async function pushGitRemote(dir: string, gitdir: string, config: GitRemo
 
   await ensureRemoteConfigured(dir, gitdir, config);
 
-  // force: true is load-bearing, not a shortcut — without it, git.push()
-  // throws PushRejectedError ("not a simple fast-forward") on essentially
-  // every push after the very first device to ever push, permanently, not
-  // as an edge case. Structured Merge (applyMergeIfNeeded() in gitSync.ts)
-  // reconciles content field-by-field and commits the result with a
-  // single parent — this device's own previous commit — never a real
-  // two-parent git merge commit linking back into the remote's history.
-  // From git's perspective that's indistinguishable from two branches that
-  // diverged and never merged, so its built-in fast-forward check refuses
-  // every time, regardless of how fresh the fetch+merge just was. That
+  // force: true was load-bearing until ADR 0006 and is kept for one release
+  // as a safety net. Structured Merge (applyMergeIfNeeded() in gitSync.ts)
+  // used to commit its result with a single parent — never a real
+  // two-parent merge commit linking back into the remote's history — so
+  // git.push() threw PushRejectedError ("not a simple fast-forward") on
+  // essentially every push after the first device's. Merges are now
+  // committed with both parents, which makes these pushes fast-forwards;
+  // a history created before that change still needs the force until its
+  // devices have merged once under the new code. That
   // check exists to stop exactly the kind of blind overwrite this app
   // already guards against a different way: the fetch-merge-push ordering
   // (pull before push, see gitSync.ts) means the commit being pushed was

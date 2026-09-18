@@ -38,13 +38,15 @@ import {
   getSyncMode,
   getGitRemoteConfig,
   getSyncIntervalMinutes,
+  getConflictPolicy,
   setGitRemoteAccessProblem,
   type GitRemoteConfig,
 } from './syncSettings';
 import { createElectronRemoteTransport } from './electronRemoteTransport';
 import { createAndroidRemoteTransport } from './androidRemoteTransport';
 import { getMirrorState, setSyncPauseReason } from './androidMirror';
-import { mergeRemoteIntoLocal } from './mergeBridge';
+import { mergeRemoteIntoLocal, readRemoteSnapshot, applyRemoteSnapshot, type ReplaceOutcome } from './mergeBridge';
+import { overlayPendingConflicts, autoResolvePendingConflicts, listLocalEntityIds } from '../../services/conflicts.local';
 import { reportSyncStarted, reportSyncFinished, LAST_SYNC_KEY } from './syncStatus';
 import { copyImagesIntoClone, materializeImagesFromCommit } from './imageSync';
 import { IMAGES_SUBDIR } from '../localImages';
@@ -89,7 +91,7 @@ function serialize<T>(fn: () => Promise<T>, label?: string): Promise<T> {
   }
 }
 
-type EntityType = 'recipes' | 'ingredients' | 'tools' | 'tags' | 'techniques' | 'profiles';
+type EntityType = 'recipes' | 'ingredients' | 'tools' | 'tags' | 'techniques' | 'profiles' | 'categories' | 'units';
 const ENTITY_TYPE_TO_DIR: Record<string, EntityType> = {
   recipe: 'recipes',
   ingredient: 'ingredients',
@@ -97,8 +99,13 @@ const ENTITY_TYPE_TO_DIR: Record<string, EntityType> = {
   tag: 'tags',
   technique: 'techniques',
   profile: 'profiles',
+  category: 'categories',
+  unit: 'units',
 };
-const ALL_ENTITY_DIRS: EntityType[] = ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles'];
+const DIR_TO_ENTITY_TYPE: Record<string, string> = Object.fromEntries(
+  Object.entries(ENTITY_TYPE_TO_DIR).map(([entityType, dirName]) => [dirName, entityType])
+);
+const ALL_ENTITY_DIRS: EntityType[] = ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles', 'categories', 'units'];
 
 // What git actually stages and commits: every entity directory, plus the
 // content-addressed image store. `images` is deliberately NOT an
@@ -175,13 +182,18 @@ function author() {
 export function writeEntityFile(type: EntityType, id: string, data: Record<string, unknown>): Promise<void> {
   return serialize(async () => {
     const { dir } = await ensureHiddenCloneInitialized();
-    const json = JSON.stringify(data, null, 2);
+    // A field still waiting on the user is committed with the other
+    // device's value until it is resolved — see overlayPendingConflicts().
+    const entityType = DIR_TO_ENTITY_TYPE[type];
+    const committed = entityType ? await overlayPendingConflicts(entityType, id, data) : data;
+    const json = JSON.stringify(committed, null, 2);
     // Payload size is logged because a recipe carrying a data: URI as its
     // cover image (rather than a link or a stored local path) makes this
     // one file megabytes long, which then has to be written, hashed and
     // committed on every single save.
     const startedAt = performance.now();
     await gitfs.promises.writeFile(`${dir}/${type}/${id}.json`, json);
+    dirtyPaths.add(`${type}/${id}.json`);
     logIfSlow(`writeEntityFile(${type}) fs write`, startedAt, `${Math.round(json.length / 1024)}KB`);
     scheduleCommit();
   });
@@ -191,6 +203,14 @@ export function writeEntityFile(type: EntityType, id: string, data: Record<strin
 // ingredient rows) becomes one commit, not dozens. ──────────────────────
 
 let commitTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Entity files written since the last commit. statusMatrix() trusts git's
+ *  index stat cache — same size and same mtime second means "unchanged" —
+ *  so an edit that rewrites a file with a same-length value within a second
+ *  of the previous write (a merge, then an immediate edit) was silently
+ *  never committed. These paths are staged explicitly instead: git.add()
+ *  always re-hashes what it is given. */
+const dirtyPaths = new Set<string>();
 
 export function scheduleCommit(delayMs = 2000): void {
   if (commitTimer) clearTimeout(commitTimer);
@@ -218,6 +238,12 @@ async function commitNowInternal(): Promise<boolean> {
     console.info(`SmartChef: staged ${imageCopy.copied} image(s) for sync`);
   }
 
+  if (dirtyPaths.size > 0) {
+    const written = [...dirtyPaths];
+    dirtyPaths.clear();
+    await git.add({ fs: gitfs, dir, gitdir, filepath: written, cache: gitCache() });
+  }
+
   const statusStartedAt = performance.now();
   const matrix = await git.statusMatrix({ fs: gitfs, dir, gitdir, filepaths: COMMITTED_DIRS, cache: gitCache() });
   logIfSlow('commit statusMatrix', statusStartedAt, `${matrix.length} files`);
@@ -226,7 +252,7 @@ async function commitNowInternal(): Promise<boolean> {
 
   await git.add({ fs: gitfs, dir, gitdir, filepath: COMMITTED_DIRS, cache: gitCache() });
   const id = await getDeviceId();
-  const changedCount = matrix.filter(([, head, workdir]) => head !== workdir).length;
+  const changedCount = matrix.filter(([, head, workdir, stage]) => head !== workdir || head !== stage).length;
   await git.commit({
     fs: gitfs,
     dir,
@@ -239,6 +265,72 @@ async function commitNowInternal(): Promise<boolean> {
 
 export function commitNow(): Promise<boolean> {
   return serialize(commitNowInternal, 'commitNow');
+}
+
+/** Commits the outcome of merging `remoteOid` into this device as a real
+ *  git merge commit — parents [local HEAD, remoteOid] — and does so even
+ *  when the merge changed no file.
+ *
+ *  This is what makes Structured Merge three-way at all (ADR 0006). The
+ *  post-merge commit used to be an ordinary single-parent commit on this
+ *  device's own history, so the remote commit never became an ancestor:
+ *  findMergeBase() never found common ground between two devices, every
+ *  merge compared against nothing, and every field that differed came back
+ *  as a conflict — sync after sync. It is also why git-remote pushes needed
+ *  `force: true`. With the remote as a parent, the next merge's base is the
+ *  commit this one already reconciled, and only edits made since compare.
+ *
+ *  With no local history yet (first sync) the remote is the only parent. */
+async function commitMergeInternal(localOid: string | null, remoteOid: string): Promise<string> {
+  const { dir, gitdir } = await ensureHiddenCloneInitialized();
+  await copyImagesIntoClone(dir);
+  await git.add({ fs: gitfs, dir, gitdir, filepath: COMMITTED_DIRS, cache: gitCache() });
+  const id = await getDeviceId();
+  return git.commit({
+    fs: gitfs,
+    dir,
+    gitdir,
+    message: `merge: sync from another device into ${id}`,
+    author: author(),
+    parent: localOid ? [localOid, remoteOid] : [remoteOid],
+  });
+}
+
+/** Writes every file the remote tree has and the working tree lacks. The
+ *  merge commit makes the remote an ancestor, so anything it doesn't carry
+ *  reads to other devices as a deletion — an entity that failed to apply
+ *  here, or an image this device never had, must still ride along. */
+async function copyRemoteOnlyFiles(dir: string, gitdir: string, remoteOid: string, paths: string[]): Promise<void> {
+  for (const filepath of paths) {
+    const target = `${dir}/${filepath}`;
+    try {
+      await gitfs.promises.stat(target);
+      continue; // the merge already wrote it
+    } catch {
+      // absent — copy it below
+    }
+    try {
+      const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid: remoteOid, filepath, cache: gitCache() });
+      const slash = filepath.lastIndexOf('/');
+      if (slash > 0) await mkdirp(`${dir}/${filepath.slice(0, slash)}`);
+      await gitfs.promises.writeFile(target, blob);
+    } catch (err) {
+      console.warn(`SmartChef: could not carry ${filepath} into the merge commit:`, err);
+    }
+  }
+}
+
+async function mkdirp(path: string): Promise<void> {
+  const parts = path.split('/');
+  for (let i = 1; i <= parts.length; i++) {
+    const partial = parts.slice(0, i).join('/');
+    if (!partial) continue;
+    try {
+      await gitfs.promises.mkdir(partial);
+    } catch {
+      // exists already
+    }
+  }
 }
 
 // ── Remote transport resolution — which platform, and has the user
@@ -312,7 +404,7 @@ export async function listDeviceRecords(): Promise<DeviceRecord[]> {
 }
 
 /** Same singular entityType strings mergeBridge.ts's ENTITY_DIRS uses. */
-export type SyncEntityType = 'recipe' | 'ingredient' | 'tool' | 'tag' | 'technique' | 'profile';
+export type SyncEntityType = 'recipe' | 'ingredient' | 'tool' | 'tag' | 'technique' | 'profile' | 'category' | 'unit';
 
 export interface SyncResult {
   applied: number;
@@ -341,6 +433,9 @@ export interface SyncResult {
    *  so a real failure shows up in the UI instead of only a console log
    *  nobody but a developer would ever open. */
   failedEntities: Array<{ entityType: string; entityId: string; error: string }>;
+  /** Fields both devices changed that a rule settled without asking —
+   *  during the merge, plus pending conflicts settled after it (ADR 0006). */
+  autoResolved: number;
   /** Passthrough of mergeBridge.ts's own per-entity-type scan counts — see
    *  MergeBridgeResult.entityScanCounts for why this exists. Only the last
    *  merge call's counts are kept per type (git-remote/folder mode can run
@@ -385,7 +480,9 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
   let applied = 0;
   const appliedByType: Partial<Record<SyncEntityType, number>> = {};
   let conflicts = 0;
+  let autoResolved = 0;
   let mergeCommitted = false;
+  const policy = await getConflictPolicy();
   let pushedObjects = 0;
   let pulledObjects = 0;
   const failedEntities: Array<{ entityType: string; entityId: string; error: string }> = [];
@@ -438,10 +535,14 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
     }
 
     if (!remoteOid || remoteOid === localOid) return;
+    // Already merged: the remote commit is in this device's history (the
+    // normal state right after this device's own merge commit, until the
+    // other device pushes again). Nothing new to take.
+    if (localOid && await git.isDescendent({ fs: gitfs, dir, gitdir, oid: localOid, ancestor: remoteOid, depth: -1, cache: gitCache() })) return;
 
     let mergeResult;
     try {
-      mergeResult = await mergeRemoteIntoLocal(dir, gitdir, localOid, remoteOid);
+      mergeResult = await mergeRemoteIntoLocal(dir, gitdir, localOid, remoteOid, { policy });
     } catch (err) {
       // mergeRemoteIntoLocal() calls git.listFiles() to enumerate each
       // commit's tree — unlike readEntityJson()'s per-blob reads inside
@@ -471,6 +572,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
 
     applied += mergeResult.entitiesCreated + mergeResult.entitiesUpdated;
     conflicts += mergeResult.conflictsRecorded;
+    autoResolved += mergeResult.autoResolved;
     failedEntities.push(...mergeResult.failedEntities);
     Object.assign(entityScanCounts, mergeResult.entityScanCounts);
 
@@ -481,9 +583,9 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
       const type = touched.entityType as SyncEntityType;
       appliedByType[type] = (appliedByType[type] ?? 0) + 1;
     }
-    if (mergeResult.touchedEntities.length > 0) {
-      mergeCommitted = (await commitNowInternal()) || mergeCommitted;
-    }
+    await copyRemoteOnlyFiles(dir, gitdir, remoteOid, mergeResult.remoteOnlyFiles);
+    await commitMergeInternal(localOid, remoteOid);
+    mergeCommitted = true;
   }
 
   // ── Folder mode (gitObjectTransport.ts) — a plain folder mirrored by an
@@ -680,7 +782,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
 
   const lastSyncAt = new Date().toISOString();
   await Preferences.set({ key: LAST_SYNC_KEY, value: lastSyncAt });
-  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, pushedObjects, pulledObjects, failedEntities, entityScanCounts };
+  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, autoResolved, pushedObjects, pulledObjects, failedEntities, entityScanCounts };
 }
 
 /** Wrapped so every caller — the startup watcher, the interval tick, a
@@ -717,7 +819,77 @@ export async function getLastPushAt(): Promise<string | null> {
   return value ?? null;
 }
 
-export function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
+/** Once per entity-file format change (ADR 0006), on the first sync after
+ *  upgrading: re-serializes the whole library so its files carry what the
+ *  new format adds — category_name, unit_symbol and a stable row order;
+ *  then translations, ingredient tags, categories and units — and other
+ *  devices stop seeing per-device ids or missing pieces. Queued ahead of
+ *  the sync rather than run inside it — each write goes through
+ *  serialize() itself, and awaiting that from within a serialized task
+ *  would deadlock. */
+const RESERIALIZE_KEY = 'smartchef.sync.reserializedFormat';
+const ENTITY_FILE_FORMAT = '2';
+
+async function reserializeOnceForPortableIds(): Promise<void> {
+  const { value } = await Preferences.get({ key: RESERIALIZE_KEY });
+  if (value === ENTITY_FILE_FORMAT) return;
+  try {
+    const [ingredients, { resyncAllRecipes }, { resyncAllTags }, { resyncAllTechniques }] = await Promise.all([
+      import('../../services/ingredients.local'),
+      import('../../services/recipes.local'),
+      import('../../services/tags.local'),
+      import('../../services/techniques.local'),
+    ]);
+    await ingredients.resyncAllCategories();
+    await ingredients.resyncAllUnits();
+    await resyncAllTags();
+    await ingredients.resyncAllTools();
+    await resyncAllTechniques();
+    await ingredients.resyncAllIngredients();
+    await resyncAllRecipes();
+    await Preferences.set({ key: RESERIALIZE_KEY, value: ENTITY_FILE_FORMAT });
+  } catch (err) {
+    console.warn('SmartChef: re-serializing the library for the new file format failed — will retry next sync:', err);
+  }
+}
+
+/** updated_at of an entity as the last-fetched remote commit has it —
+ *  used to settle conflicts recorded before timestamps were stored. */
+export async function readRemoteEntityUpdatedAt(entityType: string, entityId: string): Promise<string | null> {
+  const dirName = ENTITY_TYPE_TO_DIR[entityType];
+  if (!dirName) return null;
+  try {
+    const { dir, gitdir } = await ensureHiddenCloneInitialized();
+    const oid = await git.resolveRef({ fs: gitfs, dir, gitdir, ref: DEFAULT_REMOTE_TRACKING_REF_NAME });
+    const { blob } = await git.readBlob({ fs: gitfs, dir, gitdir, oid, filepath: `${dirName}/${entityId}.json`, cache: gitCache() });
+    const json = JSON.parse(new TextDecoder().decode(blob)) as { updated_at?: unknown };
+    return typeof json.updated_at === 'string' ? json.updated_at : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Settles whatever pending conflicts a rule can decide (ADR 0006) — run
+ *  after every sync, outside the git queue since resolving re-serializes
+ *  entities through it. Covers the backlog recorded before these rules. */
+export async function autoResolveConflictsNow(): Promise<number> {
+  try {
+    const outcome = await autoResolvePendingConflicts(await getConflictPolicy(), readRemoteEntityUpdatedAt);
+    return outcome.resolved;
+  } catch (err) {
+    console.warn('SmartChef: auto-resolving pending conflicts failed:', err);
+    return 0;
+  }
+}
+
+export async function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
+  await reserializeOnceForPortableIds();
+  const result = await syncNowSerialized(onProgress);
+  result.autoResolved += await autoResolveConflictsNow();
+  return result;
+}
+
+function syncNowSerialized(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
   return serialize(async () => {
     reportSyncStarted();
     // Bracketed rather than left to live for the session: the cache holds
@@ -791,6 +963,142 @@ export async function repairLocalStorage(): Promise<RepairResult> {
 
     return { repaired: result.entitiesCreated + result.entitiesUpdated, failedEntities: result.failedEntities };
   });
+}
+
+// ── Replace this device with the synced data (`git reset --hard`) ─────────
+// The opposite of "Resync All", which re-pushes this device's rows and so
+// only ever merges: this throws this device's library away and takes the
+// Sync Folder's (or git remote's) as the truth. For a device that has got
+// itself into a state nobody wants to merge.
+
+const NO_REMOTE_MESSAGE = 'No Sync Folder or git remote is configured on this device yet.';
+const EMPTY_REMOTE_MESSAGE = 'The Sync Folder has no synced data yet — sync from another device first.';
+
+/** Fetches the remote into the remote-tracking ref without merging
+ *  anything, and returns the commit it points at. */
+async function pullRemoteInternal(dir: string, gitdir: string, onProgress?: (progress: TransferProgress) => void): Promise<string> {
+  if ((await getSyncMode()) === 'git-remote') {
+    const config = await getGitRemoteConfig();
+    if (!config) throw new Error(NO_REMOTE_MESSAGE);
+    await fetchGitRemote(dir, gitdir, config, (loaded, total) => onProgress?.({ phase: 'pull', done: loaded, total }));
+  } else {
+    const transport = await getConfiguredRemoteTransport();
+    if (!transport) throw new Error(NO_REMOTE_MESSAGE);
+    const pulled = await pullObjectsAndRefs(gitfs.promises, dir, transport, undefined, onProgress);
+    if (pulled.pulled && !pulled.complete && !(await tryCatchUpFromBundle(gitfs.promises, dir, gitdir, transport))) {
+      throw new Error('The Sync Folder listing looks incomplete on this device, so replacing from it is not safe right now.');
+    }
+  }
+  try {
+    return await git.resolveRef({ fs: gitfs, dir, gitdir, ref: DEFAULT_REMOTE_TRACKING_REF_NAME });
+  } catch {
+    throw new Error(EMPTY_REMOTE_MESSAGE);
+  }
+}
+
+const REPLACE_COUNT_TYPES = ['recipe', 'ingredient', 'tool', 'tag', 'technique'] as const;
+export type ReplaceCountType = typeof REPLACE_COUNT_TYPES[number];
+
+export interface ReplacePreview {
+  local: Record<ReplaceCountType, number>;
+  remote: Record<ReplaceCountType, number>;
+}
+
+/** What a replace would do, without doing it — for the confirmation dialog. */
+export function previewReplaceFromRemote(onProgress?: (progress: TransferProgress) => void): Promise<ReplacePreview> {
+  return serialize(async () => {
+    const { dir, gitdir } = await ensureHiddenCloneInitialized();
+    const remoteOid = await pullRemoteInternal(dir, gitdir, onProgress);
+    const snapshot = await readRemoteSnapshot(dir, gitdir, remoteOid);
+    const local = {} as Record<ReplaceCountType, number>;
+    const remote = {} as Record<ReplaceCountType, number>;
+    for (const type of REPLACE_COUNT_TYPES) {
+      local[type] = (await listLocalEntityIds(type)).length;
+      remote[type] = snapshot.entities.get(type)?.size ?? 0;
+    }
+    return { local, remote };
+  }, 'previewReplaceFromRemote');
+}
+
+export interface ReplaceResult extends ReplaceOutcome {
+  /** Ref holding this device's history from before the replace, if it had
+   *  any — recoverable with git, never shown as an everyday action. */
+  backupRef: string | null;
+}
+
+const BACKUP_REF_DIR = 'refs/backups';
+const BACKUPS_KEPT = 3;
+
+function backupStamp(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}-${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`;
+}
+
+async function writeBackupRef(dir: string, gitdir: string, oid: string): Promise<string> {
+  const ref = `${BACKUP_REF_DIR}/pre-replace-${backupStamp()}`;
+  await git.writeRef({ fs: gitfs, dir, gitdir, ref, value: oid, force: true });
+  try {
+    const existing = (await git.listRefs({ fs: gitfs, dir, gitdir, filepath: BACKUP_REF_DIR })).sort();
+    for (const name of existing.slice(0, Math.max(0, existing.length - BACKUPS_KEPT))) {
+      await git.deleteRef({ fs: gitfs, dir, gitdir, ref: `${BACKUP_REF_DIR}/${name}` });
+    }
+  } catch (err) {
+    console.warn('SmartChef: pruning old backup refs failed:', err);
+  }
+  return ref;
+}
+
+/** Makes this device's library exactly the synced one: every synced row is
+ *  overwritten with the remote copy, rows only this device has are
+ *  discarded, pending conflicts are dropped, and the Hidden Clone is moved
+ *  onto the remote commit so the next sync has nothing to merge or push.
+ *
+ *  Nothing is changed until every remote file has been read and parsed. The
+ *  previous history stays reachable under refs/backups/. Categories, units,
+ *  profiles on this device, cooking history, collections and settings are
+ *  kept — see conflicts.local.ts discardLocalEntity(). */
+export function replaceLocalWithRemote(onProgress?: (done: number, total: number) => void): Promise<ReplaceResult> {
+  return serialize(async () => {
+    reportSyncStarted();
+    let applied = 0;
+    try {
+      const { dir, gitdir } = await ensureHiddenCloneInitialized();
+      resetGitCache();
+      await commitNowInternal();
+      const remoteOid = await pullRemoteInternal(dir, gitdir);
+
+      const snapshot = await readRemoteSnapshot(dir, gitdir, remoteOid);
+      if (snapshot.unreadable.length > 0) {
+        throw new Error(
+          `${snapshot.unreadable.length} synced item(s) could not be read, so nothing was replaced. Sync again once the Sync Folder has finished copying.`
+        );
+      }
+
+      let backupRef: string | null = null;
+      try {
+        backupRef = await writeBackupRef(dir, gitdir, await git.resolveRef({ fs: gitfs, dir, gitdir, ref: 'HEAD' }));
+      } catch {
+        // No local history yet — nothing to back up.
+      }
+
+      const outcome = await applyRemoteSnapshot(dir, gitdir, remoteOid, snapshot, onProgress);
+      applied = Object.values(outcome.applied).reduce((n, c) => n + c, 0);
+      await materializeImagesFromCommit(dir, gitdir, remoteOid).catch((err) =>
+        console.warn('SmartChef: bringing images across during replace failed:', err)
+      );
+
+      const branch = (await git.currentBranch({ fs: gitfs, dir, gitdir })) ?? 'main';
+      await git.writeRef({ fs: gitfs, dir, gitdir, ref: `refs/heads/${branch}`, value: remoteOid, force: true });
+      await git.checkout({ fs: gitfs, dir, gitdir, ref: branch, force: true });
+      resetGitCache();
+
+      await Preferences.set({ key: LAST_SYNC_KEY, value: new Date().toISOString() });
+      return { ...outcome, backupRef };
+    } finally {
+      reportSyncFinished(applied);
+      resetGitCache();
+    }
+  }, 'replaceLocalWithRemote');
 }
 
 export async function getLastSyncAt(): Promise<string | null> {

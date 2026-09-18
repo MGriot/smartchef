@@ -26,10 +26,18 @@ function newId(): string {
 // any other device.
 export async function syncIngredient(id: string): Promise<void> {
   try {
-    const row = await queryOne<Record<string, unknown>>('SELECT * FROM ingredients WHERE id=$1', [id]);
+    // category_name rides along because category ids are per-device random
+    // — it is what the receiving device files the ingredient under (see
+    // conflicts.local.ts getMergeableFieldNames()).
+    const row = await queryOne<Record<string, unknown>>(
+      `SELECT i.*, c.name AS category_name FROM ingredients i
+         LEFT JOIN ingredient_categories c ON c.id = i.category_id
+        WHERE i.id=$1`,
+      [id]
+    );
     if (!row) return;
-    const { writeEntityFile } = await import('../lib/sync/gitSync');
-    await writeEntityFile('ingredients', id, row);
+    const [{ writeEntityFile }, { readExtraFields }] = await Promise.all([import('../lib/sync/gitSync'), import('./syncExtras.local')]);
+    await writeEntityFile('ingredients', id, { ...row, ...(await readExtraFields('ingredient', id, row)) });
   } catch (err) {
     console.error('SmartChef sync (ingredient) failed:', err);
   }
@@ -374,12 +382,41 @@ export async function mergeIngredients(sourceId: string, targetId: string): Prom
 
 // ── Categories ─────────────────────────────────────────────────────────
 
+// Synced entities since ADR 0006 — see syncIngredient() above for the
+// fire-and-forget + dynamic-import pattern.
+export async function syncCategory(id: string): Promise<void> {
+  try {
+    const row = await queryOne<Record<string, unknown>>('SELECT * FROM ingredient_categories WHERE id=$1', [id]);
+    if (!row) return;
+    const [{ writeEntityFile }, { readExtraFields }] = await Promise.all([import('../lib/sync/gitSync'), import('./syncExtras.local')]);
+    await writeEntityFile('categories', id, { ...row, ...(await readExtraFields('category', id, row)) });
+  } catch (err) {
+    console.error('SmartChef sync (category) failed:', err);
+  }
+}
+
+export async function resyncAllCategories(onProgress?: (done: number, total: number) => void): Promise<number> {
+  const rows = await query<{ id: string }>('SELECT id FROM ingredient_categories');
+  for (let i = 0; i < rows.length; i++) {
+    await syncCategory(rows[i].id);
+    onProgress?.(i + 1, rows.length);
+  }
+  return rows.length;
+}
+
+/** A new row's id: the portable one for its name when free (the same on
+ *  every device, see syncExtras.local.ts), a random one otherwise. */
+async function freshPortableId(table: string, portable: string): Promise<string> {
+  return (await queryOne(`SELECT id FROM ${table} WHERE id=$1`, [portable])) ? newId() : portable;
+}
+
 /** The aisle order — see the server's PUT /ingredients/categories/reorder
  *  for why this takes the whole sequence rather than one moved item. */
 export async function reorderCategories(ids: string[]): Promise<void> {
   for (let i = 0; i < ids.length; i++) {
     await query('UPDATE ingredient_categories SET sort_order=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2', [i, ids[i]]);
   }
+  for (const id of ids) void syncCategory(id);
 }
 
 export async function listCategories({ lang }: { lang?: string }) {
@@ -439,12 +476,14 @@ async function upsertCategoryTranslations(categoryId: string, translations?: Cat
 }
 
 export async function createCategory(d: CategoryInput): Promise<{ id: string }> {
-  const id = d.id ?? newId();
+  const { portableCategoryId } = await import('./syncExtras.local');
+  const id = d.id ?? await freshPortableId('ingredient_categories', portableCategoryId(d.name));
   await query(
     "INSERT INTO ingredient_categories (id, name, description, icon, color) VALUES ($1, $2, $3, $4, $5)",
     [id, d.name, d.description || null, d.icon || null, d.color || null]
   );
   await upsertCategoryTranslations(id, d.translations);
+  void syncCategory(id);
   return { id };
 }
 
@@ -454,13 +493,35 @@ export async function updateCategory(id: string, d: CategoryInput): Promise<void
     [d.name, d.description || null, d.icon || null, d.color || null, id]
   );
   await upsertCategoryTranslations(id, d.translations);
+  void syncCategory(id);
 }
 
 export async function deleteCategory(id: string): Promise<void> {
   await query("UPDATE ingredient_categories SET deleted_at=now(), updated_at=now() WHERE id=$1", [id]);
+  void syncCategory(id);
 }
 
 // ── Units ──────────────────────────────────────────────────────────────
+
+export async function syncUnit(id: string): Promise<void> {
+  try {
+    const row = await queryOne<Record<string, unknown>>('SELECT * FROM units WHERE id=$1', [id]);
+    if (!row) return;
+    const [{ writeEntityFile }, { readExtraFields }] = await Promise.all([import('../lib/sync/gitSync'), import('./syncExtras.local')]);
+    await writeEntityFile('units', id, { ...row, ...(await readExtraFields('unit', id, row)) });
+  } catch (err) {
+    console.error('SmartChef sync (unit) failed:', err);
+  }
+}
+
+export async function resyncAllUnits(onProgress?: (done: number, total: number) => void): Promise<number> {
+  const rows = await query<{ id: string }>('SELECT id FROM units');
+  for (let i = 0; i < rows.length; i++) {
+    await syncUnit(rows[i].id);
+    onProgress?.(i + 1, rows.length);
+  }
+  return rows.length;
+}
 
 export async function listUnits({ lang }: { lang?: string }) {
   const rows = await query<Record<string, unknown>>(`SELECT * FROM units ORDER BY unit_type, name`);
@@ -513,12 +574,14 @@ async function upsertUnitTranslations(unitId: string, translations?: UnitInput['
 }
 
 export async function createUnit(d: UnitInput): Promise<{ id: string }> {
-  const id = newId();
+  const { portableUnitId } = await import('./syncExtras.local');
+  const id = await freshPortableId('units', portableUnitId(d.symbol));
   await query(
     `INSERT INTO units (id, name, symbol, unit_type, system, to_base_factor) VALUES ($1, $2, $3, $4, $5, $6)`,
     [id, d.name, d.symbol, d.unitType || null, d.system || null, d.toBaseFactor ?? 1]
   );
   await upsertUnitTranslations(id, d.translations);
+  void syncUnit(id);
   return { id };
 }
 
@@ -528,6 +591,7 @@ export async function updateUnit(id: string, d: UnitInput): Promise<void> {
     [d.name, d.symbol, d.unitType || null, d.system || null, d.toBaseFactor ?? 1, id]
   );
   await upsertUnitTranslations(id, d.translations);
+  void syncUnit(id);
 }
 
 export async function deleteUnit(id: string): Promise<void> {
@@ -542,8 +606,8 @@ export async function syncTool(id: string): Promise<void> {
   try {
     const row = await queryOne<Record<string, unknown>>('SELECT * FROM tools WHERE id=$1', [id]);
     if (!row) return;
-    const { writeEntityFile } = await import('../lib/sync/gitSync');
-    await writeEntityFile('tools', id, row);
+    const [{ writeEntityFile }, { readExtraFields }] = await Promise.all([import('../lib/sync/gitSync'), import('./syncExtras.local')]);
+    await writeEntityFile('tools', id, { ...row, ...(await readExtraFields('tool', id, row)) });
   } catch (err) {
     console.error('SmartChef sync (tool) failed:', err);
   }

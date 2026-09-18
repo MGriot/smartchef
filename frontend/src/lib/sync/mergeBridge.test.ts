@@ -43,6 +43,9 @@ let createEntityShouldThrowFor: string | null = null;
 const creationOrder: Array<{ entityType: string; entityId: string }> = [];
 
 vi.mock('../../services/conflicts.local', () => ({
+  loadPendingConflictIndex: async () => new Map(),
+  laterTimestamp: (a: string | null | undefined, b: string | null | undefined) => b ?? a ?? null,
+  deleteConflict: async () => {},
   entityExists: async (entityType: string, entityId: string) => dbEntities[entityType]?.has(entityId) ?? false,
   createEntity: async (entityType: string, entityId: string, fields: Record<string, unknown>) => {
     if (entityId === createEntityShouldThrowFor) throw new Error(`simulated write failure for ${entityId}`);
@@ -86,7 +89,7 @@ function baseKey(localOid: string, remoteOid: string): string {
 describe('mergeRemoteIntoLocal', () => {
   it('does nothing when local and remote are the same commit', async () => {
     const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'same-oid', 'same-oid');
-    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [], entityScanCounts: {} });
+    expect(result).toEqual({ entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [], entityScanCounts: {}, autoResolved: 0, remoteOnlyFiles: [] });
   });
 
   it('creates a brand-new entity that only exists on the remote side', async () => {
@@ -198,6 +201,8 @@ describe('mergeRemoteIntoLocal', () => {
       conflictsRecorded: 0,
       touchedEntities: [],
       failedEntities: [],
+      autoResolved: 0,
+      remoteOnlyFiles: [],
       entityScanCounts: {
         ingredient: { remoteFiles: 0, localFiles: 0 },
         tool: { remoteFiles: 0, localFiles: 0 },

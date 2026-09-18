@@ -742,7 +742,7 @@ const RecipeCreate: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 font-body">
       {/* Header */}
-      <header className="bg-[#fafaf5]/90 dark:bg-zinc-950/90 backdrop-blur-md sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between">
+      <header className="bg-[#fafaf5]/90 dark:bg-zinc-950/90 backdrop-blur-md sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <Link to="/" className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
           <span className="material-symbols-outlined">close</span>
           <span className="text-sm font-bold">{t('common.cancel')}</span>

@@ -100,7 +100,7 @@ describe('the cache is dropped where it would go stale', () => {
   });
 
   it('is reset at both ends of a sync cycle', () => {
-    const cycle = gitSync.slice(gitSync.indexOf('export function syncNow('));
+    const cycle = gitSync.slice(gitSync.indexOf('function syncNowSerialized('));
     const body = cycle.slice(0, cycle.indexOf("}, 'syncNow');"));
     expect(body.split('resetGitCache();').length - 1).toBe(2);
   });

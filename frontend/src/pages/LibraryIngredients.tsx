@@ -29,6 +29,9 @@ function useMonthLabels(): string[] {
 }
 
 
+// Filter chips shown before the "+N" toggle — about two rows on a phone.
+const COLLAPSED_TAG_COUNT = 8;
+
 export default function LibraryIngredients() {
   const { t } = useTranslation();
   const monthLabels = useMonthLabels();
@@ -38,6 +41,8 @@ export default function LibraryIngredients() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
+  const [showAllTags, setShowAllTags] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   // Was component-local state that reset on every visit; now persisted per
   // section alongside the sort order, like the other Library screens.
@@ -69,6 +74,7 @@ export default function LibraryIngredients() {
 
   const fetchData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [ingRes, catRes, tagRes] = await Promise.all([
         apiFetch(`/api/ingredients${langQuery}`),
@@ -78,11 +84,15 @@ export default function LibraryIngredients() {
       const ings = await ingRes.json();
       const cats = await catRes.json();
       const tgs = await tagRes.json();
+      // An error response used to become an empty list here, which renders
+      // exactly like an empty library — every category at 0, no hint why.
+      if (!ingRes.ok) throw new Error(ings?.error ? JSON.stringify(ings.error) : `Ingredients failed to load (${ingRes.status})`);
       setIngredients(ings.data || []);
       setCategories(cats.data || []);
       setAllTags(tgs.data || []);
     } catch (err) {
       console.error('Fetch failed:', err);
+      setLoadError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -107,6 +117,14 @@ export default function LibraryIngredients() {
   };
 
   const isFiltering = search.trim().length > 0 || activeTagFilters.length > 0;
+
+  // Only tags that actually label an ingredient can filter anything here —
+  // /api/tags returns every tag, recipe courses and diets included, which
+  // put a wall of dead chips above the list. Active filters always stay
+  // visible so one can be switched off again.
+  const usedTagIds = new Set(ingredients.flatMap((i: any) => (i.tags || []).map((tg: any) => tg.id)));
+  const filterTags = allTags.filter(tg => usedTagIds.has(tg.id) || activeTagFilters.includes(tg.id));
+  const visibleFilterTags = showAllTags ? filterTags : filterTags.slice(0, COLLAPSED_TAG_COUNT);
   const uncategorized = ingredients.filter(i => !i.category_id || !categories.some(c => c.id === i.category_id));
 
   useEffect(() => {
@@ -583,17 +601,21 @@ export default function LibraryIngredients() {
   return (
     <>
       <AppLayout librarySection="ingredients" sidebarExtra={categorySidebar}>
-          <div className="flex justify-between items-end mb-10">
-            <div>
+          <div className="flex justify-between items-end gap-4 mb-6 sm:mb-10">
+            <div className="min-w-0">
               <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">{t('library.ingredients.eyebrow')}</p>
-              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">{t('library.ingredients.heading')}</h1>
+              <h1 className="text-4xl sm:text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none break-words">{t('library.ingredients.heading')}</h1>
             </div>
+            {/* Icon-only on a phone: with its label the button is ~200px, and
+                beside a 60px title it ran off the right edge of the screen. */}
             <button
               onClick={() => handleOpenModal()}
-              className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
+              aria-label={t('library.ingredients.addNew')}
+              title={t('library.ingredients.addNew')}
+              className="shrink-0 flex items-center gap-2 p-3 sm:px-6 sm:py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
             >
               <span className="material-symbols-outlined">add</span>
-              {t('library.ingredients.addNew')}
+              <span className="hidden sm:inline">{t('library.ingredients.addNew')}</span>
             </button>
           </div>
 
@@ -618,7 +640,7 @@ export default function LibraryIngredients() {
             />
             <ViewToggle value={viewMode} onChange={setViewMode} />
             <div className="flex flex-wrap gap-1.5">
-              {allTags.map(tg => (
+              {visibleFilterTags.map(tg => (
                 <button
                   key={tg.id}
                   onClick={() => toggleTagFilter(tg.id)}
@@ -630,12 +652,22 @@ export default function LibraryIngredients() {
                   {tg.translated_name || tg.name}
                 </button>
               ))}
+              {filterTags.length > COLLAPSED_TAG_COUNT && (
+                <button
+                  onClick={() => setShowAllTags(v => !v)}
+                  className="px-3 py-1.5 rounded-full text-xs font-bold text-primary border border-transparent hover:border-primary/30 transition-all"
+                >
+                  {showAllTags ? t('common.showLess') : `+${filterTags.length - COLLAPSED_TAG_COUNT}`}
+                </button>
+              )}
             </div>
           </div>
 
-          <section className="bg-white dark:bg-zinc-900 rounded-[40px] px-10 py-4 shadow-sm border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
+          <section className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] px-4 sm:px-10 py-4 shadow-sm border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
             {loading ? (
               <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.ingredients.loading')}</p>
+            ) : loadError ? (
+              <p className="py-20 text-center text-red-500 font-medium break-words">{loadError}</p>
             ) : (
               <>
                 {categories.map(c => categorySection(c.id, c.translated_name || c.name, c.icon, c.color, ingredients.filter(i => i.category_id === c.id)))}

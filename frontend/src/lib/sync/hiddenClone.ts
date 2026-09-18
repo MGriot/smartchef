@@ -74,7 +74,7 @@ export async function ensureHiddenCloneInitialized(): Promise<HiddenCloneDirs> {
   // travels with the recipe (ADR 0003). Created here for the same reason as
   // the rest: git.add() on a path that does not exist is an error, and this
   // is the one place that guarantees the layout.
-  for (const entityDir of ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles', 'images']) {
+  for (const entityDir of ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles', 'categories', 'units', 'images']) {
     await gitfs.promises.mkdir(`${dir}/${entityDir}`);
   }
   initDone = true;

@@ -19,6 +19,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { Preferences } from '@capacitor/preferences';
+import type { ConflictPolicy } from '../structuredMerge';
 
 export type SyncMode = 'folder' | 'git-remote';
 
@@ -49,6 +50,24 @@ const INTERVAL_UNIT_KEY = 'smartchef.sync.interval.unit';
 // (plain minutes, no unit) keeps that choice instead of silently
 // reverting to the default the first time it loads this new code.
 const LEGACY_INTERVAL_MINUTES_KEY = 'smartchef.sync.intervalMinutes';
+
+// How a field both devices changed differently gets settled (ADR 0006).
+// 'newest' — the default — keeps the side whose record was edited last,
+// the way most people expect sync to behave; 'ask' records it in the
+// Conflicts card for a manual pick. Either way, cases with an obvious
+// answer (one side empty, both sides equal, tags added on both) never ask.
+const CONFLICT_POLICY_KEY = 'smartchef.sync.conflictPolicy';
+
+export type { ConflictPolicy };
+
+export async function getConflictPolicy(): Promise<ConflictPolicy> {
+  const { value } = await Preferences.get({ key: CONFLICT_POLICY_KEY });
+  return value === 'ask' ? 'ask' : 'newest';
+}
+
+export async function setConflictPolicy(policy: ConflictPolicy): Promise<void> {
+  await Preferences.set({ key: CONFLICT_POLICY_KEY, value: policy });
+}
 
 export async function getSyncMode(): Promise<SyncMode> {
   const { value } = await Preferences.get({ key: MODE_KEY });

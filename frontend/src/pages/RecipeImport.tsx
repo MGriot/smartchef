@@ -938,40 +938,44 @@ export default function RecipeImport() {
 
   return (
     <AppLayout>
-      <div className="p-6 sm:p-12 max-w-6xl mx-auto">
-          <div className="mb-12">
+      <div className="p-4 sm:p-12 max-w-6xl mx-auto">
+          <div className="mb-8 sm:mb-12">
             <h1 className="text-4xl sm:text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter mb-4">{t('import.title')}</h1>
             <p className="text-zinc-500 dark:text-zinc-400 text-lg max-w-xl leading-relaxed">
               {t('import.subtitle')}
             </p>
           </div>
 
-          <div className="grid grid-cols-12 gap-10">
+          {/* min-w-0 on each column is what keeps a phone from scrolling
+              sideways: a grid item's default min-width is its content's, so
+              the row of four source buttons used to stretch the whole card past the
+              screen edge. */}
+          <div className="grid grid-cols-12 gap-6 lg:gap-10">
             {/* Input Form */}
-            <div className="col-span-12 lg:col-span-7">
-              <div className="bg-white dark:bg-zinc-900 rounded-[40px] shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
-                <div className="p-8 border-b border-zinc-50 dark:border-zinc-800 flex justify-between items-center">
+            <div className="col-span-12 lg:col-span-7 min-w-0">
+              <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] shadow-sm border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+                <div className="p-5 sm:p-8 border-b border-zinc-50 dark:border-zinc-800 flex flex-col sm:flex-row gap-4 sm:justify-between items-start sm:items-center">
                    <h3 className="text-[10px] font-black text-primary tracking-[0.2em] uppercase">{t('import.sourceMaterial')}</h3>
-                   <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
+                   <div className="grid grid-cols-4 w-full sm:w-auto sm:flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
                       <button
                         onClick={() => setSourceType('url')}
-                        className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'url' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
+                        className={`px-2 sm:px-4 py-1.5 rounded-lg text-[10px] leading-tight font-black transition-all ${sourceType === 'url' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
                       >{t('import.url')}</button>
                       <button
                          onClick={() => setSourceType('text')}
-                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'text' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
+                         className={`px-2 sm:px-4 py-1.5 rounded-lg text-[10px] leading-tight font-black transition-all ${sourceType === 'text' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
                       >{t('import.rawText')}</button>
                       <button
                          onClick={() => setSourceType('file')}
-                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'file' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
+                         className={`px-2 sm:px-4 py-1.5 rounded-lg text-[10px] leading-tight font-black transition-all ${sourceType === 'file' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
                       >{t('import.importFileTab')}</button>
                       <button
                          onClick={() => setSourceType('scan')}
-                         className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${sourceType === 'scan' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
+                         className={`px-2 sm:px-4 py-1.5 rounded-lg text-[10px] leading-tight font-black transition-all ${sourceType === 'scan' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-400 dark:text-zinc-500'}`}
                       >{t('import.scanTab')}</button>
                    </div>
                 </div>
-                <div className="p-10">
+                <div className="p-5 sm:p-10">
                   {sourceType === 'scan' ? (
                     <>
                       <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mb-4">
@@ -1365,16 +1369,16 @@ export default function RecipeImport() {
             </div>
 
             {/* Sidebar: placeholder / parsing / Review Matches */}
-            <div className="col-span-12 lg:col-span-5 space-y-8">
+            <div className="col-span-12 lg:col-span-5 min-w-0 space-y-6 sm:space-y-8">
                {!draft && !parsing && !matching && (
-                 <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
+                 <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
                     <span className="material-symbols-outlined text-4xl text-zinc-300 dark:text-zinc-600 mb-3">auto_fix_high</span>
                     <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('import.pasteToPreview')}</p>
                  </div>
                )}
 
                {parsing && (
-                 <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 relative overflow-hidden group">
+                 <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 relative overflow-hidden group">
                     <div className="relative z-10 flex flex-col items-center text-center">
                        <div className="w-16 h-16 rounded-full bg-white dark:bg-zinc-900 shadow-xl flex items-center justify-center mb-6 relative">
                           <span className="material-symbols-outlined text-primary text-3xl animate-pulse">model_training</span>
@@ -1397,14 +1401,14 @@ export default function RecipeImport() {
                )}
 
                {matching && (
-                 <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
+                 <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
                     <span className="material-symbols-outlined text-3xl text-primary animate-spin mb-3">sync</span>
                     <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('import.findingMatches')}</p>
                  </div>
                )}
 
                {draft && !matching && (
-                 <div className="bg-white dark:bg-zinc-900 rounded-[40px] overflow-hidden shadow-xl shadow-zinc-200/50 border border-zinc-100 dark:border-zinc-800">
+                 <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] overflow-hidden shadow-xl shadow-zinc-200/50 border border-zinc-100 dark:border-zinc-800">
                     <div className="p-8 max-h-[80vh] overflow-y-auto">
                        <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('import.reviewMatches')}</p>
                        <h4 className="text-2xl font-black text-zinc-900 dark:text-zinc-100 leading-tight mb-4">{draft.title || t('import.untitledRecipe')}</h4>

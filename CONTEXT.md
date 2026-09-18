@@ -5,7 +5,7 @@ Governs how a standalone (server-less) SmartChef installation keeps its own data
 ## Language
 
 **Local Storage**:
-The live database and image files a standalone-mode app instance reads and writes directly during normal use — the entirety of a user's recipes, ingredients, tools, tags, and techniques. Never touched by an external replication tool.
+The live database and image files a standalone-mode app instance reads and writes directly during normal use — the entirety of a user's recipes, ingredients, tools, tags, techniques, ingredient categories and units, with their translations. Never touched by an external replication tool.
 _Avoid_: local database, app data, working copy
 
 **Sync Folder**:
@@ -29,12 +29,24 @@ The private, app-managed git working copy each device's Sync Engine actually ope
 _Avoid_: working tree, staging clone
 
 **Structured Merge**:
-The Sync Engine's merge strategy: comparing parsed entity JSON (not raw text) against a common ancestor, so non-overlapping field edits combine automatically. Used instead of git's textual merge, which risks leaving unparseable conflict markers inside a JSON file.
+The Sync Engine's merge strategy: comparing parsed, normalized entity JSON (not raw text) against a common ancestor, so non-overlapping field edits combine automatically. The ancestor exists because every merge is committed with two parents. Row ids, row order, JSON spelling and empty-vs-null are not edits. Set fields such as tags merge member by member. Used instead of git's textual merge, which risks leaving unparseable conflict markers inside a JSON file. See [ADR 0006](./docs/adr/0006-git-parented-merges-and-newest-wins.md).
 _Avoid_: three-way merge, JSON diff
 
+**Entity File**:
+One synced library item as one JSON file in the Hidden Clone, carrying everything the item owns: its row, translations, a recipe's steps and ingredient rows (each with their own translations), and an ingredient's tags. Categories and units are entity files too, on **portable ids** derived from name/symbol, so they are the same row on every device.
+_Avoid_: sync file, export
+
+**Conflict Policy**:
+A per-device setting for how a field both devices changed differently is settled. **Newest** (the default) keeps the side edited last. **Ask** turns it into a Conflict. Cases with an obvious answer are settled under either policy: equal values, one side empty, or set fields.
+_Avoid_: merge mode, resolution strategy
+
 **Conflict**:
-An entity where the same field was changed on two devices since their last common sync point. Left pending and excluded from that sync's applied set until the user picks a version — never auto-resolved.
+A field that changed differently on two devices since their last common sync point, where the Conflict Policy is Ask, or where Newest can't tell which edit came last. Left pending until the user picks a version. Until then, this device commits the other device's value for that field, so its own value isn't passed off as an edit.
 _Avoid_: merge conflict, sync error
+
+**Replace from Synced Data**:
+The explicit "take the remote as the truth" action — `git reset --hard` for Local Storage. Synced rows are overwritten, rows only this device has are discarded, and the Hidden Clone moves onto the remote commit. A backup ref of the old history is kept. Distinct from Resync All, which re-pushes this device's rows and therefore only ever merges.
+_Avoid_: reset, restore (a Restore is from a Backup)
 
 **Deletion Marker**:
 The existing per-entity tombstone convention — `sync_status = 'deleted'` on recipes/ingredients, `deleted_at` elsewhere — that lets a deletion propagate through Structured Merge like any other field change.

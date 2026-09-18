@@ -27,7 +27,11 @@ import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
 import { gitCache } from './gitCache';
 import { mergeEntity } from '../structuredMerge';
-import { entityExists, createEntity, applyEntityMergeResult, getMergeableFieldNames } from '../../services/conflicts.local';
+import {
+  entityExists, createEntity, applyEntityMergeResult, getMergeableFieldNames, loadPendingConflictIndex, laterTimestamp, deleteConflict,
+  listLocalEntityIds, forceApplyEntity, discardLocalEntity, clearAllConflicts,
+} from '../../services/conflicts.local';
+import type { ConflictPolicy } from '../structuredMerge';
 import { mapWithConcurrency, TRANSFER_CONCURRENCY } from './gitObjectTransport';
 
 // Recipes reference ingredients/tools by id (recipe_ingredients.ingredient_id/
@@ -47,14 +51,31 @@ import { mapWithConcurrency, TRANSFER_CONCURRENCY } from './gitObjectTransport';
 // doesn't abort the batch — see the try/catch below), a later entity that
 // *does* fail would leave that dangling reference permanent, not just
 // transient.
+// Categories and units first (ingredients and recipe rows point at them),
+// tags before ingredients (ingredient_tags is a real foreign key).
 const ENTITY_DIRS: Array<{ dirName: string; entityType: string }> = [
-  { dirName: 'ingredients', entityType: 'ingredient' },
-  { dirName: 'tools', entityType: 'tool' },
+  { dirName: 'categories', entityType: 'category' },
+  { dirName: 'units', entityType: 'unit' },
   { dirName: 'tags', entityType: 'tag' },
+  { dirName: 'tools', entityType: 'tool' },
   { dirName: 'techniques', entityType: 'technique' },
+  { dirName: 'ingredients', entityType: 'ingredient' },
   { dirName: 'profiles', entityType: 'profile' },
   { dirName: 'recipes', entityType: 'recipe' },
 ];
+
+/** Ingredients split into base ingredients and varieties
+ *  (parent_ingredient_id, a real foreign key), bases first — each batch
+ *  still runs concurrently. */
+async function ingredientBatches(ids: string[], read: (id: string) => Promise<Record<string, unknown> | null>): Promise<string[][]> {
+  const bases: string[] = [];
+  const varieties: string[] = [];
+  await Promise.all(ids.map(async (id) => {
+    const json = await read(id);
+    (typeof json?.parent_ingredient_id === 'string' && json.parent_ingredient_id ? varieties : bases).push(id);
+  }));
+  return [bases, varieties];
+}
 
 async function readEntityJson(dir: string, gitdir: string, oid: string | null, filepath: string): Promise<Record<string, unknown> | null> {
   if (!oid) return null;
@@ -171,6 +192,19 @@ export interface MergeBridgeResult {
    *  discarded it". Surfaced in Account.tsx since not everyone hitting
    *  this can attach a debugger to see it any other way. */
   entityScanCounts: Record<string, { remoteFiles: number; localFiles: number }>;
+  /** Fields both sides changed that a rule settled without asking (ADR
+   *  0006) — newest edit, empty side, or a set merge. */
+  autoResolved: number;
+  /** Every path in the remote tree that the local tree lacks. The merge
+   *  commit has to contain them all: it makes the remote an ancestor, so a
+   *  file missing from it would read, to every other device, as this
+   *  device having deleted it. The caller copies whichever of these the
+   *  merge itself didn't write. */
+  remoteOnlyFiles: string[];
+}
+
+export interface MergeOptions {
+  policy?: ConflictPolicy;
 }
 
 /** Merges a freshly-fetched remote commit into local state. No-op (all
@@ -183,9 +217,19 @@ export interface MergeBridgeResult {
  *  advance any ref or touch the working tree itself; the caller (syncNow())
  *  owns deciding what the Hidden Clone's own next commit looks like once
  *  Local Storage reflects the merge outcome. */
-export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid: string | null, remoteOid: string): Promise<MergeBridgeResult> {
-  const result: MergeBridgeResult = { entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [], entityScanCounts: {} };
+export async function mergeRemoteIntoLocal(
+  dir: string,
+  gitdir: string,
+  localOid: string | null,
+  remoteOid: string,
+  options: MergeOptions = {}
+): Promise<MergeBridgeResult> {
+  const result: MergeBridgeResult = {
+    entitiesCreated: 0, entitiesUpdated: 0, conflictsRecorded: 0, touchedEntities: [], failedEntities: [],
+    entityScanCounts: {}, autoResolved: 0, remoteOnlyFiles: [],
+  };
   if (localOid === remoteOid) return result;
+  const policy = options.policy ?? 'newest';
 
   const baseOid: string | null = localOid
     ? (await git.findMergeBase({ fs: gitfs, dir, gitdir, oids: [localOid, remoteOid], cache: gitCache() }))[0] ?? null
@@ -196,6 +240,9 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
     git.listFiles({ fs: gitfs, dir, gitdir, ref: remoteOid, cache: gitCache() }),
   ]);
   const remoteFileSet = new Set(remoteFiles);
+  const localFileSet = new Set(localFiles);
+  result.remoteOnlyFiles = remoteFiles.filter((f) => !localFileSet.has(f));
+  const pendingIndex = await loadPendingConflictIndex();
 
   // Applies one entity's three-way merge and writes the outcome — same
   // logic regardless of entity type, but called either sequentially
@@ -226,20 +273,12 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
       readEntityJson(dir, gitdir, remoteOid, filepath),
     ]);
 
-    const merged = mergeEntity(baseJson ?? {}, localJson ?? {}, remoteJson ?? {}, fieldNames);
-    if (Object.keys(merged.applied).length === 0 && merged.conflicts.length === 0) {
-      // A file genuinely listed in the remote tree but unreadable here
-      // (missing/corrupt object, a truncated fetch) looks IDENTICAL to
-      // "nothing changed" to mergeEntity() above — readEntityJson() has
-      // to tolerate a bad file the same way it tolerates a legitimately-
-      // absent one (see its own comment), so this is the one place left
-      // that can tell the two apart: the remote tree listing itself,
-      // gathered independently of any blob read. Found in production —
-      // an entire entity type silently, permanently produced zero
-      // applied fields on every single one of its entities, with no
-      // visible error anywhere — surfaced now via the same failedEntities
-      // mechanism a thrown write already uses, instead of staying invisible.
-      if (remoteJson === null && remoteFileSet.has(filepath)) {
+    // A file absent on the remote side never means "the other device
+    // emptied every field" — nothing is ever deleted by removing its file —
+    // so there is nothing to take from it. (Unreadable-but-listed is still
+    // reported below.)
+    if (remoteJson === null) {
+      if (remoteFileSet.has(filepath)) {
         result.failedEntities.push({
           entityType,
           entityId: id,
@@ -249,12 +288,41 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
       return;
     }
 
+    // A field still waiting on the user is committed with the remote's
+    // value (overlayPendingConflicts), so the tree can't say what this
+    // device actually holds for it — the conflict row can.
+    const pending = pendingIndex.get(`${entityType}:${id}`) ?? [];
+    const localForMerge: Record<string, unknown> = { ...(localJson ?? {}) };
+    for (const conflict of pending) localForMerge[conflict.fieldName] = conflict.localValue;
+
+    const merged = mergeEntity(baseJson ?? {}, localForMerge, remoteJson, fieldNames, {
+      // Per entity, not per commit: an entity both devices created without
+      // ever merging has no ancestor even when the commits share one.
+      hasBase: baseJson !== null && localJson !== null,
+      policy,
+    });
+    result.autoResolved += merged.autoResolved?.length ?? 0;
+    // Pending conflicts this merge no longer finds conflicting — the other
+    // device came round to this device's value, or a rule now settles it.
+    const settledPending = pending.filter((c) => !merged.conflicts.some((m) => m.fieldName === c.fieldName));
+    if (Object.keys(merged.applied).length === 0 && merged.conflicts.length === 0 && settledPending.length === 0) {
+      return;
+    }
+
     try {
       if (await entityExists(entityType, id)) {
-        const outcome = await applyEntityMergeResult(entityType, id, merged);
-        if (outcome.appliedFields.length > 0) {
-          result.entitiesUpdated++;
-          result.touchedEntities.push({ entityType, entityId: id, finalFields: { ...localJson, ...merged.applied } });
+        const localUpdatedAt = typeof localJson?.updated_at === 'string' ? localJson.updated_at : null;
+        const remoteUpdatedAt = typeof remoteJson.updated_at === 'string' ? remoteJson.updated_at : null;
+        const outcome = await applyEntityMergeResult(entityType, id, merged, { localUpdatedAt, remoteUpdatedAt });
+        for (const conflict of settledPending) await deleteConflict(conflict.id);
+        if (outcome.appliedFields.length > 0) result.entitiesUpdated++;
+        if (outcome.appliedFields.length > 0 || outcome.conflictsRecorded > 0 || settledPending.length > 0) {
+          const finalFields: Record<string, unknown> = { ...localForMerge, ...merged.applied };
+          if (outcome.appliedFields.length > 0) finalFields.updated_at = laterTimestamp(localUpdatedAt, remoteUpdatedAt) ?? finalFields.updated_at;
+          // Fields now in conflict go into the tree as the remote's value
+          // until the user picks — see overlayPendingConflicts().
+          for (const conflict of merged.conflicts) finalFields[conflict.fieldName] = conflict.remoteValue;
+          result.touchedEntities.push({ entityType, entityId: id, finalFields });
         }
         result.conflictsRecorded += outcome.conflictsRecorded;
       } else if (remoteJson) {
@@ -290,10 +358,117 @@ export async function mergeRemoteIntoLocal(dir: string, gitdir: string, localOid
     if (entityType === 'recipe') {
       const orderedIds = await orderRecipeIdsByDependency(ids, dir, gitdir, localOid, remoteOid);
       for (const id of orderedIds) await applyOneEntity(dirName, entityType, fieldNames, id);
+    } else if (entityType === 'ingredient') {
+      const batches = await ingredientBatches([...ids], (id) => readEntityJson(dir, gitdir, remoteOid, `${dirName}/${id}.json`));
+      for (const batch of batches) {
+        await mapWithConcurrency(batch, TRANSFER_CONCURRENCY, (id) => applyOneEntity(dirName, entityType, fieldNames, id));
+      }
     } else {
       await mapWithConcurrency([...ids], TRANSFER_CONCURRENCY, (id) => applyOneEntity(dirName, entityType, fieldNames, id));
     }
   }
 
   return result;
+}
+
+// ── Replacing this device's library with a remote commit ────────────────
+// The engine behind gitSync.ts replaceLocalWithRemote() — `git reset --hard`
+// for Local Storage. Read everything first, touch nothing until every file
+// has parsed: a half-applied replace is worse than none.
+
+export interface RemoteSnapshot {
+  /** entityType -> id -> the synced JSON. */
+  entities: Map<string, Map<string, Record<string, unknown>>>;
+  /** Paths listed in the remote tree that could not be read or parsed. */
+  unreadable: string[];
+}
+
+/** A soft-deleted row in the synced copy counts as absent. */
+function isTombstone(json: Record<string, unknown>): boolean {
+  return json.sync_status === 'deleted';
+}
+
+export async function readRemoteSnapshot(dir: string, gitdir: string, remoteOid: string): Promise<RemoteSnapshot> {
+  const files = await git.listFiles({ fs: gitfs, dir, gitdir, ref: remoteOid, cache: gitCache() });
+  const snapshot: RemoteSnapshot = { entities: new Map(), unreadable: [] };
+  for (const { dirName, entityType } of ENTITY_DIRS) {
+    const byId = new Map<string, Record<string, unknown>>();
+    await mapWithConcurrency(entityIdsFromFiles(files, dirName), TRANSFER_CONCURRENCY, async (id) => {
+      const filepath = `${dirName}/${id}.json`;
+      const json = await readEntityJson(dir, gitdir, remoteOid, filepath);
+      if (json === null) snapshot.unreadable.push(filepath);
+      else if (!isTombstone(json)) byId.set(id, json);
+    });
+    snapshot.entities.set(entityType, byId);
+  }
+  return snapshot;
+}
+
+export interface ReplaceOutcome {
+  /** Rows written from the synced copy, per entity type. */
+  applied: Record<string, number>;
+  /** Rows this device had that the synced library doesn't. */
+  discarded: number;
+  failedEntities: Array<{ entityType: string; entityId: string; error: string }>;
+}
+
+export async function applyRemoteSnapshot(
+  dir: string,
+  gitdir: string,
+  remoteOid: string,
+  snapshot: RemoteSnapshot,
+  onProgress?: (done: number, total: number) => void
+): Promise<ReplaceOutcome> {
+  const outcome: ReplaceOutcome = { applied: {}, discarded: 0, failedEntities: [] };
+  const total = [...snapshot.entities.values()].reduce((n, m) => n + m.size, 0);
+  let done = 0;
+
+  const localOnly = new Map<string, string[]>();
+  for (const { entityType } of ENTITY_DIRS) {
+    const remote = snapshot.entities.get(entityType) ?? new Map();
+    localOnly.set(entityType, (await listLocalEntityIds(entityType)).filter((id) => !remote.has(id)));
+  }
+
+  async function discard(entityType: string) {
+    for (const id of localOnly.get(entityType) ?? []) {
+      try {
+        await discardLocalEntity(entityType, id);
+        outcome.discarded++;
+      } catch (err) {
+        outcome.failedEntities.push({ entityType, entityId: id, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  }
+
+  async function apply(entityType: string, id: string, json: Record<string, unknown>) {
+    try {
+      await forceApplyEntity(entityType, id, json);
+      outcome.applied[entityType] = (outcome.applied[entityType] ?? 0) + 1;
+    } catch (err) {
+      console.error(`SmartChef: replacing ${entityType} ${id} failed:`, err);
+      outcome.failedEntities.push({ entityType, entityId: id, error: err instanceof Error ? err.message : String(err) });
+    }
+    onProgress?.(++done, total);
+  }
+
+  // Local-only recipes go first: they are what could still reference a
+  // local-only ingredient or tool that is about to be discarded.
+  await discard('recipe');
+  for (const { entityType } of ENTITY_DIRS) {
+    if (entityType === 'recipe') continue;
+    const byId = snapshot.entities.get(entityType) ?? new Map<string, Record<string, unknown>>();
+    const batches = entityType === 'ingredient'
+      ? await ingredientBatches([...byId.keys()], async (id) => byId.get(id) ?? null)
+      : [[...byId.keys()]];
+    for (const batch of batches) for (const id of batch) await apply(entityType, id, byId.get(id)!);
+  }
+  const recipes = snapshot.entities.get('recipe') ?? new Map();
+  for (const id of await orderRecipeIdsByDependency(new Set(recipes.keys()), dir, gitdir, null, remoteOid)) {
+    await apply('recipe', id, recipes.get(id)!);
+  }
+  for (const { entityType } of ENTITY_DIRS) {
+    if (entityType !== 'recipe') await discard(entityType);
+  }
+  await clearAllConflicts();
+  return outcome;
 }

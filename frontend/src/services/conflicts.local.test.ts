@@ -139,6 +139,10 @@ vi.mock('../db/local', () => ({
       return [];
     }
 
+    // Step / ingredient-row translations (ADR 0006) ride along with the
+    // whole-array writes; nothing here asserts on them.
+    if (/^(DELETE FROM|INSERT INTO) recipe_(step|ingredient)_translations/.test(trimmed)) return [];
+
     throw new Error(`fake db/local: unrecognized query — ${sql}`);
   }),
   queryOne: vi.fn(async (sql: string, params: unknown[] = []) => {

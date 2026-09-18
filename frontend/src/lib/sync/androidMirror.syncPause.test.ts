@@ -65,6 +65,15 @@ describe('sync pause state (task 13)', () => {
       bytesToBase64: (bytes: Uint8Array) => Buffer.from(bytes).toString('base64'),
     }));
     vi.doMock('../electronBridge', () => ({ isElectron: () => false }));
+    // syncNow() also re-serializes once for portable ids and settles pending
+    // conflicts after the cycle (ADR 0006) — both SQLite-backed, and out of
+    // scope here for the same reason Structured Merge is (see above).
+    vi.doMock('../../services/conflicts.local', () => ({
+      overlayPendingConflicts: async (_type: string, _id: string, data: Record<string, unknown>) => data,
+      autoResolvePendingConflicts: async () => ({ resolved: 0, remaining: 0 }),
+    }));
+    vi.doMock('../../services/ingredients.local', () => ({ resyncAllIngredients: async () => 0 }));
+    vi.doMock('../../services/recipes.local', () => ({ resyncAllRecipes: async () => 0 }));
 
     // Fails every write from the moment `revoked` flips true — simulating
     // permission being revoked partway through a sync cycle (provider

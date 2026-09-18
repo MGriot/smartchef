@@ -85,3 +85,73 @@ describe('mergeEntity', () => {
     expect(result.conflicts).toEqual([]);
   });
 });
+
+describe('mergeField — ADR 0006 rules', () => {
+  const older = Date.UTC(2026, 8, 1);
+  const newer = Date.UTC(2026, 8, 17);
+
+  it('does not count serialization noise as an edit on either side', () => {
+    const base = '["Vegano","Salsa"]';
+    expect(mergeField(base, '["Salsa","Vegano"]', ['Vegano', 'Salsa'], { fieldName: 'tags' })).toEqual({ type: 'unchanged' });
+    expect(mergeField(null, '', null, { fieldName: 'tips' })).toEqual({ type: 'unchanged' });
+  });
+
+  describe('with no common ancestor', () => {
+    it('takes the other side when one side is empty, whichever side that is', () => {
+      expect(mergeField(undefined, '', 'Consiglio', { fieldName: 'tips', hasBase: false, policy: 'ask' }))
+        .toEqual({ type: 'auto-resolved', winner: 'remote', value: 'Consiglio', reason: 'empty-side' });
+      expect(mergeField(undefined, 'Consiglio', null, { fieldName: 'tips', hasBase: false, policy: 'ask' }))
+        .toEqual({ type: 'keep-local' });
+    });
+
+    it('asks when both have different content and the policy is ask', () => {
+      expect(mergeField(undefined, 'Mine', 'Theirs', { fieldName: 'description', hasBase: false, policy: 'ask', localUpdatedAt: older, remoteUpdatedAt: newer }).type)
+        .toBe('conflict');
+    });
+
+    it('keeps the newer side under the newest policy', () => {
+      expect(mergeField(undefined, 'Mine', 'Theirs', { fieldName: 'description', hasBase: false, policy: 'newest', localUpdatedAt: older, remoteUpdatedAt: newer }))
+        .toEqual({ type: 'auto-resolved', winner: 'remote', value: 'Theirs', reason: 'newest' });
+    });
+  });
+
+  it('newest policy: local wins when local is newer', () => {
+    expect(mergeField('Base', 'Mine', 'Theirs', { fieldName: 'title', policy: 'newest', localUpdatedAt: newer, remoteUpdatedAt: older }))
+      .toEqual({ type: 'auto-resolved', winner: 'local', value: 'Mine', reason: 'newest' });
+  });
+
+  it('newest policy still asks when the timestamps cannot tell', () => {
+    expect(mergeField('Base', 'Mine', 'Theirs', { fieldName: 'title', policy: 'newest', localUpdatedAt: older, remoteUpdatedAt: older }).type).toBe('conflict');
+    expect(mergeField('Base', 'Mine', 'Theirs', { fieldName: 'title', policy: 'newest' }).type).toBe('conflict');
+  });
+
+  it('merges a set field member by member instead of conflicting', () => {
+    const result = mergeField('["a","b"]', '["a","b","c"]', '["a","d"]', { fieldName: 'tags', policy: 'ask' });
+    expect(result.type).toBe('merged');
+    expect(JSON.parse((result as { value: string }).value)).toEqual(['a', 'c', 'd']);
+  });
+
+  it('a set merge that equals one side is just that side', () => {
+    expect(mergeField('["a"]', '["a","b"]', '["a"]', { fieldName: 'tags' })).toEqual({ type: 'keep-local' });
+  });
+});
+
+describe('mergeEntity — ADR 0006', () => {
+  it('reads updated_at from each side for the newest policy and reports what it settled', () => {
+    const base = { title: 'Lasagna', tips: 'old' };
+    const local = { title: 'Lasagna mine', tips: 'old', updated_at: '2026-09-01 10:00:00' };
+    const remote = { title: 'Lasagna theirs', tips: 'new tip', updated_at: '2026-09-17 10:00:00' };
+    const result = mergeEntity(base, local, remote, ['title', 'tips'], { policy: 'newest' });
+    expect(result.applied).toEqual({ title: 'Lasagna theirs', tips: 'new tip' });
+    expect(result.conflicts).toEqual([]);
+    expect(result.autoResolved).toEqual([{ fieldName: 'title', winner: 'remote', reason: 'newest' }]);
+  });
+
+  it('with no ancestor, fills gaps both ways and only conflicts on real differences', () => {
+    const local = { description: '', tips: 'mine', steps: [{ id: 'a', step_number: 1, description: 'Mix' }] };
+    const remote = { description: 'Theirs', tips: 'theirs', steps: [{ id: 'b', step_number: 1, description: 'Mix' }] };
+    const result = mergeEntity({}, local, remote, ['description', 'tips', 'steps'], { hasBase: false, policy: 'ask' });
+    expect(result.applied).toEqual({ description: 'Theirs' });
+    expect(result.conflicts.map((c) => c.fieldName)).toEqual(['tips']);
+  });
+});

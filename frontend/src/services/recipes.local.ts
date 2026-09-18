@@ -65,11 +65,30 @@ export async function syncRecipe(id: string): Promise<void> {
   try {
     const row = await queryOne<Record<string, unknown>>('SELECT * FROM recipes WHERE id=$1', [id]);
     if (!row) return;
-    const ingredients = await query<Record<string, unknown>>('SELECT * FROM recipe_ingredients WHERE recipe_id=$1', [id]);
-    const steps = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1', [id]);
+    // Ordered, so the same recipe serializes identically on every device,
+    // and each ingredient row carries its unit's symbol: unit ids are
+    // per-device random (db/local.ts), and the symbol is what a receiving
+    // device maps back to its own unit (conflicts.local.ts writeArrayField).
+    const ingredients = await query<Record<string, unknown>>(
+      `SELECT ri.*, u.symbol AS unit_symbol FROM recipe_ingredients ri
+         LEFT JOIN units u ON u.id = ri.unit_id
+        WHERE ri.recipe_id=$1 ORDER BY ri.sort_order, ri.id`,
+      [id]
+    );
+    const steps = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number, id', [id]);
     const toolRows = await query<{ tool_id: string }>('SELECT tool_id FROM recipe_tools WHERE recipe_id=$1', [id]);
-    const { writeEntityFile } = await import('../lib/sync/gitSync');
-    await writeEntityFile('recipes', id, { ...row, ingredients, steps, toolIds: toolRows.map(t => t.tool_id) });
+    const [{ writeEntityFile }, extras] = await Promise.all([import('../lib/sync/gitSync'), import('./syncExtras.local')]);
+    // Translations travel inside the recipe's own file — the recipe's, and
+    // each step's and ingredient row's — so a recipe never arrives on another
+    // device without them (ADR 0006).
+    const rowTranslations = await extras.readRecipeRowTranslations(id);
+    await writeEntityFile('recipes', id, {
+      ...row,
+      ingredients: ingredients.map(r => ({ ...r, translations: rowTranslations.ingredients.get(r.id as string) ?? [] })),
+      steps: steps.map(r => ({ ...r, translations: rowTranslations.steps.get(r.id as string) ?? [] })),
+      toolIds: toolRows.map(t => t.tool_id),
+      ...(await extras.readExtraFields('recipe', id, row)),
+    });
   } catch (err) {
     console.error('SmartChef sync (recipe) failed:', err);
   }

@@ -97,14 +97,20 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
 
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-outfit">
-      <OfflineBanner />
       {/* The horizontal padding has to be classes rather than the inline
           style it used to be, because an inline style can't have breakpoints
           — and a flat 2rem per side costs 64px of a 360px phone screen. The
           arbitrary values keep the safe-area floor the inline style gave.
-          paddingTop stays inline: it has no responsive variant to express. */}
+          paddingTop stays inline: it has no responsive variant to express.
+
+          Below `lg` the bar is `fixed`, not sticky: on a phone it must never
+          move, and a sticky header silently stops sticking the moment any
+          ancestor becomes a scroll container (html/body's overflow-x once did
+          exactly that). Its paddingTop also paints the status-bar strip, so
+          scrolled content can't show through there. The spacer after it
+          reserves the same height in the flow — see --app-header-h. */}
       <header
-        className="min-h-[65px] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 sticky top-0 z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))]"
+        className="min-h-[65px] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 fixed inset-x-0 top-0 lg:sticky z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))]"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="flex items-center gap-3 lg:gap-6 xl:gap-10 min-w-0">
@@ -117,7 +123,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           >
             <span className="material-symbols-outlined">{mobileMenuOpen ? 'close' : 'menu'}</span>
           </button>
-          <Link to="/" className="text-xl lg:text-2xl font-black text-primary tracking-tight shrink-0">SmartChef</Link>
+          <Link to="/" className="text-xl lg:text-2xl font-black text-primary tracking-tight truncate min-w-0">SmartChef</Link>
           <nav className="hidden lg:flex items-center gap-4 xl:gap-6 2xl:gap-8">
             {NAV_LINKS.map((link) => (
               <Link
@@ -138,7 +144,9 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           </nav>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 xl:gap-4 shrink-0">
-          {headerActions}
+          {/* Only from `lg`: below it a page's actions live in its own
+              FloatingActionBar, leaving this bar just menu, name and avatar. */}
+          {headerActions && <div className="hidden lg:flex items-center gap-3 xl:gap-4">{headerActions}</div>}
           {/* Icon-only until xl, where the label fits without squeezing the
               nav. `title` carries the same text for a hover or long-press. */}
           <Link
@@ -153,7 +161,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             value={contentLang}
             onChange={(e) => handleLanguageChange(e.target.value)}
             aria-label={t('common.language')}
-            className="max-w-[6.5rem] xl:max-w-none truncate text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-2.5 pr-6 xl:pl-3 xl:pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+            className="hidden sm:block max-w-[6.5rem] xl:max-w-none truncate text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-2.5 pr-6 xl:pl-3 xl:pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
           >
             {languages.map((l) => (
               <option key={l.code} value={l.code}>{l.label}</option>
@@ -168,9 +176,32 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           </Link>
         </div>
       </header>
+      <div className="lg:hidden shrink-0" style={{ height: 'var(--app-header-h)' }} aria-hidden="true" />
+      {/* Under the bar rather than above it: above, it would sit beneath the
+          fixed header on a phone and never be seen. */}
+      <OfflineBanner />
 
+      {/* Below `lg` the header is fixed, so the menu has to be too — in the
+          flow it would open wherever the page happens to be scrolled to. */}
       {mobileMenuOpen && (
-        <nav className="xl:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm">
+        <nav className="xl:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm max-lg:fixed max-lg:inset-x-0 max-lg:z-40 max-lg:top-[var(--app-header-h)] max-lg:max-h-[calc(100dvh-var(--app-header-h))] max-lg:overflow-y-auto">
+          {/* The header's own picker is hidden below `sm` to keep the bar to
+              menu, name and avatar; this is where it lives there instead. */}
+          <label className="sm:hidden flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+            <span className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-[20px]">translate</span>
+              {t('common.language')}
+            </span>
+            <select
+              value={contentLang}
+              onChange={(e) => handleLanguageChange(e.target.value)}
+              className="text-xs font-bold text-zinc-600 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800 rounded-full pl-3 pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700"
+            >
+              {languages.map((l) => (
+                <option key={l.code} value={l.code}>{l.label}</option>
+              ))}
+            </select>
+          </label>
           <Link
             to="/recipe/new"
             className="flex items-center gap-3 px-4 py-3 bg-primary text-white rounded-xl font-bold text-sm mb-2"
@@ -197,9 +228,9 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
         </nav>
       )}
 
-      <div className="flex min-h-[calc(100vh-65px)]">
+      <div className="flex min-h-[calc(100vh-var(--app-header-h))]">
         {librarySection && (
-          <aside className="hidden lg:flex w-[280px] shrink-0 bg-white dark:bg-zinc-900 border-r border-zinc-100 dark:border-zinc-800 flex-col p-6 sticky top-[65px] h-[calc(100vh-65px)]">
+          <aside className="hidden lg:flex w-[280px] shrink-0 bg-white dark:bg-zinc-900 border-r border-zinc-100 dark:border-zinc-800 flex-col p-6 sticky top-[var(--app-header-h)] h-[calc(100vh-var(--app-header-h))]">
             <div className="mb-8 p-2">
               <h2 className="text-lg font-black text-primary leading-tight">{t('library.management')}</h2>
               <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 tracking-[0.2em] uppercase">{t('library.kitchenEssentials')}</p>

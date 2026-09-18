@@ -23,6 +23,7 @@ import {
   stepIngredientConsumption, remainingBeforeStep,
 } from '../lib/stepRefs';
 import CookTimerBar from '../components/CookTimerBar';
+import FloatingActionBar, { FLOATING_ACTION_BAR_CLEARANCE } from '../components/FloatingActionBar';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { startCookTimer, requestTimerNotifications } from '../lib/cookTimers';
 import { toSystem, type MeasurementSystem } from '../lib/unitConvert';
@@ -219,6 +220,16 @@ interface RecipeNutritionResult {
 /* ═══════════════════════════════════════════════════════════════════════
    HELPERS
    ═══════════════════════════════════════════════════════════════════════ */
+// Recipe actions inside FloatingActionBar: 44px touch targets instead of the
+// header's bare 20px icons.
+const BAR_BUTTON = 'w-11 h-11 justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800';
+// A header popover hangs down from its icon; one opened from the floating bar
+// has to open upward and span the screen instead, or a 256px menu anchored to
+// an icon near the middle of a 390px screen runs off the left edge.
+const popoverPlacement = (inBar: boolean) =>
+  inBar ? 'fixed left-4 right-4 mx-auto max-w-sm z-50' : 'absolute right-0 top-8 z-50 w-64';
+const POPOVER_ABOVE_BAR: React.CSSProperties = { bottom: 'calc(5.5rem + env(safe-area-inset-bottom))' };
+
 const difficultyKey: Record<string, string> = {
   easy: 'gallery.difficultyEasy', medium: 'gallery.difficultyIntermediate',
   hard: 'gallery.difficultyAdvanced', expert: 'gallery.difficultyExpert',
@@ -976,7 +987,7 @@ const RecipeDetail: React.FC = () => {
 
     return (
       <div className="min-h-screen bg-zinc-900 text-white font-body">
-        <header className="sticky top-0 z-50 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+        <header className="sticky top-0 z-50 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
           <button onClick={() => setMode('view')} className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 hover:text-white transition-colors">
             <span className="material-symbols-outlined">arrow_back</span>
             <span className="text-sm font-bold">{t('recipeDetail.exitKitchen')}</span>
@@ -1203,7 +1214,7 @@ const RecipeDetail: React.FC = () => {
     return (
       <div className="min-h-screen bg-zinc-900 text-white font-body">
         {/* Header */}
-        <header className="sticky top-0 z-50 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+        <header className="sticky top-0 z-50 bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex items-center justify-between" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
           <button onClick={() => setMode('view')} className="flex items-center gap-2 text-zinc-400 dark:text-zinc-500 hover:text-white transition-colors">
             <span className="material-symbols-outlined">arrow_back</span>
             <span className="text-sm font-bold">{t('recipeDetail.exitKitchen')}</span>
@@ -1808,7 +1819,7 @@ const RecipeDetail: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 font-body">
         {/* Header */}
-        <header className="bg-[#fafaf5] dark:bg-zinc-950 sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between">
+        <header className="bg-[#fafaf5] dark:bg-zinc-950 sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
           <button onClick={() => { setDraft(recipe); setRawTextMode(false); setRawTextError(null); setMode('view'); }} className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
             <span className="material-symbols-outlined">close</span>
             <span className="text-sm font-bold">{t('common.cancel')}</span>
@@ -2835,21 +2846,23 @@ const RecipeDetail: React.FC = () => {
   const primaryIngredients = sortedIngredients.filter(ing => ing.substituteFor == null);
   const sortedSteps = [...recipe.steps].sort((a, b) => a.stepNumber - b.stepNumber);
 
-  const editButton = (
+  const editButton = (inBar: boolean) => (
     <button
       onClick={() => setMode('edit')}
-      className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors"
+      className={inBar
+        ? `${BAR_BUTTON} bg-primary text-white hover:bg-primary/90`
+        : "flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors"}
       aria-label={t('recipeDetail.editRecipeAria')}
     >
       <span className="material-symbols-outlined text-[20px]">edit</span>
     </button>
   );
 
-  const deleteButton = (
+  const deleteButton = (inBar: boolean) => (
     <button
       onClick={handleDelete}
       disabled={saving}
-      className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-red-500 transition-colors disabled:opacity-50"
+      className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-red-500 transition-colors disabled:opacity-50`}
       aria-label={t('recipeDetail.deleteRecipe')}
       title={t('recipeDetail.deleteRecipe')}
     >
@@ -2857,11 +2870,11 @@ const RecipeDetail: React.FC = () => {
     </button>
   );
 
-  const downloadButton = isNative() ? (
+  const downloadButton = (inBar: boolean) => isNative() ? (
     <button
       onClick={handleToggleDownload}
       disabled={downloading}
-      className={`flex items-center gap-1.5 transition-colors disabled:opacity-50 ${downloaded ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
+      className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 transition-colors disabled:opacity-50 ${downloaded ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
       aria-label={downloaded ? 'Remove offline download' : 'Download for offline'}
       title={downloaded ? 'Downloaded for offline — tap to remove' : 'Download for offline'}
     >
@@ -2871,14 +2884,14 @@ const RecipeDetail: React.FC = () => {
     </button>
   ) : null;
 
-  const shoppingListHeaderButton = (
+  const shoppingListHeaderButton = (inBar: boolean) => (
     <button
       onClick={() => {
         addToShoppingCart({ recipeId: id!, title: recipe.translated_title || recipe.title, servings });
         setAddedToCart(true);
         setTimeout(() => setAddedToCart(false), 2000);
       }}
-      className={`flex items-center gap-1.5 transition-colors ${addedToCart ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
+      className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 transition-colors ${addedToCart ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
       aria-label={t('recipeDetail.addToShoppingList')}
       title={t('recipeDetail.addToShoppingList')}
     >
@@ -2957,11 +2970,11 @@ const RecipeDetail: React.FC = () => {
     window.setTimeout(() => setCopiedSection(c => (c === key ? null : c)), 1500);
   };
 
-  const exportHeaderButton = (
+  const exportHeaderButton = (inBar: boolean) => (
     <div className="relative">
       <button
         onClick={() => setShowExportMenu(v => !v)}
-        className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors"
+        className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors`}
         aria-label={t('recipeDetail.exportRecipe')}
         title={t('recipeDetail.exportRecipe')}
       >
@@ -2970,7 +2983,7 @@ const RecipeDetail: React.FC = () => {
       {showExportMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
-          <div className="absolute right-0 top-8 z-50 w-64 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-2">
+          <div className={`${popoverPlacement(inBar)} bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-2`} style={inBar ? POPOVER_ABOVE_BAR : undefined}>
             <button
               onClick={() => { setShowExportMenu(false); setShowShareLink(true); }}
               className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
@@ -3066,11 +3079,11 @@ const RecipeDetail: React.FC = () => {
     </div>
   );
 
-  const collectionHeaderButton = (
+  const collectionHeaderButton = (inBar: boolean) => (
     <div className="relative">
       <button
         onClick={() => showCollectionPicker ? setShowCollectionPicker(false) : openCollectionPicker()}
-        className={`flex items-center gap-1.5 transition-colors ${memberCollectionIds.size > 0 ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
+        className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 transition-colors ${memberCollectionIds.size > 0 ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
         aria-label={t('recipeDetail.addToCollection')}
         title={t('recipeDetail.addToCollection')}
       >
@@ -3079,7 +3092,7 @@ const RecipeDetail: React.FC = () => {
       {showCollectionPicker && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowCollectionPicker(false)} />
-          <div className="absolute right-0 top-8 z-50 w-64 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-3">
+          <div className={`${popoverPlacement(inBar)} bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-3`} style={inBar ? POPOVER_ABOVE_BAR : undefined}>
             <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-2 pb-2">{t('recipeDetail.addToCollection')}</p>
             {loadingCollections ? (
               <p className="text-xs text-zinc-400 dark:text-zinc-500 px-2 py-2">{t('common.loading')}</p>
@@ -3106,16 +3119,19 @@ const RecipeDetail: React.FC = () => {
     </div>
   );
 
-  const headerActions = (
+  // One set of actions, two homes: the top bar from `lg` up, a floating
+  // bar at the bottom below it (see FloatingActionBar for why).
+  const renderActions = (inBar: boolean) => (
     <>
-      {downloadButton}
-      {shoppingListHeaderButton}
-      {collectionHeaderButton}
-      {exportHeaderButton}
-      {deleteButton}
-      {editButton}
+      {downloadButton(inBar)}
+      {shoppingListHeaderButton(inBar)}
+      {collectionHeaderButton(inBar)}
+      {exportHeaderButton(inBar)}
+      {deleteButton(inBar)}
+      {editButton(inBar)}
     </>
   );
+  const headerActions = renderActions(false);
 
   return (
     <AppLayout headerActions={headerActions}>
@@ -3677,6 +3693,11 @@ const RecipeDetail: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Room for the floating action bar below, so the last section can be
+          scrolled clear of it instead of ending up underneath. */}
+      <div className="lg:hidden no-print" style={{ height: FLOATING_ACTION_BAR_CLEARANCE }} aria-hidden="true" />
+      <FloatingActionBar label={t('recipeDetail.actionsLabel')}>{renderActions(true)}</FloatingActionBar>
     </AppLayout>
   );
 };
