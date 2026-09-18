@@ -1,5 +1,18 @@
 # TODO
 
+## Catalog-aware import matching (2026-09-18)
+
+- [x] **AI import now recognizes the library it's importing into** — the recipe-parse prompt (server and standalone) is handed the library's own ingredient/tool/technique names, labelled in the app's content language, and asked which one each parsed item corresponds to (`catalogName`), instead of coining fresh wording every time.
+  - New `importCatalog.service.ts` (server) / `importCatalog.local.ts` (standalone) twins load one query per entity type — deliberately not built on `proposeIngredientMatches()`/`listIngredients()`, which read fields (plurals, synonyms, tags, translations) this only needs two columns of. Ingredients are capped at 400, ordered by usage so a library that grows past the cap loses its least-used rows rather than everything alphabetically after "P".
+  - The catalog prompt and its rendering are **twinned** between `backend/src/services/llm.parser.ts` and `frontend/src/services/llmParser.local.ts` inside `BEGIN/END TWIN BLOCK` markers, enforced by a new `llmParser.promptParity.test.ts` that diffs the two files' marked blocks byte-for-byte — the two had already drifted by one character (`->` vs `→`) before this existed to catch it.
+  - **Ollama never gets the ingredient list** (tools/techniques only) — it's the one provider that doesn't set `num_ctx`, so a ~2000-token ingredient list would silently overflow its default context window and get answered from whatever's left, not an error. Anthropic/Gemini/OpenAI get the full list.
+  - `dropUnknownCatalogNames()` re-validates every `catalogName` the model returns against the catalog **actually sent to that provider** (not the full catalog) before anything acts on it — a claim naming a real row the model was never shown, or a plausible-sounding invention, is dropped to null and surfaces as a warning instead of silently merging a distinct ingredient into an existing one.
+  - On the review screen, `lib/importMatching.ts`'s `mergeSuggestions()` combines the fuzzy-name matches with the model's catalog claim into one ranked list; a match found *only* via the catalog claim is flagged `viaCatalog` and badged "AI match" in the UI rather than auto-selected unmarked — that badge is the entire safety story, since with an empty catalog claim (every non-AI import path) this returns byte-for-byte the old ranking.
+  - 61 new tests across both modes (`importMatching.test.ts`, `importCatalog.local.integration.test.ts`, `importCatalog.roundtrip.integration.test.ts`, `llmParser.catalog.test.ts`, `llmParser.catalogName.test.ts`, `llmParser.promptParity.test.ts`). No backend unit test for `importCatalog.service.ts` directly — `backend/package.json` has no test script, so the promptParity test reaching across the repo from the frontend suite is the only automated check the backend copy gets at all.
+  - New `import.aiSuggestedMatch` i18n key, in all four locales.
+
+---
+
 ## Feature-parity programme (2026-09-09)
 
 Full plan and reasoning: [`docs/plans/2026-09-09-feature-parity-plan.md`](docs/plans/2026-09-09-feature-parity-plan.md).

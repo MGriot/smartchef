@@ -314,6 +314,7 @@ smartchef/
 │   │   │   ├── tags.service.ts         # Ingredient-driven auto-tagging
 │   │   │   ├── nutrition.service.ts    # Per-serving nutrition calculation
 │   │   │   ├── pantry.service.ts       # Pantry rows + "what can I cook?" matching
+│   │   │   ├── importCatalog.service.ts # Library names for the import prompt to reuse instead of coining fresh wording (standalone twin: frontend/src/services/importCatalog.local.ts)
 │   │   │   ├── folder-sync.service.ts  # Whole-library snapshot export/merge (multi-device sync + backups)
 │   │   │   ├── device-identity.service.ts
 │   │   │   └── crdt/vector-clock.ts    # Legacy — not wired into any write path, kept for the old sync.ts routes
@@ -343,6 +344,7 @@ smartchef/
     │   │   ├── Login.tsx / Account.tsx  # Auth + account settings (avatar presets, LLM provider), Backup & Restore, Multi-Device Sync
     │   │   ├── ManageUsers.tsx          # Admin-only: invite/list/remove instance users
     │   │   └── ServerConnect.tsx        # Native-app-only: connect to a remote SmartChef server
+    │   ├── lib/importMatching.ts         # Merges fuzzy name matches with the AI's catalog claim for the import Review Matches step
     │   ├── lib/unitConvert.ts            # Display-only unit/temperature/tin-size conversion — never written back
     │   ├── lib/cookTimers.ts             # Step timers, module-level so leaving cook mode doesn't cancel the roast
     │   ├── lib/zipReader.ts              # Minimal zip/gzip reader for migration archives (DecompressionStream)
@@ -463,10 +465,7 @@ spends minutes of CPU inference, where the structured path is a parse.
 
 **A file exported from another app.** Paprika (`.paprikarecipes`), Mealie,
 Crouton, Mela, Nextcloud Cookbook and CopyMeThat, plus bare schema.org JSON.
-Zip and gzip archives are unpacked in the browser. Imports go through the
-same fuzzy ingredient matcher the AI path uses, so "400g San Marzano
-tomatoes" resolves to the tomato already in your library rather than minting
-a duplicate.
+Zip and gzip archives are unpacked in the browser.
 
 **A PDF.** Text is extracted directly when the file has a text layer.
 
@@ -476,6 +475,25 @@ uploaded anywhere. The language model for a language is downloaded once
 do. Printed pages photographed straight-on read well; handwriting is
 genuinely hit and miss, which is why extracted text lands in the review box
 rather than importing straight off.
+
+### Matching what's already in your library
+
+Every import, however it got in, goes through a fuzzy name matcher against
+your existing ingredients, tools and techniques before anything is created,
+so "400g San Marzano tomatoes" resolves to the tomato you already have
+rather than minting a duplicate.
+
+The AI import path (URL, raw text, PDF text or photo, run through the LLM)
+goes one step further: the model is handed your library's own names —
+labelled in your recipe language, so it can recognize "Burro" as
+"Butter" — and asked which entry each ingredient, tool and technique
+corresponds to. That catches matches string similarity alone would miss
+(a recipe's "planetaria" against your library's "Stand Mixer"), without
+letting the model coin its own name for something you already have. Every
+such claim is checked against the exact list the model was shown before
+anything acts on it, so a plausible-sounding invention is rejected rather
+than trusted; a match found only this way is badged **AI match** in the
+Review Matches step instead of being auto-selected unmarked.
 
 ---
 

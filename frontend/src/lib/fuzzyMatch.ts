@@ -11,6 +11,12 @@ export interface MatchSuggestion {
   id: string;
   name: string;
   score: number;
+  /** Set only by lib/importMatching.ts's mergeSuggestions, for a row that
+   *  the AI named as a library match but string similarity did not find on
+   *  its own. Never produced by topMatches() below, and deliberately
+   *  absent from the backend twin (ingredient.matcher.ts's MatchSuggestion)
+   *  — it is a client-side display concern, not a scoring one. */
+  viaCatalog?: boolean;
 }
 
 function normalize(s: string): string {

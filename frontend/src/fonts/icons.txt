@@ -19,6 +19,7 @@ autoplay
 backup
 badge
 blanket
+blender
 blind
 block
 bolt
@@ -105,6 +106,7 @@ eject
 email
 enable
 encrypted
+ent
 equal
 error
 event
@@ -189,6 +191,7 @@ login
 logout
 looks
 loop
+lowercase
 map
 markdown
 matter
