@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import { isStandaloneMode } from '../lib/standalone';
 import { storeImage } from '../lib/localImages';
@@ -19,6 +20,7 @@ interface ImageUrlInputProps {
  * images, both are just URLs.
  */
 export default function ImageUrlInput({ value, onChange, placeholder = 'https://…', className }: ImageUrlInputProps) {
+  const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
       onChange(json.data.url);
     } catch (err) {
       console.error('Image upload failed:', err);
-      setError('Upload failed');
+      setError(t('common.uploadFailed'));
     } finally {
       setUploading(false);
     }
@@ -84,7 +86,7 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
           className="shrink-0 flex items-center gap-1.5 px-4 rounded-xl bg-zinc-900 text-white text-sm font-bold hover:bg-zinc-800 transition-colors disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-sm">{uploading ? 'sync' : 'upload'}</span>
-          {uploading ? 'Uploading…' : 'Upload'}
+          {uploading ? t('common.uploading') : t('common.upload')}
         </button>
       </div>
       {error && <p className="text-xs text-red-500 font-medium mt-1">{error}</p>}
