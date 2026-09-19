@@ -147,6 +147,7 @@ grid_view
 group
 groups
 hardware
+healing
 heat
 height
 help
@@ -229,6 +230,7 @@ package_2
 padding
 pages
 paid
+palette
 password
 pattern
 pause
