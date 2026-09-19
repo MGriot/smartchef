@@ -18,10 +18,19 @@
 import type { MatchSuggestion } from './fuzzyMatch';
 
 /** The Review Matches step's per-item decision: either "use this existing
- *  library row" or "create a new one" (ingredients also need a category). */
+ *  library row" or "create a new one" (ingredients also need a category).
+ *  A new row's `name` is what the user typed over the suggested name;
+ *  undefined means "keep the suggestion". */
 export type Resolution =
   | { choice: 'existing'; id: string; name: string }
-  | { choice: 'new'; categoryId?: string };
+  | { choice: 'new'; categoryId?: string; name?: string };
+
+/** The name a "create new" row will be created with: whatever the user
+ *  typed, else the suggestion. */
+export function newRowName(resolution: Resolution | undefined, suggested: string): string {
+  const typed = resolution?.choice === 'new' ? resolution.name : undefined;
+  return typed !== undefined ? typed.trim() || suggested : suggested;
+}
 
 /** Pre-selects the top suggestion when it is confident enough, otherwise
  *  defaults to creating a new row. The 0.7 floor is the same one the

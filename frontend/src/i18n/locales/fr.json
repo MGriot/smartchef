@@ -160,7 +160,22 @@
       "sectionNaming": "Dénomination",
       "sectionNamingHint": "Les synonymes le rendent trouvable ; les traductions lui donnent un nom par langue.",
       "moveUp": "Monter (rayon précédent)",
-      "moveDown": "Descendre (rayon suivant)"
+      "moveDown": "Descendre (rayon suivant)",
+      "nameEnglish": "Nom (anglais)",
+      "aiTranslate": "Traduire avec l'IA",
+      "aiTranslating": "Traduction…",
+      "autoTranslateHint": "Laissez les traductions vides et l'IA les remplira à partir du nom anglais à l'enregistrement.",
+      "tidyButton": "Ranger les noms avec l'IA",
+      "tidyTitle": "Ranger les noms des ingrédients",
+      "tidySubtitle": "Nom anglais, général → spécifique → variante, un nom par langue",
+      "tidyIntro": "L'IA passe en revue chaque ingrédient : elle le renomme selon la convention du catalogue (anglais, p. ex. \"Apple\" → \"Renetta Apple\" → \"Renetta Apple Slices\"), relie chaque ingrédient spécifique à l'ingrédient général et remplit les langues manquantes. Les traductions existantes ne sont jamais écrasées. Vous vérifiez chaque modification avant son application.",
+      "tidyAnalyse": "Analyser {{count}} ingrédients",
+      "tidyAnalysing": "Analyse… {{done}} / {{total}}",
+      "tidyApply": "Appliquer {{count}} modifications",
+      "tidyApplying": "Application… {{done}} / {{total}}",
+      "tidyNothing": "Tout suit déjà la convention — rien à changer.",
+      "tidyDuplicate": "Deviendrait « {{name}} », qui existe déjà — utilisez Fusionner pour les combiner.",
+      "tidyFailed": "La requête à l'IA a échoué."
     },
     "common": {
       "gridView": "Vue en grille",
@@ -518,7 +533,12 @@
     "matchLanguageHint": "Les ingrédients, ustensiles et techniques ci-dessous sont comparés à votre bibliothèque dans cette langue. Changez-la si les suggestions semblent fausses.",
     "langUnsupported": "Cette recette semble écrite en {{lang}}, une langue pour laquelle SmartChef n'a pas de catalogue. Choisissez la langue de comparaison et d'enregistrement — les noms restent écrits tels quels.",
     "rematching": "Nouvelle comparaison…",
-    "searchNoResults": "Rien dans votre bibliothèque ne correspond."
+    "searchNoResults": "Rien dans votre bibliothèque ne correspond.",
+    "newNameEnglish": "Nom en anglais",
+    "newName": "Nom",
+    "namingBusy": "Demande à l'IA du nom de catalogue et des traductions…",
+    "varietyOf": "Variété de {{name}}",
+    "translatedOnCreate": "Les traductions seront générées par l'IA à la création."
   },
   "login": {
     "signingIn": "Connexion…",

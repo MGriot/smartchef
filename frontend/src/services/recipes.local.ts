@@ -932,6 +932,61 @@ export async function getCookSequenceFor(id: string) {
   return { sections: await resolveCookSequence(id) };
 }
 
+// ── POST /recipes/:id/translate/:lang ───────────────────────────────────
+// Port of the backend route: AI-translates title/description/steps/
+// ingredient notes into `lang` with the configured provider and overwrites
+// any existing translation for that language.
+
+export async function translateRecipe(id: string, lang: string) {
+  const recipe = await queryOne<{ title: string; description: string | null }>(
+    "SELECT title, description FROM recipes WHERE id=$1 AND sync_status != 'deleted'",
+    [id]
+  );
+  if (!recipe) return null;
+  const steps = await query<{ id: string; title: string | null; description: string; notes: string | null }>(
+    "SELECT id, title, description, notes FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number",
+    [id]
+  );
+  const ingredientNotes = await query<{ id: string; notes: string }>(
+    "SELECT id, notes FROM recipe_ingredients WHERE recipe_id=$1 AND notes IS NOT NULL AND notes != ''",
+    [id]
+  );
+
+  const { translateRecipeContent } = await import('./aiTasks.local');
+  const translated = await translateRecipeContent(
+    { title: recipe.title, description: recipe.description, steps, ingredientNotes },
+    lang
+  );
+
+  await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO recipe_translations (id, recipe_id, language_code, title, description)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (recipe_id, language_code) DO UPDATE SET title=excluded.title, description=excluded.description, updated_at=CURRENT_TIMESTAMP`,
+      [newId(), id, lang, translated.title, translated.description]
+    );
+    for (const step of translated.steps) {
+      await client.query(
+        `INSERT INTO recipe_step_translations (id, step_id, language_code, title, description, notes)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (step_id, language_code) DO UPDATE SET title=excluded.title, description=excluded.description, notes=excluded.notes, updated_at=CURRENT_TIMESTAMP`,
+        [newId(), step.id, lang, step.title, step.description, step.notes]
+      );
+    }
+    for (const note of translated.ingredientNotes) {
+      await client.query(
+        `INSERT INTO recipe_ingredient_translations (id, recipe_ingredient_id, language_code, notes)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (recipe_ingredient_id, language_code) DO UPDATE SET notes=excluded.notes, updated_at=CURRENT_TIMESTAMP`,
+        [newId(), note.id, lang, note.notes]
+      );
+    }
+  });
+
+  syncRecipeInBackground(id);
+  return { lang, ...translated };
+}
+
 // ── Not yet ported (Stage 2+) ──────────────────────────────────────────
 
 export function notAvailableOffline(feature: string): never {

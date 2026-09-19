@@ -16,7 +16,16 @@ import { extractPdfText } from '../services/migration/pdfText';
 import { readImageText, ocrLanguageFor, OCR_MODEL_MB, type OcrProgress } from '../services/migration/ocr';
 import { proposeMatches, ProposedMatches } from '../services/matchSuggestions';
 import { matchUnitId, type MatchSuggestion } from '../lib/fuzzyMatch';
-import { defaultResolution, mergeSuggestions, type Resolution } from '../lib/importMatching';
+import { defaultResolution, mergeSuggestions, newRowName, type Resolution } from '../lib/importMatching';
+
+/** What POST /api/ingredients/ai-name answers per item. */
+interface IngredientNaming {
+  key: string;
+  name: string;
+  parent: string | null;
+  parentId: string | null;
+  translations: Array<{ lang: string; text: string }>;
+}
 import { repairIngredientAmount } from '../lib/ingredientAmount';
 import { checkMediaForProvider } from '../lib/llmMedia';
 import { matchStepIngredients, linkIngredientsInText } from '../lib/stepRefs';
@@ -146,6 +155,13 @@ export default function RecipeImport() {
   const [techniqueRes, setTechniqueRes] = useState<Resolution[]>([]);
   const [categories, setCategories] = useState<Category[] | null>(null);
   const [searchQuery, setSearchQuery] = useState<{ kind: 'ingredient' | 'tool' | 'technique'; index: number; query: string } | null>(null);
+  // AI naming for ingredients the review will create: the catalog-style
+  // English name, the "variety of" parent and a name per language, keyed
+  // by the draft ingredient's index. Suggestions only — the name stays
+  // editable, and an edited name is translated again on create.
+  const [naming, setNaming] = useState<Record<number, IngredientNaming>>({});
+  const [namingPending, setNamingPending] = useState<Set<number>>(new Set());
+  const namingGeneration = useRef(0);
 
   // Which language the review step matches and searches the catalogs in.
   //
@@ -285,6 +301,9 @@ export default function RecipeImport() {
   };
 
   const resetDraft = () => {
+    namingGeneration.current++;
+    setNaming({});
+    setNamingPending(new Set());
     setDraft(null);
     setSuggestions(null);
     setIngredientRes([]);
@@ -405,6 +424,42 @@ export default function RecipeImport() {
     if (ingredientNames.some((n) => defaultResolution(byIngredientName[n] || []).choice === 'new')) {
       loadCategoriesOnce();
     }
+    void requestNaming(d, ingredientNames
+      .map((n, i) => (defaultResolution(byIngredientName[n] || []).choice === 'new' ? i : -1))
+      .filter((i) => i >= 0));
+  };
+
+  /** Asks the AI how the catalog should name the ingredients about to be
+   *  created. Best effort and silent on failure (no provider reachable,
+   *  or server mode, which has no such route): the rows then just keep the
+   *  recipe's own wording as the suggested name. */
+  const requestNaming = async (d: TemplateParseResult, indices: number[]) => {
+    const todo = indices.filter((i) => !naming[i] && !namingPending.has(i) && d.ingredients[i]?.name?.trim());
+    if (!todo.length) return;
+    const generation = namingGeneration.current;
+    setNamingPending((prev) => new Set([...prev, ...todo]));
+    try {
+      const res = await apiFetch('/api/ingredients/ai-name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: todo.map((i) => ({ key: String(i), text: d.ingredients[i].name })) }),
+        timeoutMs: 650_000,
+      });
+      if (!res.ok || generation !== namingGeneration.current) return;
+      const json = await res.json();
+      const rows: IngredientNaming[] = Array.isArray(json.data) ? json.data : [];
+      setNaming((prev) => ({ ...prev, ...Object.fromEntries(rows.map((r) => [Number(r.key), r])) }));
+    } catch (err) {
+      console.warn('AI ingredient naming unavailable:', err);
+    } finally {
+      if (generation === namingGeneration.current) {
+        setNamingPending((prev) => {
+          const next = new Set(prev);
+          todo.forEach((i) => next.delete(i));
+          return next;
+        });
+      }
+    }
   };
 
   /** Re-scores everything in a different language. Every resolution is
@@ -509,6 +564,10 @@ export default function RecipeImport() {
       const units: Unit[] = unitsJson.data || [];
 
       const matchedIngredients: MatchedIngredient[] = [];
+      // Two rows resolving to the same new name ("Egg" twice) become one
+      // ingredient, and a suggested parent created earlier in this same
+      // import can still be linked.
+      const createdIngredientIds = new Map<string, string>();
       for (let i = 0; i < draft.ingredients.length; i++) {
         const ing = draft.ingredients[i];
         const resolution = ingredientRes[i];
@@ -519,19 +578,36 @@ export default function RecipeImport() {
         } else {
           const catId = resolution?.categoryId || (await loadCategoriesOnce())[0]?.id;
           if (!catId) throw new Error(`Pick a category for "${ing.name}"`);
-          const createRes = await apiFetch('/api/ingredients', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: ing.name, categoryId: catId }),
-          });
-          const createJson = await createRes.json();
-          if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : `Could not create "${ing.name}"`);
-          ingredientId = createJson.data.id;
+          const suggested = naming[i];
+          const newName = newRowName(resolution, suggested?.name ?? ing.name);
+          const already = createdIngredientIds.get(newName.toLowerCase());
+          if (already) {
+            ingredientId = already;
+          } else {
+            // The suggestion's translations only fit the suggested name; a
+            // name the user typed over it is translated afresh on create.
+            const useSuggestion = !!suggested && suggested.name === newName;
+            const parentIngredientId = useSuggestion
+              ? suggested.parentId ?? (suggested.parent ? createdIngredientIds.get(suggested.parent.toLowerCase()) ?? null : null)
+              : null;
+            const createRes = await apiFetch('/api/ingredients', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(useSuggestion
+                ? { name: newName, categoryId: catId, translations: suggested.translations, parentIngredientId }
+                : { name: newName, categoryId: catId, autoTranslate: true }),
+              timeoutMs: useSuggestion ? undefined : 650_000,
+            });
+            const createJson = await createRes.json();
+            if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : `Could not create "${newName}"`);
+            ingredientId = createJson.data.id;
+            createdIngredientIds.set(newName.toLowerCase(), ingredientId);
+          }
           isNew = true;
         }
         matchedIngredients.push({
           ingredientId,
-          ingredientName: resolution?.choice === 'existing' ? resolution.name : ing.name,
+          ingredientName: resolution?.choice === 'existing' ? resolution.name : newRowName(resolution, naming[i]?.name ?? ing.name),
           confidence: resolution?.choice === 'existing' ? (suggestions?.ingredients[ing.name]?.find((s) => s.id === ingredientId)?.score ?? 1) : 1,
           isNew,
           unitId: matchUnitId(ing.unit, units),
@@ -555,14 +631,14 @@ export default function RecipeImport() {
           const createRes = await apiFetch('/api/tools', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name }),
+            body: JSON.stringify({ name: newRowName(resolution, name) }),
           });
           const createJson = await createRes.json();
           if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : `Could not create "${name}"`);
           toolId = createJson.data.id;
           isNew = true;
         }
-        matchedTools.push({ toolId, toolName: resolution?.choice === 'existing' ? resolution.name : name, isNew });
+        matchedTools.push({ toolId, toolName: resolution?.choice === 'existing' ? resolution.name : newRowName(resolution, name), isNew });
       }
 
       const techniqueIdByName = new Map<string, string>();
@@ -576,7 +652,7 @@ export default function RecipeImport() {
           const createRes = await apiFetch('/api/techniques', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name }),
+            body: JSON.stringify({ name: newRowName(resolution, name) }),
           });
           const createJson = await createRes.json();
           if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : `Could not create "${name}"`);
@@ -852,6 +928,10 @@ export default function RecipeImport() {
     extra?: React.ReactNode
   ) => {
     const isSearching = searchQuery?.kind === kind && searchQuery.index === index;
+    const suggestion = kind === 'ingredient' ? naming[index] : undefined;
+    const suggestedName = suggestion?.name ?? name;
+    const newName = newRowName(resolution, suggestedName);
+    const namingBusy = kind === 'ingredient' && namingPending.has(index);
     return (
       <div key={`${kind}-${index}`} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 bg-zinc-50/50 dark:bg-zinc-900/50">
         <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mb-2">{name}</p>
@@ -884,15 +964,44 @@ export default function RecipeImport() {
               checked={resolution?.choice === 'new'}
               onChange={() => {
                 setResolution({ choice: 'new' });
-                if (kind === 'ingredient') loadCategoriesOnce();
+                if (kind === 'ingredient') {
+                  loadCategoriesOnce();
+                  if (draft) void requestNaming(draft, [index]);
+                }
               }}
             />
-            <span className="text-amber-700 font-bold">{t('import.createNew', { name })}</span>
+            <span className="text-amber-700 font-bold">{t('import.createNew', { name: newName })}</span>
           </label>
+          {resolution?.choice === 'new' && (
+            <div className="mt-1 space-y-1">
+              <label className="block text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                {kind === 'ingredient' ? t('import.newNameEnglish') : t('import.newName')}
+                <input
+                  type="text"
+                  value={resolution.name ?? suggestedName}
+                  onChange={(e) => setResolution({ ...resolution, name: e.target.value })}
+                  placeholder={suggestedName}
+                  className="mt-1 block w-full text-xs font-normal normal-case tracking-normal text-zinc-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
+                />
+              </label>
+              {namingBusy && (
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{t('import.namingBusy')}</p>
+              )}
+              {suggestion && newName === suggestion.name && (suggestion.parent || suggestion.translations.some((tr) => tr.lang !== 'en')) && (
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug">
+                  {suggestion.parent && <>{t('import.varietyOf', { name: suggestion.parent })}{' · '}</>}
+                  {suggestion.translations.filter((tr) => tr.lang !== 'en').map((tr) => `${tr.lang.toUpperCase()} ${tr.text}`).join(' · ')}
+                </p>
+              )}
+              {suggestion && newName !== suggestion.name && (
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{t('import.translatedOnCreate')}</p>
+              )}
+            </div>
+          )}
           {resolution?.choice === 'new' && kind === 'ingredient' && (
             <select
               value={resolution.categoryId || ''}
-              onChange={(e) => setResolution({ choice: 'new', categoryId: e.target.value })}
+              onChange={(e) => setResolution({ ...resolution, categoryId: e.target.value })}
               className="mt-1 w-full text-xs bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
             >
               <option value="">{t('import.pickCategory')}</option>

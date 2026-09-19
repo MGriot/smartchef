@@ -15,6 +15,7 @@ import { apiFetch } from '../lib/api';
 import { INGREDIENT_ICONS } from '../lib/icons';
 import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
+import IngredientTidyModal from '../components/IngredientTidyModal';
 
 /** Short month names in the UI language. LibrarySeasonality.tsx already
  *  derives its own month labels this way; doing the same here avoids
@@ -63,6 +64,14 @@ export default function LibraryIngredients() {
   const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], seasonalMonths: [] as number[], synonyms: [] as string[], parentIngredientId: null as string | null, nutrition: { ...emptyNutrition } });
   const [parentQuery, setParentQuery] = useState('');
   const [translations, setTranslations] = useState<{lang: string, text: string}[]>([]);
+  // AI naming (standalone mode only — the routes live in localRouter.ts).
+  const [standalone, setStandalone] = useState(false);
+  const [aiTranslating, setAiTranslating] = useState(false);
+  const [aiTranslateError, setAiTranslateError] = useState<string | null>(null);
+  const [showTidy, setShowTidy] = useState(false);
+  useEffect(() => {
+    import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setStandalone).catch(() => setStandalone(false));
+  }, []);
 
   // Category form
   const [editingCat, setEditingCat] = useState<any>(null);
@@ -197,12 +206,16 @@ export default function LibraryIngredients() {
     const { nutrition, ...formRest } = form;
     const url = editingIng ? `/api/ingredients/${editingIng.id}` : '/api/ingredients';
     const method = editingIng ? 'PUT' : 'POST';
+    // A new ingredient saved without translations gets them from the AI
+    // (standalone mode), named after the English name just entered.
+    const autoTranslate = !editingIng && standalone && cleanTranslations.length === 0;
 
     try {
       const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formRest, ...nutritionFields, translations: cleanTranslations })
+        body: JSON.stringify({ ...formRest, ...nutritionFields, translations: cleanTranslations, ...(autoTranslate ? { autoTranslate: true } : {}) }),
+        ...(autoTranslate ? { timeoutMs: 650_000 } : {}),
       });
       const result = await res.json();
       if (res.ok) {
@@ -248,6 +261,42 @@ export default function LibraryIngredients() {
       alert(t('library.ingredients.networkErrorMerging'));
     } finally {
       setMerging(false);
+    }
+  };
+
+  /** Fills the languages still missing from the English name, and the
+   *  "variety of" parent when none is picked. Never overwrites a
+   *  translation already typed. */
+  const handleAiTranslate = async () => {
+    const name = form.name.trim();
+    if (!name) return;
+    setAiTranslating(true);
+    setAiTranslateError(null);
+    try {
+      const res = await apiFetch('/api/ingredients/ai-name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ key: 'form', text: name }], keepName: true }),
+        timeoutMs: 650_000,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('library.ingredients.tidyFailed'));
+      const s = (json.data || [])[0];
+      if (!s) return;
+      const have = new Set(translations.filter(tr => tr.lang.trim() && tr.text.trim()).map(tr => tr.lang.trim().toLowerCase()));
+      setTranslations([
+        ...translations.filter(tr => tr.lang.trim() || tr.text.trim()),
+        ...(s.translations as { lang: string; text: string }[]).filter(tr => !have.has(tr.lang.toLowerCase())),
+      ]);
+      if (!form.parentIngredientId && s.parentId && s.parentId !== editingIng?.id) {
+        const parent = ingredients.find(i => i.id === s.parentId);
+        setForm(f => ({ ...f, parentIngredientId: s.parentId }));
+        setParentQuery(parent ? parent.translated_name || parent.name : s.parent);
+      }
+    } catch (err) {
+      setAiTranslateError(err instanceof Error ? err.message : t('library.ingredients.tidyFailed'));
+    } finally {
+      setAiTranslating(false);
     }
   };
 
@@ -608,6 +657,18 @@ export default function LibraryIngredients() {
             </div>
             {/* Icon-only on a phone: with its label the button is ~200px, and
                 beside a 60px title it ran off the right edge of the screen. */}
+            <div className="shrink-0 flex items-center gap-2">
+            {standalone && (
+              <button
+                onClick={() => setShowTidy(true)}
+                aria-label={t('library.ingredients.tidyButton')}
+                title={t('library.ingredients.tidyButton')}
+                className="shrink-0 flex items-center gap-2 p-3 sm:px-5 sm:py-3 rounded-full font-bold border border-primary/30 text-primary hover:bg-primary/5 transition-all active:scale-95"
+              >
+                <span className="material-symbols-outlined">auto_fix_high</span>
+                <span className="hidden sm:inline">{t('library.ingredients.tidyButton')}</span>
+              </button>
+            )}
             <button
               onClick={() => handleOpenModal()}
               aria-label={t('library.ingredients.addNew')}
@@ -617,6 +678,7 @@ export default function LibraryIngredients() {
               <span className="material-symbols-outlined">add</span>
               <span className="hidden sm:inline">{t('library.ingredients.addNew')}</span>
             </button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-4 mb-6">
@@ -697,7 +759,7 @@ export default function LibraryIngredients() {
         <div className="space-y-8">
           <FormSection title={t('library.ingredients.sectionIdentity')}>
             <FieldRow>
-              <Field label={t('library.ingredients.nameNative')}>
+              <Field label={t('library.ingredients.nameEnglish')}>
                 <input
                   type="text" required value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
@@ -855,8 +917,27 @@ export default function LibraryIngredients() {
           <FormSection
             title={t('library.ingredients.sectionNaming')}
             description={t('library.ingredients.sectionNamingHint')}
-            action={<AddLangButton onClick={addTranslation} label={t('library.ingredients.addLang')} />}
+            action={
+              <div className="flex items-center gap-4">
+                {standalone && (
+                  <button
+                    type="button"
+                    onClick={handleAiTranslate}
+                    disabled={aiTranslating || !form.name.trim()}
+                    className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-primary hover:underline disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">translate</span>
+                    {aiTranslating ? t('library.ingredients.aiTranslating') : t('library.ingredients.aiTranslate')}
+                  </button>
+                )}
+                <AddLangButton onClick={addTranslation} label={t('library.ingredients.addLang')} />
+              </div>
+            }
           >
+            {aiTranslateError && <p className="text-sm text-red-600 font-medium">{aiTranslateError}</p>}
+            {standalone && !editingIng && translations.length === 0 && (
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">{t('library.ingredients.autoTranslateHint')}</p>
+            )}
             <Field label={t('library.ingredients.synonyms')}>
               <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
             </Field>
@@ -873,6 +954,13 @@ export default function LibraryIngredients() {
           </FormSection>
         </div>
       </Modal>
+
+      <IngredientTidyModal
+        open={showTidy}
+        onClose={() => setShowTidy(false)}
+        ingredients={ingredients}
+        onApplied={fetchData}
+      />
 
       {/* ─── Category Modal ─────────────────────────────────────────────── */}
       <Modal

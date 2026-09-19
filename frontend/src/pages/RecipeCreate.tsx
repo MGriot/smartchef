@@ -529,7 +529,9 @@ const RecipeCreate: React.FC = () => {
           categoryId: pendingIngredient.categoryId,
           pluralName: pendingIngredient.pluralName || undefined,
           description: pendingIngredient.description || undefined,
+          autoTranslate: true,
         }),
+        timeoutMs: 650_000,
       });
       const json = await res.json();
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.couldNotCreateIngredient'));
@@ -1182,7 +1184,7 @@ const RecipeCreate: React.FC = () => {
                     {pendingIngredient?.idx === idx && (
                       <div className="mt-2 bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-2">
                         <div>
-                          <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.ingredient')}</label>
+                          <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('import.newNameEnglish')}</label>
                           <input
                             type="text"
                             value={pendingIngredient.name}

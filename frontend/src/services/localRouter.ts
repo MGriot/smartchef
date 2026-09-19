@@ -23,6 +23,7 @@ import * as pantry from './pantry.local';
 import { getStandaloneProfile } from '../lib/standalone';
 import { electronGeocode, isElectron } from '../lib/electronBridge';
 import { androidGeocode } from '../lib/gitHttpBridge';
+import { isValidLanguageCode } from '../lib/languages';
 
 export interface LocalDispatchResult {
   status: number;
@@ -134,11 +135,39 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     if (!result) return { status: 404, error: 'Recipe not found' };
     return { status: 200, data: result };
   }
+  if (sub === 'translate' && sub2 && method === 'POST') {
+    const lang = sub2.trim().toLowerCase();
+    if (!isValidLanguageCode(lang)) return { status: 400, error: `Unsupported language: ${sub2}` };
+    try {
+      const result = await recipes.translateRecipe(id, lang);
+      if (!result) return { status: 404, error: 'Ricetta non trovata' };
+      return { status: 200, data: result };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'Translation failed' };
+    }
+  }
   if (sub === 'nutrition' || sub === 'translate' || sub === 'collections') {
     return { status: 501, error: `"${sub}" isn't available in offline mode yet — connect to a server to use it.` };
   }
   void sub2;
   return NOT_HANDLED;
+}
+
+/** Fills a new ingredient's missing translations (and its parent, if none
+ *  was picked) from the configured AI. The English name the user typed is
+ *  kept as-is. Best effort: without a reachable provider the ingredient is
+ *  still created, just with the translations it came with. */
+async function fillNamingWithAi(input: any): Promise<void> {
+  if (typeof input?.name !== 'string' || !input.name.trim()) return;
+  try {
+    const [s] = await ingredients.suggestIngredientNaming([{ key: 'new', text: input.name }], { keepName: true });
+    if (!s) return;
+    const have = new Set<string>((input.translations ?? []).filter((t: any) => t?.text?.trim()).map((t: any) => String(t.lang).toLowerCase()));
+    input.translations = [...(input.translations ?? []), ...s.translations.filter((t) => !have.has(t.lang.toLowerCase()))];
+    if (!input.parentIngredientId && s.parentId) input.parentIngredientId = s.parentId;
+  } catch (err) {
+    console.warn('AI translation of a new ingredient failed, creating it without:', err);
+  }
 }
 
 async function dispatchIngredients(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
@@ -162,8 +191,29 @@ async function dispatchIngredients(segments: string[], method: string, sp: URLSe
 
   if (!first) {
     if (method === 'GET') return { status: 200, data: await ingredients.listIngredients({ q: sp.get('q') ?? undefined, lang: sp.get('lang') ?? undefined }) };
-    if (method === 'POST') return { status: 200, data: await ingredients.createIngredient(parseBody(init)) };
+    if (method === 'POST') {
+      const { autoTranslate, ...input } = parseBody(init) ?? {};
+      if (autoTranslate) await fillNamingWithAi(input);
+      return { status: 200, data: await ingredients.createIngredient(input) };
+    }
     return NOT_HANDLED;
+  }
+
+  // AI naming: English base name, "variety of" parent and a name per
+  // library language — see aiTasks.local.ts.
+  if (first === 'ai-name' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (items.length === 0) return { status: 400, error: 'Nothing to name.' };
+    try {
+      return { status: 200, data: await ingredients.suggestIngredientNaming(items, { keepName: body.keepName === true }) };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI naming failed' };
+    }
+  }
+  if (second === 'naming' && method === 'POST') {
+    await ingredients.applyIngredientNaming(first, parseBody(init) ?? {});
+    return { status: 200, data: { success: true } };
   }
 
   if (second === 'merge' && method === 'POST') {

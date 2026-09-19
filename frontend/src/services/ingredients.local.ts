@@ -297,23 +297,95 @@ export async function createIngredient(d: IngredientInput): Promise<{ id: string
   return { id };
 }
 
-export async function updateIngredient(id: string, d: IngredientInput): Promise<void> {
-  // A variant can't be its own parent, directly or by way of one of its
-  // own descendants — walk up from the proposed parent and refuse if this
-  // ingredient's own id shows up, rather than silently creating a cycle
-  // the UI would then render as an infinite chain.
-  let parentIngredientId = d.parentIngredientId ?? null;
-  if (parentIngredientId) {
-    let cursor: string | null = parentIngredientId;
-    const seen = new Set<string>();
-    while (cursor) {
-      if (cursor === id) { parentIngredientId = null; break; }
-      if (seen.has(cursor)) break;
-      seen.add(cursor);
-      const ancestorRow: { parent_ingredient_id: string | null } | null = await queryOne('SELECT parent_ingredient_id FROM ingredients WHERE id=$1', [cursor]);
-      cursor = ancestorRow?.parent_ingredient_id ?? null;
-    }
+/** A variant can't be its own parent, directly or by way of one of its
+ *  own descendants — walk up from the proposed parent and refuse if this
+ *  ingredient's own id shows up, rather than silently creating a cycle
+ *  the UI would then render as an infinite chain. */
+async function acyclicParent(id: string, proposed: string | null | undefined): Promise<string | null> {
+  if (!proposed) return null;
+  let cursor: string | null = proposed;
+  const seen = new Set<string>();
+  while (cursor) {
+    if (cursor === id) return null;
+    if (seen.has(cursor)) break;
+    seen.add(cursor);
+    const ancestorRow: { parent_ingredient_id: string | null } | null = await queryOne('SELECT parent_ingredient_id FROM ingredients WHERE id=$1', [cursor]);
+    cursor = ancestorRow?.parent_ingredient_id ?? null;
   }
+  return proposed;
+}
+
+// ── AI naming ──────────────────────────────────────────────────────────
+// See aiTasks.local.ts for the naming convention itself.
+
+export interface NamingSuggestion {
+  key: string;
+  name: string;
+  parent: string | null;
+  /** The parent resolved to an existing catalog row, when it is one. */
+  parentId: string | null;
+  translations: Array<{ lang: string; text: string }>;
+}
+
+export async function suggestIngredientNaming(
+  items: Array<{ key: string; text: string; known?: Record<string, string> }>,
+  opts: { keepName?: boolean } = {}
+): Promise<NamingSuggestion[]> {
+  const clean = items.filter((i) => i && typeof i.key === 'string' && typeof i.text === 'string' && i.text.trim());
+  if (clean.length === 0) return [];
+  const catalog = await query<{ id: string; name: string }>("SELECT id, name FROM ingredients WHERE sync_status != 'deleted' ORDER BY name");
+  const idByName = new Map<string, string>();
+  for (const c of catalog) if (!idByName.has(c.name.trim().toLowerCase())) idByName.set(c.name.trim().toLowerCase(), c.id);
+  const [{ nameIngredients }, { listLanguages }] = await Promise.all([import('./aiTasks.local'), import('../lib/languages')]);
+  const langs = [...new Set(['en', ...listLanguages().map((l) => l.code)])];
+  const results = await nameIngredients(clean, { catalogNames: catalog.map((c) => c.name), langs, keepName: opts.keepName });
+  return results.map((r) => ({
+    key: r.key,
+    name: r.name,
+    parent: r.parent,
+    parentId: r.parent ? idByName.get(r.parent.toLowerCase()) ?? null : null,
+    translations: Object.entries(r.translations).map(([lang, text]) => ({ lang, text })),
+  }));
+}
+
+export interface NamingChange {
+  name?: string;
+  /** undefined = leave as is; null = clear. */
+  parentIngredientId?: string | null;
+  /** Upserted per language; languages not listed are left alone. */
+  translations?: Array<{ lang: string; text: string }>;
+}
+
+/** Applies a naming change without touching anything else on the row —
+ *  unlike updateIngredient(), which rewrites every column from a full form. */
+export async function applyIngredientNaming(id: string, change: NamingChange): Promise<void> {
+  const row = await queryOne<{ id: string }>("SELECT id FROM ingredients WHERE id=$1 AND sync_status != 'deleted'", [id]);
+  if (!row) return;
+  if (typeof change.name === 'string' && change.name.trim()) {
+    await query("UPDATE ingredients SET name=$1, updated_at=now() WHERE id=$2", [change.name.trim(), id]);
+  }
+  if (change.parentIngredientId !== undefined) {
+    const parentId = await acyclicParent(id, change.parentIngredientId);
+    await query("UPDATE ingredients SET parent_ingredient_id=$1, updated_at=now() WHERE id=$2", [parentId, id]);
+  }
+  for (const t of change.translations ?? []) {
+    if (!t?.lang?.trim() || !t.text?.trim()) continue;
+    const existing = await queryOne<{ id: string }>(
+      "SELECT id FROM ingredient_translations WHERE ingredient_id=$1 AND LOWER(language_code)=LOWER($2)",
+      [id, t.lang.trim()]
+    );
+    if (existing) await query("UPDATE ingredient_translations SET translated_name=$1 WHERE id=$2", [t.text.trim(), existing.id]);
+    else await query(
+      "INSERT INTO ingredient_translations (id, ingredient_id, language_code, translated_name) VALUES ($1, $2, $3, $4)",
+      [newId(), id, t.lang.trim().toLowerCase(), t.text.trim()]
+    );
+  }
+  await query("UPDATE ingredients SET updated_at=now() WHERE id=$1", [id]);
+  syncIngredientInBackground(id);
+}
+
+export async function updateIngredient(id: string, d: IngredientInput): Promise<void> {
+  const parentIngredientId = await acyclicParent(id, d.parentIngredientId);
 
   await query(
     `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,

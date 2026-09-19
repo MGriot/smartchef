@@ -160,7 +160,22 @@
       "sectionNaming": "Denominazione",
       "sectionNamingHint": "I sinonimi lo rendono trovabile; le traduzioni gli danno un nome per lingua.",
       "moveUp": "Sposta su (corsia precedente)",
-      "moveDown": "Sposta giù (corsia successiva)"
+      "moveDown": "Sposta giù (corsia successiva)",
+      "nameEnglish": "Nome (inglese)",
+      "aiTranslate": "Traduci con l'AI",
+      "aiTranslating": "Traduzione…",
+      "autoTranslateHint": "Lascia vuote le traduzioni e l'AI le compilerà dal nome inglese al salvataggio.",
+      "tidyButton": "Riordina nomi con l'AI",
+      "tidyTitle": "Riordina i nomi degli ingredienti",
+      "tidySubtitle": "Nome inglese, generale → specifico → variante, un nome per lingua",
+      "tidyIntro": "L'AI esamina ogni ingrediente: lo rinomina secondo la convenzione del catalogo (inglese, es. \"Apple\" → \"Renetta Apple\" → \"Renetta Apple Slices\"), collega ogni ingrediente specifico a quello generale e compila le lingue mancanti. Le traduzioni esistenti non vengono mai sovrascritte. Controlli ogni modifica prima che venga applicata.",
+      "tidyAnalyse": "Analizza {{count}} ingredienti",
+      "tidyAnalysing": "Analisi… {{done}} / {{total}}",
+      "tidyApply": "Applica {{count}} modifiche",
+      "tidyApplying": "Applicazione… {{done}} / {{total}}",
+      "tidyNothing": "Tutto segue già la convenzione — niente da cambiare.",
+      "tidyDuplicate": "Diventerebbe \"{{name}}\", che esiste già — usa Unisci per combinarli.",
+      "tidyFailed": "La richiesta all'AI non è riuscita."
     },
     "common": {
       "gridView": "Vista a griglia",
@@ -554,7 +569,12 @@
     "matchLanguageHint": "Ingredienti, strumenti e tecniche qui sotto vengono confrontati con la tua libreria in questa lingua. Cambiala se i suggerimenti sembrano sbagliati.",
     "langUnsupported": "Questa ricetta sembra scritta in {{lang}}, una lingua per cui SmartChef non ha un catalogo. Scegli in quale lingua confrontarla e salvarla — i nomi restano comunque esattamente come sono scritti.",
     "rematching": "Nuovo confronto…",
-    "searchNoResults": "Nella tua libreria non c'è niente che corrisponda."
+    "searchNoResults": "Nella tua libreria non c'è niente che corrisponda.",
+    "newNameEnglish": "Nome in inglese",
+    "newName": "Nome",
+    "namingBusy": "Chiedo all'AI il nome di catalogo e le traduzioni…",
+    "varietyOf": "Varietà di {{name}}",
+    "translatedOnCreate": "Le traduzioni verranno generate dall'AI alla creazione."
   },
   "seasonality": {
     "hint": "Cosa è di stagione, mese per mese — modifica la stagionalità di un ingrediente dalla pagina Ingredienti.",

@@ -160,7 +160,22 @@
       "sectionNaming": "Denominación",
       "sectionNamingHint": "Los sinónimos lo hacen localizable; las traducciones le dan un nombre por idioma.",
       "moveUp": "Subir (pasillo anterior)",
-      "moveDown": "Bajar (pasillo siguiente)"
+      "moveDown": "Bajar (pasillo siguiente)",
+      "nameEnglish": "Nombre (inglés)",
+      "aiTranslate": "Traducir con IA",
+      "aiTranslating": "Traduciendo…",
+      "autoTranslateHint": "Deja las traducciones vacías y la IA las completará a partir del nombre en inglés al guardar.",
+      "tidyButton": "Ordenar nombres con IA",
+      "tidyTitle": "Ordenar los nombres de los ingredientes",
+      "tidySubtitle": "Nombre en inglés, general → específico → variante, un nombre por idioma",
+      "tidyIntro": "La IA revisa cada ingrediente: lo renombra según la convención del catálogo (inglés, p. ej. \"Apple\" → \"Renetta Apple\" → \"Renetta Apple Slices\"), enlaza cada ingrediente específico con el general y completa los idiomas que faltan. Las traducciones existentes nunca se sobrescriben. Revisas cada cambio antes de aplicarlo.",
+      "tidyAnalyse": "Analizar {{count}} ingredientes",
+      "tidyAnalysing": "Analizando… {{done}} / {{total}}",
+      "tidyApply": "Aplicar {{count}} cambios",
+      "tidyApplying": "Aplicando… {{done}} / {{total}}",
+      "tidyNothing": "Todo sigue ya la convención — nada que cambiar.",
+      "tidyDuplicate": "Pasaría a ser «{{name}}», que ya existe — usa Combinar para unirlos.",
+      "tidyFailed": "La solicitud a la IA ha fallado."
     },
     "common": {
       "gridView": "Vista de cuadrícula",
@@ -518,7 +533,12 @@
     "matchLanguageHint": "Los ingredientes, utensilios y técnicas de abajo se comparan con tu biblioteca en este idioma. Cámbialo si las sugerencias no cuadran.",
     "langUnsupported": "Esta receta parece escrita en {{lang}}, un idioma para el que SmartChef no tiene catálogo. Elige en qué idioma compararla y guardarla — los nombres se conservan tal cual en cualquier caso.",
     "rematching": "Comparando de nuevo…",
-    "searchNoResults": "No hay nada en tu biblioteca que coincida."
+    "searchNoResults": "No hay nada en tu biblioteca que coincida.",
+    "newNameEnglish": "Nombre en inglés",
+    "newName": "Nombre",
+    "namingBusy": "Pidiendo a la IA el nombre de catálogo y las traducciones…",
+    "varietyOf": "Variedad de {{name}}",
+    "translatedOnCreate": "La IA generará las traducciones al crearlo."
   },
   "login": {
     "signingIn": "Iniciando…",

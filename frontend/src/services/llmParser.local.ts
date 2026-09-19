@@ -445,7 +445,7 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
  *  a cloud provider selected with no key is a settings mistake the user
  *  needs told about, not a reason to silently spend a different provider's
  *  quota — same rule as the backend's callConfiguredProvider(). */
-async function callConfiguredProvider(content: string, systemPrompt: string, media?: ParseMedia): Promise<string> {
+export async function callConfiguredProvider(content: string, systemPrompt: string, media?: ParseMedia): Promise<string> {
   const settings = await getLlmSettings();
   // Checked before the key check on purpose: "Gemini can't do video" is
   // the more useful sentence than "no key saved" when both are true, since
@@ -473,7 +473,7 @@ async function callConfiguredProvider(content: string, systemPrompt: string, med
 // less: standalone mode is the configuration most likely to be pointed at
 // a small local model whose output runs into the token budget mid-array.
 
-function repairTruncatedJson(raw: string): string {
+export function repairTruncatedJson(raw: string): string {
   const stack: string[] = [];
   let inString = false;
   let escape = false;
