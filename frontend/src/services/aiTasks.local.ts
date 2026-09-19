@@ -11,12 +11,13 @@
 // provider Account → AI Provider has selected answers these too.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../i18n';
 import { callConfiguredProvider, repairTruncatedJson } from './llmParser.local';
 import { languageLabel } from '../lib/languages';
 
 function parseJsonObject(raw: string): any {
   const match = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
-  if (!match) throw new Error('The model did not return any JSON — try again, or switch provider.');
+  if (!match) throw new Error(i18n.t('errors.noJsonFromModel'));
   try {
     return JSON.parse(match[0]);
   } catch {
@@ -109,7 +110,8 @@ export interface IngredientNamingResult {
   name: string;
   /** The next-more-general ingredient's catalog name, or null. */
   parent: string | null;
-  /** Name per language code (includes 'en' = name). */
+  /** Name per requested language code; 'en' only when asked for, and then
+   *  always `name` itself. */
   translations: Record<string, string>;
 }
 
@@ -135,8 +137,8 @@ export function buildIngredientNamingPrompt(catalogNames: string[], langs: strin
     `"Lemon Zest" → "Lemon", "Apple" → null). Use it ONLY when it is a name from the catalog below or the "name" of another ` +
     `input item, copied exactly; otherwise null. Never make an ingredient its own parent.\n\n` +
     `"translations" maps each of these language codes to the ingredient's natural name in that language, as a cook would ` +
-    `write it on a shopping list, first letter capitalized: ${langList}. The "en" entry equals "name".\n\n` +
-    `Respond EXCLUSIVELY with JSON: {"items": [{"key": "...", "name": "...", "parent": "..." | null, "translations": {"en": "...", ...}}]}, ` +
+    `write it on a shopping list, first letter capitalized: ${langList}.${langs.includes('en') ? ' The "en" entry equals "name".' : ''}\n\n` +
+    `Respond EXCLUSIVELY with JSON: {"items": [{"key": "...", "name": "...", "parent": "..." | null, "translations": {"${langs[0] ?? 'it'}": "...", ...}}]}, ` +
     `one entry per input item, keys copied exactly.` +
     catalog
   );

@@ -14,6 +14,7 @@
 //     and git transport use.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../i18n';
 import { apiFetch, isNative } from '../lib/api';
 import { isStandaloneMode } from '../lib/standalone';
 import { nativeHttpRequest } from '../lib/nativeHttp';
@@ -171,10 +172,10 @@ export function assertImportableUrl(raw: string): URL {
   try {
     url = new URL(raw);
   } catch {
-    throw new Error('That does not look like a valid URL.');
+    throw new Error(i18n.t('errors.invalidUrl'));
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Only http and https addresses can be imported.');
+    throw new Error(i18n.t('errors.httpOnly'));
   }
   const host = url.hostname.toLowerCase();
   const blocked =
@@ -186,7 +187,7 @@ export function assertImportableUrl(raw: string): URL {
     /^169\.254\./.test(host) ||
     host === '::1' ||
     host.endsWith('.local');
-  if (blocked) throw new Error('That address is on a private network and cannot be imported.');
+  if (blocked) throw new Error(i18n.t('errors.privateNetwork'));
   return url;
 }
 
@@ -205,7 +206,7 @@ async function fetchViaNativeBridge(url: URL): Promise<string> {
     headers: isCaptionOnlyHost(url) ? CRAWLER_HEADERS : PAGE_HEADERS,
     timeoutMs: 30_000,
   });
-  if (res.statusCode >= 400) throw new Error(`The site returned HTTP ${res.statusCode}.`);
+  if (res.statusCode >= 400) throw new Error(i18n.t('errors.siteHttpStatus', { status: res.statusCode }));
   return decodeBody(res.body);
 }
 

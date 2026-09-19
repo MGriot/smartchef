@@ -31,6 +31,7 @@
 // what RecipeImport.tsx already casts the /api/recipes/parse response to,
 // so returning it here type-checks the wire contract instead of asserting
 // it.
+import i18n from '../i18n';
 import type { TemplateParseResult } from './recipeTemplateParser';
 import { loadImportCatalog, type ImportCatalog } from './importCatalog.local';
 import { getLlmSettings, DEFAULT_OLLAMA_URL, type LlmProvider } from '../lib/llmSettings';
@@ -304,7 +305,7 @@ export interface ParseMedia {
 function assertMediaSupported(provider: LlmProvider, media: ParseMedia): MediaKind {
   const kind = mediaKindFor(media.mimeType);
   if (!kind) {
-    throw new Error(`SmartChef doesn't know what to do with a ${media.mimeType || 'file of that type'} — use an image, a PDF, an audio file or a video.`);
+    throw new Error(i18n.t('media.unknownType', { type: media.mimeType || i18n.t('media.unknownTypeFallback') }));
   }
   // Approximate: 4 base64 characters carry 3 bytes.
   const bytes = Math.floor((media.data.length * 3) / 4);
@@ -356,7 +357,7 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('Anthropic', statusCode, text);
   const data = json as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
-  if (data?.stop_reason === 'refusal') throw new Error('Anthropic declined the request (safety classifier)');
+  if (data?.stop_reason === 'refusal') throw new Error(i18n.t('errors.anthropicDeclined'));
   return data?.content?.find((b) => b.type === 'text')?.text ?? '';
 }
 
@@ -453,15 +454,15 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
   if (media) assertMediaSupported(settings.provider, media);
 
   if (settings.provider === 'anthropic') {
-    if (!settings.keys.anthropic) throw new Error('Anthropic is selected but no API key is saved — add one under Account → AI Provider.');
+    if (!settings.keys.anthropic) throw new Error(i18n.t('errors.noApiKey', { provider: 'Anthropic' }));
     return callAnthropic(content, settings.keys.anthropic, systemPrompt, media);
   }
   if (settings.provider === 'gemini') {
-    if (!settings.keys.gemini) throw new Error('Google Gemini is selected but no API key is saved — add one under Account → AI Provider.');
+    if (!settings.keys.gemini) throw new Error(i18n.t('errors.noApiKey', { provider: 'Google Gemini' }));
     return callGemini(content, settings.keys.gemini, systemPrompt, media);
   }
   if (settings.provider === 'openai') {
-    if (!settings.keys.openai) throw new Error('OpenAI is selected but no API key is saved — add one under Account → AI Provider.');
+    if (!settings.keys.openai) throw new Error(i18n.t('errors.noApiKey', { provider: 'OpenAI' }));
     return callOpenAI(content, settings.keys.openai, systemPrompt, media);
   }
   return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, media);
@@ -523,7 +524,7 @@ export function repairTruncatedJson(raw: string): string {
 
 function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
   const jsonMatch = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
-  if (!jsonMatch) throw new Error('The model did not return any JSON — try again, or switch provider.');
+  if (!jsonMatch) throw new Error(i18n.t('errors.noJsonFromModel'));
 
   let parsed: any;
   try {
@@ -664,9 +665,9 @@ export async function parseRecipeLocally(req: LocalParseRequest): Promise<Templa
   // handwritten card, and it throws away the layout that tells a model
   // which column is the ingredient list.
   if (req.inputType === 'media') {
-    if (!req.media?.data) throw new Error('No file was attached.');
+    if (!req.media?.data) throw new Error(i18n.t('errors.noFileAttached'));
     const kind = mediaKindFor(req.media.mimeType);
-    if (!kind) throw new Error(`SmartChef doesn't know what to do with a ${req.media.mimeType || 'file of that type'}.`);
+    if (!kind) throw new Error(i18n.t('errors.unknownFileType', { type: req.media.mimeType || i18n.t('media.unknownTypeFallback') }));
     const extra = req.input.trim();
     const prompt = `${MEDIA_INSTRUCTION[kind]}${extra ? `
 

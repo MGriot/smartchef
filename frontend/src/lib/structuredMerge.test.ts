@@ -155,3 +155,62 @@ describe('mergeEntity — ADR 0006', () => {
     expect(result.conflicts.map((c) => c.fieldName)).toEqual(['tips']);
   });
 });
+
+describe('mergeEntity — modify/delete', () => {
+  const fields = ['title', 'sync_status'];
+  const base = { title: 'Pane', sync_status: 'local', updated_at: '2026-09-01 10:00:00' };
+
+  it('takes a deletion when the other side changed nothing', () => {
+    const result = mergeEntity(base, base, { ...base, sync_status: 'deleted', updated_at: '2026-09-02 10:00:00' }, fields, { policy: 'newest' });
+    expect(result.applied).toEqual({ sync_status: 'deleted' });
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it('asks when one side deleted and the other edited, under the ask policy', () => {
+    const local = { ...base, title: 'Pane casereccio', updated_at: '2026-09-03 10:00:00' };
+    const remote = { ...base, sync_status: 'deleted', updated_at: '2026-09-02 10:00:00' };
+    const result = mergeEntity(base, local, remote, fields, { policy: 'ask' });
+    expect(result.applied).toEqual({});
+    expect(result.conflicts.map((c) => c.fieldName)).toEqual(['sync_status']);
+  });
+
+  it('newest: an edit made after the deletion keeps the item', () => {
+    const local = { ...base, title: 'Pane casereccio', updated_at: '2026-09-03 10:00:00' };
+    const remote = { ...base, sync_status: 'deleted', updated_at: '2026-09-02 10:00:00' };
+    const result = mergeEntity(base, local, remote, fields, { policy: 'newest' });
+    expect(result.applied).toEqual({});
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it('newest: a deletion made after the edit wins', () => {
+    const local = { ...base, sync_status: 'deleted', updated_at: '2026-09-04 10:00:00' };
+    const remote = { ...base, title: 'Pane casereccio', updated_at: '2026-09-03 10:00:00' };
+    const result = mergeEntity(base, local, remote, fields, { policy: 'newest' });
+    expect(result.applied).toEqual({ title: 'Pane casereccio' });
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it('newest: an edit made after this device deleted brings the item back', () => {
+    const local = { ...base, sync_status: 'deleted', updated_at: '2026-09-02 10:00:00' };
+    const remote = { ...base, title: 'Pane casereccio', updated_at: '2026-09-03 10:00:00' };
+    const result = mergeEntity(base, local, remote, fields, { policy: 'newest' });
+    expect(result.applied).toEqual({ title: 'Pane casereccio', sync_status: 'local' });
+  });
+});
+
+describe('pickNewer — never leaves a decidable disagreement pending', () => {
+  it('a side with an edit time beats a side without one', async () => {
+    const { pickNewer } = await import('./structuredMerge');
+    expect(pickNewer(1000, null)).toBe('local');
+    expect(pickNewer(null, 1000)).toBe('remote');
+    expect(pickNewer(null, null)).toBeNull();
+    expect(pickNewer(1000, 1000)).toBeNull();
+    expect(pickNewer(2000, 1000)).toBe('local');
+  });
+
+  it('newest policy: a copy with no timestamp loses to one that has it', () => {
+    const result = mergeEntity({}, { title: 'Mine', updated_at: '2026-09-13 09:29:19' }, { title: 'Theirs' }, ['title'], { hasBase: false, policy: 'newest' });
+    expect(result.conflicts).toEqual([]);
+    expect(result.applied).toEqual({});
+  });
+});

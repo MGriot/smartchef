@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { isNative } from '../lib/api';
 import { isServerReachable } from '../lib/offlineSync';
 
 export default function OfflineBanner() {
+  const { t } = useTranslation();
   const [offline, setOffline] = useState(false);
   const [pending, setPending] = useState(0);
 
@@ -43,9 +45,9 @@ export default function OfflineBanner() {
     >
       {offline
         ? pending > 0
-          ? `Offline — ${pending} change${pending === 1 ? '' : 's'} will sync when reconnected`
-          : 'Offline — showing your last synced data'
-        : `Syncing ${pending} pending change${pending === 1 ? '' : 's'}…`}
+          ? t('offline.pending', { count: pending })
+          : t('offline.showingLast')
+        : t('offline.syncing', { count: pending })}
     </div>
   );
 }

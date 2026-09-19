@@ -38,6 +38,7 @@
 // module testable in a suite that has no DOM.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../i18n';
 import type { SyncInterval, SyncIntervalUnit, SyncMode } from './sync/syncSettings';
 
 /** Identifies the format. Also fed to AES-GCM as additional authenticated
@@ -163,7 +164,7 @@ function additionalData(version: number): Uint8Array {
 /** Encrypts `payload` into the text written to disk. */
 export async function encodeSetupFile(payload: SetupFilePayload, passphrase: string): Promise<string> {
   if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-    throw new SetupFileError('wrong-passphrase', `Passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters.`);
+    throw new SetupFileError('wrong-passphrase', i18n.t('setupFile.errors.passphraseTooShort', { count: MIN_PASSPHRASE_LENGTH }));
   }
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
@@ -197,16 +198,16 @@ function parseEnvelope(text: string): SetupFileEnvelope {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new SetupFileError('not-a-setup-file', 'That file is not a SmartChef setup file.');
+    throw new SetupFileError('not-a-setup-file', i18n.t('setupFile.errors.notSetupFile'));
   }
   const env = parsed as Partial<SetupFileEnvelope>;
   if (!env || typeof env !== 'object' || env.magic !== SETUP_FILE_MAGIC) {
-    throw new SetupFileError('not-a-setup-file', 'That file is not a SmartChef setup file.');
+    throw new SetupFileError('not-a-setup-file', i18n.t('setupFile.errors.notSetupFile'));
   }
   if (env.v !== SETUP_FILE_VERSION) {
     throw new SetupFileError(
       'unsupported-version',
-      'That setup file was written by a newer version of SmartChef. Update the app and try again.',
+      i18n.t('setupFile.errors.newerVersion'),
     );
   }
   if (
@@ -218,7 +219,7 @@ function parseEnvelope(text: string): SetupFileEnvelope {
     typeof env.kdf.salt !== 'string' ||
     typeof env.kdf.iterations !== 'number'
   ) {
-    throw new SetupFileError('corrupt', 'That setup file is damaged and cannot be read.');
+    throw new SetupFileError('corrupt', i18n.t('setupFile.errors.corrupt'));
   }
   return env as SetupFileEnvelope;
 }
@@ -227,13 +228,13 @@ function assertPayload(value: unknown): SetupFilePayload {
   const payload = value as Partial<SetupFilePayload>;
   const sync = payload?.sync;
   if (!sync || (sync.mode !== 'folder' && sync.mode !== 'git-remote')) {
-    throw new SetupFileError('invalid-contents', 'That setup file does not contain sync settings.');
+    throw new SetupFileError('invalid-contents', i18n.t('setupFile.errors.noSettings'));
   }
   // A file whose git-remote block is missing a URL would import as "Git
   // Remote mode, configured against nothing", which fails later and far
   // from here. Reject it while there is still context to explain it.
   if (sync.mode === 'git-remote' && !sync.gitRemote?.url) {
-    throw new SetupFileError('invalid-contents', 'That setup file is set to Git Remote mode but has no repository URL.');
+    throw new SetupFileError('invalid-contents', i18n.t('setupFile.errors.noRepoUrl'));
   }
   return payload as SetupFilePayload;
 }
@@ -257,13 +258,13 @@ export async function decodeSetupFile(text: string, passphrase: string): Promise
       buf(fromBase64(env.ct)),
     );
   } catch {
-    throw new SetupFileError('wrong-passphrase', 'Wrong passphrase, or the file has been altered.');
+    throw new SetupFileError('wrong-passphrase', i18n.t('setupFile.errors.wrongPassphrase'));
   }
   try {
     return assertPayload(JSON.parse(new TextDecoder().decode(plaintext)));
   } catch (err) {
     if (err instanceof SetupFileError) throw err;
-    throw new SetupFileError('corrupt', 'That setup file is damaged and cannot be read.');
+    throw new SetupFileError('corrupt', i18n.t('setupFile.errors.corrupt'));
   }
 }
 

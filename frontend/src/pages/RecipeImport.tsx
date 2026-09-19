@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import AppLayout from '../components/AppLayout';
 import CatalogSearchBox from '../components/CatalogSearchBox';
 import { useStore } from '../store/app.store';
@@ -77,7 +78,7 @@ interface Unit {
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.onerror = () => reject(new Error(i18n.t('import.readFileFailed')));
     reader.onload = () => {
       const result = String(reader.result ?? '');
       const comma = result.indexOf(',');
@@ -577,7 +578,7 @@ export default function RecipeImport() {
           ingredientId = resolution.id;
         } else {
           const catId = resolution?.categoryId || (await loadCategoriesOnce())[0]?.id;
-          if (!catId) throw new Error(`Pick a category for "${ing.name}"`);
+          if (!catId) throw new Error(t('import.pickCategoryFor', { name: ing.name }));
           const suggested = naming[i];
           const newName = newRowName(resolution, suggested?.name ?? ing.name);
           const already = createdIngredientIds.get(newName.toLowerCase());
@@ -599,7 +600,7 @@ export default function RecipeImport() {
               timeoutMs: useSuggestion ? undefined : 650_000,
             });
             const createJson = await createRes.json();
-            if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : `Could not create "${newName}"`);
+            if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : t('import.couldNotCreate', { name: newName }));
             ingredientId = createJson.data.id;
             createdIngredientIds.set(newName.toLowerCase(), ingredientId);
           }
@@ -634,7 +635,7 @@ export default function RecipeImport() {
             body: JSON.stringify({ name: newRowName(resolution, name) }),
           });
           const createJson = await createRes.json();
-          if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : `Could not create "${name}"`);
+          if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : t('import.couldNotCreate', { name }));
           toolId = createJson.data.id;
           isNew = true;
         }
@@ -655,7 +656,7 @@ export default function RecipeImport() {
             body: JSON.stringify({ name: newRowName(resolution, name) }),
           });
           const createJson = await createRes.json();
-          if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : `Could not create "${name}"`);
+          if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : t('import.couldNotCreate', { name }));
           techniqueId = createJson.data.id;
         }
         techniqueIdByName.set(name, techniqueId);

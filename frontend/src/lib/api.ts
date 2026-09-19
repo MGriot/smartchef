@@ -14,6 +14,7 @@
 // to be replayed once connectivity returns (see offlineSync.ts).
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../i18n';
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 
@@ -220,7 +221,7 @@ export async function apiFetch(path: string, init?: RequestInit & { timeoutMs?: 
   }
   const base = await getServerUrl();
   if (!base) {
-    throw new Error('No server configured — connect to your SmartChef server first.');
+    throw new Error(i18n.t('errors.noServer'));
   }
 
   const { timeoutMs = 10_000, ...fetchInit } = init ?? {};

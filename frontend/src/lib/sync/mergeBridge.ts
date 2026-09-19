@@ -27,6 +27,7 @@ import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
 import { gitCache } from './gitCache';
 import { mergeEntity } from '../structuredMerge';
+import { healEntitySides } from './referenceHeal';
 import {
   entityExists, createEntity, applyEntityMergeResult, getMergeableFieldNames, loadPendingConflictIndex, laterTimestamp, deleteConflict,
   listLocalEntityIds, forceApplyEntity, discardLocalEntity, clearAllConflicts,
@@ -295,17 +296,28 @@ export async function mergeRemoteIntoLocal(
     const localForMerge: Record<string, unknown> = { ...(localJson ?? {}) };
     for (const conflict of pending) localForMerge[conflict.fieldName] = conflict.localValue;
 
-    const merged = mergeEntity(baseJson ?? {}, localForMerge, remoteJson, fieldNames, {
+    // Unit/category references nobody can resolve borrow what the other
+    // sides hold for the same row — see referenceHeal.ts.
+    const healed = healEntitySides(entityType, baseJson ?? {}, localForMerge, remoteJson);
+    const merged = mergeEntity(healed.base, healed.local, healed.remote, fieldNames, {
       // Per entity, not per commit: an entity both devices created without
       // ever merging has no ancestor even when the commits share one.
       hasBase: baseJson !== null && localJson !== null,
       policy,
     });
+    // This device's own rows hold the unresolvable references: rewrite
+    // them from the healed value even where the merge found no change.
+    for (const field of healed.localHealed) {
+      if (!(field in merged.applied) && !merged.conflicts.some((c) => c.fieldName === field)) {
+        merged.applied[field] = healed.local[field];
+      }
+    }
     result.autoResolved += merged.autoResolved?.length ?? 0;
     // Pending conflicts this merge no longer finds conflicting — the other
     // device came round to this device's value, or a rule now settles it.
     const settledPending = pending.filter((c) => !merged.conflicts.some((m) => m.fieldName === c.fieldName));
-    if (Object.keys(merged.applied).length === 0 && merged.conflicts.length === 0 && settledPending.length === 0) {
+    const republish = healed.remoteHealed.length > 0;
+    if (Object.keys(merged.applied).length === 0 && merged.conflicts.length === 0 && settledPending.length === 0 && !republish) {
       return;
     }
 
@@ -316,8 +328,8 @@ export async function mergeRemoteIntoLocal(
         const outcome = await applyEntityMergeResult(entityType, id, merged, { localUpdatedAt, remoteUpdatedAt });
         for (const conflict of settledPending) await deleteConflict(conflict.id);
         if (outcome.appliedFields.length > 0) result.entitiesUpdated++;
-        if (outcome.appliedFields.length > 0 || outcome.conflictsRecorded > 0 || settledPending.length > 0) {
-          const finalFields: Record<string, unknown> = { ...localForMerge, ...merged.applied };
+        if (outcome.appliedFields.length > 0 || outcome.conflictsRecorded > 0 || settledPending.length > 0 || republish) {
+          const finalFields: Record<string, unknown> = { ...healed.local, ...merged.applied };
           if (outcome.appliedFields.length > 0) finalFields.updated_at = laterTimestamp(localUpdatedAt, remoteUpdatedAt) ?? finalFields.updated_at;
           // Fields now in conflict go into the tree as the remote's value
           // until the user picks — see overlayPendingConflicts().
@@ -333,9 +345,9 @@ export async function mergeRemoteIntoLocal(
         // complete remote row, not just the subset mergeEntity() happened
         // to consider — createEntity() itself still allowlists/drops
         // whole-array fields, same safety net as the merge path.
-        await createEntity(entityType, id, remoteJson);
+        await createEntity(entityType, id, healed.remote);
         result.entitiesCreated++;
-        result.touchedEntities.push({ entityType, entityId: id, finalFields: remoteJson });
+        result.touchedEntities.push({ entityType, entityId: id, finalFields: healed.remote });
       }
       // Neither exists locally nor has a remote value to create from
       // shouldn't be reachable (id came from one of the two file lists),
@@ -343,6 +355,17 @@ export async function mergeRemoteIntoLocal(
     } catch (err) {
       console.error(`SmartChef: failed to write merged ${entityType} ${id} into Local Storage:`, err);
       result.failedEntities.push({ entityType, entityId: id, error: err instanceof Error ? err.message : String(err) });
+      // The merge result still goes into the tree. Keeping this device's old
+      // file instead, under a merge commit that names the remote as parent,
+      // told every device the remote's change had been undone here. The
+      // database catches up from HEAD on the next sync (sync_repair).
+      if (!result.touchedEntities.some((t) => t.entityType === entityType && t.entityId === id)) {
+        const finalFields: Record<string, unknown> = localJson === null
+          ? healed.remote
+          : { ...healed.local, ...merged.applied, updated_at: laterTimestamp(localJson.updated_at as string, remoteJson.updated_at as string) ?? healed.local.updated_at };
+        for (const conflict of merged.conflicts) finalFields[conflict.fieldName] = conflict.remoteValue;
+        result.touchedEntities.push({ entityType, entityId: id, finalFields });
+      }
     }
   }
 

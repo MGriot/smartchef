@@ -77,7 +77,17 @@ export async function syncRecipe(id: string): Promise<void> {
     );
     const steps = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number, id', [id]);
     const toolRows = await query<{ tool_id: string }>('SELECT tool_id FROM recipe_tools WHERE recipe_id=$1', [id]);
-    const [{ writeEntityFile }, extras] = await Promise.all([import('../lib/sync/gitSync'), import('./syncExtras.local')]);
+    const [{ writeEntityFile }, extras, { unitSymbolsFromSteps, hasUnknownUnit }] = await Promise.all([
+      import('../lib/sync/gitSync'), import('./syncExtras.local'), import('../lib/sync/referenceHeal'),
+    ]);
+    // A row still pointing at a unit id this device doesn't have would be
+    // written with no symbol, which no device can resolve. The recipe's own
+    // step amounts carry id and symbol together — use them when they can.
+    const stepSymbols = unitSymbolsFromSteps(steps);
+    for (const r of ingredients) {
+      const symbol = hasUnknownUnit(r) ? stepSymbols.get(r.unit_id as string) : undefined;
+      if (symbol) Object.assign(r, { unit_id: extras.portableUnitId(symbol), unit_symbol: symbol });
+    }
     // Translations travel inside the recipe's own file — the recipe's, and
     // each step's and ingredient row's — so a recipe never arrives on another
     // device without them (ADR 0006).

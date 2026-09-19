@@ -134,7 +134,7 @@ export function TranslationRows<T extends LangEntry>({
   onChange,
   textKey = 'name' as keyof T & string,
   emptyLabel,
-  langPlaceholder = 'EN',
+  langPlaceholder = 'IT',
   textPlaceholder,
 }: {
   value: T[];
@@ -159,7 +159,8 @@ export function TranslationRows<T extends LangEntry>({
   return (
     <div className="space-y-2.5">
       {value.map((row, i) => (
-        <div key={i} className="flex items-center gap-2">
+        <div key={i}>
+          <div className="flex items-center gap-2">
           <input
             type="text"
             maxLength={3}
@@ -183,6 +184,11 @@ export function TranslationRows<T extends LangEntry>({
           >
             <span className="material-symbols-outlined text-[20px]">close</span>
           </button>
+          </div>
+          {/* Catalog names are English already: an "en" row only repeats them. */}
+          {row.lang.trim().toLowerCase() === 'en' && (
+            <p className="sc-hint mt-1 pl-1 text-amber-600 dark:text-amber-400">{t('common.englishIsBase')}</p>
+          )}
         </div>
       ))}
     </div>

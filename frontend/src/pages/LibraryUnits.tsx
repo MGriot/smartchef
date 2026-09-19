@@ -95,16 +95,16 @@ export default function LibraryUnits() {
         setShowModal(false);
         fetchUnits();
       } else {
-        alert(`Save failed: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.shared.saveFailed', { error: JSON.stringify(result.error || result) }));
       }
     } catch (err) {
       console.error('Save failed:', err);
-      alert('Network error while saving units.');
+      alert(t('library.shared.networkErrorSaving'));
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this unit?')) return;
+    if (!window.confirm(t('library.units.confirmDelete'))) return;
     try {
       const res = await apiFetch(`/api/units/${id}`, { method: 'DELETE' });
       if (res.ok) fetchUnits();
@@ -118,12 +118,12 @@ export default function LibraryUnits() {
       <AppLayout librarySection="units">
           <div className="flex justify-between items-end mb-10">
              <div>
-              <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">SmartChef Atelier</p>
-              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">Units & Scales</h1>
+              <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">{t('library.units.eyebrow')}</p>
+              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">{t('library.units.heading')}</h1>
             </div>
             <button onClick={() => handleOpenModal()} className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95">
               <span className="material-symbols-outlined text-xl">add_circle</span>
-              Register Unit
+              {t('library.units.addNew')}
             </button>
           </div>
 
@@ -139,7 +139,7 @@ export default function LibraryUnits() {
           <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
             {view === 'grid' ? (
               loading ? (
-                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading units...</p>
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.units.loading')}</p>
               ) : visibleUnits.length === 0 ? (
                 <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.common.empty')}</p>
               ) : (
@@ -157,15 +157,15 @@ export default function LibraryUnits() {
                       </p>
                       <div className="flex items-center justify-center gap-1.5 mt-2">
                         <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${u.system === 'metric' ? 'bg-primary/10 text-primary' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}`}>
-                          {u.system || 'N/A'}
+                          {u.system ? t(`library.units.systemsShort.${u.system}`, { defaultValue: u.system }) : t('library.units.notSet')}
                         </span>
-                        <span className="text-[9px] font-black uppercase text-zinc-400 dark:text-zinc-500">{u.unit_type}</span>
+                        <span className="text-[9px] font-black uppercase text-zinc-400 dark:text-zinc-500">{u.unit_type ? t(`library.units.types.${u.unit_type}`, { defaultValue: u.unit_type }) : ''}</span>
                       </div>
                       <div className="flex justify-center gap-1 mt-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                        <button onClick={() => handleOpenModal(u)} title="Edit" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                        <button onClick={() => handleOpenModal(u)} title={t('common.edit')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                           <span className="material-symbols-outlined text-[18px]">edit</span>
                         </button>
-                        <button onClick={() => handleDelete(u.id)} title="Delete" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
+                        <button onClick={() => handleDelete(u.id)} title={t('common.delete')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
                           <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
                       </div>
@@ -178,15 +178,15 @@ export default function LibraryUnits() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-zinc-100 dark:border-zinc-800">
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-4">Unit</th>
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest text-center">System</th>
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Type</th>
-                    <th className="text-right py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pr-4">Actions</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-4">{t('library.units.unit')}</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest text-center">{t('library.units.system')}</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{t('library.units.type')}</th>
+                    <th className="text-right py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pr-4">{t('library.shared.actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">
                   {loading ? (
-                    <tr><td colSpan={4} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading units...</td></tr>
+                    <tr><td colSpan={4} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.units.loading')}</td></tr>
                   ) : visibleUnits.map((u: any) => (
                     <tr key={u.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
                       <td className="py-6 pl-4">
@@ -195,10 +195,10 @@ export default function LibraryUnits() {
                       </td>
                       <td className="py-6 text-center">
                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${u.system === 'metric' ? 'bg-primary/10 text-primary' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}`}>
-                          {u.system || 'N/A'}
+                          {u.system ? t(`library.units.systemsShort.${u.system}`, { defaultValue: u.system }) : t('library.units.notSet')}
                         </span>
                       </td>
-                      <td className="py-6 capitalize font-bold text-xs text-zinc-600 dark:text-zinc-400">{u.unit_type}</td>
+                      <td className="py-6 capitalize font-bold text-xs text-zinc-600 dark:text-zinc-400">{u.unit_type ? t(`library.units.types.${u.unit_type}`, { defaultValue: u.unit_type }) : ''}</td>
                       <td className="py-6 text-right pr-4">
                          <div className="flex justify-end gap-2">
                             <button onClick={() => handleOpenModal(u)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
@@ -223,27 +223,27 @@ export default function LibraryUnits() {
         onClose={() => setShowModal(false)}
         onSubmit={handleSave}
         size="md"
-        title={editingUnit ? 'Edit Unit' : 'Define New Scale'}
-        subtitle="Units convert against a base unit of the same type."
+        title={editingUnit ? t('library.units.editTitle') : t('library.units.newTitle')}
+        subtitle={t('library.units.modalSubtitle')}
         footer={
           <>
-            <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
-            <ModalSubmitButton>{editingUnit ? 'Update System' : 'Apply Scale'}</ModalSubmitButton>
+            <ModalCancelButton onClick={() => setShowModal(false)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton>{editingUnit ? t('library.units.update') : t('library.units.add')}</ModalSubmitButton>
           </>
         }
       >
         <div className="space-y-8">
-          <FormSection title="Identity">
+          <FormSection title={t('library.shared.sectionIdentity')}>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field label="Full Name" className="sm:col-span-2">
+              <Field label={t('library.units.fullName')} className="sm:col-span-2">
                 <input
                   type="text" required value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Milliliter"
+                  placeholder={t('library.units.fullNamePlaceholder')}
                   className="sc-field"
                 />
               </Field>
-              <Field label="Symbol">
+              <Field label={t('library.units.symbol')}>
                 <input
                   type="text" required value={form.symbol}
                   onChange={e => setForm({ ...form, symbol: e.target.value })}
@@ -254,36 +254,36 @@ export default function LibraryUnits() {
             </div>
           </FormSection>
 
-          <FormSection title="Measurement">
+          <FormSection title={t('library.units.measurement')}>
             <FieldRow>
-              <Field label="Type">
+              <Field label={t('library.units.type')}>
                 <select
                   value={form.unitType}
                   onChange={e => setForm({ ...form, unitType: e.target.value })}
                   className="sc-field cursor-pointer"
                 >
-                  <option value="volume">Volume</option>
-                  <option value="weight">Weight</option>
-                  <option value="length">Length</option>
-                  <option value="temperature">Temperature</option>
-                  <option value="count">Count / Each</option>
+                  <option value="volume">{t('library.units.types.volume')}</option>
+                  <option value="weight">{t('library.units.types.weight')}</option>
+                  <option value="length">{t('library.units.types.length')}</option>
+                  <option value="temperature">{t('library.units.types.temperature')}</option>
+                  <option value="count">{t('library.units.types.count')}</option>
                 </select>
               </Field>
-              <Field label="Measurement System">
+              <Field label={t('library.units.measurementSystem')}>
                 <select
                   value={form.system}
                   onChange={e => setForm({ ...form, system: e.target.value })}
                   className="sc-field cursor-pointer"
                 >
-                  <option value="metric">Metric (SI)</option>
-                  <option value="imperial">Imperial / US</option>
-                  <option value="custom">Artisanal / Custom</option>
+                  <option value="metric">{t('library.units.systems.metric')}</option>
+                  <option value="imperial">{t('library.units.systems.imperial')}</option>
+                  <option value="custom">{t('library.units.systems.custom')}</option>
                 </select>
               </Field>
             </FieldRow>
             <Field
-              label="Conversion Factor (to base)"
-              hint="How many base units of this type one of this unit is worth — 1 for the base unit itself."
+              label={t('library.units.factor')}
+              hint={t('library.units.factorHint')}
             >
               <input
                 type="number" step="any" value={form.toBaseFactor}
@@ -294,15 +294,15 @@ export default function LibraryUnits() {
           </FormSection>
 
           <FormSection
-            title="Translations"
-            description="A name per language; the symbol stays the same everywhere."
-            action={<AddLangButton onClick={addTranslation} label="Add Lang" />}
+            title={t('library.shared.translations')}
+            description={t('library.units.translationsHint')}
+            action={<AddLangButton onClick={addTranslation} label={t('library.shared.addLang')} />}
           >
             <TranslationRows
               value={translations}
               onChange={setTranslations}
-              emptyLabel="No translations added."
-              textPlaceholder="Translated name"
+              emptyLabel={t('library.shared.noTranslations')}
+              textPlaceholder={t('library.shared.translatedNamePlaceholder')}
             />
           </FormSection>
         </div>

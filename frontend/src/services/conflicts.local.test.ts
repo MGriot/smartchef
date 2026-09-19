@@ -230,14 +230,15 @@ describe('upsertConflict', () => {
 });
 
 describe('resolveConflict', () => {
-  it('deletes the conflict and reports the chosen value', async () => {
+  it('reports the chosen value and keeps the conflict until the value is applied', async () => {
     await upsertConflict({ entityType: 'ingredient', entityId: 'i1', fieldName: 'calories_kcal', baseValue: 110, localValue: 120, remoteValue: 95 });
     const [{ id }] = await listPendingConflicts();
 
     const resolved = await resolveConflict(id, 'remote');
 
-    expect(resolved).toEqual({ entityType: 'ingredient', entityId: 'i1', fieldName: 'calories_kcal', chosenValue: 95 });
-    expect(await listPendingConflicts()).toHaveLength(0);
+    expect(resolved).toEqual({ entityType: 'ingredient', entityId: 'i1', fieldName: 'calories_kcal', chosenValue: 95, conflictId: id });
+    // A write that fails after this point must not lose the conflict.
+    expect(await listPendingConflicts()).toHaveLength(1);
   });
 
   it('resolving "local" reports the local value, not the remote one', async () => {

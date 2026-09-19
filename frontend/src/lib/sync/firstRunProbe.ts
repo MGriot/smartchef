@@ -46,6 +46,7 @@
 // reports that by returning `supported: false`.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../../i18n';
 import * as git from 'isomorphic-git';
 import { gitfs } from '../gitfs';
 import { gitCache, resetGitCache } from './gitCache';
@@ -178,7 +179,7 @@ export async function probeFirstRunProfiles(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`Timed out after ${PROBE_TIMEOUT_MS / 1000}s while reading the library's profiles.`)),
+      () => reject(new Error(i18n.t('errors.probeTimeout', { seconds: PROBE_TIMEOUT_MS / 1000 }))),
       PROBE_TIMEOUT_MS
     );
   });

@@ -21,6 +21,7 @@
 // server URL, so there is nothing to move between.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../i18n';
 import { setServerUrl } from './api';
 
 /** Trailing slashes stripped; a bare host gets https:// so "box.ts.net"
@@ -146,7 +147,7 @@ export async function migrateServerToOffline(opts: {
   if (!res.ok) throw new Error(await readError(res, 'Export failed'));
   const snapshot = (await res.json()).data;
   if (!snapshot || typeof snapshot !== 'object') {
-    throw new Error('The server sent back something that is not a library snapshot.');
+    throw new Error(i18n.t('errors.notSnapshot'));
   }
 
   opts.onStage?.('Saving it on this device…');

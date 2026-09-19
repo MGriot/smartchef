@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import Modal, { ModalCancelButton, ModalSubmitButton } from './Modal';
 import { Field } from './Form';
 import {
@@ -38,6 +39,7 @@ function PassphraseInput({
   placeholder?: string;
   autoFocus?: boolean;
 }) {
+  const { t } = useTranslation();
   const [shown, setShown] = useState(false);
   return (
     <div className="relative">
@@ -56,7 +58,7 @@ function PassphraseInput({
       <button
         type="button"
         onClick={() => setShown((v) => !v)}
-        aria-label={shown ? 'Hide passphrase' : 'Show passphrase'}
+        aria-label={shown ? t('setupFile.hidePassphrase') : t('setupFile.showPassphrase')}
         className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
       >
         <span className="material-symbols-outlined text-[20px]">{shown ? 'visibility_off' : 'visibility'}</span>
@@ -74,6 +76,7 @@ export function ExportSetupFileDialog({
   onClose: () => void;
   deviceName?: string | null;
 }) {
+  const { t } = useTranslation();
   const [passphrase, setPassphrase] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
@@ -107,7 +110,7 @@ export function ExportSetupFileDialog({
       setPassphrase('');
       setConfirm('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create the setup file.');
+      setError(err instanceof Error ? err.message : t('setupFile.createFailed'));
     } finally {
       setBusy(false);
     }
@@ -117,18 +120,18 @@ export function ExportSetupFileDialog({
     <Modal
       open={open}
       onClose={close}
-      title="Export a setup file"
-      subtitle="Carry this device's sync settings to another one"
+      title={t('setupFile.exportTitle')}
+      subtitle={t('setupFile.exportSubtitle')}
       size="sm"
       onSubmit={saved ? undefined : handleSubmit}
       footer={
         saved ? (
-          <ModalSubmitButton type="button" onClick={close}>Done</ModalSubmitButton>
+          <ModalSubmitButton type="button" onClick={close}>{t('setupFile.done')}</ModalSubmitButton>
         ) : (
           <>
-            <ModalCancelButton onClick={close}>Cancel</ModalCancelButton>
+            <ModalCancelButton onClick={close}>{t('common.cancel')}</ModalCancelButton>
             <ModalSubmitButton disabled={!canSubmit}>
-              {busy ? 'Encrypting…' : 'Create file'}
+              {busy ? t('setupFile.encrypting') : t('setupFile.createFile')}
             </ModalSubmitButton>
           </>
         )
@@ -139,43 +142,37 @@ export function ExportSetupFileDialog({
           <div className="flex items-start gap-3 p-4 rounded-2xl bg-primary/5 border border-primary/15">
             <span className="material-symbols-outlined text-primary">lock</span>
             <div className="min-w-0">
-              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Setup file created</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t('setupFile.created')}</p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 break-words">
                 {saved.location
-                  ? `Saved to ${saved.location}`
-                  : `Saved as ${saved.fileName} wherever your browser puts downloads.`}
+                  ? t('setupFile.savedTo', { location: saved.location })
+                  : t('setupFile.savedAs', { fileName: saved.fileName })}
               </p>
             </div>
           </div>
           <p className="sc-hint">
-            Move it to your other device however you like, then choose it there — on first run, or
-            from Account → Folder Sync. You will need the same passphrase to open it, and there is
-            no way to recover it, so keep it somewhere you trust.
+            {t('setupFile.createdHint')}
           </p>
         </div>
       ) : (
         <div className="space-y-4">
           <p className="sc-hint">
-            The file holds this device&apos;s sync mode, how often it syncs, and — in Git Remote
-            mode — the repository URL, username and access token. It is encrypted with the
-            passphrase you choose here: only SmartChef can read the format, and only this
-            passphrase can unlock it.
+            {t('setupFile.exportIntro')}
           </p>
-          <Field label="Passphrase" htmlFor="setup-passphrase" hint={`At least ${MIN_PASSPHRASE_LENGTH} characters.`}>
+          <Field label={t('setupFile.passphrase')} htmlFor="setup-passphrase" hint={t('setupFile.passphraseHint', { count: MIN_PASSPHRASE_LENGTH })}>
             <PassphraseInput id="setup-passphrase" value={passphrase} onChange={setPassphrase} autoFocus />
           </Field>
-          <Field label="Confirm passphrase" htmlFor="setup-passphrase-confirm">
+          <Field label={t('setupFile.confirmPassphrase')} htmlFor="setup-passphrase-confirm">
             <PassphraseInput id="setup-passphrase-confirm" value={confirm} onChange={setConfirm} />
           </Field>
           {tooShort && (
             <p className="text-sm text-amber-600 font-medium">
-              Use at least {MIN_PASSPHRASE_LENGTH} characters.
+              {t('setupFile.tooShort', { count: MIN_PASSPHRASE_LENGTH })}
             </p>
           )}
-          {mismatch && <p className="text-sm text-amber-600 font-medium">The two passphrases don&apos;t match.</p>}
+          {mismatch && <p className="text-sm text-amber-600 font-medium">{t('setupFile.mismatch')}</p>}
           <p className="sc-hint">
-            Your sync folder itself isn&apos;t included — a folder path or an Android folder
-            permission means nothing on another device, so that one step is still chosen there.
+            {t('setupFile.folderNotIncluded')}
           </p>
           {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
         </div>
@@ -195,6 +192,7 @@ export function ImportSetupFileDialog({
    *  its own view of them (or move a first-run flow forward). */
   onImported: (applied: AppliedSetup) => void;
 }) {
+  const { t } = useTranslation();
   const [file, setFile] = useState<File | null>(null);
   const [passphrase, setPassphrase] = useState('');
   const [busy, setBusy] = useState(false);
@@ -225,7 +223,7 @@ export function ImportSetupFileDialog({
           ? err.message
           : err instanceof Error
             ? err.message
-            : 'Could not read that setup file.',
+            : t('setupFile.readFailed'),
       );
     } finally {
       setBusy(false);
@@ -236,15 +234,15 @@ export function ImportSetupFileDialog({
     <Modal
       open={open}
       onClose={close}
-      title="Use a setup file"
-      subtitle="Apply sync settings exported from another device"
+      title={t('setupFile.importTitle')}
+      subtitle={t('setupFile.importSubtitle')}
       size="sm"
       onSubmit={handleSubmit}
       footer={
         <>
-          <ModalCancelButton onClick={close}>Cancel</ModalCancelButton>
+          <ModalCancelButton onClick={close}>{t('common.cancel')}</ModalCancelButton>
           <ModalSubmitButton disabled={!file || !passphrase || busy}>
-            {busy ? 'Opening…' : 'Apply settings'}
+            {busy ? t('setupFile.opening') : t('setupFile.apply')}
           </ModalSubmitButton>
         </>
       }
@@ -258,10 +256,10 @@ export function ImportSetupFileDialog({
           <span className="material-symbols-outlined text-primary">upload_file</span>
           <span className="min-w-0">
             <span className="block text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">
-              {file ? file.name : 'Choose a setup file'}
+              {file ? file.name : t('setupFile.choose')}
             </span>
             <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">
-              {file ? 'Tap to choose a different one' : `A ${SETUP_FILE_EXTENSION} file from your other device`}
+              {file ? t('setupFile.chooseAnother') : t('setupFile.fileHint', { ext: SETUP_FILE_EXTENSION })}
             </span>
           </span>
         </button>
@@ -282,15 +280,14 @@ export function ImportSetupFileDialog({
           }}
         />
 
-        <Field label="Passphrase" htmlFor="import-passphrase" hint="The one used when the file was created.">
+        <Field label={t('setupFile.passphrase')} htmlFor="import-passphrase" hint={t('setupFile.importPassphraseHint')}>
           <PassphraseInput id="import-passphrase" value={passphrase} onChange={setPassphrase} />
         </Field>
 
         {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
 
         <p className="sc-hint">
-          This replaces the sync settings on this device only. Nothing in your recipe library is
-          touched, and the device the file came from carries on unchanged.
+          {t('setupFile.importHint')}
         </p>
       </div>
     </Modal>

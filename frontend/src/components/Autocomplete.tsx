@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import i18n from '../i18n';
 
 export interface AutocompleteOption {
   id: string;
@@ -150,7 +151,7 @@ export default function Autocomplete({ options, value, onSelect, onClear, placeh
               onClick={handleCreateNew}
               className="w-full text-left px-4 py-2 text-sm font-bold text-primary hover:bg-primary/5 transition-colors border-t border-zinc-100 dark:border-zinc-800"
             >
-              {createNewLabel ? createNewLabel(trimmedQuery) : `+ Create "${trimmedQuery}"`}
+              {createNewLabel ? createNewLabel(trimmedQuery) : i18n.t('common.createNamed', { name: trimmedQuery })}
             </button>
           )}
         </div>

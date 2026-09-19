@@ -778,6 +778,27 @@ CREATE TABLE IF NOT EXISTS sync_conflicts (
   UNIQUE(entity_type, entity_id, field_name)
 );
 CREATE INDEX IF NOT EXISTS idx_sync_conflicts_entity ON sync_conflicts(entity_type, entity_id);
+
+-- Two-way reconciliation (services/syncReconcile.local.ts). Local-only.
+-- sync_index: the row's updated_at as of the last time its entity file was
+-- written from (or applied to) this database. A row whose updated_at no
+-- longer matches changed without reaching the repo and is re-published.
+CREATE TABLE IF NOT EXISTS sync_index (
+  entity_type TEXT NOT NULL,
+  entity_id   TEXT NOT NULL,
+  updated_at  TEXT,
+  PRIMARY KEY (entity_type, entity_id)
+);
+-- sync_repair: entities whose file is in the repo but whose write into this
+-- database failed during a merge. Re-applied from HEAD every sync until
+-- they succeed.
+CREATE TABLE IF NOT EXISTS sync_repair (
+  entity_type TEXT NOT NULL,
+  entity_id   TEXT NOT NULL,
+  error       TEXT,
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (entity_type, entity_id)
+);
 `;
 
 // A small, sensible starting catalog so the app isn't a totally empty

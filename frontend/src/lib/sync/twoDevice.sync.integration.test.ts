@@ -553,4 +553,198 @@ describe('two devices syncing through one Sync Folder', { timeout: 60_000 }, () 
     const langs = (await api.query<{ language_code: string }>(`SELECT language_code FROM recipe_translations WHERE recipe_id = 'r1' ORDER BY language_code`)).map((r) => r.language_code);
     expect(langs).toEqual(['en', 'es', 'fr']);
   });
+  it('heals unit and category ids only one device can resolve — both devices end up with units and categories', async () => {
+    const a = await newDevice('a');
+    const b = await newDevice('b');
+    const unitsOf = (api: DeviceApi) => api.query<{ id: string; symbol: string | null }>(
+      `SELECT ri.id, u.symbol FROM recipe_ingredients ri LEFT JOIN units u ON u.id = ri.unit_id WHERE ri.recipe_id = 'r1' ORDER BY ri.sort_order`
+    );
+    const categoryOf = async (api: DeviceApi) => (await api.queryOne<{ name: string | null }>(
+      `SELECT c.name FROM ingredients i LEFT JOIN ingredient_categories c ON c.id = i.category_id WHERE i.id = 'ing-1'`
+    ))?.name ?? null;
+
+    // A — the healthy device: portable units and categories.
+    let api = await on(a);
+    await api.createEntity('ingredient', 'ing-1', { id: 'ing-1', name: 'Farina', category_id: 'cat-frutta' });
+    await api.syncIngredient('ing-1');
+    await createRecipe(api, 'r1', {
+      title: 'Fekkas',
+      ingredients: [
+        { id: 'ri-1', sort_order: 0, ingredient_id: 'ing-1', quantity: 620, unit_id: 'unit-g', unit_symbol: 'g' },
+        { id: 'ri-2', sort_order: 1, ingredient_id: null, quantity_text: 'uova', quantity: 4, unit_id: 'unit-pz', unit_symbol: 'pz' },
+      ],
+    });
+    expect((await unitsOf(api)).map((r) => r.symbol)).toEqual(['g', 'pz']);
+    expect(await categoryOf(api)).toBe('Frutta');
+    await api.syncNow();
+
+    // B — the phone: same content, but its rows point at the random ids it
+    // had before portable ids existed, so its files carry no symbol/name.
+    api = await on(b);
+    await api.syncNow();
+    await api.query(`UPDATE recipe_ingredients SET unit_id = '2152e3cc861f7d77969a3d8f739f4e03' WHERE id = 'ri-1'`);
+    await api.query(`UPDATE recipe_ingredients SET unit_id = 'c81f0baf77a35a1d2ae8f7d5740c72ab' WHERE id = 'ri-2'`);
+    await api.query(`UPDATE ingredients SET category_id = 'a25e3f52e12a501384d7a74f355c1a27' WHERE id = 'ing-1'`);
+    await api.syncRecipe('r1');
+    await api.syncIngredient('ing-1');
+    expect((await unitsOf(api)).map((r) => r.symbol)).toEqual([null, null]);
+
+    // B publishes them — it has nothing new to fetch, so this only pushes.
+    await api.syncNow();
+
+    // A merges B's commit: the unresolvable ids are not an edit, so A keeps
+    // its units, asks nothing, and never stores B's ids.
+    api = await on(a);
+    const onA = await api.syncNow();
+    expect(onA.conflicts).toBe(0);
+    expect((await unitsOf(api)).map((r) => r.symbol)).toEqual(['g', 'pz']);
+    expect(await categoryOf(api)).toBe('Frutta');
+    expect(await api.listPendingConflicts()).toEqual([]);
+
+    // B takes A's merge: its own dangling references borrow A's resolvable ones.
+    api = await on(b);
+    const onB = await api.syncNow();
+    expect(onB.conflicts).toBe(0);
+    expect((await unitsOf(api)).map((r) => r.symbol)).toEqual(['g', 'pz']);
+    expect(await categoryOf(api)).toBe('Frutta');
+    expect(await api.listPendingConflicts()).toEqual([]);
+
+    // And the repaired rows are what B now publishes.
+    const git = await import('isomorphic-git');
+    const { gitfs } = await import('../gitfs');
+    await api.syncNow();
+    const head = await git.resolveRef({ fs: gitfs, dir: '/clone', gitdir: '/clone/.git', ref: 'HEAD' });
+    const { blob } = await git.readBlob({ fs: gitfs, dir: '/clone', gitdir: '/clone/.git', oid: head, filepath: 'recipes/r1.json' });
+    const file = JSON.parse(new TextDecoder().decode(blob)) as { ingredients: Array<{ unit_symbol?: string }> };
+    expect(file.ingredients.map((r) => r.unit_symbol)).toEqual(['g', 'pz']);
+  });
+
+  it('settles a backlog of false unit conflicts recorded before healing existed', async () => {
+    const a = await newDevice('a');
+    let api = await on(a);
+    await createRecipe(api, 'r1', {
+      title: 'Fekkas',
+      ingredients: [{ id: 'ri-1', sort_order: 0, ingredient_id: null, quantity: 620, unit_id: 'unit-g', unit_symbol: 'g' }],
+    });
+    const local = [{ id: 'ri-1', sort_order: 0, ingredient_id: null, quantity: 620, unit_id: 'unit-g', unit_symbol: 'g' }];
+    const remote = [{ id: 'ri-1', sort_order: 0, ingredient_id: null, quantity: 620, unit_id: '2152e3cc861f7d77969a3d8f739f4e03' }];
+    await api.upsertConflict({ entityType: 'recipe', entityId: 'r1', fieldName: 'ingredients', baseValue: null, localValue: local, remoteValue: remote });
+    await api.upsertConflict({ entityType: 'ingredient', entityId: 'ing-x', fieldName: 'category_id', baseValue: null, localValue: 'cat-other', remoteValue: 'a25e3f52' });
+    const outcome = await api.autoResolvePendingConflicts('ask');
+    expect(outcome).toEqual({ resolved: 2, remaining: 0 });
+    expect(await api.listPendingConflicts()).toEqual([]);
+    const unit = await api.queryOne<{ symbol: string }>(`SELECT u.symbol FROM recipe_ingredients ri JOIN units u ON u.id = ri.unit_id WHERE ri.id = 'ri-1'`);
+    expect(unit?.symbol).toBe('g');
+  });
+  it('fast-forwards instead of making a merge commit when this device has nothing the other lacks', async () => {
+    const a = await newDevice('a');
+    const b = await newDevice('b');
+    const headAndParents = async () => {
+      const git = await import('isomorphic-git');
+      const { gitfs } = await import('../gitfs');
+      const oid = await git.resolveRef({ fs: gitfs, dir: '/clone', gitdir: '/clone/.git', ref: 'HEAD' });
+      const { commit } = await git.readCommit({ fs: gitfs, dir: '/clone', gitdir: '/clone/.git', oid });
+      const remote = await git.resolveRef({ fs: gitfs, dir: '/clone', gitdir: '/clone/.git', ref: 'refs/remotes/sync-folder/main' });
+      return { oid, parents: commit.parent, remote };
+    };
+
+    let api = await on(a);
+    await createRecipe(api, 'r1', { title: 'Pane' });
+    await api.syncNow();
+    api = await on(b);
+    await api.syncNow();
+
+    // A edits; B has done nothing since — B's branch just moves to A's commit.
+    api = await on(a);
+    await editRecipe(api, 'r1', 'title', 'Pane casereccio', '2026-09-12 10:00:00');
+    await api.syncNow();
+    api = await on(b);
+    const onB = await api.syncNow();
+    expect(onB.conflicts).toBe(0);
+    expect((await recipeRow(api, 'r1'))?.title).toBe('Pane casereccio');
+    const head = await headAndParents();
+    // B's HEAD IS the remote commit — no merge commit of B's own on top.
+    expect(head.oid).toBe(head.remote);
+
+    // And an idle round trip adds no commits on either side.
+    const idle = await api.syncNow();
+    expect(idle.committed).toBe(false);
+    expect((await headAndParents()).oid).toBe(head.oid);
+  });
+
+  it('propagates a recipe deletion, and a device joining later never sees it live', async () => {
+    const a = await newDevice('a');
+    const b = await newDevice('b');
+    const c = await newDevice('c');
+
+    let api = await on(a);
+    await createRecipe(api, 'r1', { title: 'Da buttare' });
+    await createRecipe(api, 'r2', { title: 'Da tenere' });
+    await api.syncNow();
+    api = await on(b);
+    await api.syncNow();
+    expect((await recipeRow(api, 'r1'))?.sync_status).not.toBe('deleted');
+
+    api = await on(a);
+    await api.deleteRecipe('r1');
+    await vi.runOnlyPendingTimersAsync();
+    await api.syncRecipe('r1');
+    await api.syncNow();
+
+    api = await on(b);
+    const onB = await api.syncNow();
+    expect(onB.conflicts).toBe(0);
+    expect((await recipeRow(api, 'r1'))?.sync_status).toBe('deleted');
+    expect((await recipeRow(api, 'r2'))?.sync_status).not.toBe('deleted');
+
+    api = await on(c);
+    await api.syncNow();
+    expect((await recipeRow(api, 'r1'))?.sync_status).toBe('deleted');
+    expect((await recipeRow(api, 'r2'))?.title).toBe('Da tenere');
+  });
+
+  it('reconciles both ways: an edit that never reached the repo is pushed, a row the database lost is pulled back', async () => {
+    const a = await newDevice('a');
+    const b = await newDevice('b');
+
+    let api = await on(a);
+    await createRecipe(api, 'r1', { title: 'Focaccia' });
+    await createRecipe(api, 'r2', { title: 'Grissini' });
+    await api.syncNow();
+    api = await on(b);
+    await api.syncNow();
+
+    // Push: A's row changes without its file being written (a save whose
+    // serialization failed). The next sync notices and publishes it.
+    api = await on(a);
+    await api.query(`UPDATE recipes SET title = 'Focaccia genovese', updated_at = '2026-09-15 10:00:00' WHERE id = 'r1'`);
+    await api.syncNow();
+    api = await on(b);
+    await api.syncNow();
+    expect((await recipeRow(api, 'r1'))?.title).toBe('Focaccia genovese');
+
+    // Pull: B's database loses a row its own history holds (a create that
+    // failed mid-merge). The next sync restores it from HEAD.
+    await api.query(`DELETE FROM recipes WHERE id = 'r2'`);
+    expect(await recipeRow(api, 'r2')).toBeNull();
+    const repaired = await api.syncNow();
+    expect((await recipeRow(api, 'r2'))?.title).toBe('Grissini');
+    expect(repaired.failedEntities).toEqual([]);
+
+    // Pull: a merge whose database write failed is queued and re-applied.
+    await api.query(`UPDATE recipes SET title = 'sbagliato' WHERE id = 'r1'`);
+    await api.query(`INSERT INTO sync_repair (entity_type, entity_id, error) VALUES ('recipe', 'r1', 'simulated')`);
+    await api.syncNow();
+    expect((await recipeRow(api, 'r1'))?.title).toBe('Focaccia genovese');
+    expect(await api.query(`SELECT * FROM sync_repair`)).toEqual([]);
+
+    // And once both sides agree, a sync changes nothing on either device.
+    const idle = await api.syncNow();
+    expect(idle.committed).toBe(false);
+    api = await on(a);
+    await api.syncNow();
+    expect((await api.syncNow()).committed).toBe(false);
+    expect((await recipeRow(api, 'r1'))?.title).toBe('Focaccia genovese');
+  });
+
 });

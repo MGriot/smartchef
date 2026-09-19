@@ -233,7 +233,7 @@ const Home: React.FC = () => {
         body: JSON.stringify({ recipeIds: Array.from(selectedIds) }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : 'Export failed');
+      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('errors.exportFailed'));
       const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -331,11 +331,11 @@ const Home: React.FC = () => {
             <div className="mb-6 flex items-center gap-3 rounded-2xl bg-primary/5 border border-primary/20 px-4 py-3">
               <span className="material-symbols-outlined text-primary animate-spin text-[20px]">progress_activity</span>
               <div>
-                <p className="text-sm font-bold text-on-surface">Still downloading your library</p>
+                <p className="text-sm font-bold text-on-surface">{t('gallery.stillDownloading')}</p>
                 <p className="text-xs text-secondary">
                   {recipes.length > 0
-                    ? 'More recipes will appear here as they arrive.'
-                    : 'Your recipes will appear here as they arrive — you can keep using the app meanwhile.'}
+                    ? t('gallery.stillDownloadingMore')
+                    : t('gallery.stillDownloadingFirst')}
                 </p>
               </div>
             </div>

@@ -10,27 +10,28 @@ import { checkTokenShape } from '../lib/sync/tokenShape';
 import type { RemoteAccessResult } from '../lib/sync/remoteAccessProbe';
 import { ImportSetupFileDialog } from '../components/SetupFileDialog';
 import type { AppliedSetup } from '../lib/setupFileTransfer';
+import type { TFunction } from 'i18next';
 
 /** Turns a probe phase into something worth reading. Bytes are shown
  *  rather than a bare percentage because on a slow link the numbers moving
  *  at all is the reassurance; a percentage that sits at 0 is not. */
-function probeStatusLine(phase: import('../lib/sync/firstRunProbe').ProbePhase | null): string {
-  if (!phase) return 'Checking this library for existing profiles…';
+function probeStatusLine(phase: import('../lib/sync/firstRunProbe').ProbePhase | null, t: TFunction): string {
+  if (!phase) return t('connect.probeChecking');
   const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
   switch (phase.kind) {
     case 'connecting':
-      return 'Connecting…';
+      return t('connect.probeConnecting');
     case 'downloading':
       return phase.total > 0
-        ? `Downloading… ${mb(phase.loaded)} of ${mb(phase.total)} MB`
-        : `Downloading… ${mb(phase.loaded)} MB`;
+        ? t('connect.probeDownloadingOf', { loaded: mb(phase.loaded), total: mb(phase.total) })
+        : t('connect.probeDownloading', { loaded: mb(phase.loaded) });
     // Named rather than folded into "downloading": on a phone this is
     // usually the longest part, and calling it a download while nothing
     // downloads is how the previous version read as a hang.
     case 'preparing':
-      return 'Unpacking the library…';
+      return t('connect.probePreparing');
     case 'reading':
-      return 'Reading the profiles…';
+      return t('connect.probeReading');
   }
 }
 
@@ -167,7 +168,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
         await checkForExistingProfiles();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not choose a sync folder');
+      setError(err instanceof Error ? err.message : t('connect.errorChooseFolder'));
     } finally {
       setChoosingFolder(false);
     }
@@ -223,7 +224,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       setShowGitForm(false);
       await checkForExistingProfiles();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save git remote settings');
+      setError(err instanceof Error ? err.message : t('connect.errorSaveGit'));
     } finally {
       setSavingGitRemote(false);
     }
@@ -270,7 +271,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       await activateStandaloneProfile(id);
       onConnected();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not switch profile');
+      setError(err instanceof Error ? err.message : t('connect.errorSwitchProfile'));
       setActivatingProfileId(null);
     }
   };
@@ -306,7 +307,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       await initStandaloneProfile(name, avatarUrl || null);
       onConnected();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start offline mode');
+      setError(err instanceof Error ? err.message : t('connect.errorStartOffline'));
     } finally {
       setConnecting(false);
     }
@@ -342,7 +343,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
       className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-sm font-bold mb-6 transition-colors"
     >
       <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-      Back
+      {t('common.back')}
     </button>
   );
 
@@ -370,8 +371,8 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
             >
               <span className="material-symbols-outlined text-2xl text-primary">dns</span>
               <span>
-                <span className="block font-bold text-zinc-900 dark:text-zinc-100 text-sm">Connect to a server</span>
-                <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Share a household library across devices via Tailscale/LAN</span>
+                <span className="block font-bold text-zinc-900 dark:text-zinc-100 text-sm">{t('connect.chooseServer')}</span>
+                <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">{t('connect.chooseServerHint')}</span>
               </span>
             </button>
             <button
@@ -381,8 +382,8 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
             >
               <span className="material-symbols-outlined text-2xl text-primary">phone_iphone</span>
               <span>
-                <span className="block font-bold text-zinc-900 dark:text-zinc-100 text-sm">Use offline on this device</span>
-                <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">No server, no account — everything stays on this device</span>
+                <span className="block font-bold text-zinc-900 dark:text-zinc-100 text-sm">{t('connect.chooseOffline')}</span>
+                <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">{t('connect.chooseOfflineHint')}</span>
               </span>
             </button>
             <button
@@ -392,8 +393,8 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
             >
               <span className="material-symbols-outlined text-2xl text-primary">key</span>
               <span>
-                <span className="block font-bold text-zinc-900 dark:text-zinc-100 text-sm">I have a setup file</span>
-                <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Exported from a device you already set up — fills in the sync settings for you</span>
+                <span className="block font-bold text-zinc-900 dark:text-zinc-100 text-sm">{t('connect.chooseSetupFile')}</span>
+                <span className="block text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">{t('connect.chooseSetupFileHint')}</span>
               </span>
             </button>
           </div>
@@ -437,37 +438,35 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
               <div className="flex items-start gap-3 p-4 rounded-2xl bg-primary/5 border border-primary/15 mb-5">
                 <span className="material-symbols-outlined text-primary">key</span>
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Setup file applied</p>
+                  <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t('connect.setupApplied')}</p>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 break-words">
                     {importedSetup.mode === 'git-remote'
-                      ? `Syncing through ${importedSetup.remoteUrl}${importedSetup.hasToken ? '' : ' — no access token was included, so you may need to add one later'}.`
-                      : 'Folder mode. A folder can’t travel in a setup file, so pick this device’s own below.'}
+                      ? t(importedSetup.hasToken ? 'connect.setupAppliedGit' : 'connect.setupAppliedGitNoToken', { url: importedSetup.remoteUrl })
+                      : t('connect.setupAppliedFolder')}
                   </p>
                 </div>
               </div>
             )}
 
             <div className="bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-5 mb-5">
-              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Sync across your devices</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t('connect.syncTitle')}</p>
               <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1 mb-3">
-                Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder), or
-                connect directly to a git server (GitHub, GitLab, self-hosted). Skip this for now — you can always set it up
-                later from Account → Folder Sync.
+                {t('connect.syncHint')}
               </p>
               {syncFolderName ? (
                 <div className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-xl px-3 py-2.5 border border-zinc-200 dark:border-zinc-700">
                   <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 truncate">{syncFolderName}</span>
-                  <button type="button" onClick={handleRemoveSyncFolder} className="text-[11px] font-black text-zinc-400 dark:text-zinc-500 hover:text-red-600">Remove</button>
+                  <button type="button" onClick={handleRemoveSyncFolder} className="text-[11px] font-black text-zinc-400 dark:text-zinc-500 hover:text-red-600">{t('connect.remove')}</button>
                 </div>
               ) : gitRemoteConfigured ? (
                 <div className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-xl px-3 py-2.5 border border-zinc-200 dark:border-zinc-700">
                   <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 truncate" title={gitRemoteConfigured}>{gitRemoteConfigured}</span>
-                  <button type="button" onClick={handleRemoveGitRemote} className="text-[11px] font-black text-zinc-400 dark:text-zinc-500 hover:text-red-600">Remove</button>
+                  <button type="button" onClick={handleRemoveGitRemote} className="text-[11px] font-black text-zinc-400 dark:text-zinc-500 hover:text-red-600">{t('connect.remove')}</button>
                 </div>
               ) : showGitForm ? (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Repository URL</label>
+                    <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('connect.repoUrl')}</label>
                     <input
                       type="text"
                       autoFocus
@@ -476,26 +475,26 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                       placeholder="https://github.com/you/smartchef-sync.git"
                       className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                     />
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">An empty private repo works fine.</p>
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('connect.repoUrlHint')}</p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Username</label>
+                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('connect.username')}</label>
                       <input
                         type="text"
                         value={gitRemoteUsername}
                         onChange={(e) => setGitRemoteUsername(e.target.value)}
-                        placeholder="Usually optional with a token"
+                        placeholder={t('connect.usernamePlaceholder')}
                         className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Access Token</label>
+                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('connect.token')}</label>
                       <input
                         type="password"
                         value={gitRemoteToken}
                         onChange={(e) => setGitRemoteToken(e.target.value)}
-                        placeholder="Personal access token / password"
+                        placeholder={t('connect.tokenPlaceholder')}
                         className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                       />
                       {/* Advisory only — Continue stays enabled. See
@@ -510,18 +509,18 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                   </div>
                   {showCorsProxy ? (
                     <div>
-                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">CORS Proxy (rarely needed)</label>
+                      <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('connect.corsProxy')}</label>
                       <input
                         type="text"
                         value={gitRemoteCorsProxy}
                         onChange={(e) => setGitRemoteCorsProxy(e.target.value)}
-                        placeholder="Leave blank unless you have a specific reason to set one"
+                        placeholder={t('connect.corsProxyPlaceholder')}
                         className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                       />
                     </div>
                   ) : (
                     <button type="button" onClick={() => setShowCorsProxy(true)} className="text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400">
-                      + Advanced: CORS proxy (not needed for GitHub/GitLab)
+                      {t('connect.corsProxyShow')}
                     </button>
                   )}
                   {connectionTestResult && (
@@ -547,7 +546,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                       onClick={() => setShowGitForm(false)}
                       className="px-4 py-2.5 rounded-xl text-xs font-black bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                     >
-                      Back
+                      {t('common.back')}
                     </button>
                     <button
                       type="button"
@@ -556,7 +555,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                       className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
                     >
                       <span className={`material-symbols-outlined text-base ${testingConnection ? 'animate-spin' : ''}`}>wifi_tethering</span>
-                      {testingConnection ? 'Testing…' : 'Test Connection'}
+                      {testingConnection ? t('connect.testing') : t('connect.testConnection')}
                     </button>
                     <button
                       type="button"
@@ -565,7 +564,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                       className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-black text-xs hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
                     >
                       <span className="material-symbols-outlined text-base">{savingGitRemote ? 'sync' : 'save'}</span>
-                      {savingGitRemote ? 'Saving…' : 'Save'}
+                      {savingGitRemote ? t('common.saving') : t('common.save')}
                     </button>
                   </div>
                 </div>
@@ -578,7 +577,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-zinc-900 text-white rounded-xl text-xs font-black hover:bg-zinc-800 disabled:opacity-50"
                   >
                     <span className="material-symbols-outlined text-[16px]">folder_open</span>
-                    {choosingFolder ? 'Choosing…' : 'Choose Folder'}
+                    {choosingFolder ? t('connect.choosing') : t('connect.chooseFolder')}
                   </button>
                   <button
                     type="button"
@@ -586,14 +585,14 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded-xl text-xs font-black hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
                     <span className="material-symbols-outlined text-[16px]">dns</span>
-                    Git Server
+                    {t('connect.gitServer')}
                   </button>
                   <button
                     type="button"
                     onClick={() => setFolderSkipped(true)}
                     className={`px-4 py-2.5 rounded-xl text-xs font-black transition-colors ${folderSkipped ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400' : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                   >
-                    {folderSkipped ? 'Skipped ✓' : 'Skip for now'}
+                    {folderSkipped ? t('connect.skipped') : t('connect.skip')}
                   </button>
                 </div>
               )}
@@ -601,7 +600,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
 
             {checkingFolder && (
               <div className="py-4 space-y-2">
-                <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium text-center">{probeStatusLine(probePhase)}</p>
+                <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium text-center">{probeStatusLine(probePhase, t)}</p>
                 {probePhase?.kind === 'downloading' && probePhase.total > 0 && (
                   <div className="h-1.5 w-full rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
                     <div
@@ -613,28 +612,27 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                 {/* This step is deliberately small now — see
                     firstRunProbe.ts. It used to run a whole sync here,
                     which on a phone was indistinguishable from a hang. */}
-                <p className="text-xs text-zinc-400 dark:text-zinc-600 text-center">Only the profiles are fetched now — your recipes download in the background once you're in.</p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-600 text-center">{t('connect.probeOnlyProfiles')}</p>
               </div>
             )}
 
             {!checkingFolder && tokenRejected && (
-              <RemoteAccessNotice kind="token-rejected" hint="You can change it later in Account → Folder Sync." />
+              <RemoteAccessNotice kind="token-rejected" hint={t('connect.tokenChangeLater')} />
             )}
 
             {!checkingFolder && probeFailure && (
               <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-4 space-y-2">
-                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Couldn't read this library</p>
+                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">{t('connect.probeFailedTitle')}</p>
                 <p className="text-xs text-amber-800 dark:text-amber-300/80">{probeFailure}</p>
                 <p className="text-xs text-amber-800 dark:text-amber-300/80">
-                  If other devices already share it, go back and check the address and token rather than creating a profile here — a
-                  new profile made now would be a second copy of someone the library may already have.
+                  {t('connect.probeFailedHint')}
                 </p>
               </div>
             )}
 
             {!checkingFolder && showExistingProfilesPicker && (
               <div className="space-y-5">
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">This library already has profiles — pick who you are, or create a new one.</p>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('connect.pickProfile')}</p>
                 <div className="space-y-2">
                   {folderProfiles!.map((p) => (
                     <button
@@ -661,7 +659,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                       {p.role === 'admin' && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider">
                           <span className="material-symbols-outlined text-[12px]">shield_person</span>
-                          Admin
+                          {t('connect.admin')}
                         </span>
                       )}
                       {activatingProfileId === p.id && <span className="material-symbols-outlined text-primary animate-spin ml-auto text-lg">sync</span>}
@@ -675,7 +673,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                   className="w-full flex items-center justify-center gap-2 p-4 bg-white dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-2xl text-zinc-500 dark:text-zinc-400 font-bold text-sm transition-colors"
                 >
                   <span className="material-symbols-outlined text-lg">add</span>
-                  New Profile
+                  {t('connect.newProfile')}
                 </button>
               </div>
             )}
@@ -689,26 +687,26 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                     className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-xs font-bold -mt-2 mb-1 transition-colors"
                   >
                     <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                    Back to existing profiles
+                    {t('connect.backToProfiles')}
                   </button>
                 )}
                 <div>
-                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Your name</label>
+                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('connect.yourName')}</label>
                   <input
                     type="text"
                     autoFocus
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Matteo"
+                    placeholder={t('connect.yourNamePlaceholder')}
                     className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
                   />
                   <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">
-                    Used to label recipes you create and cooks you log — no password, this device's data is already private to you.
+                    {t('connect.yourNameHint')}
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Avatar</label>
+                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('connect.avatar')}</label>
                   {AVATAR_PRESETS.length > 0 && (
                     <div className="flex flex-wrap gap-2 mb-3">
                       {AVATAR_PRESETS.map((preset) => (
@@ -732,7 +730,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
                   disabled={connecting || !name.trim()}
                   className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
                 >
-                  {connecting ? 'Starting…' : 'Start using SmartChef offline'}
+                  {connecting ? t('connect.starting') : t('connect.startOffline')}
                 </button>
               </form>
             )}

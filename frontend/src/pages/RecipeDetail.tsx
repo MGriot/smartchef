@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useStore } from '../store/app.store';
 import { listLanguages, languageLabel } from '../lib/languages';
-import { useLanguages, useUiAndContentLanguage } from '../hooks/useLanguages';
+import { useLanguages } from '../hooks/useLanguages';
 import { canPrint, printPage } from '../lib/print';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
@@ -278,9 +279,14 @@ const firstWordsOf = (text: string | null | undefined, max = 60): string => {
   return plain.slice(0, max).replace(/\s\S*$/, '') + '…';
 };
 
+/** An ingredient note as imports leave it — ", 7 circa," — without the
+ *  separators that belonged to the source line around it. */
+const tidyNote = (note: string | null | undefined): string =>
+  (note ?? '').replace(/^[\s,;]+|[\s,;]+$/g, '');
+
 const formatDate = (iso: string | null | undefined): string => {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  return new Date(iso).toLocaleDateString(i18n.language, { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
 /* ── Sub-recipe ingredient fetcher ─────────────────────────────────── */
@@ -457,7 +463,12 @@ const RecipeDetail: React.FC = () => {
   const contentLang = useStore((s) => s.contentLang);
   const addToShoppingCart = useStore((s) => s.addToShoppingCart);
 
-  const handleLanguageChange = useUiAndContentLanguage();
+  // The language this page is read in. Starts at the app's content language;
+  // the picker in the hero switches it for this recipe only — the app-wide
+  // setting stays where it is.
+  const [viewLang, setViewLang] = useState<string | null>(null);
+  useEffect(() => { setViewLang(null); }, [id]);
+  const shownLang = viewLang ?? contentLang;
 
   const openCollectionPicker = async () => {
     setShowCollectionPicker(true);
@@ -547,7 +558,7 @@ const RecipeDetail: React.FC = () => {
     if (!id) return;
     setLoading(true);
     try {
-      const res = await apiFetch(`/api/recipes/${id}${contentLang ? `?lang=${contentLang}` : ''}`);
+      const res = await apiFetch(`/api/recipes/${id}${shownLang ? `?lang=${shownLang}` : ''}`);
       const json = await res.json();
       if (json.data) {
         setRecipe(json.data);
@@ -559,7 +570,7 @@ const RecipeDetail: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [id, contentLang]);
+  }, [id, shownLang]);
 
   useEffect(() => { fetchRecipe(); }, [fetchRecipe]);
 
@@ -590,7 +601,8 @@ const RecipeDetail: React.FC = () => {
   };
 
   /* ── AI recipe translation ──────────────────────────────────────── */
-  const [aiTranslateLang, setAiTranslateLang] = useState(listLanguages().find(l => l.code !== 'en')?.code || 'en');
+  // English is the app's base language, never a translation target.
+  const [aiTranslateLang, setAiTranslateLang] = useState(listLanguages().find(l => l.code !== 'en')?.code || '');
   const [aiTranslating, setAiTranslating] = useState(false);
   const [aiTranslateError, setAiTranslateError] = useState<string | null>(null);
 
@@ -600,7 +612,7 @@ const RecipeDetail: React.FC = () => {
   useEffect(() => {
     const baseLang = recipe?.language_code || draft.language_code;
     if (baseLang && aiTranslateLang === baseLang) {
-      setAiTranslateLang(listLanguages().find(l => l.code !== baseLang)?.code || aiTranslateLang);
+      setAiTranslateLang(listLanguages().find(l => l.code !== baseLang && l.code !== 'en')?.code || aiTranslateLang);
     }
   }, [recipe?.language_code, draft.language_code]);
 
@@ -760,7 +772,7 @@ const RecipeDetail: React.FC = () => {
       if (ref.amountMode === 'absolute') {
         return {
           sortOrder: ing.sortOrder,
-          name: ing.ingredientName || ing.subRecipeTitle || 'Ingredient',
+          name: ing.ingredientName || ing.subRecipeTitle || t('shopping.ingredientFallback'),
           quantity: ref.quantity != null ? scale(ref.quantity) : '',
           unitSymbol: ref.unitSymbol || ing.unitSymbol || '',
           portionPct: 100,
@@ -771,7 +783,7 @@ const RecipeDetail: React.FC = () => {
       const portionQty = ing.quantity !== null ? ing.quantity * ref.portion : null;
       return {
         sortOrder: ing.sortOrder,
-        name: ing.ingredientName || ing.subRecipeTitle || 'Ingredient',
+        name: ing.ingredientName || ing.subRecipeTitle || t('shopping.ingredientFallback'),
         quantity: scale(portionQty),
         unitSymbol: ing.unitSymbol || '',
         portionPct: Math.round(ref.portion * 100),
@@ -791,12 +803,51 @@ const RecipeDetail: React.FC = () => {
   };
 
   /* ── Toggle step complete (cooking mode) ────────────────────────── */
+  // Same count both cook-mode branches show: every section's steps when the
+  // recipe has sub-recipes, the recipe's own otherwise.
+  const cookStepTotal = cookSequence && cookSequence.length > 1
+    ? cookSequence.reduce((n, section) => n + section.steps.length, 0)
+    : (recipe?.steps?.length ?? 0);
+  // Ticking the last step logs the cook. Progress survives leaving cook
+  // mode (see the localStorage effects above), so this remembers the cook
+  // was logged — re-ticking the last step, or coming back to a finished
+  // cook, must not count it twice.
+  const cookLoggedKey = `smartchef.cookLogged.${id}`;
+  const cookLogged = () => {
+    try { return localStorage.getItem(cookLoggedKey) === '1'; } catch { return false; }
+  };
+  const setCookLogged = (logged: boolean) => {
+    try { logged ? localStorage.setItem(cookLoggedKey, '1') : localStorage.removeItem(cookLoggedKey); } catch { /* at worst logs twice */ }
+  };
+  // The latest ticks, ahead of the render: two taps in one frame must each
+  // build on the other, and the "was it just finished" check needs the
+  // set as it was right before this tap.
+  const completedRef = useRef(completedSteps);
+  completedRef.current = completedSteps;
   const toggleStep = (key: string) => {
-    setCompletedSteps(prev => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
+    const prev = completedRef.current;
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    completedRef.current = next;
+    setCompletedSteps(next);
+    if (next.size === 0) setCookLogged(false);
+    else if (cookStepTotal > 0 && next.size >= cookStepTotal && prev.size < cookStepTotal && !cookLogged()) {
+      setCookLogged(true);
+      void handleLogCooked();
+    }
+  };
+  /* ── Enter cooking mode — a finished cook starts over ───────────────── */
+  const startCooking = () => {
+    if (cookLogged()) {
+      setCookLogged(false);
+      try {
+        localStorage.removeItem(`smartchef.cookProgress.${id}`);
+        localStorage.removeItem(`smartchef.cookIngredients.${id}`);
+      } catch { /* nothing saved to clear */ }
+      setCheckedIngredients(new Set());
+    }
+    setCompletedSteps(new Set());
+    setMode('cook');
   };
 
   /* ── Save recipe (edit mode) ────────────────────────────────────── */
@@ -889,7 +940,7 @@ const RecipeDetail: React.FC = () => {
       });
       if (!res.ok) {
         const result = await res.json().catch(() => ({}));
-        throw new Error(result.error ? JSON.stringify(result.error) : `Save failed (${res.status})`);
+        throw new Error(result.error ? JSON.stringify(result.error) : t('errors.saveFailedStatus', { status: res.status }));
       }
       await fetchRecipe();
       setMode('view');
@@ -1192,6 +1243,10 @@ const RecipeDetail: React.FC = () => {
               <span className="text-6xl mb-4 block">🎉</span>
               <h2 className="font-headline font-extrabold text-3xl text-primary mb-2">{t('recipeDetail.bonAppetit')}</h2>
               <p className="text-zinc-400 dark:text-zinc-500">{t('recipeDetail.allStepsCompleted')}</p>
+              <p className="mt-2 flex items-center justify-center gap-1.5 text-sm font-bold text-primary">
+                <span className="material-symbols-outlined text-base">check_circle</span>
+                {t('recipeDetail.loggedAsCooked')} · {t('recipeDetail.cookedTimes', { count: recipe.times_cooked })}
+              </p>
               <button onClick={() => setMode('view')} className="mt-6 px-8 py-3 bg-primary text-white rounded-full font-bold hover:bg-primary/80 transition-colors">
                 {t('recipeDetail.backToRecipe')}
               </button>
@@ -1394,6 +1449,10 @@ const RecipeDetail: React.FC = () => {
               <span className="text-6xl mb-4 block">🎉</span>
               <h2 className="font-headline font-extrabold text-3xl text-primary mb-2">{t('recipeDetail.bonAppetit')}</h2>
               <p className="text-zinc-400 dark:text-zinc-500">{t('recipeDetail.allStepsCompleted')}</p>
+              <p className="mt-2 flex items-center justify-center gap-1.5 text-sm font-bold text-primary">
+                <span className="material-symbols-outlined text-base">check_circle</span>
+                {t('recipeDetail.loggedAsCooked')} · {t('recipeDetail.cookedTimes', { count: recipe.times_cooked })}
+              </p>
               <button onClick={() => setMode('view')} className="mt-6 px-8 py-3 bg-primary text-white rounded-full font-bold hover:bg-primary/80 transition-colors">
                 {t('recipeDetail.backToRecipe')}
               </button>
@@ -1470,7 +1529,7 @@ const RecipeDetail: React.FC = () => {
       try {
         const parsed = JSON.parse(rawText);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error(`Expected a JSON object, got ${Array.isArray(parsed) ? 'an array' : typeof parsed}`);
+          throw new Error(t('errors.expectedJsonObject'));
         }
         // Merge onto the current draft rather than replacing it wholesale.
         // ingredients/steps/tools/techniques also accept the same looser
@@ -2804,12 +2863,12 @@ const RecipeDetail: React.FC = () => {
                       onChange={e => setAiTranslateLang(e.target.value)}
                       className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
                     >
-                      {languages.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                      {languages.filter(l => l.code !== 'en').map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                     </select>
                     <button
                       type="button"
                       onClick={handleAiTranslate}
-                      disabled={aiTranslating}
+                      disabled={aiTranslating || !aiTranslateLang}
                       className="px-5 py-3 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
                     >
                       {aiTranslating && <span className="material-symbols-outlined text-base animate-spin">sync</span>}
@@ -2877,8 +2936,8 @@ const RecipeDetail: React.FC = () => {
       onClick={handleToggleDownload}
       disabled={downloading}
       className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 transition-colors disabled:opacity-50 ${downloaded ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
-      aria-label={downloaded ? 'Remove offline download' : 'Download for offline'}
-      title={downloaded ? 'Downloaded for offline — tap to remove' : 'Download for offline'}
+      aria-label={downloaded ? t('recipeDetail.removeOfflineDownload') : t('recipeDetail.downloadOffline')}
+      title={downloaded ? t('recipeDetail.downloadedOffline') : t('recipeDetail.downloadOffline')}
     >
       <span className="material-symbols-outlined text-[20px]">
         {downloading ? 'sync' : downloaded ? 'download_done' : 'download'}
@@ -2920,7 +2979,7 @@ const RecipeDetail: React.FC = () => {
     try {
       const res = await apiFetch(`/api/share/recipes/${id}/export`);
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : 'Export failed');
+      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('errors.exportFailed'));
       downloadTextFile(JSON.stringify(json.data, null, 2), `${recipeSlug}.smartchef.json`, 'application/json');
     } catch (err) {
       console.error('Recipe export failed:', err);
@@ -3229,11 +3288,26 @@ const RecipeDetail: React.FC = () => {
                 <p className="text-white/70 text-xs font-medium">by {recipe.creator_name}</p>
               </div>
             )}
-            {recipe.language_code && contentLang && recipe.language_code !== contentLang && !recipe.translated_title && (
-              <p className="mt-3 text-white/70 text-xs font-medium">
+            <label className="mt-3 inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-bold">
+              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">translate</span>
+              <select
+                value={shownLang}
+                onChange={(e) => setViewLang(e.target.value)}
+                aria-label={t('recipeDetail.viewLanguage')}
+                className="bg-transparent text-white text-xs font-bold border-0 py-0 pl-0 pr-6 focus:ring-0 focus-visible:underline cursor-pointer max-w-[12rem]"
+              >
+                {[...languages, ...(languages.some((l) => l.code === shownLang) ? [] : [{ code: shownLang, label: languageLabel(shownLang) }])].map((l) => (
+                  <option key={l.code} value={l.code} className="text-zinc-900">
+                    {l.label}{l.code === recipe.language_code ? ` · ${t('recipeDetail.originalLanguage')}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {recipe.language_code && shownLang && recipe.language_code !== shownLang && !recipe.translated_title && (
+              <p className="mt-2 text-white/70 text-xs font-medium">
                 {t('recipeDetail.shownInOriginal', {
                   shownLang: languageLabel(recipe.language_code),
-                  targetLang: languageLabel(contentLang),
+                  targetLang: languageLabel(shownLang),
                 })}
               </p>
             )}
@@ -3476,8 +3550,8 @@ const RecipeDetail: React.FC = () => {
                         {formatAmount(ing.quantity, ing.unitSymbol, ing.quantityText)}
                       </span>
                     </div>
-                    {(ing.translatedNotes || ing.notes) && (
-                      <p className="px-3 pb-2 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium italic">— {ing.translatedNotes || ing.notes}</p>
+                    {tidyNote(ing.translatedNotes || ing.notes) && (
+                      <p className="px-3 pb-2 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium italic">— {tidyNote(ing.translatedNotes || ing.notes)}</p>
                     )}
                     {substitutes.map((alt, altIdx) => (
                       <div key={`alt-${altIdx}`} className="flex items-center justify-between gap-3 py-2 pl-8 pr-3 -mt-1">
@@ -3547,7 +3621,7 @@ const RecipeDetail: React.FC = () => {
             <div className="flex items-center justify-between mb-8">
               <h2 className="font-headline font-extrabold text-3xl text-zinc-900 dark:text-zinc-100">{t('recipeDetail.theMethod')}</h2>
               <button
-                onClick={() => { setCompletedSteps(new Set()); setMode('cook'); }}
+                onClick={startCooking}
                 className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-full font-bold text-sm shadow-sm hover:bg-primary/90 transition-all active:scale-95"
               >
                 <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>skillet</span>

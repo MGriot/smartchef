@@ -98,7 +98,7 @@ export default function LibraryTools() {
         setShowModal(false);
         fetchTools();
       } else {
-        alert(`Save failed: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.shared.saveFailed', { error: JSON.stringify(result.error || result) }));
       }
     } catch (err) {
       console.error('Save failed:', err);
@@ -106,7 +106,7 @@ export default function LibraryTools() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this tool? It's removed from the catalog and from every recipe and step referencing it — this can't be undone. To keep those references, merge it into another tool instead.")) return;
+    if (!window.confirm(t('library.tools.confirmDelete'))) return;
     try {
       const res = await apiFetch(`/api/tools/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -133,10 +133,10 @@ export default function LibraryTools() {
         setMergeTargetId('');
         fetchTools();
       } else {
-        alert(`Merge failed: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.shared.mergeFailed', { error: JSON.stringify(result.error || result) }));
       }
     } catch {
-      alert('Network error while merging.');
+      alert(t('library.shared.networkErrorMerging'));
     } finally {
       setMerging(false);
     }
@@ -157,15 +157,15 @@ export default function LibraryTools() {
       <AppLayout librarySection="tools">
           <div className="flex justify-between items-end mb-10">
             <div>
-              <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">The Atelier Management</p>
-              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">Kitchen Tools</h1>
+              <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">{t('library.shared.eyebrow')}</p>
+              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">{t('library.tools.heading')}</h1>
             </div>
             <button
               onClick={() => handleOpenModal()}
               className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
             >
               <span className="material-symbols-outlined">add</span>
-              Add New Tool
+              {t('library.tools.addNew')}
             </button>
           </div>
 
@@ -181,7 +181,7 @@ export default function LibraryTools() {
           <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
             {view === 'grid' ? (
               loading ? (
-                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</p>
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.shared.loadingItems')}</p>
               ) : visibleTools.length === 0 ? (
                 <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.common.empty')}</p>
               ) : (
@@ -202,18 +202,18 @@ export default function LibraryTools() {
                         {tool.translated_name || tool.name}
                       </p>
                       <p className="text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mt-1 truncate">
-                        {tool.category || 'GENERAL'}
+                        {tool.category || t('library.tools.general')}
                       </p>
                       {/* Same three actions as the table row, revealed on hover
                           so the tile stays readable as a catalog at a glance. */}
                       <div className="flex justify-center gap-1 mt-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                        <button onClick={() => handleOpenModal(tool)} title="Edit this tool" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                        <button onClick={() => handleOpenModal(tool)} title={t('library.tools.editThis')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                           <span className="material-symbols-outlined text-[18px]">edit</span>
                         </button>
-                        <button onClick={() => { setMergeSource(tool); setMergeTargetId(''); }} title="Merge into another tool" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                        <button onClick={() => { setMergeSource(tool); setMergeTargetId(''); }} title={t('library.tools.mergeIntoAnother')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                           <span className="material-symbols-outlined text-[18px]">call_merge</span>
                         </button>
-                        <button onClick={() => handleDelete(tool.id)} title="Delete" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
+                        <button onClick={() => handleDelete(tool.id)} title={t('common.delete')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
                           <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
                       </div>
@@ -226,14 +226,14 @@ export default function LibraryTools() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-zinc-100 dark:border-zinc-800">
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-4">Tool Details</th>
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Category</th>
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest text-right pr-4">Actions</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-4">{t('library.tools.toolDetails')}</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{t('library.shared.category')}</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest text-right pr-4">{t('library.shared.actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">
                   {loading ? (
-                    <tr><td colSpan={3} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</td></tr>
+                    <tr><td colSpan={3} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.shared.loadingItems')}</td></tr>
                   ) : visibleTools.map((tool: any) => (
                     <tr key={tool.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
                       <td className="py-6 pl-4">
@@ -253,15 +253,15 @@ export default function LibraryTools() {
                       </td>
                       <td className="py-6">
                         <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase rounded-md border border-zinc-200/50 dark:border-zinc-700/50">
-                          {tool.category || 'GENERAL'}
+                          {tool.category || t('library.tools.general')}
                         </span>
                       </td>
                       <td className="py-6 text-right pr-4">
                          <div className="flex justify-end gap-2">
-                            <button onClick={() => handleOpenModal(tool)} title="Edit this tool" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                            <button onClick={() => handleOpenModal(tool)} title={t('library.tools.editThis')} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                               <span className="material-symbols-outlined text-xl">edit</span>
                             </button>
-                            <button onClick={() => { setMergeSource(tool); setMergeTargetId(''); }} title="Merge into another tool" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                            <button onClick={() => { setMergeSource(tool); setMergeTargetId(''); }} title={t('library.tools.mergeIntoAnother')} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                               <span className="material-symbols-outlined text-xl">call_merge</span>
                             </button>
                             <button onClick={() => handleDelete(tool.id)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
@@ -284,24 +284,24 @@ export default function LibraryTools() {
         onClose={() => setMergeSource(null)}
         size="sm"
         zIndex={120}
-        title="Merge Tool"
-        subtitle={mergeSource ? `Fold "${mergeSource.translated_name || mergeSource.name}" into another tool. Every recipe and every step referencing it is repointed automatically — nothing is lost.` : undefined}
+        title={t('library.tools.mergeTitle')}
+        subtitle={mergeSource ? t('library.tools.mergeSubtitle', { name: mergeSource.translated_name || mergeSource.name }) : undefined}
         footer={
           <>
-            <ModalCancelButton onClick={() => setMergeSource(null)}>Cancel</ModalCancelButton>
+            <ModalCancelButton onClick={() => setMergeSource(null)}>{t('common.cancel')}</ModalCancelButton>
             <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
-              {merging ? 'Merging…' : 'Merge'}
+              {merging ? t('library.shared.merging') : t('library.shared.merge')}
             </ModalSubmitButton>
           </>
         }
       >
-        <Field label="Merge into" hint="Type to search the catalog, then pick the tool to keep.">
+        <Field label={t('library.shared.mergeIntoLabel')} hint={t('library.tools.mergeIntoHint')}>
           <Autocomplete
             options={mergeOptions}
             value={mergeTargetId || null}
             onSelect={(id) => setMergeTargetId(id)}
             onClear={() => setMergeTargetId('')}
-            placeholder="Search for a tool…"
+            placeholder={t('library.tools.search')}
             className="sc-field"
           />
         </Field>
@@ -312,69 +312,69 @@ export default function LibraryTools() {
         onClose={() => setShowModal(false)}
         onSubmit={handleSave}
         size="md"
-        title={editingTool ? 'Edit Tool' : 'New Culinary Tool'}
-        subtitle={editingTool ? 'Changes apply everywhere this tool is used.' : 'Register a piece of equipment recipes can reference.'}
+        title={editingTool ? t('library.tools.editTitle') : t('library.tools.newTitle')}
+        subtitle={editingTool ? t('library.tools.editSubtitle') : t('library.tools.newSubtitle')}
         footer={
           <>
-            {editingTool && <ModalDeleteButton onClick={() => handleDelete(editingTool.id)} label="Delete tool" />}
-            <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
-            <ModalSubmitButton>{editingTool ? 'Update Asset' : 'Register Asset'}</ModalSubmitButton>
+            {editingTool && <ModalDeleteButton onClick={() => handleDelete(editingTool.id)} label={t('library.tools.deleteTool')} />}
+            <ModalCancelButton onClick={() => setShowModal(false)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton>{editingTool ? t('library.tools.update') : t('library.tools.register')}</ModalSubmitButton>
           </>
         }
       >
         <div className="space-y-8">
-          <FormSection title="Identity">
+          <FormSection title={t('library.shared.sectionIdentity')}>
             <FieldRow>
-              <Field label="Tool Name">
+              <Field label={t('library.tools.name')}>
                 <input
                   type="text" required value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Mandoline Slicer"
+                  placeholder={t('library.tools.namePlaceholder')}
                   className="sc-field"
                 />
               </Field>
-              <Field label="Category" hint="Free text — e.g. Prep, Baking, Cooking.">
+              <Field label={t('library.shared.category')} hint={t('library.tools.categoryHint')}>
                 <input
                   type="text" value={form.category}
                   onChange={e => setForm({ ...form, category: e.target.value })}
-                  placeholder="e.g. Prep"
+                  placeholder={t('library.tools.categoryPlaceholder')}
                   className="sc-field"
                 />
               </Field>
             </FieldRow>
-            <Field label="Technical Specs / Description">
+            <Field label={t('library.tools.specs')}>
               <textarea
                 value={form.description}
                 onChange={e => setForm({ ...form, description: e.target.value })}
-                placeholder="Maintenance requirements, serial numbers..."
+                placeholder={t('library.tools.specsPlaceholder')}
                 className="sc-field h-24 resize-none font-medium"
               />
             </Field>
           </FormSection>
 
-          <FormSection title="Appearance" description="The icon shows wherever the tool appears without a photo.">
-            <Field label="Choose Icon">
+          <FormSection title={t('library.shared.sectionAppearance')} description={t('library.tools.appearanceHint')}>
+            <Field label={t('library.shared.chooseIcon')}>
               <IconPicker icons={TOOL_ICONS} value={form.icon} onChange={icon => setForm({ ...form, icon })} />
             </Field>
-            <Field label="Reference Photos">
+            <Field label={t('library.shared.referencePhotos')}>
               <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({ ...form, imageUrls: urls })} />
             </Field>
           </FormSection>
 
           <FormSection
-            title="Naming"
-            description="Alternate names make the tool findable; translations give it a name per language."
-            action={<AddLangButton onClick={addTranslation} label="Add Lang" />}
+            title={t('library.shared.sectionNaming')}
+            description={t('library.tools.namingHint')}
+            action={<AddLangButton onClick={addTranslation} label={t('library.shared.addLang')} />}
           >
-            <Field label="Synonyms">
+            <Field label={t('library.shared.synonyms')}>
               <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
             </Field>
-            <Field label="Translations">
+            <Field label={t('library.shared.translations')}>
               <TranslationRows
                 value={translations}
                 onChange={setTranslations}
-                emptyLabel="No translations added."
-                textPlaceholder="Translated name"
+                emptyLabel={t('library.shared.noTranslations')}
+                textPlaceholder={t('library.shared.translatedNamePlaceholder')}
               />
             </Field>
           </FormSection>

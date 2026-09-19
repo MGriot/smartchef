@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import Autocomplete from '../components/Autocomplete';
 import CoverImage from '../components/CoverImage';
@@ -7,6 +8,11 @@ import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
+
+const DIFFICULTY_KEY: Record<string, string> = {
+  easy: 'gallery.difficultyEasy', medium: 'gallery.difficultyIntermediate',
+  hard: 'gallery.difficultyAdvanced', expert: 'gallery.difficultyExpert',
+};
 
 interface CollectionRecipe {
   id: string;
@@ -32,6 +38,7 @@ interface RecipeOption {
 }
 
 export default function CollectionDetail() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const contentLang = useStore((s) => s.contentLang);
@@ -93,7 +100,7 @@ export default function CollectionDetail() {
   };
 
   const handleDeleteCollection = async () => {
-    if (!window.confirm('Delete this collection? Recipes themselves are not affected.')) return;
+    if (!window.confirm(t('collections.confirmDelete'))) return;
     await apiFetch(`/api/collections/${id}`, { method: 'DELETE' });
     navigate('/');
   };
@@ -124,7 +131,7 @@ export default function CollectionDetail() {
     try {
       const res = await apiFetch(`/api/share/collections/${id}/export`);
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : 'Export failed');
+      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('collections.exportFailed'));
       const slug = collection.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -154,8 +161,8 @@ export default function CollectionDetail() {
     return (
       <AppLayout>
         <div className="flex flex-col items-center justify-center h-80 text-center">
-          <h3 className="text-2xl font-bold font-headline text-zinc-800 dark:text-zinc-200 mb-2">Collection not found</h3>
-          <Link to="/" className="text-primary font-bold">Back to Gallery</Link>
+          <h3 className="text-2xl font-bold font-headline text-zinc-800 dark:text-zinc-200 mb-2">{t('collections.notFound')}</h3>
+          <Link to="/" className="text-primary font-bold">{t('collections.backToGallery')}</Link>
         </div>
       </AppLayout>
     );
@@ -170,19 +177,19 @@ export default function CollectionDetail() {
         <div className="flex justify-between items-start mb-10">
           <div>
             <Link to="/" className="text-zinc-400 dark:text-zinc-500 hover:text-primary text-sm font-bold flex items-center gap-1 mb-4">
-              <span className="material-symbols-outlined text-[18px]">arrow_back</span> Gallery
+              <span className="material-symbols-outlined text-[18px]">arrow_back</span> {t('collections.gallery')}
             </Link>
             <h1 className="text-5xl font-extrabold tracking-tight font-headline text-on-surface mb-2">{collection.name}</h1>
             {collection.description && <p className="text-secondary text-lg max-w-xl">{collection.description}</p>}
           </div>
           <div className="flex gap-2">
-            <button onClick={handleExportCollection} title="Export Collection" className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
+            <button onClick={handleExportCollection} title={t('collections.export')} className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
               <span className="material-symbols-outlined text-[20px]">ios_share</span>
             </button>
-            <button onClick={openEdit} className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
+            <button onClick={openEdit} title={t('collections.edit')} className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
               <span className="material-symbols-outlined text-[20px]">edit</span>
             </button>
-            <button onClick={handleDeleteCollection} className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-red-100 hover:text-red-500 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
+            <button onClick={handleDeleteCollection} title={t('collections.deleteCollection')} className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-red-100 hover:text-red-500 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">
               <span className="material-symbols-outlined text-[20px]">delete</span>
             </button>
           </div>
@@ -196,7 +203,7 @@ export default function CollectionDetail() {
               options={addableRecipes.map(r => ({ id: r.id, label: r.translated_title || r.title }))}
               onSelect={(rid) => setAddRecipeId(rid)}
               onClear={() => setAddRecipeId('')}
-              placeholder="Search a recipe to add…"
+              placeholder={t('collections.searchToAdd')}
               className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-medium"
             />
           </div>
@@ -206,14 +213,14 @@ export default function CollectionDetail() {
             className="flex items-center justify-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-sm hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-40"
           >
             <span className="material-symbols-outlined text-[18px]">add</span>
-            Add to Collection
+            {t('collections.addToCollection')}
           </button>
         </div>
 
         {collection.recipes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-60 text-center">
             <span className="material-symbols-outlined text-6xl text-zinc-300 dark:text-zinc-600 mb-4">restaurant</span>
-            <p className="text-zinc-500 dark:text-zinc-400 text-sm">No recipes in this collection yet — add some above.</p>
+            <p className="text-zinc-500 dark:text-zinc-400 text-sm">{t('collections.empty')}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
@@ -223,7 +230,7 @@ export default function CollectionDetail() {
                 <div key={recipe.id} className="group relative bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300">
                   <button
                     onClick={() => handleRemoveRecipe(recipe.id)}
-                    title="Remove from collection"
+                    title={t('collections.removeRecipe')}
                     className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-zinc-900/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
                   >
                     <span className="material-symbols-outlined text-[16px]">close</span>
@@ -244,11 +251,11 @@ export default function CollectionDetail() {
                       <div className="flex items-center gap-5 text-zinc-500 dark:text-zinc-400 text-[13px] font-medium">
                         <div className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>schedule</span>
-                          {totalTime > 0 ? `${totalTime} min` : '—'}
+                          {totalTime > 0 ? t('collections.minutes', { count: totalTime }) : '—'}
                         </div>
                         <div className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>restaurant</span>
-                          {recipe.difficulty}
+                          {DIFFICULTY_KEY[recipe.difficulty] ? t(DIFFICULTY_KEY[recipe.difficulty]) : recipe.difficulty}
                         </div>
                       </div>
                     </div>
@@ -266,23 +273,23 @@ export default function CollectionDetail() {
         onClose={() => setEditing(false)}
         onSubmit={handleSaveEdit}
         size="sm"
-        title="Edit Collection"
+        title={t('collections.edit')}
         footer={
           <>
-            <ModalCancelButton onClick={() => setEditing(false)}>Cancel</ModalCancelButton>
-            <ModalSubmitButton>Save</ModalSubmitButton>
+            <ModalCancelButton onClick={() => setEditing(false)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton>{t('common.save')}</ModalSubmitButton>
           </>
         }
       >
         <div className="space-y-4">
-          <Field label="Name">
+          <Field label={t('collections.name')}>
             <input
               type="text" required value={editName}
               onChange={e => setEditName(e.target.value)}
               className="sc-field"
             />
           </Field>
-          <Field label="Description">
+          <Field label={t('collections.descriptionLabel')}>
             <textarea
               value={editDescription}
               onChange={e => setEditDescription(e.target.value)}

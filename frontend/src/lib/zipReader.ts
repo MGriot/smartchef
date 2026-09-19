@@ -18,6 +18,8 @@
 // than producing half a library.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../i18n';
+
 export interface ZipEntry {
   name: string;
   /** Uncompressed bytes. */
@@ -37,12 +39,12 @@ function findEndOfCentralDirectory(view: DataView): number {
   for (let i = view.byteLength - 22; i >= start; i--) {
     if (view.getUint32(i, true) === EOCD_SIGNATURE) return i;
   }
-  throw new Error('That file is not a zip archive.');
+  throw new Error(i18n.t('errors.notZip'));
 }
 
 async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   const Ctor = (globalThis as { DecompressionStream?: typeof DecompressionStream }).DecompressionStream;
-  if (!Ctor) throw new Error('This device cannot unzip files (DecompressionStream is unavailable).');
+  if (!Ctor) throw new Error(i18n.t('errors.cannotUnzip'));
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new Ctor('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
@@ -50,7 +52,7 @@ async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
 /** Standalone gzip member — Paprika gzips each recipe *inside* the zip. */
 export async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   const Ctor = (globalThis as { DecompressionStream?: typeof DecompressionStream }).DecompressionStream;
-  if (!Ctor) throw new Error('This device cannot read gzipped files (DecompressionStream is unavailable).');
+  if (!Ctor) throw new Error(i18n.t('errors.cannotGunzip'));
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new Ctor('gzip'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
@@ -76,7 +78,7 @@ export async function readZip(input: ArrayBuffer | Uint8Array): Promise<ZipEntry
   let offset = view.getUint32(eocd + 16, true);
 
   if (view.getUint32(eocd + 12, true) === 0xffffffff || offset === 0xffffffff) {
-    throw new Error('ZIP64 archives are not supported.');
+    throw new Error(i18n.t('errors.zip64'));
   }
 
   const decoder = new TextDecoder('utf-8');
@@ -84,7 +86,7 @@ export async function readZip(input: ArrayBuffer | Uint8Array): Promise<ZipEntry
 
   for (let i = 0; i < entryCount; i++) {
     if (view.getUint32(offset, true) !== CENTRAL_SIGNATURE) {
-      throw new Error('This zip file appears to be damaged.');
+      throw new Error(i18n.t('errors.zipDamaged'));
     }
     const method = view.getUint16(offset + 10, true);
     const compressedSize = view.getUint32(offset + 20, true);
@@ -100,7 +102,7 @@ export async function readZip(input: ArrayBuffer | Uint8Array): Promise<ZipEntry
     if (name.endsWith('/')) continue;
 
     if (view.getUint32(localOffset, true) !== LOCAL_SIGNATURE) {
-      throw new Error('This zip file appears to be damaged.');
+      throw new Error(i18n.t('errors.zipDamaged'));
     }
     // The local header's name/extra lengths can differ from the central
     // directory's, so they must be read again here rather than reused.
@@ -114,7 +116,7 @@ export async function readZip(input: ArrayBuffer | Uint8Array): Promise<ZipEntry
     } else if (method === 8) {
       entries.push({ name, bytes: await inflateRaw(raw) });
     } else {
-      throw new Error(`This zip uses an unsupported compression method (${method}).`);
+      throw new Error(i18n.t('errors.zipUnsupportedMethod', { method }));
     }
   }
 

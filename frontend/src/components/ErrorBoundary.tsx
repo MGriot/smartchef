@@ -1,4 +1,5 @@
 import React from 'react';
+import i18n from '../i18n';
 
 interface Props {
   children: React.ReactNode;
@@ -32,7 +33,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
         <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center p-6 font-outfit">
           <div className="w-full max-w-lg bg-white dark:bg-zinc-900 rounded-[32px] shadow-sm border border-zinc-100 dark:border-zinc-800 p-8 text-center">
             <span className="material-symbols-outlined text-4xl text-red-400 mb-3">error</span>
-            <h1 className="text-xl font-black text-zinc-900 dark:text-zinc-100 mb-2">Something went wrong</h1>
+            <h1 className="text-xl font-black text-zinc-900 dark:text-zinc-100 mb-2">{i18n.t('common.somethingWentWrong')}</h1>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4 font-mono break-words">
               {this.state.error.message}
             </p>
@@ -42,14 +43,14 @@ export default class ErrorBoundary extends React.Component<Props, State> {
                 onClick={() => this.setState({ error: null })}
                 className="px-5 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-2xl font-bold text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
               >
-                Try again
+                {i18n.t('common.tryAgain')}
               </button>
               <button
                 type="button"
                 onClick={() => window.location.reload()}
                 className="px-5 py-2.5 bg-primary text-white rounded-2xl font-bold text-sm hover:bg-primary/90 transition-colors"
               >
-                Reload app
+                {i18n.t('common.reloadApp')}
               </button>
             </div>
           </div>

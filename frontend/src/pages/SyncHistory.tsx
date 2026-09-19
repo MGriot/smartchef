@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import AppLayout from '../components/AppLayout';
+import { formatRelativeTime } from '../lib/relativeTime';
 
 interface SyncCommit {
   oid: string;
@@ -17,20 +20,12 @@ interface DeviceRecord {
   lastSyncAt: string;
 }
 
-function formatWhen(ts: number): string {
-  const diffMs = Date.now() - ts;
-  const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  return new Date(ts).toLocaleString();
-}
+const formatWhen = (ts: number) => formatRelativeTime(ts);
 
-function describeChange(path: string): string {
+function describeChange(path: string, t: TFunction): string {
   const m = path.match(/^(recipes|ingredients)\/([^/]+)\.json$/);
   if (!m) return path;
-  return `${m[1] === 'recipes' ? 'Recipe' : 'Ingredient'} ${m[2].slice(0, 8)}…`;
+  return t(m[1] === 'recipes' ? 'syncHistory.recipe' : 'syncHistory.ingredient', { id: m[2].slice(0, 8) });
 }
 
 const PLATFORM_ICON: Record<DeviceRecord['platform'], string> = {
@@ -39,6 +34,7 @@ const PLATFORM_ICON: Record<DeviceRecord['platform'], string> = {
 };
 
 export default function SyncHistory() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [commits, setCommits] = useState<SyncCommit[] | null>(null);
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
@@ -47,7 +43,7 @@ export default function SyncHistory() {
 
   useEffect(() => {
     import('../lib/sync/gitSync').then(({ getSyncHistory, listDeviceRecords }) => {
-      getSyncHistory(100).then(setCommits).catch((err) => setError(err instanceof Error ? err.message : 'Could not load sync history'));
+      getSyncHistory(100).then(setCommits).catch((err) => setError(err instanceof Error ? err.message : t('syncHistory.loadFailed')));
       listDeviceRecords().then(setDevices).catch(() => {}); // best-effort — commit history above is the primary content
     });
   }, []);
@@ -61,17 +57,17 @@ export default function SyncHistory() {
             className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-sm font-bold mb-6 transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-            Back
+            {t('common.back')}
           </button>
-          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">Sync History</h1>
+          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">{t('syncHistory.heading')}</h1>
           <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-2">
-            Every commit written to this device's sync folder — this device's and anything pulled in from others sharing it.
+            {t('syncHistory.subtitle')}
           </p>
         </div>
 
         {devices.length > 0 && (
           <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mb-8">
-            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-4">Devices</h2>
+            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-4">{t('syncHistory.devices')}</h2>
             <div className="space-y-1.5">
               {devices.map((d) => (
                 <div key={d.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
@@ -100,7 +96,7 @@ export default function SyncHistory() {
 
         {!error && commits !== null && commits.length === 0 && (
           <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
-            <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">No sync activity yet — this shows up after the first save or "Sync Now".</p>
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{t('syncHistory.empty')}</p>
           </div>
         )}
 
@@ -124,11 +120,11 @@ export default function SyncHistory() {
                 {expanded === c.oid && (
                   <div className="px-5 pb-5 space-y-1.5">
                     {c.changedFiles.length === 0 && (
-                      <p className="text-xs text-zinc-400 dark:text-zinc-500">No file changes recorded for this commit.</p>
+                      <p className="text-xs text-zinc-400 dark:text-zinc-500">{t('syncHistory.noFiles')}</p>
                     )}
                     {c.changedFiles.map((f) => (
                       <div key={f} className="px-3 py-2 bg-zinc-50 dark:bg-zinc-900 rounded-lg text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                        {describeChange(f)}
+                        {describeChange(f, t)}
                       </div>
                     ))}
                   </div>

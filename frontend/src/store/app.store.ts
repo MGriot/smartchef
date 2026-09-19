@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import i18n from "../i18n";
-import { adoptUiLangForAccount } from "../lib/uiLanguage";
+import { adoptUiLangForAccount, readUiLang } from "../lib/uiLanguage";
 
 interface Recipe {
   id: string;
@@ -153,10 +153,11 @@ export const useStore = create<AppStore>((set, get) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 
-  // Defaults to "en" to match i18n's own default UI locale (src/i18n/index.ts)
-  // — otherwise the chrome reads English on first visit while every
-  // ingredient/unit/category name still shows its untranslated base value.
-  contentLang: localStorage.getItem(contentLangKey()) || "en",
+  // Defaults to the UI language (itself "en" on a fresh install — see
+  // src/i18n/index.ts), so the chrome and the recipes start out in the same
+  // language. A hard-coded "en" left an Italian interface showing English
+  // ingredient names wherever an English translation existed.
+  contentLang: localStorage.getItem(contentLangKey()) || readUiLang(),
   setContentLang: (lang) => {
     localStorage.setItem(contentLangKey(get().account?.id), lang);
     set({ contentLang: lang });

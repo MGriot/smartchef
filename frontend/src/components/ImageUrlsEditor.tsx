@@ -118,7 +118,7 @@ export default function ImageUrlsEditor({ urls, onChange }: ImageUrlsEditorProps
           className="shrink-0 flex items-center gap-1.5 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-sm font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-sm">{uploading ? 'sync' : 'upload'}</span>
-          {uploading ? 'Uploading…' : 'Upload'}
+          {uploading ? t('common.uploading') : t('common.upload')}
         </button>
       </div>
       {uploadError && (

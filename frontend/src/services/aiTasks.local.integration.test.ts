@@ -104,8 +104,10 @@ describe('standalone ingredient naming', () => {
     const res = await route('/api/ingredients/ai-name', 'POST', { items: [{ key: '0', text: 'mele renette' }] });
     expect(res.status).toBe(200);
     expect(res.data[0]).toMatchObject({ name: 'Renetta Apple', parent: 'Apple', parentId: 'apple' });
-    // "en" is always the base name, whatever the model wrote there.
-    expect(res.data[0].translations).toContainEqual({ lang: 'en', text: 'Renetta Apple' });
+    // English is the base name itself: never offered as a translation, and
+    // not asked of the model.
+    expect(res.data[0].translations.some((tr: { lang: string }) => tr.lang === 'en')).toBe(false);
+    expect(providerCalls[0].systemPrompt).not.toContain('"en" (');
     expect(res.data[0].translations).toContainEqual({ lang: 'it', text: 'Mela renetta' });
     expect(providerCalls[0].systemPrompt).toContain('Apple');
   });
@@ -122,7 +124,6 @@ describe('standalone ingredient naming', () => {
     const trs = db.prepare('SELECT language_code, translated_name FROM ingredient_translations WHERE ingredient_id=? ORDER BY language_code').all(res.data.id);
     // The typed French name wins over the AI's.
     expect(trs).toEqual([
-      { language_code: 'en', translated_name: 'Tonic Water' },
       { language_code: 'fr', translated_name: 'Tonic' },
       { language_code: 'it', translated_name: 'Acqua tonica' },
     ]);

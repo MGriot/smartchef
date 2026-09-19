@@ -161,7 +161,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
             value={contentLang}
             onChange={(e) => handleLanguageChange(e.target.value)}
             aria-label={t('common.language')}
-            className="hidden sm:block max-w-[6.5rem] xl:max-w-none truncate text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-2.5 pr-6 xl:pl-3 xl:pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
+            className="block max-w-[5.5rem] sm:max-w-[6.5rem] xl:max-w-none truncate text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-2.5 pr-6 xl:pl-3 xl:pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
           >
             {languages.map((l) => (
               <option key={l.code} value={l.code}>{l.label}</option>
@@ -185,8 +185,8 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           flow it would open wherever the page happens to be scrolled to. */}
       {mobileMenuOpen && (
         <nav className="xl:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm max-lg:fixed max-lg:inset-x-0 max-lg:z-40 max-lg:top-[var(--app-header-h)] max-lg:max-h-[calc(100dvh-var(--app-header-h))] max-lg:overflow-y-auto">
-          {/* The header's own picker is hidden below `sm` to keep the bar to
-              menu, name and avatar; this is where it lives there instead. */}
+          {/* The header shows the picker at every width now — on a phone it
+              was only here, and went unfound. Kept as the labelled version. */}
           <label className="sm:hidden flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
             <span className="flex items-center gap-3">
               <span className="material-symbols-outlined text-[20px]">translate</span>

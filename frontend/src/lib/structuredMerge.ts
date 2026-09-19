@@ -107,10 +107,20 @@ export function mergeField(base: unknown, local: unknown, remote: unknown, ctx: 
  *  is 'ask' or the timestamps can't tell. */
 function newerSide(ctx: FieldMergeContext): 'local' | 'remote' | null {
   if ((ctx.policy ?? 'ask') !== 'newest') return null;
-  const l = ctx.localUpdatedAt ?? null;
-  const r = ctx.remoteUpdatedAt ?? null;
-  if (l === null || r === null || l === r) return null;
-  return l > r ? 'local' : 'remote';
+  return pickNewer(ctx.localUpdatedAt ?? null, ctx.remoteUpdatedAt ?? null);
+}
+
+/** The later of two edit times (epoch ms). A side that carries a time beats
+ *  one that doesn't — a copy written before timestamps were serialized can't
+ *  claim to be newer, and leaving it undecided kept conflicts pending
+ *  forever, the tree republishing the older copy meanwhile. Only two equal
+ *  times, or none at all, stay undecided. */
+export function pickNewer(local: number | null, remote: number | null): 'local' | 'remote' | null {
+  if (local === null && remote === null) return null;
+  if (remote === null) return 'local';
+  if (local === null) return 'remote';
+  if (local === remote) return null;
+  return local > remote ? 'local' : 'remote';
 }
 
 export interface EntityConflict {
@@ -164,8 +174,18 @@ export function mergeEntity(
     remoteUpdatedAt: parseTimestamp(remote.updated_at),
   };
 
+  // Whether each side edited anything besides a deletion marker — a
+  // deletion on one side meeting an edit on the other is git's
+  // modify/delete conflict (see resolveModifyDelete below).
+  let localEditedOther = false;
+  let remoteEditedOther = false;
+
   for (const fieldName of fieldNames) {
     const result = mergeField(base[fieldName], local[fieldName], remote[fieldName], { ...ctxBase, fieldName });
+    if (!TOMBSTONE_FIELDS.has(fieldName)) {
+      if (result.type === 'keep-local' || result.type === 'merged' || result.type === 'conflict' || result.type === 'auto-resolved') localEditedOther = true;
+      if (result.type === 'fast-forward' || result.type === 'merged' || result.type === 'conflict' || result.type === 'auto-resolved') remoteEditedOther = true;
+    }
     switch (result.type) {
       case 'fast-forward':
         applied[fieldName] = result.value;
@@ -184,5 +204,55 @@ export function mergeEntity(
     }
   }
 
+  if (ctxBase.hasBase) {
+    for (const fieldName of fieldNames) {
+      if (TOMBSTONE_FIELDS.has(fieldName)) {
+        resolveModifyDelete(fieldName, base, local, remote, { localEditedOther, remoteEditedOther }, ctxBase, applied, conflicts, autoResolved);
+      }
+    }
+  }
+
   return { applied, conflicts, autoResolved };
+}
+
+// ── Modify/delete ───────────────────────────────────────────────────────
+// Deletion markers: recipes/ingredients carry sync_status='deleted', the
+// other types deleted_at. Merged like any field, a deletion on one side
+// silently won over an edit made on the other side meanwhile — the case git
+// stops on as a modify/delete conflict. Here the policy decides it: under
+// 'newest' the later of the two wins (an edit made after the deletion
+// brings the item back), otherwise the user is asked.
+const TOMBSTONE_FIELDS = new Set(['sync_status', 'deleted_at']);
+
+function isDeleted(fieldName: string, value: unknown): boolean {
+  return fieldName === 'sync_status' ? value === 'deleted' : !isEmptyValue(value);
+}
+
+function resolveModifyDelete(
+  fieldName: string,
+  base: Record<string, unknown>,
+  local: Record<string, unknown>,
+  remote: Record<string, unknown>,
+  edits: { localEditedOther: boolean; remoteEditedOther: boolean },
+  ctx: FieldMergeContext,
+  applied: Record<string, unknown>,
+  conflicts: EntityConflict[],
+  autoResolved: AutoResolvedField[],
+): void {
+  const baseDeleted = isDeleted(fieldName, base[fieldName]);
+  const localDeleted = !baseDeleted && isDeleted(fieldName, local[fieldName]);
+  const remoteDeleted = !baseDeleted && isDeleted(fieldName, remote[fieldName]);
+  const deletedHere = localDeleted && !remoteDeleted && edits.remoteEditedOther;
+  const deletedThere = remoteDeleted && !localDeleted && edits.localEditedOther;
+  if (!deletedHere && !deletedThere) return;
+
+  const winner = newerSide(ctx);
+  if (!winner) {
+    delete applied[fieldName];
+    conflicts.push({ fieldName, baseValue: base[fieldName], localValue: local[fieldName], remoteValue: remote[fieldName] });
+    return;
+  }
+  if (winner === 'remote') applied[fieldName] = remote[fieldName];
+  else delete applied[fieldName];
+  autoResolved.push({ fieldName, winner, reason: 'newest' });
 }

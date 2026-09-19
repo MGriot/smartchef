@@ -337,7 +337,9 @@ export async function suggestIngredientNaming(
   const idByName = new Map<string, string>();
   for (const c of catalog) if (!idByName.has(c.name.trim().toLowerCase())) idByName.set(c.name.trim().toLowerCase(), c.id);
   const [{ nameIngredients }, { listLanguages }] = await Promise.all([import('./aiTasks.local'), import('../lib/languages')]);
-  const langs = [...new Set(['en', ...listLanguages().map((l) => l.code)])];
+  // The catalog name IS the English name — an "en" translation would only
+  // repeat it, so English is never asked for.
+  const langs = [...new Set(listLanguages().map((l) => l.code))].filter((code) => code !== 'en');
   const results = await nameIngredients(clean, { catalogNames: catalog.map((c) => c.name), langs, keepName: opts.keepName });
   return results.map((r) => ({
     key: r.key,

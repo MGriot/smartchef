@@ -697,7 +697,7 @@ const RecipeCreate: React.FC = () => {
     try {
       const parsed = JSON.parse(rawText);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error(`Expected a JSON object, got ${Array.isArray(parsed) ? 'an array' : typeof parsed}`);
+        throw new Error(t('errors.expectedJsonObject'));
       }
       // Merge onto the current draft rather than replacing it wholesale.
       // ingredients/steps/tools also accept the same looser shape the AI

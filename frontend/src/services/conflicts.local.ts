@@ -12,8 +12,9 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne } from "../db/local";
-import type { ConflictPolicy, EntityMergeResult } from "../lib/structuredMerge";
+import { pickNewer, type ConflictPolicy, type EntityMergeResult } from "../lib/structuredMerge";
 import { fieldValuesEqual, isEmptyValue, mergeKeyedList, mergeSetField, parseTimestamp, KEYED_LIST_FIELDS, SET_FIELDS } from "../lib/mergeNormalize";
+import { healIngredientsValue } from "../lib/sync/referenceHeal";
 import {
   EXTRA_FIELDS, isExtraField, writeExtraField, writeStepTranslations, writeRecipeIngredientTranslations, portableCategoryId,
 } from "./syncExtras.local";
@@ -128,6 +129,9 @@ export interface ResolvedConflict {
   entityId: string;
   fieldName: string;
   chosenValue: unknown;
+  /** The pending conflict this settles — removed by applyResolvedConflict()
+   *  only once the value is written, so a failed write leaves it pending. */
+  conflictId?: string;
 }
 
 // ── Applying a resolution back onto the entity ──────────────────────────
@@ -157,6 +161,10 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
       'rest_time_min', 'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url',
       'source_url', 'is_component', 'language_code', 'tags', 'regions', 'region_coords',
       'sources', 'creator_name', 'storage_instructions', 'tips',
+      // The deletion marker ('local' | 'deleted'). Left out, a recipe
+      // deleted on one device never disappeared anywhere else, and one that
+      // arrived already deleted was created live.
+      'sync_status',
     ]),
   },
   ingredient: {
@@ -171,6 +179,8 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
       'image_urls', 'seasonal_months',
       // Left out of sync until ADR 0006's whole-library pass.
       'synonyms', 'plural_name', 'parent_ingredient_id',
+      // Deletion marker — see recipe.
+      'sync_status',
     ]),
   },
   tool: {
@@ -180,17 +190,17 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
     // updateTool()/deleteTool() in ingredients.local.ts) fast-forwards
     // through Structured Merge like any other field, instead of the
     // deletion silently never reaching other devices.
-    scalarFields: new Set(['name', 'category', 'description', 'icon', 'image_urls', 'deleted_at']),
+    scalarFields: new Set(['name', 'category', 'description', 'icon', 'image_urls', 'deleted_at', 'synonyms']),
   },
   tag: {
     table: 'tags',
     nameColumn: 'name',
-    scalarFields: new Set(['name', 'group_name', 'color', 'icon', 'sort_order', 'exclude_tag_ids', 'deleted_at']),
+    scalarFields: new Set(['name', 'group_name', 'color', 'icon', 'sort_order', 'exclude_tag_ids', 'deleted_at', 'synonyms']),
   },
   technique: {
     table: 'techniques',
     nameColumn: 'name',
-    scalarFields: new Set(['name', 'description', 'icon', 'image_urls', 'deleted_at']),
+    scalarFields: new Set(['name', 'description', 'icon', 'image_urls', 'deleted_at', 'synonyms']),
   },
   profile: {
     table: 'profiles',
@@ -223,6 +233,13 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
 // associations under — NOT `tools` (ticket 02's Answer uses "tools" as
 // shorthand for the concept; the real entity JSON's key is toolIds).
 const ARRAY_FIELDS = new Set(['steps', 'ingredients', 'toolIds']);
+
+/** Table behind a synced entity type, and whether it has updated_at —
+ *  for the two-way reconciliation in syncReconcile.local.ts. */
+export function getEntityTable(entityType: string): { table: string; hasUpdatedAt: boolean } | null {
+  const config = ENTITY_CONFIG[entityType];
+  return config ? { table: config.table, hasUpdatedAt: config.hasUpdatedAt !== false } : null;
+}
 
 /** The full set of field names Structured Merge should compare for an
  *  entity type — scalar columns plus, for recipes, the three whole-array
@@ -566,7 +583,7 @@ export async function formatArrayFieldLines(entityType: string, fieldName: strin
  *  applyMergeIfNeeded() — doesn't have, since that path already commits).
  *  Each syncX() function is itself fire-and-forget (catches and logs its
  *  own errors, per its own docstring), so this never throws. */
-async function resyncEntityToGit(entityType: string, entityId: string): Promise<void> {
+export async function resyncEntityToGit(entityType: string, entityId: string): Promise<void> {
   switch (entityType) {
     case 'recipe': {
       const { syncRecipe } = await import('./recipes.local');
@@ -617,6 +634,9 @@ export async function applyResolvedConflict(resolved: ResolvedConflict): Promise
   } else {
     await writeScalarField(config, resolved.entityType, resolved.entityId, resolved.fieldName, resolved.chosenValue);
   }
+  // Before re-serializing: while the row exists, overlayPendingConflicts()
+  // would keep writing the remote's value into the tree.
+  if (resolved.conflictId) await deleteConflict(resolved.conflictId);
   await resyncEntityToGit(resolved.entityType, resolved.entityId);
 }
 
@@ -799,6 +819,14 @@ export async function createEntity(entityType: string, entityId: string, fields:
     fields = { ...fields, parent_ingredient_id: null };
   }
   const recognized = Object.entries(fields).filter(([k]) => config.scalarFields.has(k) && !ARRAY_FIELDS.has(k));
+  // The row keeps the synced copy's own timestamps. Stamped with the insert
+  // time instead, every synced-in row looked freshly edited here: the
+  // 'newest' policy misjudged it, and reconciliation re-published it.
+  if (config.hasUpdatedAt !== false) {
+    for (const column of ['created_at', 'updated_at']) {
+      if (typeof fields[column] === 'string' && fields[column]) recognized.push([column, fields[column]]);
+    }
+  }
   const columns = ['id', ...recognized.map(([k]) => k)];
   const values: unknown[] = [entityId, ...recognized.map(([, v]) => v)];
   const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
@@ -831,21 +859,20 @@ export async function deleteConflict(id: string): Promise<void> {
   await query(`DELETE FROM sync_conflicts WHERE id = $1`, [id]);
 }
 
-/** Resolves a pending conflict by deleting its record and reporting which
- *  value the user picked. Applying that value back onto the entity's own
- *  row — and letting it ride the next normal sync per its bumped
- *  updated_at — is the caller's job; this module only owns the conflict
- *  record's lifecycle. Returns null if `id` isn't a pending conflict. */
+/** Reports which value the user picked for a pending conflict. The record
+ *  stays until applyResolvedConflict() has written that value — deleting it
+ *  first lost the conflict whenever the write then failed. Returns null if
+ *  `id` isn't a pending conflict. */
 export async function resolveConflict(id: string, chosen: 'local' | 'remote'): Promise<ResolvedConflict | null> {
   const row = await queryOne<ConflictRow>(`SELECT * FROM sync_conflicts WHERE id = $1`, [id]);
   if (!row) return null;
-  await query(`DELETE FROM sync_conflicts WHERE id = $1`, [id]);
   const conflict = fromRow(row);
   return {
     entityType: conflict.entityType,
     entityId: conflict.entityId,
     fieldName: conflict.fieldName,
     chosenValue: chosen === 'local' ? conflict.localValue : conflict.remoteValue,
+    conflictId: conflict.id,
   };
 }
 
@@ -864,15 +891,19 @@ async function entityUpdatedAt(entityType: string, entityId: string): Promise<st
 
 /** Which side of a conflict is newer, or null when that can't be told. */
 export function newerSide(conflict: Pick<SyncConflict, 'localUpdatedAt' | 'remoteUpdatedAt'>): 'local' | 'remote' | null {
-  const l = parseTimestamp(conflict.localUpdatedAt);
-  const r = parseTimestamp(conflict.remoteUpdatedAt);
-  if (l === null || r === null || l === r) return null;
-  return l > r ? 'local' : 'remote';
+  return pickNewer(parseTimestamp(conflict.localUpdatedAt), parseTimestamp(conflict.remoteUpdatedAt));
 }
 
 /** The rule-based answer for one conflict, or null if it has to be asked. */
 function decideConflict(conflict: SyncConflict, policy: ConflictPolicy): ConflictDecision | null {
-  const { fieldName, localValue, remoteValue, baseValue } = conflict;
+  const { fieldName, baseValue } = conflict;
+  let { localValue, remoteValue } = conflict;
+  if (fieldName === 'ingredients') {
+    // Unresolvable unit ids on one side are not a disagreement — see
+    // lib/sync/referenceHeal.ts. Backlog recorded before that existed.
+    localValue = healIngredientsValue(localValue, remoteValue, baseValue);
+    remoteValue = healIngredientsValue(remoteValue, localValue, baseValue);
+  }
   if (fieldValuesEqual(fieldName, localValue, remoteValue)) return { value: localValue, reason: 'equal' };
   if (isEmptyValue(localValue)) return { value: remoteValue, reason: 'empty-side' };
   if (isEmptyValue(remoteValue)) return { value: localValue, reason: 'empty-side' };
@@ -904,8 +935,8 @@ async function writeChosenValue(entityType: string, entityId: string, fieldName:
 async function settle(conflicts: Array<{ conflict: SyncConflict; value: unknown }>): Promise<void> {
   const entities = new Map<string, { entityType: string; entityId: string }>();
   for (const { conflict, value } of conflicts) {
-    await query(`DELETE FROM sync_conflicts WHERE id = $1`, [conflict.id]);
     await writeChosenValue(conflict.entityType, conflict.entityId, conflict.fieldName, value);
+    await query(`DELETE FROM sync_conflicts WHERE id = $1`, [conflict.id]);
     entities.set(`${conflict.entityType}:${conflict.entityId}`, { entityType: conflict.entityType, entityId: conflict.entityId });
   }
   // Once per entity, after every field is written: each re-serialization
@@ -931,7 +962,16 @@ export async function autoResolvePendingConflicts(
   const pending = await listPendingConflicts();
   const decided: Array<{ conflict: SyncConflict; value: unknown }> = [];
   let remaining = 0;
+  let obsolete = 0;
   for (const original of pending) {
+    // A field the merge no longer compares (an ingredient's category_id,
+    // merged by name since ADR 0006) can never be settled by a sync, and
+    // writing either side would only reintroduce a per-device id.
+    if (!(getMergeableFieldNames(original.entityType) ?? []).includes(original.fieldName)) {
+      await deleteConflict(original.id);
+      obsolete++;
+      continue;
+    }
     let conflict = original;
     if (policy === 'newest' && (!conflict.localUpdatedAt || !conflict.remoteUpdatedAt)) {
       conflict = {
@@ -945,7 +985,7 @@ export async function autoResolvePendingConflicts(
     else remaining++;
   }
   await settle(decided);
-  return { resolved: decided.length, remaining };
+  return { resolved: decided.length + obsolete, remaining };
 }
 
 /** The Conflicts card's per-entity bulk actions: keep every field from one

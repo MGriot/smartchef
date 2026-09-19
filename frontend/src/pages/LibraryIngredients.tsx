@@ -95,7 +95,7 @@ export default function LibraryIngredients() {
       const tgs = await tagRes.json();
       // An error response used to become an empty list here, which renders
       // exactly like an empty library — every category at 0, no hint why.
-      if (!ingRes.ok) throw new Error(ings?.error ? JSON.stringify(ings.error) : `Ingredients failed to load (${ingRes.status})`);
+      if (!ingRes.ok) throw new Error(ings?.error ? JSON.stringify(ings.error) : t('library.ingredients.loadFailed', { status: ingRes.status }));
       setIngredients(ings.data || []);
       setCategories(cats.data || []);
       setAllTags(tgs.data || []);

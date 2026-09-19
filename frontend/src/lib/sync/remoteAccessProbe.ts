@@ -33,6 +33,7 @@
 // has. The happy path is a single request.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../../i18n';
 import { nativeHttpRequest } from '../nativeHttp';
 import { gitBasicCredentials } from './gitRemoteTransport';
 import type { GitRemoteAccessProblem, GitRemoteConfig } from './syncSettings';
@@ -76,52 +77,22 @@ export interface RemoteAccessResult {
 
 /** Banner copy for every state that is not 'writable'.
  *
- *  Lives here, beside the code that decides the state, so a new kind cannot
- *  be added without copy — the Record's key type makes that a type error. */
-export const ACCESS_PROBLEM_COPY: Record<Exclude<RemoteAccessKind, 'writable'>, { title: string; body: string }> = {
-  'token-rejected': {
-    title: 'Your access token was rejected',
-    body:
-      'The library can still be read if the repository is public, so you can carry on — but this device won’t be ' +
-      'able to upload anything until the token is fixed. It may be mistyped, expired or revoked, or missing write ' +
-      'access (repo, or Contents: read and write for a fine-grained token) — or it may not be a GitHub token at ' +
-      'all: GitHub tokens begin ghp_ or github_pat_. A token from another service reads a public repository fine ' +
-      'and fails every upload.',
-  },
-  'read-only': {
-    title: 'This token cannot upload',
-    body:
-      'The server accepted the token but refused to let it write. On GitHub that means the token is missing the ' +
-      'repo scope, or Contents: read and write for a fine-grained token. Reading will keep working; nothing this ' +
-      'device changes will reach your other devices.',
-  },
-  'no-credentials': {
-    title: 'No access token set',
-    body:
-      'Reading a public repository needs no token, so setup looks complete — but writing to one does. Without a ' +
-      'token this device can receive changes and will never send any. Add a personal access token with write ' +
-      'access.',
-  },
-  'malformed-token': {
-    title: 'That does not look like a GitHub token',
-    body:
-      'GitHub tokens begin ghp_ or github_pat_. A token from another service can still read a public repository, ' +
-      'so sync will appear to work while every upload fails. Double-check you copied it from GitHub → Settings → ' +
-      'Developer settings → Personal access tokens.',
-  },
-  'not-found': {
-    title: 'Repository not found',
-    body:
-      'The server has no repository at this URL. Check the address — and if the repository is private, that this ' +
-      'device’s token can see it, since git reports a private repository as missing rather than forbidden.',
-  },
-  unreachable: {
-    title: 'Could not reach this git server',
-    body:
-      'Nothing answered at this address, or what answered was not a git server. Check the URL and this device’s ' +
-      'connection.',
-  },
+ *  Keyed here, beside the code that decides the state, so a new kind cannot
+ *  be added without copy — the Record's key type makes that a type error.
+ *  The words themselves live in the locale files (remoteAccess.*). */
+const ACCESS_PROBLEM_KEY: Record<Exclude<RemoteAccessKind, 'writable'>, string> = {
+  'token-rejected': 'tokenRejected',
+  'read-only': 'readOnly',
+  'no-credentials': 'noCredentials',
+  'malformed-token': 'malformedToken',
+  'not-found': 'notFound',
+  unreachable: 'unreachable',
 };
+
+export function accessProblemCopy(kind: Exclude<RemoteAccessKind, 'writable'>): { title: string; body: string } {
+  const key = ACCESS_PROBLEM_KEY[kind];
+  return { title: i18n.t(`remoteAccess.${key}.title`), body: i18n.t(`remoteAccess.${key}.body`) };
+}
 
 /** The subset of states worth remembering between screens. 'not-found' and
  *  'unreachable' are deliberately absent: both are usually transient or a
@@ -208,9 +179,9 @@ function basicAuth(username: string, password: string): string {
 
 function result(kind: RemoteAccessKind, status?: number): RemoteAccessResult {
   if (kind === 'writable') {
-    return { kind, message: 'Reachable — this device can upload.', status };
+    return { kind, message: i18n.t('remoteAccess.writable'), status };
   }
-  const copy = ACCESS_PROBLEM_COPY[kind];
+  const copy = accessProblemCopy(kind);
   return { kind, message: `${copy.title}. ${copy.body}`, status };
 }
 
@@ -220,7 +191,7 @@ function result(kind: RemoteAccessKind, status?: number): RemoteAccessResult {
  *  Never writes anything. */
 export async function probeGitRemoteAccess(config: GitRemoteConfig): Promise<RemoteAccessResult> {
   if (!config.url.trim()) {
-    return { kind: 'unreachable', message: 'Enter a repository URL first.' };
+    return { kind: 'unreachable', message: i18n.t('remoteAccess.enterUrl') };
   }
 
   // Before any network call: a token that cannot belong to this host is

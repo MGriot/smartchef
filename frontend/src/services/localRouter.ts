@@ -10,6 +10,7 @@
 // standalone mode existed.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../i18n';
 import * as recipes from './recipes.local';
 import * as ingredients from './ingredients.local';
 import * as tags from './tags.local';
@@ -61,7 +62,7 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
   if (id === 'filter-by-pantry' && method === 'POST') {
     const body = parseBody(init) ?? {};
     const items = Array.isArray(body.ingredients) ? body.ingredients : [];
-    if (items.length === 0) return { status: 400, error: 'Add something to the pantry first.' };
+    if (items.length === 0) return { status: 400, error: i18n.t('errors.pantryEmpty') };
     return { status: 200, data: await pantry.filterByPantry(items, body.minMatchRatio ?? 1, sp.get('lang') ?? undefined) };
   }
   if (id === 'parse') {
@@ -73,8 +74,8 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     // apply to it — see llmParser.local.ts's parseRecipeLocally().
     const inputType: 'url' | 'text' | 'media' =
       body.inputType === 'url' ? 'url' : body.inputType === 'media' ? 'media' : 'text';
-    if (inputType === 'media' && !body.media?.data) return { status: 400, error: 'Attach a photo, PDF, audio file or video first.' };
-    if (inputType !== 'media' && !input.trim()) return { status: 400, error: 'Paste a recipe or a link first.' };
+    if (inputType === 'media' && !body.media?.data) return { status: 400, error: i18n.t('errors.attachFileFirst') };
+    if (inputType !== 'media' && !input.trim()) return { status: 400, error: i18n.t('errors.pasteRecipeFirst') };
     // Standalone mode used to answer 501 here — Smart Import needed a
     // server. It doesn't any more: llmParser.local.ts runs the same
     // pipeline on the device against whichever provider this device has
@@ -103,7 +104,7 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
   if (!sub) {
     if (method === 'GET') {
       const recipe = await recipes.getRecipe(id, sp.get('lang') ?? undefined);
-      if (!recipe) return { status: 404, error: 'Ricetta non trovata' };
+      if (!recipe) return { status: 404, error: i18n.t('errors.recipeNotFound') };
       return { status: 200, data: recipe };
     }
     if (method === 'PUT') {
@@ -132,22 +133,22 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
   if (sub === 'cooked' && method === 'POST') {
     const profile = await getStandaloneProfile();
     const result = await recipes.logCooked(id, profile?.name ?? null);
-    if (!result) return { status: 404, error: 'Recipe not found' };
+    if (!result) return { status: 404, error: i18n.t('errors.recipeNotFound') };
     return { status: 200, data: result };
   }
   if (sub === 'translate' && sub2 && method === 'POST') {
     const lang = sub2.trim().toLowerCase();
-    if (!isValidLanguageCode(lang)) return { status: 400, error: `Unsupported language: ${sub2}` };
+    if (!isValidLanguageCode(lang)) return { status: 400, error: i18n.t('errors.unsupportedLanguage', { lang: sub2 }) };
     try {
       const result = await recipes.translateRecipe(id, lang);
-      if (!result) return { status: 404, error: 'Ricetta non trovata' };
+      if (!result) return { status: 404, error: i18n.t('errors.recipeNotFound') };
       return { status: 200, data: result };
     } catch (err) {
       return { status: 502, error: err instanceof Error ? err.message : 'Translation failed' };
     }
   }
   if (sub === 'nutrition' || sub === 'translate' || sub === 'collections') {
-    return { status: 501, error: `"${sub}" isn't available in offline mode yet — connect to a server to use it.` };
+    return { status: 501, error: i18n.t('errors.notAvailableOffline', { feature: sub }) };
   }
   void sub2;
   return NOT_HANDLED;
@@ -204,7 +205,7 @@ async function dispatchIngredients(segments: string[], method: string, sp: URLSe
   if (first === 'ai-name' && method === 'POST') {
     const body = parseBody(init) ?? {};
     const items = Array.isArray(body.items) ? body.items : [];
-    if (items.length === 0) return { status: 400, error: 'Nothing to name.' };
+    if (items.length === 0) return { status: 400, error: i18n.t('errors.nothingToName') };
     try {
       return { status: 200, data: await ingredients.suggestIngredientNaming(items, { keepName: body.keepName === true }) };
     } catch (err) {
@@ -247,7 +248,7 @@ async function dispatchTools(segments: string[], method: string, sp: URLSearchPa
   }
   if (sub === 'merge' && method === 'POST') {
     const body = parseBody(init) ?? {};
-    if (!body.targetId) return { status: 400, error: 'A tool to merge into is required.' };
+    if (!body.targetId) return { status: 400, error: i18n.t('errors.toolMergeTargetRequired') };
     return { status: 200, data: await ingredients.mergeTools(id, body.targetId) };
   }
   if (method === 'PUT') { await ingredients.updateTool(id, parseBody(init)); return { status: 200, data: { success: true } }; }
@@ -282,7 +283,7 @@ async function dispatchTags(segments: string[], method: string, sp: URLSearchPar
     // Dissolves a group, leaving its tags ungrouped — see tags.local.ts.
     if (sub === 'delete' && method === 'POST') {
       const body = parseBody(init) ?? {};
-      if (!body.groupName) return { status: 400, error: 'A group name is required.' };
+      if (!body.groupName) return { status: 400, error: i18n.t('errors.groupNameRequired') };
       return { status: 200, data: await tags.deleteTagGroup(body.groupName) };
     }
     // Translated labels for the free-text group names — see tags.local.ts.
@@ -290,7 +291,7 @@ async function dispatchTags(segments: string[], method: string, sp: URLSearchPar
       if (method === 'GET') return { status: 200, data: await tags.listTagGroupTranslations() };
       if (method === 'PUT') {
         const body = parseBody(init) ?? {};
-        if (!body.groupName) return { status: 400, error: 'A group name is required.' };
+        if (!body.groupName) return { status: 400, error: i18n.t('errors.groupNameRequired') };
         return { status: 200, data: await tags.setTagGroupTranslations(body.groupName, body.translations ?? []) };
       }
     }
@@ -314,7 +315,7 @@ async function dispatchTechniques(segments: string[], method: string, sp: URLSea
   }
   if (sub === 'merge' && method === 'POST') {
     const body = parseBody(init) ?? {};
-    if (!body.targetId) return { status: 400, error: 'A technique to merge into is required.' };
+    if (!body.targetId) return { status: 400, error: i18n.t('errors.techniqueMergeTargetRequired') };
     return { status: 200, data: await techniques.mergeTechniques(id, body.targetId) };
   }
   if (method === 'PUT') { await techniques.updateTechnique(id, parseBody(init)); return { status: 200, data: { success: true } }; }
@@ -365,7 +366,7 @@ async function dispatchShare(segments: string[], method: string, init?: RequestI
 
   if (kind === 'recipes' && id && action === 'export' && method === 'GET') {
     const bundle = await share.exportRecipe(id);
-    if (!bundle) return { status: 404, error: 'Ricetta non trovata' };
+    if (!bundle) return { status: 404, error: i18n.t('errors.recipeNotFound') };
     return { status: 200, data: bundle };
   }
 
@@ -380,7 +381,7 @@ async function dispatchPantry(segments: string[], method: string, sp: URLSearchP
     if (method === 'GET') return { status: 200, data: await pantry.listPantry(sp.get('lang') ?? undefined) };
     if (method === 'PUT') {
       const body = parseBody(init) ?? {};
-      if (!body.ingredientId) return { status: 400, error: 'An ingredient is required.' };
+      if (!body.ingredientId) return { status: 400, error: i18n.t('errors.ingredientRequired') };
       return { status: 200, data: await pantry.putPantryItem(body) };
     }
     return NOT_HANDLED;
@@ -400,7 +401,7 @@ async function dispatchCollections(segments: string[], method: string, init?: Re
     if (method === 'GET') return { status: 200, data: await collections.listCollections() };
     if (method === 'POST') {
       const body = parseBody(init) ?? {};
-      if (!body.name) return { status: 400, error: 'A name is required.' };
+      if (!body.name) return { status: 400, error: i18n.t('errors.nameRequired') };
       return { status: 201, data: await collections.createCollection(body) };
     }
     return NOT_HANDLED;
@@ -409,17 +410,17 @@ async function dispatchCollections(segments: string[], method: string, init?: Re
   if (!sub) {
     if (method === 'GET') {
       const found = await collections.getCollection(id);
-      return found ? { status: 200, data: found } : { status: 404, error: 'Collection not found' };
+      return found ? { status: 200, data: found } : { status: 404, error: i18n.t('errors.collectionNotFound') };
     }
     if (method === 'PUT') {
       const body = parseBody(init) ?? {};
-      if (!body.name) return { status: 400, error: 'A name is required.' };
+      if (!body.name) return { status: 400, error: i18n.t('errors.nameRequired') };
       const ok = await collections.updateCollection(id, body);
-      return ok ? { status: 200, data: { success: true } } : { status: 404, error: 'Collection not found' };
+      return ok ? { status: 200, data: { success: true } } : { status: 404, error: i18n.t('errors.collectionNotFound') };
     }
     if (method === 'DELETE') {
       const ok = await collections.deleteCollection(id);
-      return ok ? { status: 200, data: { success: true } } : { status: 404, error: 'Collection not found' };
+      return ok ? { status: 200, data: { success: true } } : { status: 404, error: i18n.t('errors.collectionNotFound') };
     }
     return NOT_HANDLED;
   }
@@ -427,9 +428,9 @@ async function dispatchCollections(segments: string[], method: string, init?: Re
   if (sub === 'recipes') {
     if (!recipeId && method === 'POST') {
       const body = parseBody(init) ?? {};
-      if (!body.recipeId) return { status: 400, error: 'A recipe is required.' };
+      if (!body.recipeId) return { status: 400, error: i18n.t('errors.recipeRequired') };
       const ok = await collections.addRecipeToCollection(id, body.recipeId);
-      return ok ? { status: 201, data: { success: true } } : { status: 404, error: 'Collection not found' };
+      return ok ? { status: 201, data: { success: true } } : { status: 404, error: i18n.t('errors.collectionNotFound') };
     }
     if (recipeId && method === 'DELETE') {
       await collections.removeRecipeFromCollection(id, recipeId);
@@ -454,7 +455,7 @@ async function dispatchMenus(segments: string[], method: string, init?: RequestI
     if (method === 'GET') return { status: 200, data: await menus.listMenus() };
     if (method === 'POST') {
       const body = parseBody(init) ?? {};
-      if (!body.name || !body.weekStart) return { status: 400, error: 'A name and a week start are required.' };
+      if (!body.name || !body.weekStart) return { status: 400, error: i18n.t('errors.menuFieldsRequired') };
       return { status: 201, data: await menus.createMenu(body) };
     }
     return NOT_HANDLED;
@@ -463,7 +464,7 @@ async function dispatchMenus(segments: string[], method: string, init?: RequestI
   if (!sub) {
     if (method === 'GET') {
       const menu = await menus.getMenu(menuId);
-      return menu ? { status: 200, data: menu } : { status: 404, error: 'Menu not found' };
+      return menu ? { status: 200, data: menu } : { status: 404, error: i18n.t('errors.menuNotFound') };
     }
     if (method === 'DELETE') { await menus.deleteMenu(menuId); return { status: 200, data: { success: true } }; }
     return NOT_HANDLED;
@@ -477,14 +478,14 @@ async function dispatchMenus(segments: string[], method: string, init?: RequestI
     if (!itemId && method === 'POST') {
       const body = parseBody(init) ?? {};
       if (!body.recipeId || typeof body.dayOfWeek !== 'number') {
-        return { status: 400, error: 'A recipe and a day are required.' };
+        return { status: 400, error: i18n.t('errors.menuItemFieldsRequired') };
       }
       const created = await menus.addMenuItem(menuId, body);
-      return created ? { status: 201, data: created } : { status: 404, error: 'Menu not found' };
+      return created ? { status: 201, data: created } : { status: 404, error: i18n.t('errors.menuNotFound') };
     }
     if (itemId && method === 'PATCH') {
       const ok = await menus.updateMenuItem(menuId, itemId, parseBody(init) ?? {});
-      return ok ? { status: 200, data: { success: true } } : { status: 404, error: 'Item not found' };
+      return ok ? { status: 200, data: { success: true } } : { status: 404, error: i18n.t('errors.itemNotFound') };
     }
     if (itemId && method === 'DELETE') {
       await menus.removeMenuItem(menuId, itemId);
@@ -528,24 +529,24 @@ async function dispatchShopping(segments: string[], method: string, init?: Reque
   if (second === 'items' && itemId && action === 'check' && method === 'PATCH') {
     const body = parseBody(init) ?? {};
     const ok = await shopping.setItemChecked(first, itemId, !!body.checked);
-    return ok ? { status: 200, data: { ok: true } } : { status: 404, error: 'Item not found' };
+    return ok ? { status: 200, data: { ok: true } } : { status: 404, error: i18n.t('errors.itemNotFound') };
   }
 
   if (second === 'export' && method === 'GET') {
     const list = await shopping.loadShoppingList(first);
-    if (!list) return { status: 404, error: 'Shopping list not found' };
+    if (!list) return { status: 404, error: i18n.t('errors.shoppingListNotFound') };
     return { status: 200, data: { markdown: shopping.exportShoppingListMarkdown(list) } };
   }
 
   if (!second && method === 'GET') {
     const list = await shopping.loadShoppingList(first);
-    if (!list) return { status: 404, error: 'Shopping list not found' };
+    if (!list) return { status: 404, error: i18n.t('errors.shoppingListNotFound') };
     return { status: 200, data: list };
   }
 
   if (!second && method === 'DELETE') {
     const ok = await shopping.deleteShoppingList(first);
-    return ok ? { status: 200, data: { success: true } } : { status: 404, error: 'Shopping list not found' };
+    return ok ? { status: 200, data: { success: true } } : { status: 404, error: i18n.t('errors.shoppingListNotFound') };
   }
 
   return NOT_HANDLED;
@@ -559,7 +560,7 @@ async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult
   // first match so callers that predate the search box are unaffected.
   const limit = Math.min(8, Math.max(1, Math.trunc(Number(sp.get('limit')) || 1)));
   const results = isElectron() ? await electronGeocode(q, limit) : await androidGeocode(q, limit);
-  if (!results.length) return { status: 404, error: 'No match found' };
+  if (!results.length) return { status: 404, error: i18n.t('errors.noMatch') };
   return { status: 200, data: results[0], results };
 }
 
@@ -589,7 +590,7 @@ async function dispatchAuth(segments: string[], method: string, init?: RequestIn
   if (action === 'account' && method === 'PUT') {
     const body = parseBody(init) ?? {};
     if (body.username !== undefined || body.password !== undefined) {
-      return { status: 400, error: 'Offline mode has no username or password — profiles are managed under Account.' };
+      return { status: 400, error: i18n.t('errors.offlineNoPassword') };
     }
     // Same patch semantics as the backend route: a field that is absent
     // stays as it is, an empty string clears it. That is what lets the
@@ -658,7 +659,7 @@ export async function dispatchLocal(path: string, init?: RequestInit): Promise<L
     // becoming a hard 501 — /api/auth/status in particular, whose
     // tryServeFromCache() branch serves the cached account offline.
     if (segments[0] === 'auth') return null;
-    return { status: 501, error: `This action isn't available in offline mode yet.` };
+    return { status: 501, error: i18n.t('errors.actionNotAvailableOffline') };
   }
   return result;
 }

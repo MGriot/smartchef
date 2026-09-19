@@ -328,6 +328,18 @@ export async function pushObjectsAndRefs(
   }
 
   await remote.writeFile(REF_PATH, refBytes);
+  // A plain folder has no atomic compare-and-swap: another device can write
+  // the ref between the check above and this write. Reading it back catches
+  // a writer that landed right after — this device then merges and retries
+  // now, instead of next cycle. (A writer this one overwrote keeps its
+  // commits locally and merges them back on its own next sync, so neither
+  // ordering loses history.)
+  if (expectedRemoteRefBytes !== undefined) {
+    const written = await remote.readFile(REF_PATH).catch(() => null);
+    if (written && !bytesEqual(written, refBytes)) {
+      return { pushed: false, objectsUploaded: uploadedObjectPaths.length, uploadedObjectPaths, conflict: true };
+    }
+  }
   const headBytes = await readLocalBytes(fs, localDir, HEAD_PATH);
   if (headBytes) await remote.writeFile(HEAD_PATH, headBytes);
 

@@ -85,7 +85,7 @@ export default function LibraryTechniques() {
         setShowModal(false);
         fetchTechniques();
       } else {
-        alert(`Save failed: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.shared.saveFailed', { error: JSON.stringify(result.error || result) }));
       }
     } catch (err) {
       console.error('Save failed:', err);
@@ -93,7 +93,7 @@ export default function LibraryTechniques() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this technique? It's removed from the catalogue and from every step referencing it — this can't be undone. To keep those references, merge it into another technique instead.")) return;
+    if (!window.confirm(t('library.techniques.confirmDelete'))) return;
     try {
       const res = await apiFetch(`/api/techniques/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -120,10 +120,10 @@ export default function LibraryTechniques() {
         setMergeTargetId('');
         fetchTechniques();
       } else {
-        alert(`Merge failed: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.shared.mergeFailed', { error: JSON.stringify(result.error || result) }));
       }
     } catch {
-      alert('Network error while merging.');
+      alert(t('library.shared.networkErrorMerging'));
     } finally {
       setMerging(false);
     }
@@ -154,15 +154,15 @@ export default function LibraryTechniques() {
       <AppLayout librarySection="techniques">
           <div className="flex justify-between items-end mb-10">
             <div>
-              <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">The Atelier Management</p>
-              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">Techniques</h1>
+              <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">{t('library.shared.eyebrow')}</p>
+              <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">{t('library.techniques.heading')}</h1>
             </div>
             <button
               onClick={() => handleOpenModal()}
               className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
             >
               <span className="material-symbols-outlined">add</span>
-              Add New Technique
+              {t('library.techniques.addNew')}
             </button>
           </div>
 
@@ -177,7 +177,7 @@ export default function LibraryTechniques() {
           <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
             {view === 'grid' ? (
               loading ? (
-                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</p>
+                <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.shared.loadingItems')}</p>
               ) : visibleTechniques.length === 0 ? (
                 <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.common.empty')}</p>
               ) : (
@@ -201,13 +201,13 @@ export default function LibraryTechniques() {
                         <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-2">{technique.description}</p>
                       )}
                       <div className="flex justify-center gap-1 mt-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                        <button onClick={() => handleOpenModal(technique)} title="Edit this technique" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                        <button onClick={() => handleOpenModal(technique)} title={t('library.techniques.editThis')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                           <span className="material-symbols-outlined text-[18px]">edit</span>
                         </button>
-                        <button onClick={() => { setMergeSource(technique); setMergeTargetId(''); }} title="Merge into another technique" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                        <button onClick={() => { setMergeSource(technique); setMergeTargetId(''); }} title={t('library.techniques.mergeIntoAnother')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                           <span className="material-symbols-outlined text-[18px]">call_merge</span>
                         </button>
-                        <button onClick={() => handleDelete(technique.id)} title="Delete" className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
+                        <button onClick={() => handleDelete(technique.id)} title={t('common.delete')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
                           <span className="material-symbols-outlined text-[18px]">delete</span>
                         </button>
                       </div>
@@ -220,13 +220,13 @@ export default function LibraryTechniques() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-zinc-100 dark:border-zinc-800">
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-4">Technique</th>
-                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest text-right pr-4">Actions</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-4">{t('library.techniques.column')}</th>
+                    <th className="text-left py-4 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest text-right pr-4">{t('library.shared.actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">
                   {loading ? (
-                    <tr><td colSpan={2} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading items...</td></tr>
+                    <tr><td colSpan={2} className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.shared.loadingItems')}</td></tr>
                   ) : visibleTechniques.map((technique: any) => (
                     <tr key={technique.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
                       <td className="py-6 pl-4">
@@ -246,10 +246,10 @@ export default function LibraryTechniques() {
                       </td>
                       <td className="py-6 text-right pr-4">
                          <div className="flex justify-end gap-2">
-                            <button onClick={() => handleOpenModal(technique)} title="Edit this technique" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                            <button onClick={() => handleOpenModal(technique)} title={t('library.techniques.editThis')} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                               <span className="material-symbols-outlined text-xl">edit</span>
                             </button>
-                            <button onClick={() => { setMergeSource(technique); setMergeTargetId(''); }} title="Merge into another technique" className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
+                            <button onClick={() => { setMergeSource(technique); setMergeTargetId(''); }} title={t('library.techniques.mergeIntoAnother')} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
                               <span className="material-symbols-outlined text-xl">call_merge</span>
                             </button>
                             <button onClick={() => handleDelete(technique.id)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
@@ -272,24 +272,24 @@ export default function LibraryTechniques() {
         onClose={() => setMergeSource(null)}
         size="sm"
         zIndex={120}
-        title="Merge Technique"
-        subtitle={mergeSource ? `Fold "${mergeSource.translated_name || mergeSource.name}" into another technique. Every step referencing it is repointed automatically — nothing is lost.` : undefined}
+        title={t('library.techniques.mergeTitle')}
+        subtitle={mergeSource ? t('library.techniques.mergeSubtitle', { name: mergeSource.translated_name || mergeSource.name }) : undefined}
         footer={
           <>
-            <ModalCancelButton onClick={() => setMergeSource(null)}>Cancel</ModalCancelButton>
+            <ModalCancelButton onClick={() => setMergeSource(null)}>{t('common.cancel')}</ModalCancelButton>
             <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
-              {merging ? 'Merging…' : 'Merge'}
+              {merging ? t('library.shared.merging') : t('library.shared.merge')}
             </ModalSubmitButton>
           </>
         }
       >
-        <Field label="Merge into" hint="Type to search the catalogue, then pick the technique to keep.">
+        <Field label={t('library.shared.mergeIntoLabel')} hint={t('library.techniques.mergeIntoHint')}>
           <Autocomplete
             options={mergeOptions}
             value={mergeTargetId || null}
             onSelect={(id) => setMergeTargetId(id)}
             onClear={() => setMergeTargetId('')}
-            placeholder="Search for a technique…"
+            placeholder={t('library.techniques.search')}
             className="sc-field"
           />
         </Field>
@@ -300,59 +300,59 @@ export default function LibraryTechniques() {
         onClose={() => setShowModal(false)}
         onSubmit={handleSave}
         size="md"
-        title={editingTechnique ? 'Edit Technique' : 'New Technique'}
-        subtitle="A named cooking action recipe steps can link to."
+        title={editingTechnique ? t('library.techniques.editTitle') : t('library.techniques.newTitle')}
+        subtitle={t('library.techniques.modalSubtitle')}
         footer={
           <>
-            {editingTechnique && <ModalDeleteButton onClick={() => handleDelete(editingTechnique.id)} label="Delete technique" />}
-            <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
-            <ModalSubmitButton>{editingTechnique ? 'Update Technique' : 'Add Technique'}</ModalSubmitButton>
+            {editingTechnique && <ModalDeleteButton onClick={() => handleDelete(editingTechnique.id)} label={t('library.techniques.deleteTechnique')} />}
+            <ModalCancelButton onClick={() => setShowModal(false)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton>{editingTechnique ? t('library.techniques.update') : t('library.techniques.add')}</ModalSubmitButton>
           </>
         }
       >
         <div className="space-y-8">
-          <FormSection title="Identity">
-            <Field label="Technique Name">
+          <FormSection title={t('library.shared.sectionIdentity')}>
+            <Field label={t('library.techniques.name')}>
               <input
                 type="text" required value={form.name}
                 onChange={e => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g. Blanch"
+                placeholder={t('library.techniques.namePlaceholder')}
                 className="sc-field"
               />
             </Field>
-            <Field label="Description">
+            <Field label={t('library.shared.description')}>
               <textarea
                 value={form.description}
                 onChange={e => setForm({ ...form, description: e.target.value })}
-                placeholder="What this technique means, when to use it..."
+                placeholder={t('library.techniques.descriptionPlaceholder')}
                 className="sc-field h-24 resize-none font-medium"
               />
             </Field>
           </FormSection>
 
-          <FormSection title="Appearance" description="The icon shows wherever the technique appears without a photo.">
-            <Field label="Choose Icon">
+          <FormSection title={t('library.shared.sectionAppearance')} description={t('library.techniques.appearanceHint')}>
+            <Field label={t('library.shared.chooseIcon')}>
               <IconPicker icons={TECHNIQUE_ICONS} value={form.icon} onChange={icon => setForm({ ...form, icon })} />
             </Field>
-            <Field label="Reference Photos">
+            <Field label={t('library.shared.referencePhotos')}>
               <ImageUrlsEditor urls={form.imageUrls} onChange={urls => setForm({ ...form, imageUrls: urls })} />
             </Field>
           </FormSection>
 
           <FormSection
-            title="Naming"
-            description="Alternate names make the technique findable; translations give it a name per language."
-            action={<AddLangButton onClick={addTranslation} label="Add Lang" />}
+            title={t('library.shared.sectionNaming')}
+            description={t('library.techniques.namingHint')}
+            action={<AddLangButton onClick={addTranslation} label={t('library.shared.addLang')} />}
           >
-            <Field label="Synonyms">
+            <Field label={t('library.shared.synonyms')}>
               <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
             </Field>
-            <Field label="Translations">
+            <Field label={t('library.shared.translations')}>
               <TranslationRows
                 value={translations}
                 onChange={setTranslations}
-                emptyLabel="No translations added."
-                textPlaceholder="Translated name"
+                emptyLabel={t('library.shared.noTranslations')}
+                textPlaceholder={t('library.shared.translatedNamePlaceholder')}
               />
             </Field>
           </FormSection>

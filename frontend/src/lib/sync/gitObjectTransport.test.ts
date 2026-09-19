@@ -226,6 +226,23 @@ describe('pushObjectsAndRefs compare-and-swap (expectedRemoteRefBytes)', () => {
     expect(getRemoteText(remote, '.git/refs/heads/main')).toBe('commit-from-other-device\n');
   });
 
+  it('reports conflict:true when another device writes the ref right after this one — read back, not assumed', async () => {
+    const remote = createFakeRemoteTransport();
+    putRemoteText(remote, '.git/refs/heads/main', 'commit-old\n');
+    putLocalText(localFs, '/hidden-clone/.git/refs/heads/main', 'commit-new\n');
+    // The other device's write lands between this device's write and its read-back.
+    const writeFile = remote.writeFile.bind(remote);
+    remote.writeFile = async (rel: string, data: Uint8Array) => {
+      await writeFile(rel, data);
+      if (rel === '.git/refs/heads/main') await writeFile(rel, new TextEncoder().encode('commit-from-other-device\n'));
+    };
+
+    const result = await pushObjectsAndRefs(localFs.promises, '/hidden-clone', remote, undefined, new TextEncoder().encode('commit-old\n'));
+
+    expect(result.pushed).toBe(false);
+    expect(result.conflict).toBe(true);
+  });
+
   it('treats expectedRemoteRefBytes: null as "expect no ref yet" and detects a conflict if one appeared', async () => {
     const remote = createFakeRemoteTransport();
     putRemoteText(remote, '.git/refs/heads/main', 'commit-from-other-device\n');

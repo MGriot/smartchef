@@ -44,7 +44,7 @@ export default function ImageUrlInput({ value, onChange, placeholder = 'https://
       formData.append('file', file);
       const res = await apiFetch('/api/uploads', { method: 'POST', body: formData });
       const json = await res.json();
-      if (!res.ok || !json.data?.url) throw new Error(json.error ? JSON.stringify(json.error) : 'Upload failed');
+      if (!res.ok || !json.data?.url) throw new Error(json.error ? JSON.stringify(json.error) : t('common.uploadFailed'));
       onChange(json.data.url);
     } catch (err) {
       console.error('Image upload failed:', err);

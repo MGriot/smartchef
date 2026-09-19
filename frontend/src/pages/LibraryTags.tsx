@@ -82,10 +82,10 @@ export default function LibraryTags() {
         fetchCustomTags();
       } else {
         const result = await res.json();
-        alert(`Failed to add tag: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.tags.addFailed', { error: JSON.stringify(result.error || result) }));
       }
     } catch {
-      alert('Network error while adding tag.');
+      alert(t('library.tags.networkErrorAdding'));
     } finally {
       setAddingCustom(null);
     }
@@ -113,10 +113,10 @@ export default function LibraryTags() {
         fetchTags();
         fetchCustomTags();
       } else {
-        alert(`Merge failed: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.shared.mergeFailed', { error: JSON.stringify(result.error || result) }));
       }
     } catch {
-      alert('Network error while merging.');
+      alert(t('library.shared.networkErrorMerging'));
     } finally {
       setMerging(false);
     }
@@ -147,7 +147,7 @@ export default function LibraryTags() {
         });
         if (!res.ok) {
           const result = await res.json();
-          alert(`Failed: ${JSON.stringify(result.error || result)}`);
+          alert(t('library.shared.failed', { error: JSON.stringify(result.error || result) }));
           return;
         }
       }
@@ -161,13 +161,13 @@ export default function LibraryTags() {
       });
       if (!transRes.ok) {
         const result = await transRes.json();
-        alert(`Group renamed, but its translations could not be saved: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.tags.groupTranslationsFailed', { error: JSON.stringify(result.error || result) }));
       }
       setMergingGroup(null);
       fetchTags();
       reloadGroupTranslations();
     } catch {
-      alert('Network error while saving the group.');
+      alert(t('library.tags.networkErrorSavingGroup'));
     } finally {
       setMergingGroupBusy(false);
     }
@@ -179,7 +179,7 @@ export default function LibraryTags() {
   const handleDeleteGroup = async () => {
     if (!mergingGroup) return;
     const count = (groups[mergingGroup] || []).length;
-    if (!window.confirm(`Remove the group "${groupLabel(mergingGroup)}"? Its ${count} tag${count === 1 ? '' : 's'} stay, but become ungrouped.`)) return;
+    if (!window.confirm(t('library.tags.confirmRemoveGroup', { group: groupLabel(mergingGroup), count }))) return;
     setMergingGroupBusy(true);
     try {
       const res = await apiFetch('/api/tags/groups/delete', {
@@ -189,14 +189,14 @@ export default function LibraryTags() {
       });
       if (!res.ok) {
         const result = await res.json();
-        alert(`Failed: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.shared.failed', { error: JSON.stringify(result.error || result) }));
         return;
       }
       setMergingGroup(null);
       fetchTags();
       reloadGroupTranslations();
     } catch {
-      alert('Network error while removing the group.');
+      alert(t('library.tags.networkErrorRemovingGroup'));
     } finally {
       setMergingGroupBusy(false);
     }
@@ -266,7 +266,7 @@ export default function LibraryTags() {
         setShowModal(false);
         fetchTags();
       } else {
-        alert(`Save failed: ${JSON.stringify(result.error || result)}`);
+        alert(t('library.shared.saveFailed', { error: JSON.stringify(result.error || result) }));
       }
     } catch (err) {
       console.error('Save failed:', err);
@@ -274,7 +274,7 @@ export default function LibraryTags() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this tag? It's removed from the catalog and from every recipe currently carrying it — this can't be undone.")) return;
+    if (!window.confirm(t('library.tags.confirmDelete'))) return;
     try {
       const res = await apiFetch(`/api/tags/${id}`, { method: 'DELETE' });
       if (res.ok) fetchTags();
@@ -284,7 +284,7 @@ export default function LibraryTags() {
   };
 
   const handleDeleteCustomTag = async (name: string) => {
-    if (!window.confirm(`Delete "${name}" from every recipe carrying it? This can't be undone.`)) return;
+    if (!window.confirm(t('library.tags.confirmDeleteCustom', { name }))) return;
     try {
       const res = await apiFetch('/api/tags/custom/delete', {
         method: 'POST',
@@ -324,15 +324,15 @@ export default function LibraryTags() {
       <AppLayout librarySection="tags">
         <div className="flex justify-between items-end mb-10">
           <div>
-            <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">The Atelier Management</p>
-            <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">Tags</h1>
+            <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">{t('library.shared.eyebrow')}</p>
+            <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">{t('library.tags.heading')}</h1>
           </div>
           <button
             onClick={() => handleOpenModal()}
             className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
           >
             <span className="material-symbols-outlined">add</span>
-            New Tag
+            {t('library.tags.newTag')}
           </button>
         </div>
 
@@ -346,9 +346,9 @@ export default function LibraryTags() {
 
         <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-8">
           {loading ? (
-            <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">Loading tags...</p>
+            <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.tags.loading')}</p>
           ) : Object.keys(groups).length === 0 ? (
-            <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">No tags yet — create your first one.</p>
+            <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.tags.empty')}</p>
           ) : view === 'list' ? (
             /* Flat, one tag per row, grouping dropped — the chip cloud is
                lovely for browsing a handful of groups and hopeless for
@@ -368,7 +368,7 @@ export default function LibraryTags() {
                       {tag.translated_name || tag.name}
                     </span>
                     {tag.exclude_tag_ids?.length > 0 && (
-                      <span className="block text-[10px] font-medium text-zinc-400 dark:text-zinc-500">Auto (diet)</span>
+                      <span className="block text-[10px] font-medium text-zinc-400 dark:text-zinc-500">{t('library.tags.autoDiet')}</span>
                     )}
                   </button>
                   <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-black uppercase rounded-md shrink-0">
@@ -377,7 +377,7 @@ export default function LibraryTags() {
                   <button
                     type="button"
                     onClick={() => { setMergeSource({ id: tag.id, name: tag.translated_name || tag.name }); setMergeTargetId(''); }}
-                    title="Merge into another tag"
+                    title={t('library.tags.mergeIntoAnother')}
                     className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-300 dark:text-zinc-600 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all shrink-0"
                   >
                     <span className="material-symbols-outlined text-[16px]">call_merge</span>
@@ -394,7 +394,7 @@ export default function LibraryTags() {
                 <button
                   type="button"
                   onClick={() => setMergingGroup(group)}
-                  title={group ? 'Rename, merge or remove this group' : 'File these tags under a group'}
+                  title={group ? t('library.tags.editGroup') : t('library.tags.fileUnderGroup')}
                   className="w-5 h-5 rounded-full flex items-center justify-center text-zinc-300 dark:text-zinc-600 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
                 >
                   <span className="material-symbols-outlined text-[13px]">edit</span>
@@ -416,14 +416,14 @@ export default function LibraryTags() {
                       <span className="text-left">
                         <span className="block font-extrabold text-zinc-900 dark:text-zinc-100 text-sm leading-tight">{tag.translated_name || tag.name}</span>
                         {tag.exclude_tag_ids?.length > 0 && (
-                          <span className="block text-[10px] font-medium text-zinc-400 dark:text-zinc-500">Auto (diet)</span>
+                          <span className="block text-[10px] font-medium text-zinc-400 dark:text-zinc-500">{t('library.tags.autoDiet')}</span>
                         )}
                       </span>
                     </button>
                     <button
                       type="button"
                       onClick={() => { setMergeSource({ id: tag.id, name: tag.translated_name || tag.name }); setMergeTargetId(''); }}
-                      title="Merge into another tag"
+                      title={t('library.tags.mergeIntoAnother')}
                       className="w-7 h-7 rounded-full flex items-center justify-center text-zinc-300 dark:text-zinc-600 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all shrink-0"
                     >
                       <span className="material-symbols-outlined text-[15px]">call_merge</span>
@@ -438,10 +438,9 @@ export default function LibraryTags() {
         {customTags.length > 0 && (
           <section className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 mt-8">
             <div className="mb-6">
-              <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">Custom Tags (not in catalog)</h2>
+              <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('library.tags.customHeading')}</h2>
               <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
-                Free-text tags typed directly onto a recipe that aren't part of the managed catalog above.
-                Add one to the catalog to start managing it, or merge it into an existing tag.
+                {t('library.tags.customHint')}
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -453,7 +452,7 @@ export default function LibraryTags() {
                     type="button"
                     onClick={() => handleAddCustomToCatalog(ct.name)}
                     disabled={addingCustom === ct.name}
-                    title="Add to catalog"
+                    title={t('library.tags.addToCatalog')}
                     className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all disabled:opacity-50"
                   >
                     <span className="material-symbols-outlined text-lg">{addingCustom === ct.name ? 'sync' : 'add_circle'}</span>
@@ -461,7 +460,7 @@ export default function LibraryTags() {
                   <button
                     type="button"
                     onClick={() => { setMergeSource({ name: ct.name }); setMergeTargetId(''); }}
-                    title="Merge into an existing tag"
+                    title={t('library.tags.mergeIntoExisting')}
                     className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all"
                   >
                     <span className="material-symbols-outlined text-lg">call_merge</span>
@@ -469,7 +468,7 @@ export default function LibraryTags() {
                   <button
                     type="button"
                     onClick={() => handleDeleteCustomTag(ct.name)}
-                    title="Delete from every recipe"
+                    title={t('library.tags.deleteFromEveryRecipe')}
                     className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-red-500 transition-all"
                   >
                     <span className="material-symbols-outlined text-lg">delete</span>
@@ -487,13 +486,13 @@ export default function LibraryTags() {
         onClose={() => setMergeSource(null)}
         size="sm"
         zIndex={120}
-        title="Merge Tag"
-        subtitle={mergeSource ? `Fold "${mergeSource.name}" into an existing catalog tag. Every recipe carrying it is repointed automatically — nothing is lost.` : undefined}
+        title={t('library.tags.mergeTitle')}
+        subtitle={mergeSource ? t('library.tags.mergeSubtitle', { name: mergeSource.name }) : undefined}
         footer={
           <>
-            <ModalCancelButton onClick={() => setMergeSource(null)}>Cancel</ModalCancelButton>
+            <ModalCancelButton onClick={() => setMergeSource(null)}>{t('common.cancel')}</ModalCancelButton>
             <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
-              {merging ? 'Merging…' : 'Merge'}
+              {merging ? t('library.shared.merging') : t('library.shared.merge')}
             </ModalSubmitButton>
           </>
         }
@@ -506,13 +505,13 @@ export default function LibraryTags() {
             searches its catalogs with: the text stays inside it (the page
             no longer re-renders as you type), arrow keys and Enter work,
             and a suggestion's onMouseDown keeps focus in the field. */}
-        <Field label="Merge into" hint="Type to search the catalog, then pick the tag to keep.">
+        <Field label={t('library.shared.mergeIntoLabel')} hint={t('library.tags.mergeIntoHint')}>
           <Autocomplete
             options={mergeOptions}
             value={mergeTargetId || null}
             onSelect={(id) => setMergeTargetId(id)}
             onClear={() => setMergeTargetId('')}
-            placeholder="Search for a tag…"
+            placeholder={t('library.tags.searchTag')}
             className="sc-field"
           />
         </Field>
@@ -536,32 +535,32 @@ export default function LibraryTags() {
         onClose={() => setShowModal(false)}
         onSubmit={handleSave}
         size="md"
-        title={editingTag ? 'Edit Tag' : 'New Tag'}
-        subtitle="Tags group recipes and drive the gallery's filters."
+        title={editingTag ? t('library.tags.editTag') : t('library.tags.newTag')}
+        subtitle={t('library.tags.modalSubtitle')}
         footer={
           <>
-            {editingTag && <ModalDeleteButton onClick={() => handleDelete(editingTag.id)} label="Delete tag" />}
-            <ModalCancelButton onClick={() => setShowModal(false)}>Cancel</ModalCancelButton>
-            <ModalSubmitButton>{editingTag ? 'Update Tag' : 'Add Tag'}</ModalSubmitButton>
+            {editingTag && <ModalDeleteButton onClick={() => handleDelete(editingTag.id)} label={t('library.tags.deleteTag')} />}
+            <ModalCancelButton onClick={() => setShowModal(false)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton>{editingTag ? t('library.tags.updateTag') : t('library.tags.addTag')}</ModalSubmitButton>
           </>
         }
       >
         <div className="space-y-8">
-          <FormSection title="Identity">
+          <FormSection title={t('library.shared.sectionIdentity')}>
             <FieldRow>
-              <Field label="Name">
+              <Field label={t('library.shared.name')}>
                 <input
                   type="text" required value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Vegetariano"
+                  placeholder={t('library.tags.namePlaceholder')}
                   className="sc-field"
                 />
               </Field>
-              <Field label="Group" hint="Type a new name to create a group, or pick an existing one from the suggestions.">
+              <Field label={t('library.tags.group')} hint={t('library.tags.groupHint')}>
                 <input
                   type="text" list="tag-groups" value={form.groupName}
                   onChange={e => setForm({ ...form, groupName: e.target.value })}
-                  placeholder="e.g. Dieta"
+                  placeholder={t('library.tags.groupPlaceholder')}
                   className="sc-field"
                 />
                 <datalist id="tag-groups">
@@ -571,8 +570,8 @@ export default function LibraryTags() {
             </FieldRow>
           </FormSection>
 
-          <FormSection title="Appearance">
-            <Field label="Color">
+          <FormSection title={t('library.shared.sectionAppearance')}>
+            <Field label={t('library.shared.color')}>
               <div className="flex items-center gap-3">
                 <input
                   type="color" value={form.color}
@@ -582,54 +581,54 @@ export default function LibraryTags() {
                 <span className="font-mono text-sm text-zinc-500 dark:text-zinc-400">{form.color}</span>
               </div>
             </Field>
-            <Field label="Choose Icon">
+            <Field label={t('library.shared.chooseIcon')}>
               <IconPicker icons={TAG_ICONS} value={form.icon} onChange={icon => setForm({ ...form, icon })} />
             </Field>
           </FormSection>
 
           <FormSection
-            title="Auto-apply"
-            description="If any are checked, this tag is added automatically to a recipe unless it contains an ingredient carrying one of these."
+            title={t('library.tags.autoApply')}
+            description={t('library.tags.autoApplyHint')}
           >
             <div className="sc-panel flex flex-wrap gap-2 p-4">
-              {tags.filter(t => t.id !== editingTag?.id).map(t => {
-                const on = form.excludeTagIds.includes(t.id);
+              {tags.filter(tg => tg.id !== editingTag?.id).map(tg => {
+                const on = form.excludeTagIds.includes(tg.id);
                 return (
                   <button
-                    key={t.id}
+                    key={tg.id}
                     type="button"
-                    onClick={() => toggleExclude(t.id)}
+                    onClick={() => toggleExclude(tg.id)}
                     className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-all ${
                       on
                         ? 'border-transparent text-white'
                         : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600'
                     }`}
-                    style={on ? { backgroundColor: t.color || DEFAULT_COLOR } : undefined}
+                    style={on ? { backgroundColor: tg.color || DEFAULT_COLOR } : undefined}
                   >
-                    {t.translated_name || t.name}
+                    {tg.translated_name || tg.name}
                   </button>
                 );
               })}
-              {tags.filter(t => t.id !== editingTag?.id).length === 0 && (
-                <p className="sc-hint italic">No other tags yet.</p>
+              {tags.filter(tg => tg.id !== editingTag?.id).length === 0 && (
+                <p className="sc-hint italic">{t('library.tags.noOtherTags')}</p>
               )}
             </div>
           </FormSection>
 
           <FormSection
-            title="Naming"
-            description="Alternate names make the tag findable; translations give it a name per language."
-            action={<AddLangButton onClick={addTranslation} label="Add Lang" />}
+            title={t('library.shared.sectionNaming')}
+            description={t('library.tags.namingHint')}
+            action={<AddLangButton onClick={addTranslation} label={t('library.shared.addLang')} />}
           >
-            <Field label="Synonyms">
+            <Field label={t('library.shared.synonyms')}>
               <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
             </Field>
-            <Field label="Translations">
+            <Field label={t('library.shared.translations')}>
               <TranslationRows
                 value={translations}
                 onChange={setTranslations}
-                emptyLabel="No translations added."
-                textPlaceholder="Translated name"
+                emptyLabel={t('library.shared.noTranslations')}
+                textPlaceholder={t('library.shared.translatedNamePlaceholder')}
               />
             </Field>
           </FormSection>
@@ -664,6 +663,7 @@ function RenameGroupModal({
    *  ungrouped bucket itself, which has no group to remove. */
   onDelete?: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(currentGroup);
   const [translations, setTranslations] = useState(initialTranslations);
   const renaming = name.trim() !== currentGroup;
@@ -674,10 +674,10 @@ function RenameGroupModal({
       onClose={onCancel}
       size="sm"
       zIndex={120}
-      title="Group"
+      title={t('library.tags.group')}
       subtitle={currentGroup
-        ? `Rename "${currentGroup}", fold it into another group, remove it, or give it a name per language.`
-        : 'File these ungrouped tags under a group by typing its name.'}
+        ? t('library.tags.groupSubtitle', { group: currentGroup })
+        : t('library.tags.ungroupedSubtitle')}
       footer={
         <>
           {onDelete && (
@@ -687,22 +687,22 @@ function RenameGroupModal({
               disabled={busy}
               className="mr-auto px-4 py-2 rounded-full text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50"
             >
-              Remove group
+              {t('library.tags.removeGroup')}
             </button>
           )}
-          <ModalCancelButton onClick={onCancel}>Cancel</ModalCancelButton>
+          <ModalCancelButton onClick={onCancel}>{t('common.cancel')}</ModalCancelButton>
           <ModalSubmitButton type="button" onClick={() => onConfirm(name, translations)} disabled={!name.trim() || busy}>
-            {busy ? 'Saving…' : merging ? 'Merge' : renaming ? 'Rename' : 'Save'}
+            {busy ? t('common.saving') : merging ? t('library.shared.merge') : renaming ? t('library.tags.rename') : t('common.save')}
           </ModalSubmitButton>
         </>
       }
     >
       <div className="space-y-8">
         <FormSection
-          title="Name"
-          description="Every tag currently under this group moves to whatever you type here. A brand-new name renames the group; an existing one folds the two together. Removing the group instead leaves its tags in place, ungrouped."
+          title={t('library.shared.name')}
+          description={t('library.tags.groupNameHint')}
         >
-          <Field label="Group name">
+          <Field label={t('library.tags.groupName')}>
             <input
               type="text"
               list="rename-group-suggestions"
@@ -718,16 +718,16 @@ function RenameGroupModal({
         </FormSection>
 
         <FormSection
-          title="Naming"
-          description="What this group's heading reads as in each language, wherever tags are grouped."
-          action={<AddLangButton onClick={() => setTranslations([...translations, { lang: '', name: '' }])} label="Add Lang" />}
+          title={t('library.shared.sectionNaming')}
+          description={t('library.tags.groupNamingHint')}
+          action={<AddLangButton onClick={() => setTranslations([...translations, { lang: '', name: '' }])} label={t('library.shared.addLang')} />}
         >
-          <Field label="Translations">
+          <Field label={t('library.shared.translations')}>
             <TranslationRows
               value={translations}
               onChange={setTranslations}
-              emptyLabel="No translations added — the heading reads the same in every language."
-              textPlaceholder="Translated group name"
+              emptyLabel={t('library.tags.groupNoTranslations')}
+              textPlaceholder={t('library.tags.translatedGroupName')}
             />
           </Field>
         </FormSection>

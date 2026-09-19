@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
@@ -49,15 +49,16 @@ interface MenuNutrition {
   unresolved: string[];
 }
 
-const DAYS = [
-  { idx: 0, label: 'Monday' },
-  { idx: 1, label: 'Tuesday' },
-  { idx: 2, label: 'Wednesday' },
-  { idx: 3, label: 'Thursday' },
-  { idx: 4, label: 'Friday' },
-  { idx: 5, label: 'Saturday' },
-  { idx: 6, label: 'Sunday' },
-];
+/** Monday-first weekday names in the app's language — 2024-01-01 was a
+ *  Monday. Capitalised because Italian, French and Spanish write them
+ *  lower-case, and here they are column headings. */
+function weekDays(lang: string): Array<{ idx: number; label: string }> {
+  const fmt = new Intl.DateTimeFormat(lang, { weekday: 'long' });
+  return Array.from({ length: 7 }, (_, idx) => {
+    const name = fmt.format(new Date(2024, 0, 1 + idx));
+    return { idx, label: name.charAt(0).toLocaleUpperCase(lang) + name.slice(1) };
+  });
+}
 
 const MEAL_TYPES: MenuItem['mealType'][] = ['breakfast', 'lunch', 'dinner', 'snack'];
 
@@ -99,7 +100,7 @@ function DraggableMeal({
 
       <div className="pl-5">
         <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase mb-1 ${MEAL_TYPE_STYLE[item.mealType]}`}>
-          {item.mealType}
+          {t(`planner.mealTypes.${item.mealType}`)}
         </span>
         <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 leading-tight pr-6">{item.recipe_title}</p>
         <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium mt-0.5">
@@ -150,7 +151,8 @@ function todayMonday(): string {
 }
 
 export default function Planner() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const DAYS = useMemo(() => weekDays(i18n.language), [i18n.language]);
   const contentLang = useStore((s) => s.contentLang);
   const [menus, setMenus] = useState<MenuSummary[]>([]);
   const [loadingMenus, setLoadingMenus] = useState(true);
@@ -246,14 +248,14 @@ export default function Planner() {
         await fetchMenus();
         setSelectedMenuId(json.data.id);
       } else {
-        window.alert(`Failed to create menu: ${JSON.stringify(json.error || json)}`);
+        window.alert(t('planner.createFailed', { error: JSON.stringify(json.error || json) }));
       }
     } catch (err) {
       // Not just console.error: a failure here (before menus.local.ts, an
       // apiFetch against a server that isn't configured) made "New Menu"
       // look like a dead button rather than a broken one.
       console.error('Create menu failed:', err);
-      window.alert(err instanceof Error ? err.message : 'Could not create the menu.');
+      window.alert(err instanceof Error ? err.message : t('planner.createFailedGeneric'));
     } finally {
       setCreating(false);
     }
@@ -287,11 +289,11 @@ export default function Planner() {
         await fetchMenus();
       } else {
         const json = await res.json();
-        window.alert(`Failed to add recipe: ${JSON.stringify(json.error || json)}`);
+        window.alert(t('planner.addFailed', { error: JSON.stringify(json.error || json) }));
       }
     } catch (err) {
       console.error('Add item failed:', err);
-      window.alert(err instanceof Error ? err.message : 'Could not add that recipe.');
+      window.alert(err instanceof Error ? err.message : t('planner.addFailedGeneric'));
     } finally {
       setSavingItem(false);
     }
@@ -312,7 +314,7 @@ export default function Planner() {
 
   const handleDeleteMenu = async () => {
     if (!menu) return;
-    if (!window.confirm(`Delete menu "${menu.name}"? This cannot be undone.`)) return;
+    if (!window.confirm(t('planner.confirmDeleteMenu', { name: menu.name }))) return;
     try {
       const res = await apiFetch(`/api/menus/${menu.id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -374,8 +376,8 @@ export default function Planner() {
       <div className="px-8 lg:px-12 py-10 max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
           <div>
-            <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">Meal Planner</h1>
-            <p className="text-zinc-500 dark:text-zinc-400 max-w-md">Organize your recipes into a weekly culinary schedule.</p>
+            <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">{t('planner.heading')}</h1>
+            <p className="text-zinc-500 dark:text-zinc-400 max-w-md">{t('planner.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3">
             {menus.length > 0 && (
@@ -386,14 +388,14 @@ export default function Planner() {
                   className="px-4 py-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 text-sm font-bold focus:ring-2 focus:ring-primary/20"
                 >
                   {menus.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} ({new Date(m.week_start).toLocaleDateString()})</option>
+                    <option key={m.id} value={m.id}>{m.name} ({new Date(m.week_start).toLocaleDateString(i18n.language)})</option>
                   ))}
                 </select>
                 {menu && (
                   <button
                     onClick={handleDeleteMenu}
                     className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
-                    aria-label="Delete menu"
+                    aria-label={t('planner.deleteMenu')}
                   >
                     <span className="material-symbols-outlined text-lg">delete</span>
                   </button>
@@ -405,7 +407,7 @@ export default function Planner() {
               className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
             >
               <span className="material-symbols-outlined">add</span>
-              New Menu
+              {t('planner.newMenu')}
             </button>
           </div>
         </div>
@@ -419,16 +421,16 @@ export default function Planner() {
             <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mb-6">
               <span className="material-symbols-outlined text-4xl text-primary">calendar_month</span>
             </div>
-            <h2 className="text-2xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">No menu yet</h2>
+            <h2 className="text-2xl font-bold text-zinc-800 dark:text-zinc-200 mb-2">{t('planner.emptyTitle')}</h2>
             <p className="text-zinc-500 dark:text-zinc-400 max-w-md mx-auto mb-8">
-              Create a weekly menu, then assign recipes to each day — prep times and portions come straight from the recipe.
+              {t('planner.emptyHint')}
             </p>
             <button
               onClick={() => setShowCreateModal(true)}
               className="px-8 py-4 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95 flex items-center gap-2"
             >
               <span className="material-symbols-outlined">add</span>
-              Start Planning
+              {t('planner.startPlanning')}
             </button>
           </div>
         ) : (
@@ -464,7 +466,7 @@ export default function Planner() {
               {draggingItem && (
                 <div className="bg-white dark:bg-zinc-800 rounded-xl p-3 shadow-2xl border border-primary/40 rotate-2">
                   <span className={`inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase mb-1 ${MEAL_TYPE_STYLE[draggingItem.mealType]}`}>
-                    {draggingItem.mealType}
+                    {t(`planner.mealTypes.${draggingItem.mealType}`)}
                   </span>
                   <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 leading-tight">{draggingItem.recipe_title}</p>
                 </div>
@@ -476,16 +478,16 @@ export default function Planner() {
         {/* Weekly nutrition summary */}
         {menu && menuNutrition && menuNutrition.weekly.caloriesKcal > 0 && (
           <div className="mt-8 bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-            <h3 className="font-headline font-bold text-lg mb-4">Weekly Nutrition</h3>
+            <h3 className="font-headline font-bold text-lg mb-4">{t('planner.weeklyNutrition')}</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-4">
               {[
-                { key: 'caloriesKcal', label: 'Calories', unit: 'kcal' },
-                { key: 'proteinG', label: 'Protein', unit: 'g' },
-                { key: 'carbsG', label: 'Carbs', unit: 'g' },
-                { key: 'fatG', label: 'Fat', unit: 'g' },
-                { key: 'fiberG', label: 'Fiber', unit: 'g' },
-                { key: 'sugarG', label: 'Sugar', unit: 'g' },
-                { key: 'sodiumMg', label: 'Sodium', unit: 'mg' },
+                { key: 'caloriesKcal', label: t('recipeDetail.calories'), unit: 'kcal' },
+                { key: 'proteinG', label: t('recipeDetail.protein'), unit: 'g' },
+                { key: 'carbsG', label: t('recipeDetail.carbs'), unit: 'g' },
+                { key: 'fatG', label: t('recipeDetail.fat'), unit: 'g' },
+                { key: 'fiberG', label: t('recipeDetail.fiber'), unit: 'g' },
+                { key: 'sugarG', label: t('recipeDetail.sugar'), unit: 'g' },
+                { key: 'sodiumMg', label: t('recipeDetail.sodium'), unit: 'mg' },
               ].map(f => (
                 <div key={f.key} className="text-center py-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900">
                   <p className="text-[9px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-1">{f.label}</p>
@@ -496,11 +498,11 @@ export default function Planner() {
               ))}
             </div>
             <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-              Daily average: ≈{Math.round(menuNutrition.weekly.caloriesKcal / 7)} kcal/day
+              {t('planner.dailyAverage', { kcal: Math.round(menuNutrition.weekly.caloriesKcal / 7) })}
             </p>
             {menuNutrition.unresolved.length > 0 && (
               <p className="text-[10px] text-amber-600 mt-2 italic">
-                Nutrition unavailable for: {menuNutrition.unresolved.join(', ')}
+                {t('planner.nutritionUnavailable', { names: menuNutrition.unresolved.join(', ') })}
               </p>
             )}
           </div>
@@ -513,24 +515,24 @@ export default function Planner() {
         onClose={() => setShowCreateModal(false)}
         onSubmit={handleCreateMenu}
         size="sm"
-        title="New Menu"
+        title={t('planner.newMenu')}
         footer={
           <>
-            <ModalCancelButton onClick={() => setShowCreateModal(false)}>Cancel</ModalCancelButton>
-            <ModalSubmitButton disabled={creating}>{creating ? 'Creating…' : 'Create Menu'}</ModalSubmitButton>
+            <ModalCancelButton onClick={() => setShowCreateModal(false)}>{t('common.cancel')}</ModalCancelButton>
+            <ModalSubmitButton disabled={creating}>{creating ? t('planner.creating') : t('planner.createMenu')}</ModalSubmitButton>
           </>
         }
       >
         <div className="space-y-4">
-          <Field label="Menu Name">
+          <Field label={t('planner.menuName')}>
             <input
               type="text" required value={newMenuName}
               onChange={e => setNewMenuName(e.target.value)}
-              placeholder="e.g. Week of Aug 10"
+              placeholder={t('planner.menuNamePlaceholder')}
               className="sc-field"
             />
           </Field>
-          <Field label="Week Starting (Monday)">
+          <Field label={t('planner.weekStart')}>
             <input
               type="date" required value={newMenuWeekStart}
               onChange={e => setNewMenuWeekStart(e.target.value)}
@@ -546,39 +548,39 @@ export default function Planner() {
         onClose={() => setAddingForDay(null)}
         onSubmit={handleAddItem}
         size="sm"
-        title="Add Recipe"
+        title={t('planner.addRecipe')}
         subtitle={DAYS.find(d => d.idx === addingForDay)?.label}
         footer={
           <>
-            <ModalCancelButton onClick={() => setAddingForDay(null)}>Cancel</ModalCancelButton>
+            <ModalCancelButton onClick={() => setAddingForDay(null)}>{t('common.cancel')}</ModalCancelButton>
             <ModalSubmitButton disabled={savingItem || !addRecipeId}>
-              {savingItem ? 'Adding…' : 'Add to Plan'}
+              {savingItem ? t('planner.adding') : t('planner.addToPlan')}
             </ModalSubmitButton>
           </>
         }
       >
         <div className="space-y-4">
-          <Field label="Recipe">
+          <Field label={t('planner.recipe')}>
             <Autocomplete
               value={addRecipeId}
               options={allRecipes.map(r => ({ id: r.id, label: r.translated_title || r.title }))}
               onSelect={(id) => setAddRecipeId(id)}
               onClear={() => setAddRecipeId('')}
-              placeholder="Type to search recipes…"
+              placeholder={t('planner.searchRecipes')}
               className="sc-field"
             />
           </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Meal">
+            <Field label={t('planner.meal')}>
               <select
                 value={addMealType}
                 onChange={e => setAddMealType(e.target.value as MenuItem['mealType'])}
                 className="sc-field cursor-pointer"
               >
-                {MEAL_TYPES.map(mt => <option key={mt} value={mt}>{mt[0].toUpperCase() + mt.slice(1)}</option>)}
+                {MEAL_TYPES.map(mt => <option key={mt} value={mt}>{t(`planner.mealTypes.${mt}`)}</option>)}
               </select>
             </Field>
-            <Field label="Servings">
+            <Field label={t('planner.servings')}>
               <input
                 type="number" min={1} required value={addServings}
                 onChange={e => setAddServings(parseInt(e.target.value) || 1)}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface StarRatingProps {
   value: number | null | undefined;
@@ -8,6 +9,7 @@ interface StarRatingProps {
 }
 
 export default function StarRating({ value, onChange, size = 'md', disabled }: StarRatingProps) {
+  const { t } = useTranslation();
   const starSize = size === 'sm' ? 'text-[18px]' : 'text-[24px]';
   const stars = [1, 2, 3, 4, 5];
 
@@ -22,7 +24,7 @@ export default function StarRating({ value, onChange, size = 'md', disabled }: S
               type="button"
               disabled={disabled}
               onClick={() => onChange(value === n ? n - 1 : n)}
-              title={`${n} star${n === 1 ? '' : 's'}`}
+              title={t('rating.stars', { count: n })}
               className="disabled:cursor-default"
             >
               <span
@@ -39,12 +41,12 @@ export default function StarRating({ value, onChange, size = 'md', disabled }: S
         type="button"
         disabled={disabled}
         onClick={() => onChange(null)}
-        title="Not tried yet"
+        title={t('rating.notTried')}
         className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-colors disabled:cursor-default ${
           value === null || value === undefined ? 'bg-zinc-900 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
         }`}
       >
-        N/A
+        {t('rating.na')}
       </button>
     </div>
   );

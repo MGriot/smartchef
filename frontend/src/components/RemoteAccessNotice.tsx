@@ -7,11 +7,11 @@
 // first-run setup has no token field to correct, and by the time someone
 // reaches Account -> Folder Sync — which does — the banner is long gone.
 //
-// Copy lives in remoteAccessProbe.ts beside the code that decides the
+// Copy is keyed in remoteAccessProbe.ts beside the code that decides the
 // state, so a new RemoteAccessKind cannot be added without copy for it.
 // ════════════════════════════════════════════════════════════════════════
 
-import { ACCESS_PROBLEM_COPY } from '../lib/sync/remoteAccessProbe';
+import { accessProblemCopy } from '../lib/sync/remoteAccessProbe';
 import type { GitRemoteAccessProblem } from '../lib/sync/syncSettings';
 
 interface RemoteAccessNoticeProps {
@@ -25,7 +25,7 @@ interface RemoteAccessNoticeProps {
 
 export function RemoteAccessNotice({ kind, hint }: RemoteAccessNoticeProps) {
   if (!kind) return null;
-  const copy = ACCESS_PROBLEM_COPY[kind];
+  const copy = accessProblemCopy(kind);
 
   return (
     <div className="rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-4 space-y-1">

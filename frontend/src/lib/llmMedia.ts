@@ -12,6 +12,7 @@
 // change the other.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../i18n';
 import type { LlmProvider } from './llmSettings';
 
 export type MediaKind = 'image' | 'audio' | 'video' | 'document';
@@ -100,12 +101,12 @@ export function checkMediaForProvider(
 ): MediaCheck {
   const kind = mediaKindFor(mimeType);
   if (!kind) {
-    return { ok: false, reason: `SmartChef doesn't know what to do with a ${mimeType || 'file of that type'} — use an image, a PDF, an audio file or a video.` };
+    return { ok: false, reason: i18n.t('media.unknownType', { type: mimeType || i18n.t('media.unknownTypeFallback') }) };
   }
   if (byteSize > MAX_MEDIA_BYTES) {
     return {
       ok: false,
-      reason: `That file is about ${Math.round(byteSize / 1024 / 1024)} MB — too large to send in one request. Trim the clip, or use a smaller photo.`,
+      reason: i18n.t('media.tooLarge', { mb: Math.round(byteSize / 1024 / 1024) }),
     };
   }
   if (!isKnownProvider(provider)) return { ok: true };
@@ -115,9 +116,9 @@ export function checkMediaForProvider(
   return {
     ok: false,
     reason:
-      `${PROVIDER_LABEL[provider]} can't read ${KIND_LABEL[kind]}. ` +
+      i18n.t('media.cantRead', { provider: PROVIDER_LABEL[provider], kind: i18n.t(`media.kinds.${kind}`) }) + ' ' +
       (alternatives.length
-        ? `Switch to ${alternatives.join(' or ')} under Account → AI Provider, or extract the text yourself and paste it in.`
-        : 'Extract the text yourself and paste it in instead.'),
+        ? i18n.t('media.switchTo', { providers: alternatives.join(` ${i18n.t('common.or')} `) })
+        : i18n.t('media.extractYourself')),
   };
 }

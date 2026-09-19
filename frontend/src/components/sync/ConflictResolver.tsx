@@ -9,8 +9,9 @@
 // tags as chips, times in minutes, a photo as a photo, steps one by one
 // with what changed highlighted. Tapping a version keeps it.
 //
-// Colours follow the original card: red is this device ("−"), green the
-// other device ("+"), the way a git diff reads.
+// Colours are GitHub's diff palette: this device is a deletion row ("−",
+// red), the other device an addition row ("+", green), each with a darker
+// gutter, dark text, and a stronger tint only on the words that differ.
 // ════════════════════════════════════════════════════════════════════════
 
 import { useEffect, useState, type ReactNode } from 'react';
@@ -103,14 +104,53 @@ function markedWords(mine: string, other: string, side: Side): Array<{ text: str
   return runs;
 }
 
+// ── Git diff palette ────────────────────────────────────────────────────
+const DIFF = {
+  local: {
+    row: 'bg-[#ffebe9] dark:bg-[#f8514926]',
+    gutter: 'bg-[#ffd7d5] text-[#cf222e] dark:bg-[#f851494d] dark:text-[#ff7b72]',
+    word: 'bg-[#ff818266] dark:bg-[#f8514966]',
+    sign: '−',
+  },
+  remote: {
+    row: 'bg-[#e6ffec] dark:bg-[#2ea04326]',
+    gutter: 'bg-[#ccffd8] text-[#1a7f37] dark:bg-[#3fb9504d] dark:text-[#56d364]',
+    word: 'bg-[#abf2bc] dark:bg-[#2ea04366]',
+    sign: '+',
+  },
+} as const;
+const DIFF_TEXT = 'font-mono text-[13px] leading-relaxed text-zinc-800 dark:text-zinc-200';
+
+/** One line of a git diff: tinted row, darker gutter holding − or +. */
+function DiffRow({ side, children }: { side: Side; children: ReactNode }) {
+  return (
+    <div className={`flex ${DIFF[side].row}`}>
+      <span className={`w-7 shrink-0 select-none text-center font-mono text-sm font-bold pt-2 ${DIFF[side].gutter}`}>{DIFF[side].sign}</span>
+      <div className="min-w-0 flex-1 px-3 py-2">{children}</div>
+    </div>
+  );
+}
+
+/** The "■ solo i miei ■ solo i loro" strip at the top of a diff block,
+ *  with a "più recente" badge beside whichever side was edited last. */
+function DiffLegend({ newer }: { newer?: Side | null }) {
+  const { t } = useTranslation();
+  const badge = (
+    <span className="px-1.5 py-px rounded bg-primary/10 text-primary tracking-wider normal-case font-black">{t('account.conflicts.newer')}</span>
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700 text-[10px] font-black uppercase tracking-widest">
+      <span className="flex items-center gap-1.5 text-[#cf222e] dark:text-[#ff7b72]"><span className="w-2.5 h-2.5 rounded-sm bg-[#cf222e] dark:bg-[#ff7b72]" />{t('account.conflicts.mineOnly')}{newer === 'local' && badge}</span>
+      <span className="flex items-center gap-1.5 text-[#1a7f37] dark:text-[#56d364]"><span className="w-2.5 h-2.5 rounded-sm bg-[#1a7f37] dark:bg-[#56d364]" />{t('account.conflicts.theirsOnly')}{newer === 'remote' && badge}</span>
+    </div>
+  );
+}
+
 function HighlightedText({ text, other, side }: { text: string; other: string; side: Side }) {
   const words = markedWords(text, other, side);
-  const tone = side === 'local'
-    ? 'bg-red-200/70 dark:bg-red-500/30 text-red-950 dark:text-red-100'
-    : 'bg-emerald-200/70 dark:bg-emerald-500/30 text-emerald-950 dark:text-emerald-100';
   return (
-    <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap break-words">
-      {words.map((w, i) => (w.changed ? <mark key={i} className={`${tone} rounded px-0.5`}>{w.text}</mark> : <span key={i}>{w.text}</span>))}
+    <p className={`${DIFF_TEXT} whitespace-pre-wrap break-words`}>
+      {words.map((w, i) => (w.changed ? <mark key={i} className={`${DIFF[side].word} text-inherit rounded-sm`}>{w.text}</mark> : <span key={i}>{w.text}</span>))}
     </p>
   );
 }
@@ -146,8 +186,8 @@ function ValueView({ conflict, side }: { conflict: DisplayConflict; side: Side }
               key={String(member)}
               className={`px-2.5 py-1 rounded-full text-xs font-bold ${
                 unique
-                  ? side === 'local' ? 'bg-red-100 text-red-900 dark:bg-red-500/20 dark:text-red-200' : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-500/20 dark:text-emerald-200'
-                  : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+                  ? `${DIFF[side].word} text-zinc-900 dark:text-zinc-100`
+                  : 'bg-white/70 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
               }`}
             >
               {String(member)}
@@ -187,7 +227,7 @@ function translationText(entry: Record<string, unknown>): string {
  *  carry this side's colour. */
 function TranslationsView({ value, other, side }: { value: unknown; other: unknown; side: Side }) {
   const others = new Map(translationEntries(other).map((e) => [String(e.lang).toLowerCase(), translationText(e)]));
-  const tone = side === 'local' ? 'bg-red-50 dark:bg-red-500/10' : 'bg-emerald-50 dark:bg-emerald-500/10';
+  const tone = DIFF[side].word;
   return (
     <ul className="space-y-1">
       {translationEntries(value).map((entry) => {
@@ -204,36 +244,30 @@ function TranslationsView({ value, other, side }: { value: unknown; other: unkno
   );
 }
 
-/** A version the user can keep by tapping it. */
+/** A version the user can keep by tapping it — one row of the diff. */
 function VersionCard({ conflict, side, newer, onPick, children }: {
   conflict: DisplayConflict; side: Side; newer: Side | null; onPick: () => void; children: ReactNode;
 }) {
   const { t } = useTranslation();
   const ms = parseTimestamp(side === 'local' ? conflict.localUpdatedAt : conflict.remoteUpdatedAt);
-  const accent = side === 'local' ? 'border-red-300 dark:border-red-500/40' : 'border-emerald-300 dark:border-emerald-500/40';
   return (
-    <button
-      type="button"
-      onClick={onPick}
-      className={`group w-full min-w-0 text-left rounded-2xl border-2 ${accent} bg-white dark:bg-zinc-950 p-4 hover:ring-4 hover:ring-primary/15 active:scale-[0.99] transition-all`}
-    >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-3">
-        <span className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-black ${side === 'local' ? 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'}`}>
-          {side === 'local' ? '−' : '+'}
-        </span>
-        <span className="text-xs font-black text-zinc-800 dark:text-zinc-100">
-          {side === 'local' ? t('account.conflicts.thisDevice') : t('account.conflicts.otherDevice')}
-        </span>
-        {ms !== null && <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{relativeTime(t, ms)}</span>}
-        {newer === side && (
-          <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider">{t('account.conflicts.newer')}</span>
-        )}
-      </div>
-      <div className="min-w-0">{children}</div>
-      <span className="mt-3 inline-flex items-center gap-1 text-[11px] font-black text-primary opacity-70 group-hover:opacity-100">
-        <span className="material-symbols-outlined text-[16px]">check_circle</span>
-        {t('account.conflicts.keepThisVersion')}
-      </span>
+    <button type="button" onClick={onPick} className="group block w-full min-w-0 text-left hover:brightness-[0.97] dark:hover:brightness-110 transition">
+      <DiffRow side={side}>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
+          <span className="text-[11px] font-black text-zinc-700 dark:text-zinc-200">
+            {side === 'local' ? t('account.conflicts.thisDevice') : t('account.conflicts.otherDevice')}
+          </span>
+          {ms !== null && <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{relativeTime(t, ms)}</span>}
+          {newer === side && (
+            <span className="px-1.5 py-px rounded bg-white/80 dark:bg-zinc-900/60 text-primary text-[10px] font-black uppercase tracking-wider">{t('account.conflicts.newer')}</span>
+          )}
+          <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-black text-zinc-500 group-hover:text-primary">
+            <span className="material-symbols-outlined text-[16px]">check_circle</span>
+            {t('account.conflicts.keepThisVersion')}
+          </span>
+        </div>
+        <div className="min-w-0">{children}</div>
+      </DiffRow>
     </button>
   );
 }
@@ -294,43 +328,40 @@ function ListCompare({ conflict, newer, onPick }: { conflict: DisplayConflict; n
 
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 divide-y divide-zinc-100 dark:divide-zinc-800 overflow-hidden">
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 overflow-hidden">
+        <DiffLegend newer={newer} />
         {failed && <p className="p-4 text-sm text-zinc-500">{t('account.conflicts.cannotCompare')}</p>}
         {!failed && !rows && <p className="p-4 text-sm text-zinc-400">{t('common.loading')}</p>}
-        {rows?.map((row, i) =>
-          row.kind === 'same' ? (
-            <div key={i} className="px-4 py-2.5">
-              <button
-                type="button"
-                onClick={() => setExpanded((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; })}
-                className="flex items-center gap-2 text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-zinc-600"
-              >
-                <span className="material-symbols-outlined text-[16px]">{expanded.has(i) ? 'expand_less' : 'expand_more'}</span>
-                {t(identicalKey, { count: row.count })}
-              </button>
-              {expanded.has(i) && (
-                <ul className="mt-2 space-y-1.5">
-                  {row.lines.map((line, j) => <li key={j} className="text-sm text-zinc-500 dark:text-zinc-400 break-words">{line}</li>)}
-                </ul>
-              )}
-            </div>
-          ) : (
-            <div key={i} className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3">
-              <div className="min-w-0 rounded-xl bg-red-50 dark:bg-red-500/10 p-3">
-                <p className="text-[10px] font-black uppercase tracking-wider text-red-700 dark:text-red-300 mb-1">{t('account.conflicts.thisDevice')}</p>
-                {row.mine === null
-                  ? <p className="text-sm italic text-zinc-400">{t('account.conflicts.notPresent')}</p>
-                  : <HighlightedText text={row.mine} other={row.theirs ?? ''} side="local" />}
+        <div className="divide-y divide-white/60 dark:divide-zinc-900">
+          {rows?.map((row, i) =>
+            row.kind === 'same' ? (
+              <div key={i}>
+                {/* Collapsed unchanged lines, like the hunk expander on GitHub. */}
+                <button
+                  type="button"
+                  onClick={() => setExpanded((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; })}
+                  className="flex w-full items-center gap-2 bg-[#ddf4ff] dark:bg-[#388bfd1a] text-[#0969da] dark:text-[#58a6ff] text-xs font-bold hover:brightness-95"
+                >
+                  <span className="w-7 shrink-0 self-stretch flex items-center justify-center bg-[#b6e3ff] dark:bg-[#388bfd33]">
+                    <span className="material-symbols-outlined text-[16px]">{expanded.has(i) ? 'expand_less' : 'expand_more'}</span>
+                  </span>
+                  <span className="py-1.5">{t(identicalKey, { count: row.count })}</span>
+                </button>
+                {expanded.has(i) && row.lines.map((line, j) => (
+                  <div key={j} className="flex">
+                    <span className="w-7 shrink-0" />
+                    <p className={`${DIFF_TEXT} text-zinc-500 dark:text-zinc-400 px-3 py-1.5 break-words`}>{line}</p>
+                  </div>
+                ))}
               </div>
-              <div className="min-w-0 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 p-3">
-                <p className="text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">{t('account.conflicts.otherDevice')}</p>
-                {row.theirs === null
-                  ? <p className="text-sm italic text-zinc-400">{t('account.conflicts.notPresent')}</p>
-                  : <HighlightedText text={row.theirs} other={row.mine ?? ''} side="remote" />}
+            ) : (
+              <div key={i}>
+                {row.mine !== null && <DiffRow side="local"><HighlightedText text={row.mine} other={row.theirs ?? ''} side="local" /></DiffRow>}
+                {row.theirs !== null && <DiffRow side="remote"><HighlightedText text={row.theirs} other={row.mine ?? ''} side="remote" /></DiffRow>}
               </div>
-            </div>
-          )
-        )}
+            )
+          )}
+        </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {(['local', 'remote'] as Side[]).map((side) => (
@@ -340,12 +371,12 @@ function ListCompare({ conflict, newer, onPick }: { conflict: DisplayConflict; n
             onClick={() => onPick(side)}
             className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black transition-colors ${
               side === 'local'
-                ? 'bg-red-100 text-red-900 hover:bg-red-200 dark:bg-red-500/20 dark:text-red-100'
-                : 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-100'
+                ? 'bg-zinc-100 text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700'
+                : 'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900'
             }`}
           >
+            <span className={`font-mono ${side === 'local' ? 'text-[#cf222e] dark:text-[#ff7b72]' : 'text-[#56d364] dark:text-[#1a7f37]'}`}>{DIFF[side].sign}</span>
             {side === 'local' ? t('account.conflicts.useThisDevice') : t('account.conflicts.useOtherDevice')}
-            {newer === side && <span className="text-[10px] uppercase tracking-wider opacity-70">· {t('account.conflicts.newer')}</span>}
           </button>
         ))}
       </div>
@@ -363,7 +394,8 @@ function FieldConflict({ conflict, onResolve }: { conflict: DisplayConflict; onR
       {isList ? (
         <ListCompare conflict={conflict} newer={newer} onPick={onResolve} />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+          <DiffLegend newer={newer} />
           {(['local', 'remote'] as Side[]).map((side) => (
             <VersionCard key={side} conflict={conflict} side={side} newer={newer} onPick={() => onResolve(side)}>
               <ValueView conflict={conflict} side={side} />
@@ -431,11 +463,11 @@ export function EntityConflicts({ conflicts, busy, onResolve, onResolveAll }: {
             {t('account.conflicts.keepNewest')}
           </button>
         )}
-        <button type="button" disabled={busy} onClick={() => onResolveAll('local')} className="flex-1 min-w-[8rem] px-3 py-2 rounded-full bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-100 text-xs font-black disabled:opacity-50">
-          − {t('account.conflicts.keepAllMine')}
+        <button type="button" disabled={busy} onClick={() => onResolveAll('local')} className="flex-1 min-w-[8rem] px-3 py-2 rounded-full bg-zinc-100 text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 text-xs font-black disabled:opacity-50">
+          <span className="font-mono text-[#cf222e] dark:text-[#ff7b72]">−</span> {t('account.conflicts.keepAllMine')}
         </button>
-        <button type="button" disabled={busy} onClick={() => onResolveAll('remote')} className="flex-1 min-w-[8rem] px-3 py-2 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-100 text-xs font-black disabled:opacity-50">
-          + {t('account.conflicts.keepAllTheirs')}
+        <button type="button" disabled={busy} onClick={() => onResolveAll('remote')} className="flex-1 min-w-[8rem] px-3 py-2 rounded-full bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 text-xs font-black disabled:opacity-50">
+          <span className="font-mono text-[#56d364] dark:text-[#1a7f37]">+</span> {t('account.conflicts.keepAllTheirs')}
         </button>
       </div>
     </section>

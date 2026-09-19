@@ -144,13 +144,27 @@ describe('pushGitRemote', () => {
     }));
   });
 
-  it('always pushes with force:true — without it, git.push() throws PushRejectedError on every push after the first device ever to push, since Structured Merge commits never carry real git-merge ancestry back into the remote history', async () => {
+  it('never forces a push — a force would replace the other device’s commits on the server', async () => {
     resolveRefMock.mockResolvedValue('local-oid');
     pushMock.mockResolvedValue({ ok: true });
 
     await pushGitRemote('/dir', '/dir/.git', baseConfig);
 
-    expect(pushMock).toHaveBeenCalledWith(expect.objectContaining({ force: true }));
+    expect(pushMock.mock.calls[0][0].force).toBeFalsy();
+  });
+
+  it('reports conflict:true when git refuses a non-fast-forward push, so the caller fetches, merges and retries', async () => {
+    resolveRefMock.mockResolvedValue('local-oid');
+    pushMock.mockRejectedValue(Object.assign(new Error('Push rejected because it was not a simple fast-forward.'), { code: 'PushRejectedError', data: { reason: 'not-fast-forward' } }));
+
+    expect(await pushGitRemote('/dir', '/dir/.git', baseConfig)).toEqual({ pushed: false, conflict: true });
+  });
+
+  it('still reports other push failures as transport errors', async () => {
+    resolveRefMock.mockResolvedValue('local-oid');
+    pushMock.mockRejectedValue(Object.assign(new Error('HTTP Error: 403 Forbidden'), { code: 'HttpError', data: { statusCode: 403 } }));
+
+    await expect(pushGitRemote('/dir', '/dir/.git', baseConfig)).rejects.toThrow();
   });
 
   it('reports pushed:true on a successful push', async () => {

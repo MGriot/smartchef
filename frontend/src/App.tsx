@@ -1,5 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import Login from "./pages/Login";
 import ServerConnect from "./pages/ServerConnect";
 import ProfilePicker from "./pages/ProfilePicker";
@@ -96,17 +97,16 @@ function RouteFallback() {
  *  would create a duplicate profile on top of a transient failure. Retry
  *  re-runs exactly the same check. */
 function BootErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center p-6">
       <div className="max-w-md w-full bg-white dark:bg-zinc-900 rounded-[32px] p-8 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
         <span className="material-symbols-outlined text-4xl text-amber-500">database_off</span>
         <h1 className="mt-4 text-2xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">
-          SmartChef could not open your library
+          {t('boot.title')}
         </h1>
         <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
-          Your recipes and your storage settings are still where they were — the app just
-          failed to load them this time. Retrying usually works; if it doesn't, the message
-          below says why.
+          {t('boot.hint')}
         </p>
         <p className="mt-4 text-xs font-mono text-left bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 rounded-2xl p-3 break-words">
           {message}
@@ -115,7 +115,7 @@ function BootErrorScreen({ message, onRetry }: { message: string; onRetry: () =>
           onClick={onRetry}
           className="mt-6 w-full py-3 rounded-2xl bg-primary text-white font-bold text-sm"
         >
-          Try again
+          {t('common.tryAgain')}
         </button>
       </div>
     </div>

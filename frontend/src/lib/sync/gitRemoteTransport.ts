@@ -91,6 +91,16 @@ async function ensureRemoteConfigured(dir: string, gitdir: string, config: GitRe
  *  reads, from the outside, as "sync works" right up until you notice
  *  nothing has reached the remote in a week. The raw error is an opaque
  *  HttpError; this names the cause and the fix. */
+/** isomorphic-git's refusal of a non-fast-forward push: the client-side
+ *  ancestry check (PushRejectedError), or the server's own ref-update
+ *  failure reported back through GitPushError. */
+function isPushRejection(err: unknown): boolean {
+  const e = err as { code?: string; data?: { reason?: string }; message?: string } | null;
+  if (!e) return false;
+  if (e.code === 'PushRejectedError') return true;
+  return e.code === 'GitPushError' && /non-fast-forward|fetch first|rejected/i.test(`${e.data?.reason ?? ''} ${e.message ?? ''}`);
+}
+
 function describeTransportError(err: unknown, action: 'fetch' | 'push'): Error {
   const status =
     typeof err === 'object' && err !== null && 'data' in err
@@ -195,40 +205,30 @@ export async function pushGitRemote(dir: string, gitdir: string, config: GitRemo
 
   await ensureRemoteConfigured(dir, gitdir, config);
 
-  // force: true was load-bearing until ADR 0006 and is kept for one release
-  // as a safety net. Structured Merge (applyMergeIfNeeded() in gitSync.ts)
-  // used to commit its result with a single parent — never a real
-  // two-parent merge commit linking back into the remote's history — so
-  // git.push() threw PushRejectedError ("not a simple fast-forward") on
-  // essentially every push after the first device's. Merges are now
-  // committed with both parents, which makes these pushes fast-forwards;
-  // a history created before that change still needs the force until its
-  // devices have merged once under the new code. That
-  // check exists to stop exactly the kind of blind overwrite this app
-  // already guards against a different way: the fetch-merge-push ordering
-  // (pull before push, see gitSync.ts) means the commit being pushed was
-  // just computed FROM the remote's current state, not blind to it — the
-  // same safety folder mode gets from its own manifest/CAS check instead
-  // of git ancestry (gitObjectTransport.ts). Forcing here is what actually
-  // applies that already-established safety net at the git-protocol
-  // level, not a bypass of it.
+  // A plain push, as git itself does it: the server accepts it only as a
+  // fast-forward of what it holds. When another device pushed first it is
+  // rejected, and syncNow() fetches, merges (a real two-parent merge commit,
+  // ADR 0006) and pushes again — the retry loop in gitSync.ts. This used to
+  // be `force: true`, from before merges carried the remote as a parent;
+  // with it, whichever device pushed last silently replaced the other
+  // device's commits on the server.
   let result;
   try {
     result = await git.push({
-    cache: gitCache(),
-    fs: gitfs,
-    http,
-    dir,
-    gitdir,
-    url: config.url,
-    corsProxy: config.corsProxy || undefined,
-    remote: REMOTE_NAME,
-    ref: BRANCH,
-    remoteRef: BRANCH,
-      force: true,
+      cache: gitCache(),
+      fs: gitfs,
+      http,
+      dir,
+      gitdir,
+      url: config.url,
+      corsProxy: config.corsProxy || undefined,
+      remote: REMOTE_NAME,
+      ref: BRANCH,
+      remoteRef: BRANCH,
       onAuth: authFor(config),
     });
   } catch (err) {
+    if (isPushRejection(err)) return { pushed: false, conflict: true };
     throw describeTransportError(err, 'push');
   }
 

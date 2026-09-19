@@ -1,19 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
+import { formatRelativeTime } from '../lib/relativeTime';
 import type { DownloadedRecipeSummary } from '../lib/offlineStore';
 
-function formatWhen(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  return `${Math.round(hours / 24)} day(s) ago`;
-}
+const formatWhen = (iso: string) => formatRelativeTime(iso, { days: true });
 
 export default function Downloads() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [recipes, setRecipes] = useState<DownloadedRecipeSummary[] | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -44,11 +39,11 @@ export default function Downloads() {
             className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-sm font-bold mb-6 transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-            Back
+            {t('common.back')}
           </button>
-          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">Offline Downloads</h1>
+          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">{t('downloads.heading')}</h1>
           <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-2">
-            Recipes downloaded individually for offline viewing — separate from the automatic whole-library cache. Removing one here only frees local storage; it stays on the server.
+            {t('downloads.subtitle')}
           </p>
         </div>
 
@@ -61,7 +56,7 @@ export default function Downloads() {
         {recipes !== null && recipes.length === 0 && (
           <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 text-center">
             <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">
-              No recipes downloaded yet — open a recipe and tap the download icon in its header to make it available offline.
+              {t('downloads.empty')}
             </p>
           </div>
         )}
@@ -84,7 +79,7 @@ export default function Downloads() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">{r.title}</p>
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-0.5">Downloaded {formatWhen(r.downloadedAt)}</p>
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-0.5">{t('downloads.downloadedWhen', { when: formatWhen(r.downloadedAt) })}</p>
                   </div>
                 </button>
                 <button
@@ -92,8 +87,8 @@ export default function Downloads() {
                   onClick={() => handleRemove(r.id)}
                   disabled={removingId === r.id}
                   className="flex items-center justify-center w-10 h-10 rounded-xl text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50 shrink-0"
-                  aria-label="Remove download"
-                  title="Remove download"
+                  aria-label={t('downloads.remove')}
+                  title={t('downloads.remove')}
                 >
                   <span className="material-symbols-outlined text-[20px]">{removingId === r.id ? 'sync' : 'delete'}</span>
                 </button>

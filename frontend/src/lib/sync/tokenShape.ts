@@ -25,6 +25,7 @@
 // own library. So: warn loudly, allow anyway.
 // ════════════════════════════════════════════════════════════════════════
 
+import i18n from '../../i18n';
 import { detectHost } from './hostContentsApi';
 
 /** Every prefix GitHub currently mints, per its own token-format
@@ -69,8 +70,6 @@ export function checkTokenShape(url: string, token: string | null): TokenShapePr
 
   return {
     expectedPrefixes: ['ghp_', 'github_pat_'],
-    message:
-      'This does not look like a GitHub token — GitHub tokens begin ghp_ or github_pat_. A token from another ' +
-      'service can still read a public repository, so sync will appear to work while every upload fails.',
+    message: i18n.t('remoteAccess.tokenShape'),
   };
 }

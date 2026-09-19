@@ -4,6 +4,7 @@ import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { useStore } from '../store/app.store';
 import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import ConflictsCard from '../components/sync/ConflictResolver';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 // Module-level helpers below take `t` as a parameter rather than reaching
@@ -442,11 +443,11 @@ function FolderSyncCard() {
       const outcome = await repairLocalStorage();
       setRepairMessage(
         outcome.repaired > 0
-          ? `Repaired ${outcome.repaired} item${outcome.repaired === 1 ? '' : 's'} from this device's own sync history.`
-          : "Nothing needed repair — this device's data already matches its own sync history."
+          ? t('account.folderSync.repaired', { count: outcome.repaired })
+          : t('account.folderSync.nothingToRepair')
       );
       if (outcome.failedEntities.length > 0) {
-        setError(`${outcome.failedEntities.length} item(s) still couldn't be repaired — see the console for details.`);
+        setError(t('account.folderSync.repairFailedSome', { count: outcome.failedEntities.length }));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('account.folderSync.couldNotRepair'));
@@ -636,7 +637,7 @@ function FolderSyncCard() {
             <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.syncHeading')}</h2>
             <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
               {lastSyncAt
-                ? t('account.folderSync.lastSyncedAt', { when: new Date(lastSyncAt).toLocaleString() })
+                ? t('account.folderSync.lastSyncedAt', { when: new Date(lastSyncAt).toLocaleString(i18n.language) })
                 : t('account.folderSync.neverSynced')}
             </p>
           </div>
@@ -692,7 +693,7 @@ function FolderSyncCard() {
         {stalePush(lastSyncAt, lastPushAt) && (
           <p className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] shrink-0">cloud_off</span>
-            <span>{t('account.folderSync.stalePush', { when: new Date(lastPushAt!).toLocaleString() })}</span>
+            <span>{t('account.folderSync.stalePush', { when: new Date(lastPushAt!).toLocaleString(i18n.language) })}</span>
           </p>
         )}
 
@@ -961,7 +962,7 @@ function FolderSyncCard() {
           </div>
           <div>
             <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.lastSync')}</p>
-            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : t('account.folderSync.never')}</p>
+            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{lastSyncAt ? new Date(lastSyncAt).toLocaleString(i18n.language) : t('account.folderSync.never')}</p>
           </div>
         </div>
         </div>

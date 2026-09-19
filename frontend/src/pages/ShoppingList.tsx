@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
@@ -95,22 +96,22 @@ function groupByAisle(items: ShoppingListItem[], otherLabel: string) {
   );
 }
 
-function displayName(item: ShoppingListItem): string {
-  if (!item.ingredientName) return 'Ingredient';
+function displayName(item: ShoppingListItem, t: TFunction): string {
+  if (!item.ingredientName) return t('shopping.ingredientFallback');
   return pickIngredientName(item.ingredientName, item.ingredientPluralName, item.totalQuantity ?? null);
 }
 
-function formatQty(item: ShoppingListItem): string {
+function formatQty(item: ShoppingListItem, t: TFunction): string {
   if (item.quantityText) return item.quantityText;
   if (item.totalQuantity) {
     const v = item.totalQuantity;
     return `${v % 1 === 0 ? v : v.toFixed(1)} ${item.unit?.symbol ?? ''}`.trim();
   }
-  return 'to taste';
+  return t('shopping.toTaste');
 }
 
 export default function ShoppingList() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const cart = useStore((s) => s.shoppingCart);
   const removeFromCart = useStore((s) => s.removeFromShoppingCart);
   const updateCartServings = useStore((s) => s.updateShoppingCartServings);
@@ -179,11 +180,11 @@ export default function ShoppingList() {
     setGenerating(true);
     setError(null);
     try {
-      const menuName = menus.find(m => m.id === selectedMenuId)?.name || 'Menu';
+      const menuName = menus.find(m => m.id === selectedMenuId)?.name || t('shopping.menuFallback');
       const res = await apiFetch('/api/shopping/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menuId: selectedMenuId, listName: listName.trim() || `Shopping — ${menuName}` }),
+        body: JSON.stringify({ menuId: selectedMenuId, listName: listName.trim() || t('shopping.listFromMenu', { menu: menuName }) }),
       });
       const json = await res.json();
       if (res.ok) {
@@ -195,7 +196,7 @@ export default function ShoppingList() {
       }
     } catch (err) {
       console.error('Generate from menu failed:', err);
-      setError(err instanceof Error ? err.message : 'Could not generate the list.');
+      setError(err instanceof Error ? err.message : t('shopping.generateFailed'));
     } finally {
       setGenerating(false);
     }
@@ -211,7 +212,7 @@ export default function ShoppingList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recipes: cart.map(c => ({ recipeId: c.recipeId, servings: c.servings })),
-          listName: listName.trim() || 'Shopping List',
+          listName: listName.trim() || t('shopping.heading'),
         }),
       });
       const json = await res.json();
@@ -225,7 +226,7 @@ export default function ShoppingList() {
       }
     } catch (err) {
       console.error('Generate from cart failed:', err);
-      setError(err instanceof Error ? err.message : 'Could not generate the list.');
+      setError(err instanceof Error ? err.message : t('shopping.generateFailed'));
     } finally {
       setGenerating(false);
     }
@@ -256,7 +257,7 @@ export default function ShoppingList() {
 
   const handleDeleteList = async () => {
     if (!activeList) return;
-    if (!window.confirm(`Delete "${activeList.name}"?`)) return;
+    if (!window.confirm(t('shopping.confirmDelete', { name: activeList.name }))) return;
     try {
       const res = await apiFetch(`/api/shopping/${activeList.id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -289,17 +290,17 @@ export default function ShoppingList() {
         {!activeList ? (
           <>
             <div className="mb-10">
-              <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">Shopping List</h1>
-              <p className="text-zinc-500 dark:text-zinc-400 max-w-xl">Generate an aggregated shopping list from a saved menu, or build a quick one from any recipes you pick.</p>
+              <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">{t('shopping.heading')}</h1>
+              <p className="text-zinc-500 dark:text-zinc-400 max-w-xl">{t('shopping.subtitle')}</p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
               {/* From a menu */}
               <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                <h3 className="font-headline font-bold text-xl mb-1">From a Menu</h3>
-                <p className="text-zinc-400 dark:text-zinc-500 text-sm mb-5">Aggregate every recipe already planned in a saved menu.</p>
+                <h3 className="font-headline font-bold text-xl mb-1">{t('shopping.fromMenu')}</h3>
+                <p className="text-zinc-400 dark:text-zinc-500 text-sm mb-5">{t('shopping.fromMenuHint')}</p>
                 {menus.length === 0 ? (
-                  <p className="text-sm text-zinc-400 dark:text-zinc-500 italic">No menus yet — create one in Planner first.</p>
+                  <p className="text-sm text-zinc-400 dark:text-zinc-500 italic">{t('shopping.noMenus')}</p>
                 ) : (
                   <>
                     <select
@@ -307,7 +308,7 @@ export default function ShoppingList() {
                       onChange={e => setSelectedMenuId(e.target.value)}
                       className="w-full px-5 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold mb-4"
                     >
-                      <option value="">Select a menu…</option>
+                      <option value="">{t('shopping.selectMenu')}</option>
                       {menus.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                     <button
@@ -316,7 +317,7 @@ export default function ShoppingList() {
                       className="w-full py-3.5 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
                     >
                       <span className="material-symbols-outlined text-lg">auto_awesome</span>
-                      {generating ? 'Generating…' : 'Generate List'}
+                      {generating ? t('shopping.generating') : t('shopping.generate')}
                     </button>
                   </>
                 )}
@@ -324,8 +325,8 @@ export default function ShoppingList() {
 
               {/* From cart */}
               <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-                <h3 className="font-headline font-bold text-xl mb-1">From Recipes</h3>
-                <p className="text-zinc-400 dark:text-zinc-500 text-sm mb-5">Add recipes here (or via "Add to Shopping List" on any recipe page).</p>
+                <h3 className="font-headline font-bold text-xl mb-1">{t('shopping.fromRecipes')}</h3>
+                <p className="text-zinc-400 dark:text-zinc-500 text-sm mb-5">{t('shopping.fromRecipesHint')}</p>
 
                 <div className="flex gap-2 mb-4">
                   <div className="flex-1">
@@ -334,7 +335,7 @@ export default function ShoppingList() {
                       options={allRecipes.map(r => ({ id: r.id, label: r.translated_title || r.title }))}
                       onSelect={(id) => setPickerRecipeId(id)}
                       onClear={() => setPickerRecipeId('')}
-                      placeholder="Search recipes…"
+                      placeholder={t('shopping.searchRecipes')}
                       className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
                     />
                   </div>
@@ -353,7 +354,7 @@ export default function ShoppingList() {
                 </div>
 
                 {cart.length === 0 ? (
-                  <p className="text-sm text-zinc-300 dark:text-zinc-600 italic text-center py-4">No recipes added yet</p>
+                  <p className="text-sm text-zinc-300 dark:text-zinc-600 italic text-center py-4">{t('shopping.noRecipes')}</p>
                 ) : (
                   <div className="space-y-2 mb-4">
                     {cart.map(c => (
@@ -380,7 +381,7 @@ export default function ShoppingList() {
                   className="w-full py-3.5 bg-primary text-white rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
                 >
                   <span className="material-symbols-outlined text-lg">auto_awesome</span>
-                  {generating ? 'Generating…' : 'Generate List'}
+                  {generating ? t('shopping.generating') : t('shopping.generate')}
                 </button>
               </div>
             </div>
@@ -394,7 +395,7 @@ export default function ShoppingList() {
             {/* Past lists */}
             {pastLists.length > 0 && (
               <div>
-                <h3 className="font-headline font-bold text-xl mb-4">Recent Lists</h3>
+                <h3 className="font-headline font-bold text-xl mb-4">{t('shopping.recentLists')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {pastLists.map(l => (
                     <button
@@ -403,7 +404,7 @@ export default function ShoppingList() {
                       className="text-left bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 hover:border-primary/30 transition-all"
                     >
                       <p className="font-bold text-zinc-800 dark:text-zinc-200 truncate mb-1">{l.name}</p>
-                      <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">{l.item_count} items · {new Date(l.created_at).toLocaleDateString()}</p>
+                      <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium">{t('shopping.itemCount', { count: Number(l.item_count) })} · {new Date(l.created_at).toLocaleDateString(i18n.language)}</p>
                     </button>
                   ))}
                 </div>
@@ -415,7 +416,7 @@ export default function ShoppingList() {
             <div className="flex items-center justify-between mb-2 no-print">
               <button onClick={() => setActiveList(null)} className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors text-sm font-bold">
                 <span className="material-symbols-outlined text-lg">arrow_back</span>
-                Back
+                {t('common.back')}
               </button>
               <div className="flex items-center gap-3">
                 <a
@@ -423,7 +424,7 @@ export default function ShoppingList() {
                   className="flex items-center gap-1.5 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-full text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                 >
                   <span className="material-symbols-outlined text-sm">download</span>
-                  Export
+                  {t('shopping.export')}
                 </a>
                 {canPrint() && (
                   <button
@@ -436,7 +437,7 @@ export default function ShoppingList() {
                 )}
                 <button onClick={handleDeleteList} className="flex items-center gap-1.5 px-4 py-2 text-red-500 hover:bg-red-50 rounded-full text-xs font-bold transition-colors">
                   <span className="material-symbols-outlined text-sm">delete</span>
-                  Delete
+                  {t('common.delete')}
                 </button>
               </div>
             </div>
@@ -453,7 +454,7 @@ export default function ShoppingList() {
                   style={{ width: progress.total ? `${(progress.checked / progress.total) * 100}%` : '0%' }}
                 />
               </div>
-              <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400 whitespace-nowrap">{progress.checked} / {progress.total} checked</span>
+              <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400 whitespace-nowrap">{t('shopping.checked', { checked: progress.checked, total: progress.total })}</span>
             </div>
 
             <div className="flex gap-2 mb-6 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl w-max no-print">
@@ -461,13 +462,13 @@ export default function ShoppingList() {
                 onClick={() => setViewMode('ingredient')}
                 className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'ingredient' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}
               >
-                By Ingredient
+                {t('shopping.byIngredient')}
               </button>
               <button
                 onClick={() => setViewMode('recipe')}
                 className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'recipe' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}
               >
-                By Recipe
+                {t('shopping.byRecipe')}
               </button>
             </div>
 
@@ -503,14 +504,14 @@ export default function ShoppingList() {
                               className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
                             />
                             <div className="flex-1 min-w-0">
-                              <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item)}</p>
+                              <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item, t)}</p>
                               {item.sourceDetails.length > 0 && (
                                 <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium truncate">
                                   {t('shopping.usedIn')} {item.sourceDetails.map(s => s.recipeTitle).join(', ')}
                                 </p>
                               )}
                             </div>
-                            <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums shrink-0">{formatQty(item)}</span>
+                            <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums shrink-0">{formatQty(item, t)}</span>
                           </label>
                         ))}
                       </div>
@@ -531,7 +532,7 @@ export default function ShoppingList() {
                             onChange={e => handleToggleCheck(item.id, e.target.checked)}
                             className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
                           />
-                          <span className={`flex-1 text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item)}</span>
+                          <span className={`flex-1 text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item, t)}</span>
                           <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">{item.forQuantity}</span>
                         </label>
                       ))}

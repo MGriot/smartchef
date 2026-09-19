@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
 import ImageUrlInput from '../components/ImageUrlInput';
 import { ResolvedImage } from '../components/CoverImage';
@@ -17,6 +18,7 @@ interface ProfilePickerProps {
  *  one both just call back into App.tsx's checkNativeReady() (onPicked)
  *  to re-derive auth state, same as ServerConnect.tsx's onConnected. */
 export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePickerProps) {
+  const { t } = useTranslation();
   const [profiles, setProfiles] = useState<StandaloneProfile[] | null>(null);
   const [activating, setActivating] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -37,7 +39,7 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
       await activateStandaloneProfile(id);
       onPicked();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not switch profile');
+      setError(err instanceof Error ? err.message : t('connect.errorSwitchProfile'));
       setActivating(null);
     }
   };
@@ -52,7 +54,7 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
       await createAndActivateProfile(newName, newAvatar || null);
       onPicked();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create profile');
+      setError(err instanceof Error ? err.message : t('profiles.createFailed'));
       setSaving(false);
     }
   };
@@ -62,7 +64,7 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
       <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-[40px] shadow-sm border border-zinc-100 dark:border-zinc-800 p-10">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-black text-primary tracking-tight mb-2">SmartChef</h1>
-          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{creating ? 'Create a new profile' : "Who's cooking?"}</p>
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium">{creating ? t('profiles.createTitle') : t('profiles.whoIsCooking')}</p>
         </div>
 
         {error && <p className="text-sm text-red-600 font-medium mb-4">{error}</p>}
@@ -70,9 +72,9 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
         {!creating && (
           <>
             {profiles === null ? (
-              <p className="text-center text-sm text-zinc-400 dark:text-zinc-500 py-6">Loading profiles…</p>
+              <p className="text-center text-sm text-zinc-400 dark:text-zinc-500 py-6">{t('profiles.loading')}</p>
             ) : profiles.length === 0 ? (
-              <p className="text-center text-sm text-zinc-400 dark:text-zinc-500 py-6">No profiles yet on this library.</p>
+              <p className="text-center text-sm text-zinc-400 dark:text-zinc-500 py-6">{t('profiles.empty')}</p>
             ) : (
               <div className="space-y-2 mb-4">
                 {profiles.map((p) => (
@@ -92,7 +94,7 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
                     </span>
                     <span className="font-bold text-zinc-900 dark:text-zinc-100">{p.name}</span>
                     {p.role === 'admin' && (
-                      <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider">Admin</span>
+                      <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black uppercase tracking-wider">{t('connect.admin')}</span>
                     )}
                     {activating === p.id && <span className="material-symbols-outlined text-primary animate-spin ml-auto text-lg">sync</span>}
                   </button>
@@ -105,7 +107,7 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
               className="w-full flex items-center justify-center gap-2 p-4 bg-white dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-2xl text-zinc-500 dark:text-zinc-400 font-bold text-sm transition-colors"
             >
               <span className="material-symbols-outlined text-lg">add</span>
-              New Profile
+              {t('connect.newProfile')}
             </button>
           </>
         )}
@@ -113,18 +115,18 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
         {creating && (
           <form onSubmit={handleCreate} className="space-y-5">
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Your name</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('connect.yourName')}</label>
               <input
                 type="text"
                 autoFocus
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="e.g. Matteo"
+                placeholder={t('connect.yourNamePlaceholder')}
                 className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">Avatar</label>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('connect.avatar')}</label>
               {AVATAR_PRESETS.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-3">
                   {AVATAR_PRESETS.map((preset) => (
@@ -147,14 +149,14 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
                 onClick={() => { setCreating(false); setError(null); }}
                 className="flex-1 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
               >
-                Back
+                {t('common.back')}
               </button>
               <button
                 type="submit"
                 disabled={saving || !newName.trim()}
                 className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
               >
-                {saving ? 'Creating…' : 'Start cooking'}
+                {saving ? t('users.creating') : t('profiles.startCooking')}
               </button>
             </div>
           </form>
@@ -169,7 +171,7 @@ export default function ProfilePicker({ onPicked, onChangeStorage }: ProfilePick
             onClick={onChangeStorage}
             className="mt-6 w-full pt-5 border-t border-zinc-100 dark:border-zinc-800 text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-primary transition-colors"
           >
-            Change where this device keeps your library
+            {t('profiles.changeStorage')}
           </button>
         )}
       </div>
