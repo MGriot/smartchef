@@ -435,6 +435,25 @@ export async function mergeIngredients(sourceId: string, targetId: string): Prom
   );
 
   await query("UPDATE recipe_ingredients SET ingredient_id=$1 WHERE ingredient_id=$2", [targetId, sourceId]);
+  // Everything else that names an ingredient follows it too, or it would be
+  // left pointing at a tombstone: shopping lists, the "variety of" children
+  // and the pantry (one row per ingredient — the target's row wins).
+  await query("UPDATE shopping_list_items SET ingredient_id=$1 WHERE ingredient_id=$2", [targetId, sourceId]);
+  await query("UPDATE ingredients SET parent_ingredient_id=$1, updated_at=now() WHERE parent_ingredient_id=$2 AND id != $1", [targetId, sourceId]);
+  if (await queryOne('SELECT 1 AS x FROM pantry_items WHERE ingredient_id=$1', [targetId])) {
+    await query("DELETE FROM pantry_items WHERE ingredient_id=$1", [sourceId]);
+  } else {
+    await query("UPDATE pantry_items SET ingredient_id=$1 WHERE ingredient_id=$2", [targetId, sourceId]);
+  }
+  // The source's names fill the languages the target has none for — a
+  // duplicate is usually the same thing named in another language, and that
+  // name is exactly the translation the target was missing.
+  await query(
+    `INSERT INTO ingredient_translations (id, ingredient_id, language_code, translated_name)
+     SELECT lower(hex(randomblob(16))), $1, language_code, translated_name FROM ingredient_translations
+      WHERE ingredient_id=$2 AND language_code NOT IN (SELECT language_code FROM ingredient_translations WHERE ingredient_id=$1)`,
+    [targetId, sourceId]
+  );
 
   // Union the tag sets rather than clobbering the target's — dedupe via
   // ON CONFLICT DO NOTHING against ingredient_tags' (ingredient_id, tag_id)

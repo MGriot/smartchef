@@ -85,6 +85,9 @@ describe('standalone AI provider settings', () => {
       hasGeminiKey: false,
       hasOpenaiKey: false,
       ollamaUrl: null,
+      // Empty until someone names a model in Account → AI Provider; the
+      // app's own default answers for whichever provider is selected.
+      models: { ollama: null, anthropic: null, gemini: null, openai: null },
     });
   });
 

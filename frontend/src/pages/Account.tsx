@@ -1307,6 +1307,8 @@ interface LlmConfig {
   hasGeminiKey: boolean;
   hasOpenaiKey: boolean;
   ollamaUrl: string | null;
+  /** Optional per-provider model override; absent in server mode. */
+  models?: Record<string, string | null>;
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -1371,10 +1373,16 @@ function LlmProviderCard() {
   const [keyTouched, setKeyTouched] = useState<Record<CloudProvider, boolean>>({ anthropic: false, gemini: false, openai: false });
   const [ollamaUrl, setOllamaUrl] = useState('');
   const [savedOllamaUrl, setSavedOllamaUrl] = useState('');
+  // Blank means "whatever this build defaults to for the provider". Worth
+  // a field because a model can be retired or overloaded long before a new
+  // installer could ship a different constant.
+  const [model, setModel] = useState('');
+  const [savedModel, setSavedModel] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [models, setModels] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     apiFetch('/api/auth/llm-config')
@@ -1385,6 +1393,10 @@ function LlmProviderCard() {
           setHasKey({ anthropic: json.data.hasAnthropicKey, gemini: json.data.hasGeminiKey, openai: json.data.hasOpenaiKey });
           setOllamaUrl(json.data.ollamaUrl ?? '');
           setSavedOllamaUrl(json.data.ollamaUrl ?? '');
+          setModels(json.data.models ?? {});
+          const current = json.data.models?.[json.data.provider] ?? '';
+          setModel(current);
+          setSavedModel(current);
         }
       })
       // Not swallowed: a failure here used to leave the card silently
@@ -1405,6 +1417,7 @@ function LlmProviderCard() {
         if (keyTouched[p]) body[`${p}ApiKey`] = keyValue[p];
       }
       if (ollamaUrl !== savedOllamaUrl) body.ollamaUrl = ollamaUrl;
+      if (model !== savedModel) body.llmModels = { [provider]: model };
       const res = await apiFetch('/api/auth/account', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1424,6 +1437,8 @@ function LlmProviderCard() {
       });
       setKeyTouched({ anthropic: false, gemini: false, openai: false });
       setSavedOllamaUrl(ollamaUrl);
+      setSavedModel(model);
+      setModels((prev) => ({ ...prev, [provider]: model || null }));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -1451,7 +1466,12 @@ function LlmProviderCard() {
           <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.llm.provider')}</label>
           <select
             value={provider}
-            onChange={(e) => setProvider(e.target.value)}
+            onChange={(e) => {
+              setProvider(e.target.value);
+              const saved = models[e.target.value] ?? '';
+              setModel(saved);
+              setSavedModel(saved);
+            }}
             className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4 appearance-none cursor-pointer"
           >
             <option value="ollama">{t('account.llm.providerOllama')}</option>
@@ -1498,6 +1518,18 @@ function LlmProviderCard() {
             </p>
           </div>
         )}
+
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.llm.model')}</label>
+          <input
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder={t('account.llm.modelPlaceholder')}
+            className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
+          />
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">{t('account.llm.modelHint')}</p>
+        </div>
 
         {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
         <button

@@ -183,7 +183,16 @@
       "tidyNothing": "Everything already follows the convention — nothing to change.",
       "tidyDuplicate": "Would become \"{{name}}\", which already exists — use Merge to combine them.",
       "tidyFailed": "The AI request failed.",
-      "loadFailed": "Ingredients failed to load ({{status}})"
+      "loadFailed": "Ingredients failed to load ({{status}})",
+      "dupButton": "Merge duplicates",
+      "dupTitle": "Merge duplicate ingredients",
+      "dupSubtitle": "The same ingredient catalogued twice",
+      "dupIntro": "Each pair is folded into the ingredient on the right: every recipe, shopping list and pantry item that used the left one points to it afterwards, and its names fill the languages the right one was missing. Pairs matched only in another language are not ticked — check them first.",
+      "dupNone": "No duplicates found.",
+      "dupApply": "Merge {{count}}",
+      "dupSameName": "Same name",
+      "dupTranslation": "Its {{lang}} name",
+      "tidySkipped": "{{count}} ingredients were skipped because the AI did not answer ({{error}}). Run it again later to cover them."
     },
     "common": {
       "gridView": "Grid view",
@@ -196,7 +205,11 @@
       "sortGroup": "Group",
       "sortCategory": "Category",
       "sortType": "Type",
-      "empty": "Nothing here yet"
+      "empty": "Nothing here yet",
+      "grouped": "Group by category",
+      "flat": "One list",
+      "collapseAll": "Collapse all",
+      "expandAll": "Expand all"
     },
     "shared": {
       "eyebrow": "The Atelier Management",
@@ -625,7 +638,11 @@
     "actionsLabel": "Recipe actions",
     "downloadOffline": "Download for offline",
     "removeOfflineDownload": "Remove offline download",
-    "downloadedOffline": "Downloaded for offline — tap to remove"
+    "downloadedOffline": "Downloaded for offline — tap to remove",
+    "mergeTitle": "Merge into another recipe",
+    "mergeSubtitle": "\"{{title}}\" is the same recipe as the one you pick: it is deleted, and its collections, planned meals, cook history and uses as a sub-recipe move to the recipe you keep. The kept recipe's ingredients and steps stay as they are.",
+    "mergeHint": "The recipe to keep.",
+    "mergeFailed": "The recipes could not be merged."
   },
   "recipeCreate": {
     "newRecipe": "New Recipe",
@@ -887,7 +904,8 @@
     "probeTimeout": "Timed out after {{seconds}}s while reading the library's profiles.",
     "noServer": "No server configured — connect to your SmartChef server first.",
     "mergeIntoSelf": "Cannot merge an item into itself.",
-    "toolNotFound": "Tool not found"
+    "toolNotFound": "Tool not found",
+    "providerBusy": "{{provider}} is overloaded right now (HTTP {{status}}) and still was after several retries. This is on the provider's side — try again in a few minutes."
   },
   "shopping": {
     "otherAisle": "Other",
@@ -1373,7 +1391,10 @@
       "ollamaUrl": "Ollama URL",
       "ollamaUrlPlaceholder": "http://localhost:11434 (default — leave blank unless Ollama runs elsewhere)",
       "ollamaUrlHint": "Only needed if Ollama runs on a different host or port — e.g. another machine on your network.",
-      "couldNotLoad": "Could not load the provider settings"
+      "couldNotLoad": "Could not load the provider settings",
+      "model": "Model (optional)",
+      "modelPlaceholder": "Leave empty for the default",
+      "modelHint": "Only needed if the default model is retired or busy — e.g. gemini-2.5-flash. When empty, a busy model automatically falls back to a second one."
     },
     "manageUsers": {
       "heading": "Manage Users",

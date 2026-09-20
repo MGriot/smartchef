@@ -153,6 +153,56 @@ export async function repairUnknownUnitRefs(): Promise<{ fixed: number; unresolv
   return { fixed, unresolved };
 }
 
+/** Two seeds of the same twelve categories met in one library — the
+ *  Italian-named one every device created on first run ("Carni") and the
+ *  portable English one ("Meat", whose Italian translation is "Carni") —
+ *  and cleaning up by hand deleted one of each pair, but not consistently:
+ *  "Meat" was deleted while still holding every meat ingredient, "Carni"
+ *  was kept empty. Deleting a category never moved its ingredients, so they
+ *  fell out of every category into "Uncategorized".
+ *
+ *  Settled here, every sync, by two rules:
+ *   - a category whose name is another category's translation is that
+ *     category twice: its ingredients move over and it is deleted;
+ *   - a deleted category that still holds ingredients is restored — a
+ *     category is only really gone once nothing is filed under it. */
+export async function repairCategories(): Promise<{ moved: number; restored: number; folded: number }> {
+  const cats = await query<{ id: string; name: string; deleted_at: string | null }>(`SELECT id, name, deleted_at FROM ingredient_categories`);
+  const trs = await query<{ category_id: string; name: string }>(`SELECT category_id, name FROM ingredient_category_translations`);
+  const norm = (s: string | null | undefined) => (s ?? '').trim().toLocaleLowerCase();
+  const namesOf = new Map<string, Set<string>>();
+  for (const c of cats) namesOf.set(c.id, new Set([norm(c.name)]));
+  for (const t of trs) namesOf.get(t.category_id)?.add(norm(t.name));
+
+  let moved = 0;
+  let folded = 0;
+  for (const twin of cats) {
+    const key = norm(twin.name);
+    // The canonical category lists this name among its translations, while
+    // the twin knows nothing of the canonical one's own name.
+    const target = cats.find((c) => c.id !== twin.id && namesOf.get(c.id)!.has(key) && norm(c.name) !== key
+      && !namesOf.get(twin.id)!.has(norm(c.name)));
+    if (!target) continue;
+    const n = (await queryOne<{ n: number }>(`SELECT COUNT(*) AS n FROM ingredients WHERE category_id = $1`, [twin.id]))?.n ?? 0;
+    if (n > 0) {
+      await query(`UPDATE ingredients SET category_id = $1, updated_at = now() WHERE category_id = $2`, [target.id, twin.id]);
+      moved += Number(n);
+    }
+    if (!twin.deleted_at) {
+      await query(`UPDATE ingredient_categories SET deleted_at = now(), updated_at = now() WHERE id = $1`, [twin.id]);
+      folded++;
+    }
+  }
+
+  const orphaned = await query<{ id: string }>(
+    `SELECT c.id FROM ingredient_categories c
+      WHERE c.deleted_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM ingredients i WHERE i.category_id = c.id AND COALESCE(i.sync_status, '') != 'deleted')`
+  );
+  for (const c of orphaned) await query(`UPDATE ingredient_categories SET deleted_at = NULL, updated_at = now() WHERE id = $1`, [c.id]);
+  return { moved, restored: orphaned.length, folded };
+}
+
 export async function queueRepair(entityType: string, entityId: string, error: string): Promise<void> {
   try {
     await query(

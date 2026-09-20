@@ -35,7 +35,8 @@ export default function LibraryTechniques() {
   const [merging, setMerging] = useState(false);
 
   const fetchTechniques = () => {
-    setLoading(true);
+    // Refresh in place after a save — see LibraryIngredients' fetchData.
+    if (techniques.length === 0) setLoading(true);
     apiFetch(`/api/techniques${contentLang ? `?lang=${contentLang}` : ''}`)
       .then(res => res.json())
       .then(json => {

@@ -28,6 +28,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne, withTransaction, inPlaceholders, chunk, type LocalClient } from "../db/local";
+import i18n from "../i18n";
 import { calculatePortions, resolveCookSequence } from "./matrioska.local";
 import { computeAutoTagNames, unionTagNames } from "./tags.local";
 
@@ -930,6 +931,57 @@ export async function deleteRecipe(id: string): Promise<void> {
   // from "another device hasn't created it yet" by a device that pulls
   // later, whereas a row with sync_status='deleted' unambiguously can.
   syncRecipeInBackground(id);
+}
+
+// ── POST /recipes/:id/merge ────────────────────────────────────────────
+// The same recipe saved twice — imported from the same page on two devices,
+// or re-imported after an edit. The kept recipe's own content (ingredients,
+// steps, text) is what survives; a merge is not a diff tool. What moves
+// over is everything that refers to the duplicate: collections, planned
+// meals, the cook log and its count, other recipes using it as a
+// sub-recipe, and a rating, cover or tags the kept one lacks. Then the
+// duplicate is deleted the way any recipe is, so the deletion syncs.
+
+export async function mergeRecipes(sourceId: string, targetId: string): Promise<{ recipesUpdated: number } | null> {
+  if (sourceId === targetId) throw new Error(i18n.t('errors.mergeIntoSelf'));
+  const [source, target] = await Promise.all([
+    queryOne<Record<string, any>>("SELECT * FROM recipes WHERE id=$1 AND COALESCE(sync_status,'')!='deleted'", [sourceId]),
+    queryOne<Record<string, any>>("SELECT * FROM recipes WHERE id=$1 AND COALESCE(sync_status,'')!='deleted'", [targetId]),
+  ]);
+  if (!source || !target) return null;
+
+  await query(
+    `INSERT INTO collection_recipes (collection_id, recipe_id)
+     SELECT collection_id, $1 FROM collection_recipes WHERE recipe_id=$2 ON CONFLICT DO NOTHING`,
+    [targetId, sourceId]
+  );
+  await query("DELETE FROM collection_recipes WHERE recipe_id=$1", [sourceId]);
+  await query("UPDATE menu_items SET recipe_id=$1 WHERE recipe_id=$2", [targetId, sourceId]);
+  await query("UPDATE cook_log SET recipe_id=$1 WHERE recipe_id=$2", [targetId, sourceId]);
+
+  const parents = await query<{ recipe_id: string }>(
+    "SELECT DISTINCT recipe_id FROM recipe_ingredients WHERE sub_recipe_id=$1 AND recipe_id != $2",
+    [sourceId, targetId]
+  );
+  await query("UPDATE recipe_ingredients SET sub_recipe_id=$1 WHERE sub_recipe_id=$2 AND recipe_id != $1", [targetId, sourceId]);
+
+  const parseList = (v: unknown): unknown[] => {
+    if (Array.isArray(v)) return v;
+    try { const p = JSON.parse(String(v ?? '[]')); return Array.isArray(p) ? p : []; } catch { return []; }
+  };
+  const tags = [...new Set([...parseList(target.tags), ...parseList(source.tags)].map(String))];
+  await query(
+    `UPDATE recipes SET times_cooked = COALESCE(times_cooked, 0) + $1,
+            rating = COALESCE(rating, $2), cover_image_url = COALESCE(cover_image_url, $3),
+            tags = $4, updated_at = now()
+      WHERE id = $5`,
+    [Number(source.times_cooked) || 0, source.rating ?? null, source.cover_image_url ?? null, JSON.stringify(tags), targetId]
+  );
+
+  await deleteRecipe(sourceId);
+  await syncRecipe(targetId);
+  for (const p of parents) await syncRecipe(p.recipe_id);
+  return { recipesUpdated: parents.length + 1 };
 }
 
 // ── Portions / cook-sequence ────────────────────────────────────────────

@@ -30,6 +30,7 @@ import { startCookTimer, requestTimerNotifications } from '../lib/cookTimers';
 import { toSystem, type MeasurementSystem } from '../lib/unitConvert';
 import ConverterPanel from '../components/ConverterPanel';
 import ShareLinkModal from '../components/ShareLinkModal';
+import RecipeMergeModal from '../components/RecipeMergeModal';
 import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
 import CoverImage, { ResolvedImage } from '../components/CoverImage';
@@ -413,6 +414,7 @@ const RecipeDetail: React.FC = () => {
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showShareLink, setShowShareLink] = useState(false);
+  const [showMerge, setShowMerge] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   useEffect(() => {
     import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setIsStandalone);
@@ -2919,6 +2921,19 @@ const RecipeDetail: React.FC = () => {
     </button>
   );
 
+  // Standalone only: merging is a local-library operation (recipes.local.ts).
+  const mergeButton = (inBar: boolean) => isStandalone ? (
+    <button
+      onClick={() => setShowMerge(true)}
+      disabled={saving}
+      className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors disabled:opacity-50`}
+      aria-label={t('recipeDetail.mergeTitle')}
+      title={t('recipeDetail.mergeTitle')}
+    >
+      <span className="material-symbols-outlined text-[20px]">call_merge</span>
+    </button>
+  ) : null;
+
   const deleteButton = (inBar: boolean) => (
     <button
       onClick={handleDelete}
@@ -3188,6 +3203,7 @@ const RecipeDetail: React.FC = () => {
       {shoppingListHeaderButton(inBar)}
       {collectionHeaderButton(inBar)}
       {exportHeaderButton(inBar)}
+      {mergeButton(inBar)}
       {deleteButton(inBar)}
       {editButton(inBar)}
     </>
@@ -3396,6 +3412,16 @@ const RecipeDetail: React.FC = () => {
       )}
 
       <ConverterPanel open={showConverter} onClose={() => setShowConverter(false)} />
+      {id && recipe && (
+        <RecipeMergeModal
+          open={showMerge}
+          onClose={() => setShowMerge(false)}
+          recipeId={id}
+          recipeTitle={recipe.translated_title || recipe.title}
+          lang={contentLang}
+          onMerged={(targetId) => { setShowMerge(false); navigate(`/recipe/${targetId}`); }}
+        />
+      )}
       {id && (
         <ShareLinkModal
           open={showShareLink}

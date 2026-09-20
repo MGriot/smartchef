@@ -61,6 +61,73 @@ export function ViewToggle({ value, onChange }: ViewToggleProps) {
   );
 }
 
+export interface GroupToggleProps {
+  value: boolean;
+  onChange: (next: boolean) => void;
+}
+
+/** Grouped by category, or one flat list. Separate from the grid/list
+ *  switch on purpose: they answer different questions — "how is each item
+ *  drawn" and "is the list broken into sections" — and a catalog of 300
+ *  ingredients is unusable if the only way to see it as one list is to
+ *  collapse eleven headings by hand. */
+export function GroupToggle({ value, onChange }: GroupToggleProps) {
+  const { t } = useTranslation();
+  const base = 'w-9 h-9 rounded-full flex items-center justify-center transition-all';
+  const on = 'bg-primary text-white';
+  const off = 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400';
+
+  return (
+    <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 rounded-full border border-zinc-200 dark:border-zinc-700 p-1 shrink-0">
+      <button
+        type="button"
+        onClick={() => onChange(true)}
+        title={t('library.common.grouped')}
+        aria-label={t('library.common.grouped')}
+        aria-pressed={value}
+        className={`${base} ${value ? on : off}`}
+      >
+        <span className="material-symbols-outlined text-lg">category</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange(false)}
+        title={t('library.common.flat')}
+        aria-label={t('library.common.flat')}
+        aria-pressed={!value}
+        className={`${base} ${!value ? on : off}`}
+      >
+        <span className="material-symbols-outlined text-lg">format_list_bulleted</span>
+      </button>
+    </div>
+  );
+}
+
+export interface CollapseAllButtonProps {
+  /** True when every section is already collapsed, so the button offers to
+   *  expand instead. */
+  allCollapsed: boolean;
+  onToggle: () => void;
+}
+
+/** One button for all the headings at once. */
+export function CollapseAllButton({ allCollapsed, onToggle }: CollapseAllButtonProps) {
+  const { t } = useTranslation();
+  const label = allCollapsed ? t('library.common.expandAll') : t('library.common.collapseAll');
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={label}
+      aria-label={label}
+      className="shrink-0 flex items-center gap-2 px-3 sm:px-4 py-3 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+    >
+      <span className="material-symbols-outlined text-lg">{allCollapsed ? 'unfold_more' : 'unfold_less'}</span>
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+}
+
 export interface SortSelectProps {
   value: LibrarySortKey;
   onChange: (next: LibrarySortKey) => void;

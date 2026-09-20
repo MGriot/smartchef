@@ -130,6 +130,13 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     await recipes.patchRating(id, body.rating ?? null);
     return { status: 200, data: { success: true } };
   }
+  if (sub === 'merge' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    if (!body.targetId) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    const result = await recipes.mergeRecipes(id, body.targetId);
+    if (!result) return { status: 404, error: i18n.t('errors.recipeNotFound') };
+    return { status: 200, data: result };
+  }
   if (sub === 'cooked' && method === 'POST') {
     const profile = await getStandaloneProfile();
     const result = await recipes.logCooked(id, profile?.name ?? null);
@@ -602,6 +609,7 @@ async function dispatchAuth(segments: string[], method: string, init?: RequestIn
       anthropicApiKey: body.anthropicApiKey,
       geminiApiKey: body.geminiApiKey,
       openaiApiKey: body.openaiApiKey,
+      models: body.llmModels,
     });
     return { status: 200, data: { success: true } };
   }

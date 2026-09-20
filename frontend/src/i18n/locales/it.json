@@ -183,7 +183,16 @@
       "tidyNothing": "Tutto segue già la convenzione — niente da cambiare.",
       "tidyDuplicate": "Diventerebbe \"{{name}}\", che esiste già — usa Unisci per combinarli.",
       "tidyFailed": "La richiesta all'AI non è riuscita.",
-      "loadFailed": "Impossibile caricare gli ingredienti ({{status}})"
+      "loadFailed": "Impossibile caricare gli ingredienti ({{status}})",
+      "dupButton": "Unisci doppioni",
+      "dupTitle": "Unisci gli ingredienti doppi",
+      "dupSubtitle": "Lo stesso ingrediente presente due volte",
+      "dupIntro": "Ogni coppia viene unita nell'ingrediente a destra: ricette, liste della spesa e dispensa che usavano quello a sinistra puntano poi a lui, e i suoi nomi completano le lingue che mancavano. Le coppie trovate solo in un'altra lingua non sono spuntate: controllale prima.",
+      "dupNone": "Nessun doppione trovato.",
+      "dupApply": "Unisci {{count}}",
+      "dupSameName": "Stesso nome",
+      "dupTranslation": "È il suo nome in {{lang}}",
+      "tidySkipped": "{{count}} ingredienti sono stati saltati perché l'IA non ha risposto ({{error}}). Rilancialo più tardi per completarli."
     },
     "common": {
       "gridView": "Vista a griglia",
@@ -196,7 +205,11 @@
       "sortGroup": "Gruppo",
       "sortCategory": "Categoria",
       "sortType": "Tipo",
-      "empty": "Ancora niente qui"
+      "empty": "Ancora niente qui",
+      "grouped": "Raggruppa per categoria",
+      "flat": "Elenco unico",
+      "collapseAll": "Comprimi tutto",
+      "expandAll": "Espandi tutto"
     },
     "shared": {
       "eyebrow": "Gestione dell'Atelier",
@@ -625,7 +638,11 @@
     "actionsLabel": "Azioni della ricetta",
     "downloadOffline": "Scarica per l'uso offline",
     "removeOfflineDownload": "Rimuovi download offline",
-    "downloadedOffline": "Scaricata per l'uso offline: tocca per rimuoverla"
+    "downloadedOffline": "Scaricata per l'uso offline: tocca per rimuoverla",
+    "mergeTitle": "Unisci a un'altra ricetta",
+    "mergeSubtitle": "\"{{title}}\" è la stessa ricetta di quella che scegli: viene eliminata, e raccolte, pasti pianificati, cronologia di cottura e usi come sotto-ricetta passano alla ricetta che tieni. Ingredienti e passaggi della ricetta tenuta restano com'erano.",
+    "mergeHint": "La ricetta da tenere.",
+    "mergeFailed": "Impossibile unire le ricette."
   },
   "login": {
     "password": "Password",
@@ -887,7 +904,8 @@
     "probeTimeout": "Tempo scaduto dopo {{seconds}} s durante la lettura dei profili della libreria.",
     "noServer": "Nessun server configurato: collegati prima al tuo server SmartChef.",
     "mergeIntoSelf": "Non si può unire un elemento con sé stesso.",
-    "toolNotFound": "Attrezzo non trovato"
+    "toolNotFound": "Attrezzo non trovato",
+    "providerBusy": "{{provider}} è sovraccarico in questo momento (HTTP {{status}}) e lo era ancora dopo vari tentativi. Il problema è del fornitore: riprova tra qualche minuto."
   },
   "shopping": {
     "otherAisle": "Altro",
@@ -1373,7 +1391,10 @@
       "ollamaUrl": "URL di Ollama",
       "ollamaUrlPlaceholder": "http://localhost:11434 (predefinito — lascia vuoto se Ollama non è altrove)",
       "ollamaUrlHint": "Serve solo se Ollama gira su un host o una porta diversi — ad esempio un’altra macchina della tua rete.",
-      "couldNotLoad": "Impossibile caricare le impostazioni del provider"
+      "couldNotLoad": "Impossibile caricare le impostazioni del provider",
+      "model": "Modello (facoltativo)",
+      "modelPlaceholder": "Lascia vuoto per il modello predefinito",
+      "modelHint": "Serve solo se il modello predefinito è stato ritirato o è sovraccarico, es. gemini-2.5-flash. Se lasci vuoto, un modello occupato passa automaticamente a un secondo modello."
     },
     "manageUsers": {
       "heading": "Gestisci utenti",

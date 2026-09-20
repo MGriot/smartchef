@@ -51,6 +51,7 @@ chevron_left
 chevron_right
 chips
 class
+cleaning
 clear
 close
 cloud
@@ -134,6 +135,7 @@ flight
 floor
 folder
 folder_open
+format_list_bulleted
 forward
 function
 functions
@@ -311,6 +313,7 @@ shopping_cart
 shortcut
 signature
 skillet
+sleep
 smartphone
 sort
 source

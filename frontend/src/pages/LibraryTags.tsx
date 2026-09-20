@@ -48,7 +48,8 @@ export default function LibraryTags() {
   const [mergingGroupBusy, setMergingGroupBusy] = useState(false);
 
   const fetchTags = () => {
-    setLoading(true);
+    // Refresh in place after a save — see LibraryIngredients' fetchData.
+    if (tags.length === 0) setLoading(true);
     apiFetch(`/api/tags${contentLang ? `?lang=${contentLang}` : ''}`)
       .then(res => res.json())
       .then(json => {

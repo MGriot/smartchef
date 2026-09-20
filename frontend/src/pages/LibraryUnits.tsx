@@ -33,7 +33,8 @@ export default function LibraryUnits() {
   );
 
   const fetchUnits = () => {
-    setLoading(true);
+    // Refresh in place after a save — see LibraryIngredients' fetchData.
+    if (units.length === 0) setLoading(true);
     apiFetch(`/api/units${contentLang ? `?lang=${contentLang}` : ''}`)
       .then(res => res.json())
       .then(json => {

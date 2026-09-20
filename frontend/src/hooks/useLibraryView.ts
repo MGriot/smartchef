@@ -8,7 +8,7 @@ export type LibraryViewMode = 'grid' | 'list';
  *  photos and a table of unit conversions do not want the same default. */
 export type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags' | 'seasonality';
 
-const KEY = (section: LibrarySection, field: 'view' | 'sort') => `smartchef.library.${section}.${field}`;
+const KEY = (section: LibrarySection, field: 'view' | 'sort' | 'grouped') => `smartchef.library.${section}.${field}`;
 
 /** Remembers each Library section's view mode and sort order across visits
  *  and restarts.
@@ -44,6 +44,26 @@ export function useLibraryView(section: LibrarySection, defaultView: LibraryView
     }
   });
 
+  // Whether the section is split into category headings or shown as one
+  // flat list. Only Library > Ingredients groups anything today, but the
+  // preference lives here with the other two so every section that grows
+  // grouping gets it remembered the same way.
+  const [grouped, setGrouped] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(KEY(section, 'grouped')) !== 'flat';
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(KEY(section, 'grouped'), grouped ? 'grouped' : 'flat');
+    } catch {
+      /* as below */
+    }
+  }, [section, grouped]);
+
   useEffect(() => {
     try {
       localStorage.setItem(KEY(section, 'view'), view);
@@ -60,5 +80,5 @@ export function useLibraryView(section: LibrarySection, defaultView: LibraryView
     }
   }, [section, sort]);
 
-  return { view, setView, sort, setSort };
+  return { view, setView, sort, setSort, grouped, setGrouped };
 }

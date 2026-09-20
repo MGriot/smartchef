@@ -45,10 +45,28 @@ const CLOUD_KEY_PREF: Record<CloudLlmProvider, string> = {
  *  be a cross-origin request from `capacitor-electron://-` and blocked. */
 export const DEFAULT_OLLAMA_URL = 'http://localhost:11434';
 
+/** An optional model name per provider. Empty means "whatever the app
+ *  ships as the default for that provider".
+ *
+ *  Exists because a model name is not a constant in practice: Google
+ *  retired gemini-2.0-flash mid-2026 (every Smart Import answered HTTP
+ *  404), and a busy model answers 503 for hours at a time. Both used to
+ *  need a new installer to work around. */
+const MODEL_PREF: Record<LlmProvider, string> = {
+  ollama: 'smartchef.llm.ollamaModel',
+  anthropic: 'smartchef.llm.anthropicModel',
+  gemini: 'smartchef.llm.geminiModel',
+  openai: 'smartchef.llm.openaiModel',
+};
+
+export const LLM_PROVIDERS = ['ollama', 'anthropic', 'gemini', 'openai'] as const;
+
 export interface LlmSettings {
   provider: LlmProvider;
   ollamaUrl: string | null;
   keys: Record<CloudLlmProvider, string | null>;
+  /** Per-provider model override; null for the built-in default. */
+  models: Record<LlmProvider, string | null>;
 }
 
 function normalizeProvider(raw: string | null): LlmProvider {
@@ -56,12 +74,13 @@ function normalizeProvider(raw: string | null): LlmProvider {
 }
 
 export async function getLlmSettings(): Promise<LlmSettings> {
-  const [provider, ollamaUrl, anthropic, gemini, openai] = await Promise.all([
+  const [provider, ollamaUrl, anthropic, gemini, openai, ...models] = await Promise.all([
     Preferences.get({ key: PROVIDER_KEY }),
     Preferences.get({ key: OLLAMA_URL_KEY }),
     Preferences.get({ key: CLOUD_KEY_PREF.anthropic }),
     Preferences.get({ key: CLOUD_KEY_PREF.gemini }),
     Preferences.get({ key: CLOUD_KEY_PREF.openai }),
+    ...LLM_PROVIDERS.map((name) => Preferences.get({ key: MODEL_PREF[name] })),
   ]);
   return {
     provider: normalizeProvider(provider.value),
@@ -71,6 +90,7 @@ export async function getLlmSettings(): Promise<LlmSettings> {
       gemini: gemini.value || null,
       openai: openai.value || null,
     },
+    models: Object.fromEntries(LLM_PROVIDERS.map((name, i) => [name, models[i].value || null])) as Record<LlmProvider, string | null>,
   };
 }
 
@@ -83,6 +103,7 @@ export interface LlmConfigSummary {
   hasGeminiKey: boolean;
   hasOpenaiKey: boolean;
   ollamaUrl: string | null;
+  models: Record<LlmProvider, string | null>;
 }
 
 export async function getLlmConfigSummary(): Promise<LlmConfigSummary> {
@@ -93,6 +114,7 @@ export async function getLlmConfigSummary(): Promise<LlmConfigSummary> {
     hasGeminiKey: !!s.keys.gemini,
     hasOpenaiKey: !!s.keys.openai,
     ollamaUrl: s.ollamaUrl,
+    models: s.models,
   };
 }
 
@@ -107,6 +129,8 @@ export interface LlmSettingsPatch {
   anthropicApiKey?: string;
   geminiApiKey?: string;
   openaiApiKey?: string;
+  /** Same empty-string-clears semantics as the keys above. */
+  models?: Partial<Record<LlmProvider, string>>;
 }
 
 export async function updateLlmSettings(patch: LlmSettingsPatch): Promise<void> {
@@ -128,5 +152,12 @@ export async function updateLlmSettings(patch: LlmSettingsPatch): Promise<void> 
     const trimmed = value.trim();
     if (trimmed) await Preferences.set({ key: CLOUD_KEY_PREF[name], value: trimmed });
     else await Preferences.remove({ key: CLOUD_KEY_PREF[name] });
+  }
+  for (const name of LLM_PROVIDERS) {
+    const value = patch.models?.[name];
+    if (value === undefined) continue;
+    const trimmed = value.trim();
+    if (trimmed) await Preferences.set({ key: MODEL_PREF[name], value: trimmed });
+    else await Preferences.remove({ key: MODEL_PREF[name] });
   }
 }

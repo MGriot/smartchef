@@ -48,7 +48,7 @@ import { createAndroidRemoteTransport } from './androidRemoteTransport';
 import { getMirrorState, setSyncPauseReason } from './androidMirror';
 import { mergeRemoteIntoLocal, readRemoteSnapshot, applyRemoteSnapshot, type ReplaceOutcome } from './mergeBridge';
 import { overlayPendingConflicts, autoResolvePendingConflicts, listLocalEntityIds } from '../../services/conflicts.local';
-import { recordSynced, queueRepair, markAllInSync, publishRowsAheadOfRepo, pullRepoIntoDatabase, repairUnknownUnitRefs, type PullOutcome } from '../../services/syncReconcile.local';
+import { recordSynced, queueRepair, markAllInSync, publishRowsAheadOfRepo, pullRepoIntoDatabase, repairUnknownUnitRefs, repairCategories, type PullOutcome } from '../../services/syncReconcile.local';
 import { reportSyncStarted, reportSyncFinished, LAST_SYNC_KEY } from './syncStatus';
 import { copyImagesIntoClone, materializeImagesFromCommit } from './imageSync';
 import { IMAGES_SUBDIR } from '../localImages';
@@ -910,7 +910,12 @@ async function publishDatabaseAheadOfRepo(): Promise<void> {
 const RESERIALIZE_KEY = 'smartchef.sync.reserializedFormat';
 // '3': rewrites files still carrying unresolvable unit/category ids — see
 // referenceHeal.ts.
-const ENTITY_FILE_FORMAT = '3';
+// '4': the library was revised in place on one device (English base names,
+// a name per language for every ingredient, tag, tool, technique and unit,
+// folded duplicates). Units have no updated_at, so publishRowsAheadOfRepo
+// cannot notice their new translations — this re-serialization is what
+// carries them, and everything else, to the other devices.
+const ENTITY_FILE_FORMAT = '4';
 
 async function reserializeOnceForPortableIds(): Promise<void> {
   const { value } = await Preferences.get({ key: RESERIALIZE_KEY });
@@ -964,9 +969,10 @@ export async function autoResolveConflictsNow(): Promise<number> {
   }
 }
 
-/** Points rows at units this device can resolve — see
- *  repairUnknownUnitRefs. Before publishing, so the fix travels this cycle;
- *  after merging, for ids a merge just brought in (published next cycle). */
+/** Points rows at units this device can resolve, and folds duplicated
+ *  ingredient categories — see repairUnknownUnitRefs and repairCategories.
+ *  Before publishing, so the fix travels this cycle; after merging, for ids
+ *  a merge just brought in (published next cycle). */
 async function repairUnitRefs(): Promise<void> {
   try {
     const { fixed, unresolved } = await repairUnknownUnitRefs();
@@ -974,6 +980,12 @@ async function repairUnitRefs(): Promise<void> {
     if (unresolved > 0) console.warn(`SmartChef: ${unresolved} row(s) reference a unit no device can name`);
   } catch (err) {
     console.warn('SmartChef: repairing unit references failed:', err);
+  }
+  try {
+    const { moved, restored, folded } = await repairCategories();
+    if (moved + restored + folded > 0) console.info(`SmartChef: categories repaired — ${moved} ingredient(s) moved, ${folded} duplicate(s) folded, ${restored} restored`);
+  } catch (err) {
+    console.warn('SmartChef: repairing categories failed:', err);
   }
 }
 

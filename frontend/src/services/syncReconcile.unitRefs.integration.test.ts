@@ -92,3 +92,91 @@ describe('repairUnknownUnitRefs', () => {
     expect(await repairUnknownUnitRefs()).toEqual({ fixed: 0, unresolved: 0 });
   });
 });
+
+describe('repairCategories', () => {
+  // The state one library was left in: the portable "Meat" (Italian name
+  // "Carni") deleted while holding the meat, its Italian-seeded twin
+  // "Carni" alive and empty.
+  async function seedCategories() {
+    const { query, initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await query(`DELETE FROM ingredient_categories`);
+    await query(`INSERT INTO ingredient_categories (id, name, sort_order, deleted_at) VALUES ('cat-meat', 'Meat', 2, '2026-09-01 00:00:00')`);
+    await query(`INSERT INTO ingredient_categories (id, name, sort_order) VALUES ('cat-carni', 'Carni', 2)`);
+    await query(`INSERT INTO ingredient_categories (id, name, sort_order) VALUES ('cat-fruit', 'Fruit', 1)`);
+    await query(`INSERT INTO ingredient_category_translations (id, category_id, language_code, name) VALUES ('t1', 'cat-meat', 'it', 'Carni'), ('t2', 'cat-fruit', 'it', 'Frutta')`);
+    await query(`INSERT INTO ingredients (id, category_id, name) VALUES ('beef', 'cat-meat', 'Beef'), ('boar', 'cat-carni', 'Wild Boar'), ('apple', 'cat-fruit', 'Apple')`);
+    return query;
+  }
+
+  it('folds the twin into the canonical category and brings the canonical one back', async () => {
+    const query = await seedCategories();
+    const { repairCategories } = await import('./syncReconcile.local');
+    expect(await repairCategories()).toEqual({ moved: 1, restored: 1, folded: 1 });
+
+    const live = await query<{ id: string }>(`SELECT id FROM ingredient_categories WHERE deleted_at IS NULL ORDER BY id`);
+    expect(live.map((c) => c.id)).toEqual(['cat-fruit', 'cat-meat']);
+    const cats = await query<{ id: string; category_id: string }>(`SELECT id, category_id FROM ingredients ORDER BY id`);
+    expect(cats).toEqual([
+      { id: 'apple', category_id: 'cat-fruit' },
+      { id: 'beef', category_id: 'cat-meat' },
+      { id: 'boar', category_id: 'cat-meat' },
+    ]);
+  });
+
+  it('changes nothing the second time', async () => {
+    await seedCategories();
+    const { repairCategories } = await import('./syncReconcile.local');
+    await repairCategories();
+    expect(await repairCategories()).toEqual({ moved: 0, restored: 0, folded: 0 });
+  });
+});
+
+describe('mergeIngredients', () => {
+  it('moves pantry, shopping rows and missing translations to the kept ingredient', async () => {
+    const { query, initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await query(`INSERT INTO ingredient_categories (id, name, sort_order) VALUES ('c', 'Other', 0)`);
+    await query(`INSERT INTO ingredients (id, category_id, name) VALUES ('salt', 'c', 'Salt'), ('sale', 'c', 'Sale')`);
+    await query(`INSERT INTO ingredient_translations (id, ingredient_id, language_code, translated_name) VALUES ('t1', 'salt', 'it', 'Sale'), ('t2', 'sale', 'fr', 'Sel')`);
+    await query(`INSERT INTO pantry_items (id, ingredient_id) VALUES ('p1', 'sale')`);
+    await query(`INSERT INTO shopping_lists (id, name) VALUES ('l1', 'List')`);
+    await query(`INSERT INTO shopping_list_items (id, shopping_list_id, ingredient_id) VALUES ('s1', 'l1', 'sale')`);
+
+    const { mergeIngredients } = await import('./ingredients.local');
+    await mergeIngredients('sale', 'salt');
+
+    expect(await query(`SELECT ingredient_id FROM pantry_items`)).toEqual([{ ingredient_id: 'salt' }]);
+    expect(await query(`SELECT ingredient_id FROM shopping_list_items`)).toEqual([{ ingredient_id: 'salt' }]);
+    const trs = await query<{ language_code: string; translated_name: string }>(
+      `SELECT language_code, translated_name FROM ingredient_translations WHERE ingredient_id = 'salt' ORDER BY language_code`
+    );
+    expect(trs).toEqual([{ language_code: 'fr', translated_name: 'Sel' }, { language_code: 'it', translated_name: 'Sale' }]);
+  });
+});
+
+describe('mergeRecipes', () => {
+  it('moves collections, meals, cooks and sub-recipe uses to the kept recipe', async () => {
+    const { query, initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await query(`INSERT INTO recipes (id, title, times_cooked, rating, tags) VALUES ('keep', 'Crema', 2, NULL, '["dolci"]'), ('dup', 'Crema (2)', 3, 5, '["base"]'), ('tart', 'Crostata', 0, NULL, '[]')`);
+    await query(`INSERT INTO recipe_ingredients (id, recipe_id, sort_order, sub_recipe_id) VALUES ('r1', 'tart', 0, 'dup')`);
+    await query(`INSERT INTO collections (id, name) VALUES ('c1', 'Dolci')`);
+    await query(`INSERT INTO collection_recipes (collection_id, recipe_id) VALUES ('c1', 'dup'), ('c1', 'keep')`);
+    await query(`INSERT INTO menus (id, name, week_start) VALUES ('m1', 'Week', '2026-09-21')`);
+    await query(`INSERT INTO menu_items (id, menu_id, recipe_id, day_of_week) VALUES ('mi1', 'm1', 'dup', 2)`);
+    await query(`INSERT INTO cook_log (id, recipe_id) VALUES ('k1', 'dup')`);
+
+    const { mergeRecipes } = await import('./recipes.local');
+    await mergeRecipes('dup', 'keep');
+
+    const keep = (await query<any>(`SELECT times_cooked, rating, tags FROM recipes WHERE id = 'keep'`))[0];
+    expect(keep).toMatchObject({ times_cooked: 5, rating: 5 });
+    expect(JSON.parse(keep.tags).sort()).toEqual(['base', 'dolci']);
+    expect(await query(`SELECT sync_status FROM recipes WHERE id = 'dup'`)).toEqual([{ sync_status: 'deleted' }]);
+    expect(await query(`SELECT sub_recipe_id FROM recipe_ingredients WHERE id = 'r1'`)).toEqual([{ sub_recipe_id: 'keep' }]);
+    expect(await query(`SELECT recipe_id FROM collection_recipes`)).toEqual([{ recipe_id: 'keep' }]);
+    expect(await query(`SELECT recipe_id FROM menu_items`)).toEqual([{ recipe_id: 'keep' }]);
+    expect(await query(`SELECT recipe_id FROM cook_log`)).toEqual([{ recipe_id: 'keep' }]);
+  });
+});

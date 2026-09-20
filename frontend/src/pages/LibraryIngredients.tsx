@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
-import { SortSelect, ViewToggle } from '../components/LibraryViewControls';
+import { CollapseAllButton, GroupToggle, SortSelect, ViewToggle } from '../components/LibraryViewControls';
 import { useLibraryView } from '../hooks/useLibraryView';
 import { sortLibraryItems } from '../lib/librarySort';
 import RenderFaIcon from '../components/RenderFaIcon';
@@ -16,6 +16,7 @@ import { INGREDIENT_ICONS } from '../lib/icons';
 import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
 import IngredientTidyModal from '../components/IngredientTidyModal';
+import DuplicateMergeModal from '../components/DuplicateMergeModal';
 
 /** Short month names in the UI language. LibrarySeasonality.tsx already
  *  derives its own month labels this way; doing the same here avoids
@@ -47,7 +48,10 @@ export default function LibraryIngredients() {
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   // Was component-local state that reset on every visit; now persisted per
   // section alongside the sort order, like the other Library screens.
-  const { view: viewMode, setView: setViewMode, sort, setSort } = useLibraryView('ingredients', 'grid');
+  const { view: viewMode, setView: setViewMode, sort, setSort, grouped, setGrouped } = useLibraryView('ingredients', 'grid');
+  // Which category headings are shut. Empty means every one is open, which
+  // is what a fresh install should look like.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [viewingIng, setViewingIng] = useState<any>(null);
   const [mergingIng, setMergingIng] = useState<any>(null);
   const [mergeTargetId, setMergeTargetId] = useState('');
@@ -69,6 +73,7 @@ export default function LibraryIngredients() {
   const [aiTranslating, setAiTranslating] = useState(false);
   const [aiTranslateError, setAiTranslateError] = useState<string | null>(null);
   const [showTidy, setShowTidy] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
   useEffect(() => {
     import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setStandalone).catch(() => setStandalone(false));
   }, []);
@@ -82,7 +87,11 @@ export default function LibraryIngredients() {
   const langQuery = contentLang ? `?lang=${contentLang}` : '';
 
   const fetchData = async () => {
-    setLoading(true);
+    // Only the first load shows the spinner. A refresh after saving one
+    // item used to swap the whole list for "Loading…", which threw the page
+    // back to the top every time — editing a long catalog meant scrolling
+    // back to where you were after each save.
+    if (ingredients.length === 0) setLoading(true);
     setLoadError(null);
     try {
       const [ingRes, catRes, tagRes] = await Promise.all([
@@ -606,6 +615,38 @@ export default function LibraryIngredients() {
     return result;
   };
 
+  const sectionKeys = [...categories.map((c: any) => c.id), ...(uncategorized.length > 0 ? ['uncategorized'] : [])];
+  const allCollapsed = sectionKeys.length > 0 && sectionKeys.every(k => collapsed.has(k));
+  const toggleSection = (key: string, open: boolean) => setCollapsed(prev => {
+    if (open === !prev.has(key)) return prev;
+    const next = new Set(prev);
+    if (open) next.delete(key); else next.add(key);
+    return next;
+  });
+  const toggleAllSections = () => setCollapsed(allCollapsed ? new Set() : new Set(sectionKeys));
+
+  /** Every ingredient in one list, no headings — the same cards and rows
+   *  the grouped view draws, so only the grouping changes. */
+  const flatList = () => {
+    const matched = sortWithVariants(
+      sortLibraryItems(ingredients.filter(matchesFilters), sort, {
+        label: (item: any) => item.translated_name || item.name || '',
+        group: (item: any) => item.translated_category_name || item.category_name,
+        createdAt: (item: any) => item.created_at,
+      }, contentLang),
+    );
+    if (matched.length === 0) return <p className="py-20 text-center text-zinc-400 dark:text-zinc-500 font-medium">{t('library.common.empty')}</p>;
+    return viewMode === 'grid' ? (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 py-6">{matched.map(renderIngredientCard)}</div>
+    ) : (
+      <div className="overflow-x-auto py-2">
+        <table className="w-full">
+          <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800">{matched.map(renderIngredientRow)}</tbody>
+        </table>
+      </div>
+    );
+  };
+
   const categorySection = (categoryId: string | null, catName: string, catIcon: string | undefined, catColor: string | undefined, items: any[]) => {
     // Order applied BEFORE sortWithVariants(), never after: that function
     // files each variety immediately behind its base ingredient, and
@@ -618,8 +659,14 @@ export default function LibraryIngredients() {
       }, contentLang),
     );
     if (isFiltering && matched.length === 0) return null;
+    const sectionKey = categoryId || 'uncategorized';
     return (
-      <details key={categoryId || 'uncategorized'} open className="group/section">
+      <details
+        key={sectionKey}
+        open={!collapsed.has(sectionKey)}
+        onToggle={e => toggleSection(sectionKey, (e.currentTarget as HTMLDetailsElement).open)}
+        className="group/section"
+      >
         <summary className="flex items-center justify-between cursor-pointer list-none py-4 px-2 select-none">
           <div className="flex items-center gap-3">
             <span className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-[16px]" style={{ backgroundColor: catColor || '#71717a' }}>
@@ -658,6 +705,15 @@ export default function LibraryIngredients() {
             {/* Icon-only on a phone: with its label the button is ~200px, and
                 beside a 60px title it ran off the right edge of the screen. */}
             <div className="shrink-0 flex items-center gap-2">
+            <button
+              onClick={() => setShowDuplicates(true)}
+              aria-label={t('library.ingredients.dupButton')}
+              title={t('library.ingredients.dupButton')}
+              className="shrink-0 flex items-center gap-2 p-3 sm:px-5 sm:py-3 rounded-full font-bold border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all active:scale-95"
+            >
+              <span className="material-symbols-outlined">join</span>
+              <span className="hidden sm:inline">{t('library.ingredients.dupButton')}</span>
+            </button>
             {standalone && (
               <button
                 onClick={() => setShowTidy(true)}
@@ -692,15 +748,17 @@ export default function LibraryIngredients() {
                 className="w-full pl-11 pr-4 py-3 bg-white dark:bg-zinc-900 rounded-full border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 text-sm font-medium"
               />
             </div>
-            {/* Ingredients are already grouped into category sections, so the
-                sort menu offers no "Category" ordering — it would reorder
-                nothing visible. */}
+            {/* "Category" ordering only appears in the flat list: with the
+                headings on it would reorder nothing visible. */}
             <SortSelect
               value={sort}
               onChange={setSort}
-              options={['name-asc', 'name-desc', 'newest', 'oldest']}
+              options={grouped ? ['name-asc', 'name-desc', 'newest', 'oldest'] : ['name-asc', 'name-desc', 'group-asc', 'newest', 'oldest']}
+              groupLabelKey="library.common.sortCategory"
             />
             <ViewToggle value={viewMode} onChange={setViewMode} />
+            <GroupToggle value={grouped} onChange={setGrouped} />
+            {grouped && <CollapseAllButton allCollapsed={allCollapsed} onToggle={toggleAllSections} />}
             <div className="flex flex-wrap gap-1.5">
               {visibleFilterTags.map(tg => (
                 <button
@@ -732,8 +790,12 @@ export default function LibraryIngredients() {
               <p className="py-20 text-center text-red-500 font-medium break-words">{loadError}</p>
             ) : (
               <>
-                {categories.map(c => categorySection(c.id, c.translated_name || c.name, c.icon, c.color, ingredients.filter(i => i.category_id === c.id)))}
-                {uncategorized.length > 0 && categorySection(null, t('library.ingredients.uncategorized'), 'TbTag', '#71717a', uncategorized)}
+                {grouped ? (
+                  <>
+                    {categories.map(c => categorySection(c.id, c.translated_name || c.name, c.icon, c.color, ingredients.filter(i => i.category_id === c.id)))}
+                    {uncategorized.length > 0 && categorySection(null, t('library.ingredients.uncategorized'), 'TbTag', '#71717a', uncategorized)}
+                  </>
+                ) : flatList()}
               </>
             )}
           </section>
@@ -954,6 +1016,14 @@ export default function LibraryIngredients() {
           </FormSection>
         </div>
       </Modal>
+
+      <DuplicateMergeModal
+        open={showDuplicates}
+        onClose={() => setShowDuplicates(false)}
+        ingredients={ingredients}
+        lang={contentLang}
+        onApplied={fetchData}
+      />
 
       <IngredientTidyModal
         open={showTidy}

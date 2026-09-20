@@ -57,6 +57,26 @@ const GEMINI_MODEL = 'gemini-3.6-flash';
 const OPENAI_MODEL = 'gpt-4o-mini';
 const OLLAMA_MODEL = 'llama3.1:8b';
 
+/** What each provider answers with when nothing is configured, and the one
+ *  to try when that model is busy or gone. Account → AI Provider overrides
+ *  the first; the second is what keeps a 503 from stopping the work, since
+ *  "high demand" is per-model rather than per-account. */
+const MODEL_DEFAULTS: Record<LlmProvider, { model: string; fallback: string | null }> = {
+  anthropic: { model: ANTHROPIC_MODEL, fallback: 'claude-sonnet-5' },
+  gemini: { model: GEMINI_MODEL, fallback: 'gemini-2.5-flash' },
+  openai: { model: OPENAI_MODEL, fallback: 'gpt-4o' },
+  ollama: { model: OLLAMA_MODEL, fallback: null },
+};
+
+/** The models to try in order: the configured one (or the default), then
+ *  the fallback — skipped when the user named a model themselves, since
+ *  then the choice is theirs to correct. */
+function modelsFor(provider: LlmProvider, configured: string | null): string[] {
+  const { model, fallback } = MODEL_DEFAULTS[provider];
+  if (configured) return [configured];
+  return fallback ? [model, fallback] : [model];
+}
+
 /** Cloud APIs answer in seconds. */
 const CLOUD_TIMEOUT_MS = 60_000;
 /** CPU-only local inference does not — the backend allows 600s for the
@@ -322,12 +342,46 @@ function assertMediaSupported(provider: LlmProvider, media: ParseMedia): MediaKi
 // the only thing that explains a rejected key or an exhausted quota, and
 // there is no server log here for the user to go read instead.
 
+/** Raised when the model itself is the problem — overloaded, rate-limited
+ *  or retired — so a different model is worth trying. */
+export class ProviderUnavailableError extends Error {
+  constructor(readonly statusCode: number, message: string) {
+    super(message);
+    this.name = 'ProviderUnavailableError';
+  }
+}
+
 function providerError(name: string, statusCode: number, text: string): Error {
+  // Overloaded or rate-limited even after the retries below: say so in
+  // words, not as the provider's raw JSON.
+  if (RETRYABLE_STATUS.has(statusCode)) return new ProviderUnavailableError(statusCode, i18n.t('errors.providerBusy', { provider: name, status: statusCode }));
   const detail = text.trim().slice(0, 400);
+  // A retired model answers 404 with a message naming its successor.
+  if (statusCode === 404) return new ProviderUnavailableError(statusCode, `${name} returned HTTP 404${detail ? `: ${detail}` : ''}`);
   return new Error(`${name} returned HTTP ${statusCode}${detail ? `: ${detail}` : ''}`);
 }
 
-async function callAnthropic(content: string, apiKey: string, systemPrompt: string, media?: ParseMedia): Promise<string> {
+/** Answers that mean "not now" rather than "no": rate limits and a
+ *  provider under load. Gemini in particular returns 503 "high demand" in
+ *  bursts that clear within seconds — and a tidy-up of the whole ingredient
+ *  catalog sends several batches, so one busy moment used to fail it all. */
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRY_DELAYS_MS = [2_000, 5_000, 12_000];
+
+async function postWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  payload: unknown,
+  timeoutMs: number,
+): Promise<{ statusCode: number; text: string; json: unknown }> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await nativeHttpPostJson(url, headers, payload, timeoutMs);
+    if (!RETRYABLE_STATUS.has(res.statusCode) || attempt >= RETRY_DELAYS_MS.length) return res;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+  }
+}
+
+async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia): Promise<string> {
   // A media turn is content BLOCKS rather than a bare string; the image or
   // document goes first so the text that follows reads as an instruction
   // about it, which is what Anthropic's own guidance asks for.
@@ -339,14 +393,14 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
         { type: 'text', text: content },
       ]
     : content;
-  const { statusCode, text, json } = await nativeHttpPostJson(
+  const { statusCode, text, json } = await postWithRetry(
     'https://api.anthropic.com/v1/messages',
     {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
     {
-      model: ANTHROPIC_MODEL,
+      model,
       max_tokens: 1500,
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
@@ -361,18 +415,18 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
   return data?.content?.find((b) => b.type === 'text')?.text ?? '';
 }
 
-async function callGemini(content: string, apiKey: string, systemPrompt: string, media?: ParseMedia): Promise<string> {
+async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia): Promise<string> {
   // inlineData covers images, PDFs, audio AND video with one shape — the
   // reason Gemini is the fallback this file steers people to for a voice
   // note or a clip.
   const parts: Array<Record<string, unknown>> = media
     ? [{ inlineData: { mimeType: media.mimeType, data: media.data } }, { text: content }]
     : [{ text: content }];
-  const { statusCode, text, json } = await nativeHttpPostJson(
+  const { statusCode, text, json } = await postWithRetry(
     // The key travels in a header, not the `?key=` query parameter the
     // backend uses. Same API either way, but a URL query string is the one
     // place a credential reliably ends up in logs it should not be in.
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     { 'x-goog-api-key': apiKey },
     {
       systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -385,7 +439,7 @@ async function callGemini(content: string, apiKey: string, systemPrompt: string,
   return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
-async function callOpenAI(content: string, apiKey: string, systemPrompt: string, media?: ParseMedia): Promise<string> {
+async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia): Promise<string> {
   // OpenAI takes an image as a data URI in an image_url part rather than as
   // raw base64 — the one provider here that does.
   const userContent = media
@@ -394,11 +448,11 @@ async function callOpenAI(content: string, apiKey: string, systemPrompt: string,
         { type: 'text', text: content },
       ]
     : content;
-  const { statusCode, text, json } = await nativeHttpPostJson(
+  const { statusCode, text, json } = await postWithRetry(
     'https://api.openai.com/v1/chat/completions',
     { Authorization: `Bearer ${apiKey}` },
     {
-      model: OPENAI_MODEL,
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
@@ -411,7 +465,7 @@ async function callOpenAI(content: string, apiKey: string, systemPrompt: string,
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
-async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, media?: ParseMedia): Promise<string> {
+async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media?: ParseMedia): Promise<string> {
   const base = ollamaUrl.replace(/\/+$/, '');
   // Ollama attaches images as a base64 array on the message itself. Note
   // that it accepts this against ANY model: a text-only one silently drops
@@ -424,7 +478,7 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
     `${base}/api/chat`,
     {},
     {
-      model: OLLAMA_MODEL,
+      model,
       stream: false,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -453,19 +507,34 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
   // pasting a key wouldn't have helped.
   if (media) assertMediaSupported(settings.provider, media);
 
-  if (settings.provider === 'anthropic') {
-    if (!settings.keys.anthropic) throw new Error(i18n.t('errors.noApiKey', { provider: 'Anthropic' }));
-    return callAnthropic(content, settings.keys.anthropic, systemPrompt, media);
+  const call = (model: string): Promise<string> => {
+    if (settings.provider === 'anthropic') {
+      if (!settings.keys.anthropic) throw new Error(i18n.t('errors.noApiKey', { provider: 'Anthropic' }));
+      return callAnthropic(content, settings.keys.anthropic, systemPrompt, model, media);
+    }
+    if (settings.provider === 'gemini') {
+      if (!settings.keys.gemini) throw new Error(i18n.t('errors.noApiKey', { provider: 'Google Gemini' }));
+      return callGemini(content, settings.keys.gemini, systemPrompt, model, media);
+    }
+    if (settings.provider === 'openai') {
+      if (!settings.keys.openai) throw new Error(i18n.t('errors.noApiKey', { provider: 'OpenAI' }));
+      return callOpenAI(content, settings.keys.openai, systemPrompt, model, media);
+    }
+    return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, model, media);
+  };
+
+  const models = modelsFor(settings.provider, settings.models?.[settings.provider] ?? null);
+  for (let i = 0; ; i++) {
+    try {
+      return await call(models[i]);
+    } catch (err) {
+      // Only a model that is busy or gone is worth asking a different one;
+      // a bad key or a refusal would fail exactly the same way twice.
+      const retryable = err instanceof ProviderUnavailableError;
+      if (!retryable || i >= models.length - 1) throw err;
+      console.warn(`SmartChef: ${models[i]} is unavailable (HTTP ${err.statusCode}) — trying ${models[i + 1]}`);
+    }
   }
-  if (settings.provider === 'gemini') {
-    if (!settings.keys.gemini) throw new Error(i18n.t('errors.noApiKey', { provider: 'Google Gemini' }));
-    return callGemini(content, settings.keys.gemini, systemPrompt, media);
-  }
-  if (settings.provider === 'openai') {
-    if (!settings.keys.openai) throw new Error(i18n.t('errors.noApiKey', { provider: 'OpenAI' }));
-    return callOpenAI(content, settings.keys.openai, systemPrompt, media);
-  }
-  return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, media);
 }
 
 // ── Response handling ───────────────────────────────────────────────────

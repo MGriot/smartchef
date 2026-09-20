@@ -47,7 +47,8 @@ export default function LibraryTools() {
   );
 
   const fetchTools = () => {
-    setLoading(true);
+    // Refresh in place after a save — see LibraryIngredients' fetchData.
+    if (tools.length === 0) setLoading(true);
     apiFetch(`/api/tools${contentLang ? `?lang=${contentLang}` : ''}`)
       .then(res => res.json())
       .then(json => {
