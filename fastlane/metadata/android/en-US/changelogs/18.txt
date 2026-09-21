@@ -1,0 +1,5 @@
+Duplicate ingredients, tools and tags can be merged into one, with every recipe that used either of them repointed.
+
+The catalog screens load noticeably faster on Android.
+
+A busy AI model no longer fails an import: the request is retried, and falls back to a second model when the first is unavailable.

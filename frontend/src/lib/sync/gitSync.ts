@@ -48,7 +48,7 @@ import { createAndroidRemoteTransport } from './androidRemoteTransport';
 import { getMirrorState, setSyncPauseReason } from './androidMirror';
 import { mergeRemoteIntoLocal, readRemoteSnapshot, applyRemoteSnapshot, type ReplaceOutcome } from './mergeBridge';
 import { overlayPendingConflicts, autoResolvePendingConflicts, listLocalEntityIds } from '../../services/conflicts.local';
-import { recordSynced, queueRepair, markAllInSync, publishRowsAheadOfRepo, pullRepoIntoDatabase, repairUnknownUnitRefs, repairCategories, type PullOutcome } from '../../services/syncReconcile.local';
+import { recordSynced, queueRepair, markAllInSync, publishRowsAheadOfRepo, pullRepoIntoDatabase, repairUnknownUnitRefs, repairCategories, listStuckEntities, type PullOutcome } from '../../services/syncReconcile.local';
 import { reportSyncStarted, reportSyncFinished, LAST_SYNC_KEY } from './syncStatus';
 import { copyImagesIntoClone, materializeImagesFromCommit } from './imageSync';
 import { IMAGES_SUBDIR } from '../localImages';
@@ -93,7 +93,7 @@ function serialize<T>(fn: () => Promise<T>, label?: string): Promise<T> {
   }
 }
 
-type EntityType = 'recipes' | 'ingredients' | 'tools' | 'tags' | 'techniques' | 'profiles' | 'categories' | 'units';
+type EntityType = 'recipes' | 'ingredients' | 'tools' | 'tags' | 'techniques' | 'profiles' | 'categories' | 'units' | 'settings';
 const ENTITY_TYPE_TO_DIR: Record<string, EntityType> = {
   recipe: 'recipes',
   ingredient: 'ingredients',
@@ -103,11 +103,12 @@ const ENTITY_TYPE_TO_DIR: Record<string, EntityType> = {
   profile: 'profiles',
   category: 'categories',
   unit: 'units',
+  setting: 'settings',
 };
 const DIR_TO_ENTITY_TYPE: Record<string, string> = Object.fromEntries(
   Object.entries(ENTITY_TYPE_TO_DIR).map(([entityType, dirName]) => [dirName, entityType])
 );
-const ALL_ENTITY_DIRS: EntityType[] = ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles', 'categories', 'units'];
+const ALL_ENTITY_DIRS: EntityType[] = ['recipes', 'ingredients', 'tools', 'tags', 'techniques', 'profiles', 'categories', 'units', 'settings'];
 
 // What git actually stages and commits: every entity directory, plus the
 // content-addressed image store. `images` is deliberately NOT an
@@ -341,6 +342,18 @@ async function mkdirp(path: string): Promise<void> {
 // ── Remote transport resolution — which platform, and has the user
 // actually configured a Sync Folder yet (skippable per ticket 07). ──────
 
+/** Whether this device has somewhere to sync to at all. Used to decide
+ *  WHEN the one-time legacy settings import runs: a device with a remote
+ *  imports after its first pull, so it cannot clobber a value the other
+ *  devices have already agreed on; a solo device imports at boot. */
+export async function hasConfiguredRemote(): Promise<boolean> {
+  try {
+    return (await getConfiguredRemoteTransport()) !== null;
+  } catch {
+    return false;
+  }
+}
+
 async function getConfiguredRemoteTransport(): Promise<RemoteTransport | null> {
   if (isElectron()) {
     try {
@@ -409,7 +422,7 @@ export async function listDeviceRecords(): Promise<DeviceRecord[]> {
 }
 
 /** Same singular entityType strings mergeBridge.ts's ENTITY_DIRS uses. */
-export type SyncEntityType = 'recipe' | 'ingredient' | 'tool' | 'tag' | 'technique' | 'profile' | 'category' | 'unit';
+export type SyncEntityType = 'recipe' | 'ingredient' | 'tool' | 'tag' | 'technique' | 'profile' | 'category' | 'unit' | 'setting';
 
 export interface SyncResult {
   applied: number;
@@ -438,6 +451,12 @@ export interface SyncResult {
    *  so a real failure shows up in the UI instead of only a console log
    *  nobody but a developer would ever open. */
   failedEntities: Array<{ entityType: string; entityId: string; error: string }>;
+  /** How many entities have been given up on entirely — retried until
+   *  syncReconcile.local.ts decided no further attempt could succeed.
+   *  Distinct from failedEntities, which WILL be retried next cycle: this
+   *  is a standing condition the user has to act on, and Account.tsx reads
+   *  the detail straight from listStuckEntities() rather than from here. */
+  stuck: number;
   /** Fields both devices changed that a rule settled without asking —
    *  during the merge, plus pending conflicts settled after it (ADR 0006). */
   autoResolved: number;
@@ -820,7 +839,8 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
 
   const lastSyncAt = new Date().toISOString();
   await Preferences.set({ key: LAST_SYNC_KEY, value: lastSyncAt });
-  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, autoResolved, pushedObjects, pulledObjects, failedEntities, entityScanCounts };
+  const stuck = (await listStuckEntities().catch(() => [])).length;
+  return { applied, appliedByType, committed: committedBeforeSync || mergeCommitted, lastSyncAt, conflicts, autoResolved, pushedObjects, pulledObjects, failedEntities, stuck, entityScanCounts };
 }
 
 /** Wrapped so every caller — the startup watcher, the interval tick, a
@@ -915,7 +935,12 @@ const RESERIALIZE_KEY = 'smartchef.sync.reserializedFormat';
 // folded duplicates). Units have no updated_at, so publishRowsAheadOfRepo
 // cannot notice their new translations — this re-serialization is what
 // carries them, and everything else, to the other devices.
-const ENTITY_FILE_FORMAT = '4';
+// '5': tools, techniques and tags moved onto portable ids
+// (db/rekeyNameEntities.ts), and every recipe now carries a `toolNames`
+// sidecar beside `toolIds` so a device that cannot resolve a tool id can
+// still tell what it means (lib/sync/referenceHeal.ts). Neither reaches
+// another device without republishing every affected file.
+const ENTITY_FILE_FORMAT = '5';
 
 async function reserializeOnceForPortableIds(): Promise<void> {
   const { value } = await Preferences.get({ key: RESERIALIZE_KEY });
@@ -934,6 +959,8 @@ async function reserializeOnceForPortableIds(): Promise<void> {
     await resyncAllTechniques();
     await ingredients.resyncAllIngredients();
     await resyncAllRecipes();
+    const { resyncAllSettings } = await import('../../services/settings.local');
+    await resyncAllSettings();
     await Preferences.set({ key: RESERIALIZE_KEY, value: ENTITY_FILE_FORMAT });
   } catch (err) {
     console.warn('SmartChef: re-serializing the library for the new file format failed — will retry next sync:', err);
@@ -996,6 +1023,18 @@ export async function syncNow(onProgress?: (progress: TransferProgress) => void)
   const result = await syncNowSerialized(onProgress);
   await repairUnitRefs();
   result.autoResolved += await autoResolveConflictsNow();
+  // After the pull, so the "a row that already exists is never touched"
+  // rule has the other devices' settings in front of it — importing first
+  // would race this device's own values against theirs. Then re-hydrate,
+  // so a preference someone changed elsewhere takes effect now rather than
+  // at the next restart.
+  try {
+    const { importLegacySettingsOnce, refreshSettingsAfterSync } = await import('../../services/settings.local');
+    await importLegacySettingsOnce();
+    await refreshSettingsAfterSync();
+  } catch (err) {
+    console.warn('SmartChef: refreshing synced settings failed:', err);
+  }
   return result;
 }
 

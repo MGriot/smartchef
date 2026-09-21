@@ -16,6 +16,14 @@ export default {
         "on-primary-fixed-variant": "rgb(var(--color-on-primary-fixed-variant) / <alpha-value>)",
         "inverse-primary": "rgb(var(--color-inverse-primary) / <alpha-value>)",
 
+        /* Entity colours — see theme.css. Used with opacity modifiers
+           (bg-tool/10, border-tool/20) the same way primary already is,
+           so one token covers a whole shade ramp and dark mode comes
+           from the variable rather than from a dark: variant. */
+        "ingredient": "rgb(var(--color-ingredient) / <alpha-value>)",
+        "tool": "rgb(var(--color-tool) / <alpha-value>)",
+        "technique": "rgb(var(--color-technique) / <alpha-value>)",
+
         "secondary": "rgb(var(--color-secondary) / <alpha-value>)",
         "on-secondary": "rgb(var(--color-on-secondary) / <alpha-value>)",
         "secondary-container": "rgb(var(--color-secondary-container) / <alpha-value>)",

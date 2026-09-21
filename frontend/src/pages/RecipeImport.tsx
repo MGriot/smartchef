@@ -75,6 +75,11 @@ interface Unit {
  *  btoa() on a big binary string blows the argument limit somewhere north
  *  of a few hundred kilobytes, and a video is orders of magnitude past
  *  that. */
+/** What joins two scanned pages into one document for the text parser. A
+ *  blank line, so the parser sees a paragraph break rather than an
+ *  ingredient running into a heading. */
+const PAGE_SEPARATOR = '\n\n';
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -139,7 +144,11 @@ export default function RecipeImport() {
   const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
   const [bulkSummary, setBulkSummary] = useState<BulkImportSummary | null>(null);
   const [detecting, setDetecting] = useState(false);
-  const [scanFile, setScanFile] = useState<File | null>(null);
+  // A LIST: a recipe printed across two cookbook pages is two photographs
+  // of one recipe, and making the user import it twice and merge by hand
+  // was the single most common thing the scan tab could not do.
+  const [scanFiles, setScanFiles] = useState<File[]>([]);
+  const scanFile = scanFiles[0] ?? null;
   const [scanning, setScanning] = useState(false);
   const [scanStage, setScanStage] = useState<string | null>(null);
   // Handing the file itself to the model, rather than OCR'ing it first.
@@ -277,15 +286,41 @@ export default function RecipeImport() {
   // Whether the configured provider can read the chosen file at all.
   // null when nothing is selected.
   const mediaCheck = useMemo(
-    () => (scanFile ? checkMediaForProvider(mimeTypeOf(scanFile), scanFile.size, llmProvider) : null),
-    [scanFile, llmProvider],
+    () =>
+      scanFiles.length
+        // Checked against the TOTAL, because every provider's ceiling is
+        // per-request: three photos that each pass on their own can still
+        // be refused together, and learning that after the upload is the
+        // bad version of finding out.
+        ? checkMediaForProvider(
+            mimeTypeOf(scanFiles[0]),
+            scanFiles.reduce((sum, f) => sum + f.size, 0),
+            llmProvider,
+          )
+        : null,
+    [scanFiles, llmProvider],
   );
+
+  /** Whether the configured provider can read what was chosen. When it
+   *  can, the AI route leads: it reads handwriting, two-column layouts and
+   *  a photo taken at an angle, none of which OCR handles, and it produces
+   *  a structured recipe in one step instead of a wall of text to fix by
+   *  hand. OCR leads only when it is the route that will actually work. */
+  const aiLeads = scanFiles.length > 0 && mediaCheck?.ok === true;
 
   const scanIsReadable = useMemo(() => {
     if (!scanFile) return true;
     const type = scanFile.type || '';
     return type.startsWith('image/') || type === 'application/pdf' || /\.(pdf|jpe?g|png|webp|gif|heic|bmp|tiff?)$/i.test(scanFile.name);
   }, [scanFile]);
+
+  /** Several files are pages of one recipe, which only makes sense for
+   *  images — two voice notes are two recordings. Mirrors the parser's own
+   *  assertMediaListSupported() so the refusal happens before the upload. */
+  const multiPageValid = useMemo(
+    () => scanFiles.length <= 1 || scanFiles.every((f) => (f.type || '').startsWith('image/')),
+    [scanFiles],
+  );
 
   const useTemplate = () => {
     setSourceType('text');
@@ -799,11 +834,20 @@ export default function RecipeImport() {
           throw new Error(t('import.scanPdfNoText'));
         }
       } else {
-        const onProgress = (p: OcrProgress) => {
-          const pct = p.ratio === null ? '' : ` ${Math.round(p.ratio * 100)}%`;
-          setScanStage((p.stage === 'loading' ? t('import.scanLoadingModel') : t('import.scanReading')) + pct);
-        };
-        extracted = await readImageText(scanFile, ocrLanguageFor(contentLang), onProgress);
+        // Every page, in the order they were chosen, joined with a blank
+        // line — the raw-text parser reads the result as one document, so
+        // an ingredient list on page one and steps on page two arrive as
+        // one recipe rather than two imports to merge by hand.
+        const pages: string[] = [];
+        for (let i = 0; i < scanFiles.length; i++) {
+          const onProgress = (p: OcrProgress) => {
+            const pct = p.ratio === null ? '' : ` ${Math.round(p.ratio * 100)}%`;
+            const of = scanFiles.length > 1 ? ` (${i + 1}/${scanFiles.length})` : '';
+            setScanStage((p.stage === 'loading' ? t('import.scanLoadingModel') : t('import.scanReading')) + of + pct);
+          };
+          pages.push(await readImageText(scanFiles[i], ocrLanguageFor(contentLang), onProgress));
+        }
+        extracted = pages.filter((p) => p.trim()).join(PAGE_SEPARATOR);
       }
 
       if (!extracted.trim()) throw new Error(t('import.scanNothingFound'));
@@ -836,7 +880,15 @@ export default function RecipeImport() {
     // learning afterwards the provider was never going to read it is a
     // genuinely bad experience. Both runtimes still enforce it server-side
     // — this is the version that saves the upload.
-    const preflight = checkMediaForProvider(mimeTypeOf(scanFile), scanFile.size, llmProvider);
+    if (!multiPageValid) {
+      setError(t('import.scanMultiImageOnly'));
+      return;
+    }
+    const preflight = checkMediaForProvider(
+      mimeTypeOf(scanFile),
+      scanFiles.reduce((sum, f) => sum + f.size, 0),
+      llmProvider,
+    );
     if (!preflight.ok) {
       setError(preflight.reason ?? t('import.importFailed'));
       return;
@@ -846,11 +898,13 @@ export default function RecipeImport() {
     setError(null);
     resetDraft();
     try {
-      const media = {
-        mimeType: mimeTypeOf(scanFile),
-        data: await fileToBase64(scanFile),
-        fileName: scanFile.name,
-      };
+      const media = await Promise.all(
+        scanFiles.map(async (file) => ({
+          mimeType: mimeTypeOf(file),
+          data: await fileToBase64(file),
+          fileName: file.name,
+        })),
+      );
       const res = await apiFetch('/api/recipes/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1093,14 +1147,19 @@ export default function RecipeImport() {
                       </p>
                       <label className="flex flex-col items-center justify-center gap-3 w-full h-48 bg-zinc-50/50 dark:bg-zinc-900/50 rounded-3xl border-2 border-dashed border-zinc-200 dark:border-zinc-700 cursor-pointer hover:border-primary/40 transition-colors">
                         <span className="material-symbols-outlined text-3xl text-zinc-300 dark:text-zinc-600">document_scanner</span>
-                        <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400">
-                          {scanFile ? scanFile.name : t('import.chooseScan')}
+                        <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400 px-4 text-center">
+                          {scanFiles.length > 1
+                            ? t('import.scanPagesChosen', { count: scanFiles.length })
+                            : scanFile
+                              ? scanFile.name
+                              : t('import.chooseScan')}
                         </span>
                         <input
                           type="file"
+                          multiple
                           accept="image/*,application/pdf,.pdf,audio/*,video/*"
                           className="hidden"
-                          onChange={(e) => { setScanFile(e.target.files?.[0] ?? null); setError(null); }}
+                          onChange={(e) => { setScanFiles(Array.from(e.target.files ?? [])); setError(null); }}
                         />
                       </label>
 
@@ -1108,37 +1167,68 @@ export default function RecipeImport() {
                         {t('import.scanOcrCaveat', { mb: OCR_MODEL_MB })}
                       </p>
 
-                      {/* Two genuinely different routes, not a fallback
-                          chain: on-device reading is free, offline and
-                          exact on printed text, while the AI route is the
-                          only one that can hear a voice note, watch a clip
-                          or make sense of handwriting. Which one is right
-                          depends on the file, so both are offered rather
-                          than one being guessed at. */}
-                      <button
-                        onClick={handleScan}
-                        disabled={scanning || analysing || !scanFile || !scanIsReadable}
-                        title={scanFile && !scanIsReadable ? t('import.scanOcrOnlyForText') : undefined}
-                        className="mt-8 w-full py-5 bg-primary text-white rounded-3xl font-black text-lg shadow-xl shadow-primary/20 flex items-center justify-center gap-3 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:scale-100"
-                      >
-                        <span className={`material-symbols-outlined ${scanning ? 'animate-spin' : ''}`}>
-                          {scanning ? 'settings' : 'document_scanner'}
-                        </span>
-                        {scanStage ?? (scanning ? t('import.scanning') : t('import.scanStart'))}
-                      </button>
+                      {/* Two genuinely different routes, and which one
+                          LEADS depends on the file rather than being fixed.
+                          The AI route reads handwriting, a two-column
+                          layout and a photo taken at an angle, and it
+                          produces a finished recipe in one step; OCR gives
+                          back a wall of text to correct by hand, and cannot
+                          hear a voice note at all. So when the configured
+                          provider can read what was chosen, the AI route is
+                          the primary button.
 
-                      <button
-                        onClick={handleAnalyseMedia}
-                        disabled={scanning || analysing || !scanFile}
-                        className="mt-3 w-full py-4 rounded-3xl font-black border-2 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 flex items-center justify-center gap-3 hover:border-primary/40 hover:text-primary transition-all disabled:opacity-50"
-                      >
-                        <span className={`material-symbols-outlined ${analysing ? 'animate-spin' : ''}`}>
-                          {analysing ? 'settings' : 'auto_awesome'}
-                        </span>
-                        {analysing ? t('import.scanAiRunning') : t('import.scanAiStart')}
-                      </button>
+                          OCR still leads — and is still the better answer —
+                          when no provider is configured, when the provider
+                          cannot read this kind of file, or when someone
+                          wants it done offline and for free. */}
+                      {(() => {
+                        const PRIMARY =
+                          'mt-8 w-full py-5 bg-primary text-white rounded-3xl font-black text-lg shadow-xl shadow-primary/20 flex items-center justify-center gap-3 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:scale-100';
+                        const SECONDARY =
+                          'mt-3 w-full py-4 rounded-3xl font-black border-2 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 flex items-center justify-center gap-3 hover:border-primary/40 hover:text-primary transition-all disabled:opacity-50';
+                        const ocrButton = (primary: boolean) => (
+                          <button
+                            key="ocr"
+                            onClick={handleScan}
+                            disabled={scanning || analysing || !scanFile || !scanIsReadable}
+                            title={scanFile && !scanIsReadable ? t('import.scanOcrOnlyForText') : undefined}
+                            className={primary ? PRIMARY : SECONDARY}
+                          >
+                            <span className={`material-symbols-outlined ${scanning ? 'animate-spin' : ''}`}>
+                              {scanning ? 'settings' : 'document_scanner'}
+                            </span>
+                            {scanStage ?? (scanning ? t('import.scanning') : t('import.scanStart'))}
+                          </button>
+                        );
+                        const aiButton = (primary: boolean) => (
+                          <button
+                            key="ai"
+                            onClick={handleAnalyseMedia}
+                            disabled={scanning || analysing || !scanFile || !multiPageValid}
+                            className={primary ? PRIMARY : SECONDARY}
+                          >
+                            <span className={`material-symbols-outlined ${analysing ? 'animate-spin' : ''}`}>
+                              {analysing ? 'settings' : 'auto_awesome'}
+                            </span>
+                            {analysing ? t('import.scanAiRunning') : t('import.scanAiStart')}
+                          </button>
+                        );
+                        return aiLeads
+                          ? [aiButton(true), ocrButton(false)]
+                          : [ocrButton(true), aiButton(false)];
+                      })()}
 
-                      <p className="sc-hint mt-3">{t('import.scanAiHint')}</p>
+                      {/* Says WHICH route is about to run and why. The 12 MB
+                          model download OCR triggers used to arrive with no
+                          explanation at all. */}
+                      <p className="sc-hint mt-3">
+                        {aiLeads ? t('import.scanAiHint') : t('import.scanOcrLeadHint')}
+                      </p>
+                      {scanFiles.length > 1 && (
+                        <p className="sc-hint mt-1">
+                          {multiPageValid ? t('import.scanPagesHint') : t('import.scanMultiImageOnly')}
+                        </p>
+                      )}
                       {scanFile && !scanIsReadable && (
                         <p className="sc-hint mt-1">{t('import.scanOcrOnlyForText')}</p>
                       )}

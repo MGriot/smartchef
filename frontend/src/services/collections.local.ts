@@ -69,7 +69,7 @@ export async function getCollection(id: string): Promise<Record<string, unknown>
 
   const recipes = await query<Record<string, unknown>>(
     `SELECT r.id, r.title, NULL AS translated_title, r.cover_image_url,
-            r.difficulty, r.prep_time_min, r.cook_time_min
+            r.difficulty, r.prep_time_min, r.cook_time_min, r.rest_time_min
        FROM collection_recipes cr
        JOIN recipes r ON r.id = cr.recipe_id
       WHERE cr.collection_id = $1 AND r.sync_status != 'deleted'

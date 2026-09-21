@@ -1,3 +1,5 @@
+import type { GeocodeResult } from './geocodeTypes';
+
 // ════════════════════════════════════════════════════════════════════════
 // SmartChef — Renderer-side bridge to the Electron main process
 // The `smartchefElectron` global only exists when this app is running
@@ -21,7 +23,7 @@ declare global {
       saveFile: (suggestedName: string, contents: string) => Promise<string | null>;
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
-      geocode: (q: string, limit?: number) => Promise<Array<{ lat: number; lng: number; displayName: string }>>;
+      geocode: (q: string, limit?: number, shape?: boolean) => Promise<GeocodeResult[]>;
       httpRequest: (req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array; timeoutMs?: number }) => Promise<{
         url: string;
         statusCode: number;
@@ -100,9 +102,9 @@ export async function getHiddenCloneDir(): Promise<string> {
  *  handler for why — Chromium's fetch can't set the User-Agent header
  *  Nominatim's usage policy requires). Electron-only; null on no match or
  *  any failure — callers already treat a missing pin as a non-error. */
-export async function electronGeocode(q: string, limit = 1): Promise<Array<{ lat: number; lng: number; displayName: string }>> {
+export async function electronGeocode(q: string, limit = 1, shape = false): Promise<GeocodeResult[]> {
   if (!window.smartchefElectron) return [];
-  return window.smartchefElectron.geocode(q, limit);
+  return window.smartchefElectron.geocode(q, limit, shape);
 }
 
 /** Makes a single HTTP request from the main process (Node's fetch, not

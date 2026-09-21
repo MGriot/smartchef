@@ -66,6 +66,14 @@ export async function syncRecipe(id: string): Promise<void> {
   try {
     const row = await queryOne<Record<string, unknown>>('SELECT * FROM recipes WHERE id=$1', [id]);
     if (!row) return;
+    // The yield's unit travels as a SYMBOL as well as an id, for the same
+    // reason each ingredient row does: a bare id another device cannot
+    // resolve renders as a naked number ("YIELD 2" — two of what?), and
+    // nothing in the file says what it meant.
+    if (row.yield_unit_id) {
+      const unit = await queryOne<{ symbol: string }>('SELECT symbol FROM units WHERE id=$1', [row.yield_unit_id as string]);
+      if (unit?.symbol) row.yield_unit_symbol = unit.symbol;
+    }
     // Ordered, so the same recipe serializes identically on every device,
     // and each ingredient row carries its unit's symbol: unit ids are
     // per-device random (db/local.ts), and the symbol is what a receiving
@@ -77,7 +85,17 @@ export async function syncRecipe(id: string): Promise<void> {
       [id]
     );
     const steps = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number, id', [id]);
-    const toolRows = await query<{ tool_id: string }>('SELECT tool_id FROM recipe_tools WHERE recipe_id=$1', [id]);
+    // The tool's NAME travels beside its id, for the same reason each
+    // ingredient row carries unit_symbol: tool ids were per-device random
+    // until portable ids, so a receiving device that cannot resolve an id
+    // can still tell what it means. referenceHeal.ts folds two ids naming
+    // the same tool onto one before the merge compares them.
+    const toolRows = await query<{ tool_id: string; name: string | null }>(
+      `SELECT rt.tool_id, t.name FROM recipe_tools rt
+         LEFT JOIN tools t ON t.id = rt.tool_id
+        WHERE rt.recipe_id=$1 ORDER BY rt.tool_id`,
+      [id]
+    );
     const [{ writeEntityFile }, extras, { unitSymbolsFromSteps, hasUnknownUnit }] = await Promise.all([
       import('../lib/sync/gitSync'), import('./syncExtras.local'), import('../lib/sync/referenceHeal'),
     ]);
@@ -98,6 +116,11 @@ export async function syncRecipe(id: string): Promise<void> {
       ingredients: ingredients.map(r => ({ ...r, translations: rowTranslations.ingredients.get(r.id as string) ?? [] })),
       steps: steps.map(r => ({ ...r, translations: rowTranslations.steps.get(r.id as string) ?? [] })),
       toolIds: toolRows.map(t => t.tool_id),
+      // A MAP, not a parallel array: toolIds is a SET_FIELD, so a merge may
+      // reorder and union it and index alignment would not survive. Carried
+      // metadata only — deliberately absent from ENTITY_CONFIG.recipe's
+      // scalarFields, so it can never itself become a conflict.
+      toolNames: Object.fromEntries(toolRows.filter(t => t.name).map(t => [t.tool_id, t.name as string])),
       ...(await extras.readExtraFields('recipe', id, row)),
     });
   } catch (err) {
@@ -218,7 +241,10 @@ export interface RecipeInput {
 // that is silently undefined on the screen.
 export const LIST_COLUMNS = [
   'r.id', 'r.title', 'r.description', 'r.difficulty', 'r.servings',
-  'r.prep_time_min', 'r.cook_time_min', 'r.rating', 'r.tags',
+  // rest_time_min rides along so a card's total can include waiting
+  // time, the way the recipe's own page always has. Without it a
+  // 15-day mirto advertised "25 min" in the gallery.
+  'r.prep_time_min', 'r.cook_time_min', 'r.rest_time_min', 'r.rating', 'r.tags',
   'r.regions', 'r.region_coords', 'r.cover_image_url', 'r.is_component',
   'r.times_cooked', 'r.updated_at',
 ].join(', ');

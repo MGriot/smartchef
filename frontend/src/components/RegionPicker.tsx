@@ -2,8 +2,17 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { COUNTRIES, countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { apiFetch } from '../lib/api';
+import { isAreaResult, type GeocodeResult, type PlaceShape } from '../lib/geocodeTypes';
 
-export interface RegionCoord { lat: number; lng: number }
+export interface RegionCoord {
+  lat: number;
+  lng: number;
+  /** The place's outline, when it is an area rather than a point. A region
+   *  or an island IS a shape; marking Sardinia with a pin in the sea off
+   *  its coast said something false about where the dish is from. Fetched
+   *  once, here, so the map needs no network of its own. */
+  shape?: PlaceShape;
+}
 
 interface RegionPickerProps {
   value: string[];
@@ -113,12 +122,37 @@ export default function RegionPicker({ value, onChange, coords = {}, onCoordsCha
     reset();
   };
 
-  /** A searched place arrives with its coordinates already, so unlike a
-   *  hand-typed chip it needs no follow-up geocode at all. */
-  const addPlace = (place: PlaceSuggestion) => {
+  /** The outline for a place that has one, fetched once at add time so the
+   *  map never needs the network. Best-effort: a place with no outline, or
+   *  no reachable proxy, keeps its point and is drawn as a pin. */
+  const fetchShape = async (label: string): Promise<PlaceShape | undefined> => {
+    try {
+      const res = await apiFetch(`/api/geocode?q=${encodeURIComponent(label)}&limit=1&shape=1`);
+      if (!res.ok) return undefined;
+      const json = await res.json();
+      const hit: GeocodeResult | undefined = json.data ?? json.results?.[0];
+      return hit && isAreaResult(hit) ? hit.shape : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** A searched place arrives with its coordinates already, so the only
+   *  follow-up is the outline — and the chip appears immediately either
+   *  way, with the shape filled in when it lands. */
+  const addPlace = async (place: PlaceSuggestion) => {
     if (!value.includes(place.label)) onChange([...value, place.label]);
-    onCoordsChange?.({ ...coords, [place.label.toLowerCase()]: { lat: place.lat, lng: place.lng } });
+    const key = place.label.toLowerCase();
+    onCoordsChange?.({ ...coords, [key]: { lat: place.lat, lng: place.lng } });
     reset();
+    if (!onCoordsChange) return;
+    setGeocoding(place.label);
+    try {
+      const shape = await fetchShape(place.label);
+      if (shape) onCoordsChange({ ...coords, [key]: { lat: place.lat, lng: place.lng, shape } });
+    } finally {
+      setGeocoding(null);
+    }
   };
 
   const addCustom = async () => {
@@ -130,10 +164,14 @@ export default function RegionPicker({ value, onChange, coords = {}, onCoordsCha
     if (!onCoordsChange) return;
     setGeocoding(text);
     try {
-      const res = await apiFetch(`/api/geocode?q=${encodeURIComponent(text)}`);
+      const res = await apiFetch(`/api/geocode?q=${encodeURIComponent(text)}&shape=1`);
       if (res.ok) {
         const json = await res.json();
-        onCoordsChange({ ...coords, [text.toLowerCase()]: { lat: json.data.lat, lng: json.data.lng } });
+        const hit: GeocodeResult = json.data;
+        onCoordsChange({
+          ...coords,
+          [text.toLowerCase()]: { lat: hit.lat, lng: hit.lng, ...(isAreaResult(hit) ? { shape: hit.shape } : {}) },
+        });
       }
       // 404/offline/etc: leave the chip as plain text, no pin — not an error the user needs to see.
     } catch {

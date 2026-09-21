@@ -102,7 +102,19 @@ export function observeDownloadProgress(
   };
 }
 
-interface GeocodeResult { lat: number; lng: number; displayName: string }
+import type { GeocodeResult } from './geocodeTypes';
+
+/** Kept in step with backend/src/routes/geocode.ts — see there for why an
+ *  outline is simplified and size-capped before it is carried. */
+const POLYGON_THRESHOLD = 0.01;
+const MAX_SHAPE_BYTES = 60_000;
+
+function withinBudget(geojson: unknown): GeocodeResult['shape'] {
+  if (!geojson || typeof geojson !== 'object') return undefined;
+  const type = (geojson as { type?: string }).type;
+  if (type !== 'Polygon' && type !== 'MultiPolygon') return undefined;
+  return JSON.stringify(geojson).length > MAX_SHAPE_BYTES ? undefined : (geojson as GeocodeResult['shape']);
+}
 
 // Renderer-side cache — Android has no separate main/renderer process split
 // the way Electron does, so there's no natural "shared across windows"
@@ -118,15 +130,16 @@ const geocodeCache = new Map<string, GeocodeResult[]>();
  *  GitHttpPlugin native request above instead of Electron's main-process
  *  IPC. null on no match or any failure — RegionsMap.tsx/RegionPicker.tsx
  *  already treat a missing pin as "not geocoded yet," not an error. */
-export async function androidGeocode(q: string, limit = 1): Promise<GeocodeResult[]> {
+export async function androidGeocode(q: string, limit = 1, shape = false): Promise<GeocodeResult[]> {
   const query = q.trim();
   if (!query) return [];
   const max = Math.min(8, Math.max(1, Math.trunc(limit) || 1));
-  const key = `${max}:${query.toLowerCase()}`;
+  const key = `${max}:${shape ? 'shape:' : ''}${query.toLowerCase()}`;
   if (geocodeCache.has(key)) return geocodeCache.get(key)!;
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=${max}&q=${encodeURIComponent(query)}`;
+    const shapeParams = shape ? `&polygon_geojson=1&polygon_threshold=${POLYGON_THRESHOLD}` : '';
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=${max}${shapeParams}&q=${encodeURIComponent(query)}`;
     const res = await GitHttp.request({ url, method: 'GET', headers: { 'User-Agent': 'SmartChef/1.0 (self-hosted recipe app)' } });
     if (res.statusCode < 200 || res.statusCode >= 300) throw new Error(`Nominatim error ${res.statusCode}`);
     // `body` rather than `bodyFile`: a Nominatim answer for one query is a
@@ -134,8 +147,15 @@ export async function androidGeocode(q: string, limit = 1): Promise<GeocodeResul
     // Treated as "no match" rather than asserted, since the field is now
     // optional — this function's contract is already best-effort.
     if (!res.body) return [];
-    const raw = JSON.parse(new TextDecoder().decode(base64ToBytes(res.body))) as Array<{ lat: string; lon: string; display_name: string }>;
-    const results: GeocodeResult[] = raw.map((r) => ({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), displayName: r.display_name }));
+    const raw = JSON.parse(new TextDecoder().decode(base64ToBytes(res.body))) as Array<{
+      lat: string; lon: string; display_name: string; geojson?: unknown; class?: string; type?: string;
+    }>;
+    const results: GeocodeResult[] = raw.map((r) => ({
+      lat: parseFloat(r.lat),
+      lng: parseFloat(r.lon),
+      displayName: r.display_name,
+      ...(shape ? { shape: withinBudget(r.geojson), category: r.class, kind: r.type } : {}),
+    }));
     geocodeCache.set(key, results);
     return results;
   } catch (err) {

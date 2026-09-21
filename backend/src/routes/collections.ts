@@ -45,7 +45,7 @@ collectionsRouter.get("/:id", async (req: Request, res: Response) => {
          (SELECT json_agg(jsonb_build_object(
             'id', r.id, 'title', r.title, 'translated_title', NULL,
             'cover_image_url', r.cover_image_url, 'difficulty', r.difficulty,
-            'prep_time_min', r.prep_time_min, 'cook_time_min', r.cook_time_min
+            'prep_time_min', r.prep_time_min, 'cook_time_min', r.cook_time_min, 'rest_time_min', r.rest_time_min
           ) ORDER BY cr.sort_order)
           FROM collection_recipes cr
           JOIN recipes r ON r.id = cr.recipe_id

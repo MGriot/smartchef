@@ -40,6 +40,9 @@ const childTables: Record<string, Array<Record<string, unknown>>> = {
   recipe_tools: [],
 };
 
+// sync_alias — "this id another device published is really this local row".
+const aliases: Array<{ entity_type: string; foreign_id: string; local_id: string }> = [];
+
 vi.mock('../db/local', () => ({
   query: vi.fn(async (sql: string, params: unknown[] = []) => {
     const trimmed = sql.trim();
@@ -76,10 +79,23 @@ vi.mock('../db/local', () => ({
       return [];
     }
 
-    if (normalized === 'INSERT INTO recipe_tools (recipe_id, tool_id) VALUES ($1, $2) ON CONFLICT DO NOTHING') {
+    // INSERT...SELECT, so the row only appears when the tool exists — the
+    // real table's FK to tools(id), which the old bare INSERT tripped.
+    if (normalized === 'INSERT INTO recipe_tools (recipe_id, tool_id) SELECT $1, id FROM tools WHERE id = $2 ON CONFLICT DO NOTHING') {
       const [recipeId, toolId] = params as string[];
+      if (!entityTables.tools.has(toolId)) return [];
       const already = childTables.recipe_tools.some((r) => r.recipe_id === recipeId && r.tool_id === toolId);
       if (!already) childTables.recipe_tools.push({ recipe_id: recipeId, tool_id: toolId });
+      return [];
+    }
+
+    if (normalized === 'SELECT entity_type, foreign_id, local_id FROM sync_alias') return [...aliases];
+
+    if (normalized.startsWith('INSERT INTO sync_alias')) {
+      const [entity_type, foreign_id, local_id] = params as string[];
+      const existing = aliases.find((a) => a.entity_type === entity_type && a.foreign_id === foreign_id);
+      if (existing) existing.local_id = local_id;
+      else aliases.push({ entity_type, foreign_id, local_id });
       return [];
     }
 
@@ -157,6 +173,16 @@ vi.mock('../db/local', () => ({
       const [id] = params as string[];
       return entityTables[table]?.has(id) ? { id } : null;
     }
+    // findNameTwin(): the live row that already owns an incoming name.
+    const twinMatch = trimmed.replace(/\s+/g, ' ').match(/^SELECT id FROM (\w+) WHERE name = \$1 AND deleted_at IS NULL AND id <> \$2$/);
+    if (twinMatch) {
+      const [, table] = twinMatch;
+      const [name, excludeId] = params as string[];
+      for (const [id, row] of entityTables[table] ?? []) {
+        if (id !== excludeId && row.name === name && !row.deleted_at) return { id };
+      }
+      return null;
+    }
     const selectMatch = trimmed.match(/^SELECT (\w+) as name FROM (\w+) WHERE id = \$1$/);
     if (selectMatch) {
       const [, col, table] = selectMatch;
@@ -168,13 +194,17 @@ vi.mock('../db/local', () => ({
   }),
 }));
 
-const { upsertConflict, listPendingConflicts, listPendingConflictsForEntity, resolveConflict, applyResolvedConflict, getEntityDisplayName, applyEntityMergeResult, entityExists, createEntity, getMergeableFieldNames } = await import('./conflicts.local');
+const { upsertConflict, listPendingConflicts, listPendingConflictsForEntity, resolveConflict, applyResolvedConflict, getEntityDisplayName, applyEntityMergeResult, entityExists, createEntity, getMergeableFieldNames, resolveAlias, resetAliasCache } = await import('./conflicts.local');
 
 beforeEach(() => {
   rows.length = 0;
   now = 0;
   for (const table of Object.values(entityTables)) table.clear();
   for (const table of Object.keys(childTables)) childTables[table] = [];
+  aliases.length = 0;
+  // The alias map is read once per session and cached, so a stale one
+  // would leak a previous test's aliases into this one.
+  resetAliasCache();
 });
 
 describe('upsertConflict', () => {
@@ -366,6 +396,8 @@ describe('applyEntityMergeResult', () => {
 
   it('applies scalar and whole-array fields together in the same call', async () => {
     entityTables.recipes.set('r1', { id: 'r1', servings: 4 });
+    entityTables.tools.set('knife', { id: 'knife', name: 'Knife' });
+    entityTables.tools.set('pan', { id: 'pan', name: 'Pan' });
 
     const outcome = await applyEntityMergeResult('recipe', 'r1', {
       applied: { servings: 6, toolIds: ['knife', 'pan'] },
@@ -379,6 +411,23 @@ describe('applyEntityMergeResult', () => {
       { recipe_id: 'r1', tool_id: 'knife' },
       { recipe_id: 'r1', tool_id: 'pan' },
     ]);
+  });
+
+  it('skips a tool id this device does not have instead of failing the whole recipe', async () => {
+    // recipe_tools.tool_id is a hard FK. A bare INSERT of an unknown id
+    // threw and took the entire recipe down with it — and because toolIds
+    // is a SET_FIELD, a base-less merge UNIONS both devices' ids, so that
+    // was the normal case rather than an edge one.
+    entityTables.recipes.set('r1', { id: 'r1' });
+    entityTables.tools.set('knife', { id: 'knife', name: 'Knife' });
+
+    const outcome = await applyEntityMergeResult('recipe', 'r1', {
+      applied: { toolIds: ['knife', 'a-tool-from-another-device'] },
+      conflicts: [],
+    });
+
+    expect(outcome.appliedFields).toEqual(['toolIds']);
+    expect(childTables.recipe_tools).toEqual([{ recipe_id: 'r1', tool_id: 'knife' }]);
   });
 
   it('rejects an unrecognized field rather than trusting it into SQL', async () => {
@@ -440,6 +489,7 @@ describe('createEntity', () => {
   });
 
   it('writes whole-array fields (steps/ingredients/toolIds) via the child tables, not as scalar columns', async () => {
+    entityTables.tools.set('pot', { id: 'pot', name: 'Pot' });
     await createEntity('recipe', 'r1', {
       title: 'Lasagna',
       steps: [{ id: 's1', step_number: 1, description: 'Boil water', tool_ids: '[]', step_ingredients: '[]' }],
@@ -455,6 +505,27 @@ describe('createEntity', () => {
       { id: 'ri1', recipe_id: 'r1', sort_order: 0, ingredient_id: 'tomato', subtype_id: null, sub_recipe_id: null, quantity: 2, quantity_text: null, unit_id: null, notes: null, is_optional: 0, group_name: null, substitute_for: null },
     ]);
     expect(childTables.recipe_tools).toEqual([{ recipe_id: 'r1', tool_id: 'pot' }]);
+  });
+
+  it('aliases a remote tool onto the local row that already owns its name', async () => {
+    // The same real-world tool created independently on two devices. The
+    // active-name unique index would reject the insert; before this, that
+    // throw was re-queued for repair and re-prompted on every single sync.
+    entityTables.tools.set('local-uuid', { id: 'local-uuid', name: 'Whisk' });
+
+    await createEntity('tool', 'remote-uuid', { name: 'Whisk' });
+
+    expect(entityTables.tools.has('remote-uuid')).toBe(false);
+    expect(await resolveAlias('tool', 'remote-uuid')).toBe('local-uuid');
+  });
+
+  it('routes a recipe reference to an aliased tool onto the local row', async () => {
+    entityTables.tools.set('local-uuid', { id: 'local-uuid', name: 'Whisk' });
+    await createEntity('tool', 'remote-uuid', { name: 'Whisk' });
+
+    await createEntity('recipe', 'r1', { title: 'Meringue', toolIds: ['remote-uuid'] });
+
+    expect(childTables.recipe_tools).toEqual([{ recipe_id: 'r1', tool_id: 'local-uuid' }]);
   });
 
   it('does nothing if the entity already exists (ON CONFLICT DO NOTHING) rather than clobbering it', async () => {

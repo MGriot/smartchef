@@ -33,8 +33,12 @@ The Sync Engine's merge strategy: comparing parsed, normalized entity JSON (not 
 _Avoid_: three-way merge, JSON diff
 
 **Entity File**:
-One synced library item as one JSON file in the Hidden Clone, carrying everything the item owns: its row, translations, a recipe's steps and ingredient rows (each with their own translations), and an ingredient's tags. Categories and units are entity files too, on **portable ids** derived from name/symbol, so they are the same row on every device.
+One synced library item as one JSON file in the Hidden Clone, carrying everything the item owns: its row, translations, a recipe's steps and ingredient rows (each with their own translations), and an ingredient's tags. Categories, units, tools, techniques and tags are entity files too, on **portable ids** derived from the name (or a unit's symbol), so they are the same row on every device. A portable id is assigned when the row is created and when a collision is repaired — never recomputed on rename, which is what lets a user-editable name still carry one.
 _Avoid_: sync file, export
+
+**Alias**:
+An id another device published that this device resolved onto one of its own rows — the same real-world tool, technique or tag created independently on two devices before portable ids, so each minted its own random id and the active-name unique index rejected the other's row on arrival. Permanent, not a repair queue: a device that never upgrades keeps publishing files and references under the old id, and every one of them has to keep resolving. This is also why re-keying a row writes an Alias for the loser id rather than a Deletion Marker — a tombstone would delete that device's live tool.
+_Avoid_: id mapping, redirect, merge record (a Structured Merge is about fields, an Alias is about identity)
 
 **Conflict Policy**:
 A per-device setting for how a field both devices changed differently is settled. **Newest** (the default) keeps the side edited last. **Ask** turns it into a Conflict. Cases with an obvious answer are settled under either policy: equal values, one side empty, or set fields.
@@ -47,6 +51,10 @@ _Avoid_: merge conflict, sync error
 **Replace from Synced Data**:
 The explicit "take the remote as the truth" action — `git reset --hard` for Local Storage. Synced rows are overwritten, rows only this device has are discarded, and the Hidden Clone moves onto the remote commit. A backup ref of the old history is kept. Distinct from Resync All, which re-pushes this device's rows and therefore only ever merges.
 _Avoid_: reset, restore (a Restore is from a Backup)
+
+**Stuck Entity**:
+An item from another device that this device has given up trying to save — retried until nothing further could succeed (a duplicate name, a missing column, an unparseable file). Distinct from an ordinary failed write, which is retried on the next cycle: a Stuck Entity is a standing condition the user is shown once and can act on, rather than an error re-reported after every sync forever.
+_Avoid_: sync error, failed entity (that one WILL be retried), conflict
 
 **Deletion Marker**:
 The existing per-entity tombstone convention — `sync_status = 'deleted'` on recipes/ingredients, `deleted_at` elsewhere — that lets a deletion propagate through Structured Merge like any other field change.

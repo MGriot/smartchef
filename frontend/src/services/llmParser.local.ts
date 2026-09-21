@@ -56,6 +56,16 @@ const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
 const GEMINI_MODEL = 'gemini-3.6-flash';
 const OPENAI_MODEL = 'gpt-4o-mini';
 const OLLAMA_MODEL = 'llama3.1:8b';
+// Ollama accepts an `images` array against ANY model, and a text-only one
+// silently drops the picture and answers from the prompt alone — which
+// looked exactly like the model hallucinating a recipe. So the local
+// provider gets a SECOND default, used only when there is something to
+// look at. This is what makes scanning work offline with no cloud key at
+// all, which is the whole point of having Ollama in the list.
+//
+// Neither model is bundled; `ollama pull llama3.2-vision` is the user's
+// job, and the error text says so.
+const OLLAMA_VISION_MODEL = 'llama3.2-vision:11b';
 
 /** What each provider answers with when nothing is configured, and the one
  *  to try when that model is busy or gone. Account → AI Provider overrides
@@ -71,9 +81,13 @@ const MODEL_DEFAULTS: Record<LlmProvider, { model: string; fallback: string | nu
 /** The models to try in order: the configured one (or the default), then
  *  the fallback — skipped when the user named a model themselves, since
  *  then the choice is theirs to correct. */
-function modelsFor(provider: LlmProvider, configured: string | null): string[] {
-  const { model, fallback } = MODEL_DEFAULTS[provider];
+function modelsFor(provider: LlmProvider, configured: string | null, hasMedia = false): string[] {
   if (configured) return [configured];
+  // Ollama is the only provider whose default cannot read a picture, so it
+  // is the only one that needs a different one when there is a picture.
+  // The cloud models are all multimodal already.
+  if (provider === 'ollama' && hasMedia) return [OLLAMA_VISION_MODEL, 'llava:13b'];
+  const { model, fallback } = MODEL_DEFAULTS[provider];
   return fallback ? [model, fallback] : [model];
 }
 
@@ -334,6 +348,28 @@ function assertMediaSupported(provider: LlmProvider, media: ParseMedia): MediaKi
   return kind;
 }
 
+/** Several files as ONE recipe — a recipe printed across two cookbook
+ *  pages, or photographed in three shots because it would not fit in one.
+ *
+ *  Images only, and deliberately: two photos of one recipe are pages of a
+ *  whole, while two voice notes or two videos are two recordings, and
+ *  splicing them into a single prompt would invent a relationship the user
+ *  never claimed. Each is size-checked on its own AND as a total, because
+ *  every provider's ceiling is per-request. */
+function assertMediaListSupported(provider: LlmProvider, media: ParseMedia[]): MediaKind {
+  if (media.length === 0) throw new Error(i18n.t('errors.noFileAttached'));
+  const kinds = media.map((m) => assertMediaSupported(provider, m));
+  const kind = kinds[0];
+  if (media.length === 1) return kind;
+  if (kinds.some((k) => k !== kind) || kind !== 'image') {
+    throw new Error(i18n.t('media.multiImageOnly'));
+  }
+  const totalBytes = media.reduce((sum, m) => sum + Math.floor((m.data.length * 3) / 4), 0);
+  const total = checkMediaForProvider(media[0].mimeType, totalBytes, provider);
+  if (!total.ok) throw new Error(total.reason);
+  return kind;
+}
+
 // ── Providers ───────────────────────────────────────────────────────────
 // Each mirrors its llm.providers.ts counterpart, with two differences that
 // come from running on the device rather than a server: the request goes
@@ -381,15 +417,17 @@ async function postWithRetry(
   }
 }
 
-async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia): Promise<string> {
+async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
   // A media turn is content BLOCKS rather than a bare string; the image or
   // document goes first so the text that follows reads as an instruction
   // about it, which is what Anthropic's own guidance asks for.
-  const userContent = media
+  const userContent = media?.length
     ? [
-        mediaKindFor(media.mimeType) === 'document'
-          ? { type: 'document', source: { type: 'base64', media_type: media.mimeType, data: media.data } }
-          : { type: 'image', source: { type: 'base64', media_type: media.mimeType, data: media.data } },
+        ...media.map((m) =>
+          mediaKindFor(m.mimeType) === 'document'
+            ? { type: 'document', source: { type: 'base64', media_type: m.mimeType, data: m.data } }
+            : { type: 'image', source: { type: 'base64', media_type: m.mimeType, data: m.data } },
+        ),
         { type: 'text', text: content },
       ]
     : content;
@@ -415,12 +453,12 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
   return data?.content?.find((b) => b.type === 'text')?.text ?? '';
 }
 
-async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia): Promise<string> {
+async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
   // inlineData covers images, PDFs, audio AND video with one shape — the
   // reason Gemini is the fallback this file steers people to for a voice
   // note or a clip.
-  const parts: Array<Record<string, unknown>> = media
-    ? [{ inlineData: { mimeType: media.mimeType, data: media.data } }, { text: content }]
+  const parts: Array<Record<string, unknown>> = media?.length
+    ? [...media.map((m) => ({ inlineData: { mimeType: m.mimeType, data: m.data } })), { text: content }]
     : [{ text: content }];
   const { statusCode, text, json } = await postWithRetry(
     // The key travels in a header, not the `?key=` query parameter the
@@ -439,12 +477,12 @@ async function callGemini(content: string, apiKey: string, systemPrompt: string,
   return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
-async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia): Promise<string> {
+async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
   // OpenAI takes an image as a data URI in an image_url part rather than as
   // raw base64 — the one provider here that does.
-  const userContent = media
+  const userContent = media?.length
     ? [
-        { type: 'image_url', image_url: { url: `data:${media.mimeType};base64,${media.data}` } },
+        ...media.map((m) => ({ type: 'image_url', image_url: { url: `data:${m.mimeType};base64,${m.data}` } })),
         { type: 'text', text: content },
       ]
     : content;
@@ -465,7 +503,7 @@ async function callOpenAI(content: string, apiKey: string, systemPrompt: string,
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
-async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media?: ParseMedia): Promise<string> {
+async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
   const base = ollamaUrl.replace(/\/+$/, '');
   // Ollama attaches images as a base64 array on the message itself. Note
   // that it accepts this against ANY model: a text-only one silently drops
@@ -473,7 +511,7 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
   // text elsewhere in this file mentions needing a vision model rather
   // than assuming the request shape is enough.
   const userMessage: Record<string, unknown> = { role: 'user', content };
-  if (media) userMessage.images = [media.data];
+  if (media?.length) userMessage.images = media.map((m) => m.data);
   const { statusCode, text, json } = await nativeHttpPostJson(
     `${base}/api/chat`,
     {},
@@ -500,12 +538,12 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
  *  a cloud provider selected with no key is a settings mistake the user
  *  needs told about, not a reason to silently spend a different provider's
  *  quota — same rule as the backend's callConfiguredProvider(). */
-export async function callConfiguredProvider(content: string, systemPrompt: string, media?: ParseMedia): Promise<string> {
+export async function callConfiguredProvider(content: string, systemPrompt: string, media?: ParseMedia[]): Promise<string> {
   const settings = await getLlmSettings();
   // Checked before the key check on purpose: "Gemini can't do video" is
   // the more useful sentence than "no key saved" when both are true, since
   // pasting a key wouldn't have helped.
-  if (media) assertMediaSupported(settings.provider, media);
+  if (media?.length) assertMediaListSupported(settings.provider, media);
 
   const call = (model: string): Promise<string> => {
     if (settings.provider === 'anthropic') {
@@ -523,7 +561,7 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
     return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, model, media);
   };
 
-  const models = modelsFor(settings.provider, settings.models?.[settings.provider] ?? null);
+  const models = modelsFor(settings.provider, settings.models?.[settings.provider] ?? null, !!media?.length);
   for (let i = 0; ; i++) {
     try {
       return await call(models[i]);
@@ -692,8 +730,13 @@ export interface LocalParseRequest {
   lang?: string;
   /** Required when inputType is 'media'. `input` then carries whatever
    *  extra context the user typed (or '' for none) rather than the recipe
-   *  itself. */
-  media?: ParseMedia;
+   *  itself.
+   *
+   *  A list, because one recipe is often two cookbook pages or three
+   *  photographs — see assertMediaListSupported() for why only images may
+   *  come in a set. A single object is still accepted from older callers
+   *  and from the server route's own shape. */
+  media?: ParseMedia | ParseMedia[];
 }
 
 /** What to tell the model about a file it is being handed. The prompt
@@ -702,8 +745,12 @@ export interface LocalParseRequest {
  *  rather than as prose to summarize. Italian, like the system prompt, for
  *  the same reason: the two are read together and the unit-normalization
  *  rule is written against Italian. */
-const MEDIA_INSTRUCTION: Record<MediaKind, string> = {
+const MEDIA_INSTRUCTION: Record<MediaKind | 'imageMulti', string> = {
   image: "Estrai la ricetta dall'immagine allegata (una foto, una scansione o uno screenshot di una pagina di ricetta). Leggi tutto il testo visibile, comprese le liste di ingredienti e i passaggi.",
+  // Kept beside the singular form rather than built by string surgery: the
+  // two say genuinely different things, and the multi-page one has to be
+  // explicit that these are ONE recipe or the model returns two.
+  imageMulti: "Estrai UNA SOLA ricetta dalle immagini allegate: sono pagine o scatti successivi della stessa ricetta, in ordine. Uniscile — la lista degli ingredienti puo trovarsi su un'immagine e i passaggi su un'altra. Non restituire piu ricette e non ripetere un ingrediente che compare su due immagini.",
   document: 'Estrai la ricetta dal documento allegato.',
   audio: "Ascolta l'audio allegato: è qualcuno che racconta o detta una ricetta. Trascrivila mentalmente e restituisci la ricetta strutturata. Gli ingredienti e le quantità possono essere detti in modo informale (\"un paio di cucchiai\") — in quel caso usa quantityText.",
   video: "Guarda il video allegato: è una preparazione di cucina. Usa sia il parlato sia ciò che si vede (ingredienti inquadrati, testo sovrimpresso) per ricostruire la ricetta. Se una quantità non viene mai detta né mostrata, lascia quantity a null invece di inventarla.",
@@ -734,15 +781,17 @@ export async function parseRecipeLocally(req: LocalParseRequest): Promise<Templa
   // handwritten card, and it throws away the layout that tells a model
   // which column is the ingredient list.
   if (req.inputType === 'media') {
-    if (!req.media?.data) throw new Error(i18n.t('errors.noFileAttached'));
-    const kind = mediaKindFor(req.media.mimeType);
-    if (!kind) throw new Error(i18n.t('errors.unknownFileType', { type: req.media.mimeType || i18n.t('media.unknownTypeFallback') }));
+    const files = (Array.isArray(req.media) ? req.media : req.media ? [req.media] : []).filter((m) => m?.data);
+    if (files.length === 0) throw new Error(i18n.t('errors.noFileAttached'));
+    const kind = mediaKindFor(files[0].mimeType);
+    if (!kind) throw new Error(i18n.t('errors.unknownFileType', { type: files[0].mimeType || i18n.t('media.unknownTypeFallback') }));
     const extra = req.input.trim();
-    const prompt = `${MEDIA_INSTRUCTION[kind]}${extra ? `
+    const instruction = files.length > 1 && kind === 'image' ? MEDIA_INSTRUCTION.imageMulti : MEDIA_INSTRUCTION[kind];
+    const prompt = `${instruction}${extra ? `
 
 Note aggiuntive dall'utente:
 ${extra}` : ''}`;
-    const rawMedia = await callConfiguredProvider(prompt, systemPrompt, req.media);
+    const rawMedia = await callConfiguredProvider(prompt, systemPrompt, files);
     return dropUnknownCatalogNames(parseJsonResponse(rawMedia), catalog, provider);
   }
 

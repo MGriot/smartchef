@@ -272,11 +272,11 @@ export default function StepEditor({
           <span className="material-symbols-outlined text-sm">restaurant</span> {t('editors.ingredient')}
         </button>
         <button type="button" onClick={() => setPopover(popover === 'tool' ? null : 'tool')}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'tool' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'tool' ? 'bg-tool text-white' : 'bg-tool/10 text-tool hover:bg-tool/20'}`}>
           <span className="material-symbols-outlined text-sm">construction</span> {t('editors.tool')}
         </button>
         <button type="button" onClick={() => setPopover(popover === 'technique' ? null : 'technique')}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'technique' ? 'bg-sky-500 text-white' : 'bg-sky-50 text-sky-700 hover:bg-sky-100'}`}>
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'technique' ? 'bg-technique text-white' : 'bg-technique/10 text-technique hover:bg-technique/20'}`}>
           <span className="material-symbols-outlined text-sm">whatshot</span> {t('editors.technique')}
         </button>
       </div>
@@ -396,7 +396,7 @@ export default function StepEditor({
       )}
 
       {popover === 'tool' && (
-        <div className="flex items-end gap-2 mb-2 bg-amber-50 border border-amber-100 rounded-xl p-3 flex-wrap">
+        <div className="flex items-end gap-2 mb-2 bg-tool/10 border border-tool/20 rounded-xl p-3 flex-wrap">
           <div className="flex-1 min-w-[160px]">
             <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('editors.tool')}</label>
             <Autocomplete
@@ -405,7 +405,7 @@ export default function StepEditor({
               onSelect={(id) => { setPickTool(id); setPickToolAlias(''); }}
               onClear={() => { setPickTool(''); setPickToolAlias(''); }}
               placeholder={t('editors.search')}
-              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-amber-500/20 text-sm font-bold"
+              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-tool/20 text-sm font-bold"
             />
           </div>
           <div className="flex-1 min-w-[150px]">
@@ -414,16 +414,16 @@ export default function StepEditor({
               type="text" list="step-tool-aliases" value={pickToolAlias}
               onChange={e => setPickToolAlias(e.target.value)}
               placeholder={selectedTool?.name || t('editors.showAsPlaceholder')}
-              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-amber-500/20 text-sm font-bold"
+              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-tool/20 text-sm font-bold"
             />
             {aliasDatalist('step-tool-aliases', [selectedTool?.name || '', ...(selectedTool?.aliases ?? [])])}
           </div>
-          <button type="button" onClick={confirmTool} disabled={!pickTool} className="px-3 py-2 bg-amber-500 text-white rounded-lg text-xs font-bold disabled:opacity-40">{t('editors.insert')}</button>
+          <button type="button" onClick={confirmTool} disabled={!pickTool} className="px-3 py-2 bg-tool text-white rounded-lg text-xs font-bold disabled:opacity-40">{t('editors.insert')}</button>
         </div>
       )}
 
       {popover === 'technique' && (
-        <div className="flex items-end gap-2 mb-2 bg-sky-50 border border-sky-100 rounded-xl p-3 flex-wrap">
+        <div className="flex items-end gap-2 mb-2 bg-technique/10 border border-technique/20 rounded-xl p-3 flex-wrap">
           <div className="flex-1 min-w-[150px]">
             <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('editors.technique')}</label>
             <Autocomplete
@@ -432,7 +432,7 @@ export default function StepEditor({
               onSelect={(id) => { setPickTechnique(id); setPickTechniqueAlias(''); }}
               onClear={() => { setPickTechnique(''); setPickTechniqueAlias(''); }}
               placeholder={t('editors.search')}
-              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-sky-500/20 text-sm font-bold"
+              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-technique/20 text-sm font-bold"
             />
           </div>
           <div className="flex-1 min-w-[150px]">
@@ -441,7 +441,7 @@ export default function StepEditor({
               type="text" list="step-tech-aliases" value={pickTechniqueAlias}
               onChange={e => setPickTechniqueAlias(e.target.value)}
               placeholder={selectedTechnique?.name || t('editors.showAsPlaceholder')}
-              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-sky-500/20 text-sm font-bold"
+              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-technique/20 text-sm font-bold"
             />
             {aliasDatalist('step-tech-aliases', [selectedTechnique?.name || '', ...(selectedTechnique?.aliases ?? [])])}
           </div>
@@ -449,9 +449,9 @@ export default function StepEditor({
             <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('editors.detailsOptional')}</label>
             <input type="text" value={pickParams} onChange={e => setPickParams(e.target.value)}
               placeholder={t('editors.detailsPlaceholder')}
-              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-sky-500/20 text-sm font-bold" />
+              className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-technique/20 text-sm font-bold" />
           </div>
-          <button type="button" onClick={confirmTechnique} disabled={!pickTechnique} className="px-3 py-2 bg-sky-500 text-white rounded-lg text-xs font-bold disabled:opacity-40">{t('editors.insert')}</button>
+          <button type="button" onClick={confirmTechnique} disabled={!pickTechnique} className="px-3 py-2 bg-technique text-white rounded-lg text-xs font-bold disabled:opacity-40">{t('editors.insert')}</button>
         </div>
       )}
 

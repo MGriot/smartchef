@@ -13,6 +13,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne, inPlaceholders, chunk } from "../db/local";
+import { freshPortableId, portableToolId } from "./syncExtras.local";
 
 function newId(): string {
   return crypto.randomUUID();
@@ -497,12 +498,6 @@ export async function resyncAllCategories(onProgress?: (done: number, total: num
   return rows.length;
 }
 
-/** A new row's id: the portable one for its name when free (the same on
- *  every device, see syncExtras.local.ts), a random one otherwise. */
-async function freshPortableId(table: string, portable: string): Promise<string> {
-  return (await queryOne(`SELECT id FROM ${table} WHERE id=$1`, [portable])) ? newId() : portable;
-}
-
 /** The aisle order — see the server's PUT /ingredients/categories/reorder
  *  for why this takes the whole sequence rather than one moved item. */
 export async function reorderCategories(ids: string[]): Promise<void> {
@@ -795,7 +790,11 @@ async function upsertToolTranslations(toolId: string, translations?: ToolInput['
 }
 
 export async function createTool(d: ToolInput): Promise<{ id: string }> {
-  const id = d.id ?? newId();
+  // Portable, like units and categories since ADR 0006. Tools were the
+  // last name-unique type still minting crypto.randomUUID(), which is why
+  // the same "Frusta" on two devices was two unrelated ids that no merge
+  // could reconcile and whose row the other device could not even insert.
+  const id = d.id ?? await freshPortableId('tools', portableToolId(d.name));
   await query(
     "INSERT INTO tools (id, name, category, description, icon, image_urls, synonyms) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     [id, d.name, d.category || null, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? []]

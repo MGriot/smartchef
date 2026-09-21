@@ -112,6 +112,92 @@ export function healIngredientsValue(value: unknown, ...others: unknown[]): unkn
   return typeof value === 'string' ? JSON.stringify(healed) : healed;
 }
 
+// ── Tool references ─────────────────────────────────────────────────────
+// `toolIds` is a SET_FIELD (mergeNormalize.ts), so with no common base the
+// two sides are UNIONED rather than compared. Two devices holding different
+// ids for the same real-world tool therefore produce `['abc','def']` every
+// cycle — a conflict that reappears after every resolution, and, because
+// recipe_tools.tool_id is a hard FK, a recipe that fails to apply at all.
+//
+// syncRecipe() now serializes a `toolNames` sidecar beside `toolIds` (the
+// same trick `unit_symbol` plays inside each ingredient row), which gives
+// this module the one thing it was missing: what an id MEANS. Two ids that
+// name the same tool are not a disagreement, so both sides are rewritten
+// onto one canonical id before they are compared.
+
+/** `toolId → name`, pooled from every side's `toolNames` sidecar. */
+export function toolNamesFromSides(...sides: unknown[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const side of sides) {
+    let v = side;
+    if (typeof v === 'string') {
+      try {
+        v = JSON.parse(v);
+      } catch {
+        continue;
+      }
+    }
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    for (const [id, name] of Object.entries(v as Record<string, unknown>)) {
+      if (present(id) && present(name)) out.set(id, name.trim());
+    }
+  }
+  return out;
+}
+
+function parseIds(value: unknown): string[] | null {
+  let v = value;
+  if (typeof v === 'string') {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(v)) return null;
+  return v.filter((x): x is string => typeof x === 'string');
+}
+
+/** The id every device will independently pick for a given name: the
+ *  portable `tool-<slug>` one when any side uses it, else the
+ *  lexicographically smallest. Both rules are computed from the same pooled
+ *  map on every device, so they agree with no coordination. */
+function canonicalIdsByName(names: Map<string, string>): Map<string, string> {
+  const byName = new Map<string, string[]>();
+  for (const [id, name] of names) {
+    const key = name.toLowerCase();
+    const list = byName.get(key);
+    if (list) list.push(id);
+    else byName.set(key, [id]);
+  }
+  const out = new Map<string, string>();
+  for (const [key, ids] of byName) {
+    const portable = ids.filter((id) => id.startsWith('tool-')).sort();
+    out.set(key, portable[0] ?? [...ids].sort()[0]);
+  }
+  return out;
+}
+
+/** Rewrites one `toolIds` value so every id whose name any side knows is
+ *  replaced by that name's canonical id. Ids no side can name are left
+ *  alone — unknown is not the same as wrong. Returns null when nothing
+ *  needed healing, so a caller can tell "unchanged" from "rewritten". */
+export function healToolIdsValue(value: unknown, names: Map<string, string>): string[] | null {
+  const ids = parseIds(value);
+  if (!ids || names.size === 0) return null;
+  const canonical = canonicalIdsByName(names);
+  const out: string[] = [];
+  let changed = false;
+  for (const id of ids) {
+    const name = names.get(id);
+    const target = name ? canonical.get(name.toLowerCase()) ?? id : id;
+    if (target !== id) changed = true;
+    if (!out.includes(target)) out.push(target);
+    else changed = true; // two ids folded onto one
+  }
+  return changed ? out : null;
+}
+
 /** Heals every side of one entity before it is merged. */
 export function healEntitySides(entityType: string, base: Entity, local: Entity, remote: Entity): HealedSides {
   const sides = { base: { ...base }, local: { ...local }, remote: { ...remote } };
@@ -131,6 +217,29 @@ export function healEntitySides(entityType: string, base: Entity, local: Entity,
       sides[side].ingredients = typeof sides[side].ingredients === 'string' ? JSON.stringify(healed) : healed;
       if (side === 'local') localHealed.push('ingredients');
       if (side === 'remote') remoteHealed.push('ingredients');
+    }
+
+    // A yield unit id with no symbol beside it is one this side could not
+    // resolve — borrow the symbol another side knows and move the id onto
+    // the portable one, exactly as an ingredient row's unit is healed.
+    const yieldSymbol = order.map((o) => sides[o].yield_unit_symbol).find(present);
+    if (yieldSymbol) {
+      for (const side of order) {
+        if (!present(sides[side].yield_unit_id) || present(sides[side].yield_unit_symbol)) continue;
+        sides[side].yield_unit_symbol = yieldSymbol;
+        sides[side].yield_unit_id = portableUnitId(yieldSymbol);
+        if (side === 'local') localHealed.push('yield_unit_id');
+        if (side === 'remote') remoteHealed.push('yield_unit_id');
+      }
+    }
+
+    const toolNames = toolNamesFromSides(local.toolNames, remote.toolNames, base.toolNames);
+    for (const side of order) {
+      const healed = healToolIdsValue(sides[side].toolIds, toolNames);
+      if (!healed) continue;
+      sides[side].toolIds = typeof sides[side].toolIds === 'string' ? JSON.stringify(healed) : healed;
+      if (side === 'local') localHealed.push('toolIds');
+      if (side === 'remote') remoteHealed.push('toolIds');
     }
   }
 

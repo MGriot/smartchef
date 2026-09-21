@@ -60,12 +60,45 @@ const CONFLICT_POLICY_KEY = 'smartchef.sync.conflictPolicy';
 
 export type { ConflictPolicy };
 
+// ── Library default vs per-device override ──────────────────────────────
+// CONTEXT.md frames both the Conflict Policy and the auto-sync interval as
+// per-device choices, and they stay that way: a phone on mobile data has
+// every reason to sync less often than a desktop. But making each device
+// set them from scratch is the friction this release is removing.
+//
+// So each gains a LIBRARY DEFAULT that travels as a synced setting, which
+// a device follows unless it has one of its own. The presence of the
+// Preferences key IS the override — no new flag, and every existing device
+// is already in the overriding state, so nobody's behaviour changes on
+// upgrade until they opt in.
+
+/** Where a setting applies: only here, or everywhere in this library. */
+export type SettingScope = 'device' | 'all-devices';
+
 export async function getConflictPolicy(): Promise<ConflictPolicy> {
   const { value } = await Preferences.get({ key: CONFLICT_POLICY_KEY });
-  return value === 'ask' ? 'ask' : 'newest';
+  if (value === 'ask' || value === 'newest') return value; // this device overrides
+  const { getSetting, CONFLICT_POLICY_DEFAULT } = await import('../settingsRegistry');
+  return getSetting<ConflictPolicy>(CONFLICT_POLICY_DEFAULT);
 }
 
-export async function setConflictPolicy(policy: ConflictPolicy): Promise<void> {
+/** True when this device is deliberately ignoring the library default —
+ *  so the settings screen can say so rather than looking inconsistent. */
+export async function hasConflictPolicyOverride(): Promise<boolean> {
+  const { value } = await Preferences.get({ key: CONFLICT_POLICY_KEY });
+  return value === 'ask' || value === 'newest';
+}
+
+export async function setConflictPolicy(policy: ConflictPolicy, scope: SettingScope = 'device'): Promise<void> {
+  if (scope === 'all-devices') {
+    const { setSetting } = await import('../../services/settings.local');
+    const { CONFLICT_POLICY_DEFAULT } = await import('../settingsRegistry');
+    await setSetting(CONFLICT_POLICY_DEFAULT, policy);
+    // Stop overriding, or this device would keep its old value while
+    // telling every other device to use the new one.
+    await Preferences.remove({ key: CONFLICT_POLICY_KEY });
+    return;
+  }
   await Preferences.set({ key: CONFLICT_POLICY_KEY, value: policy });
 }
 
@@ -228,11 +261,34 @@ export async function getSyncInterval(): Promise<SyncInterval> {
     if (Number.isFinite(value) && value > 0) return { value, unit: 'minutes' };
   }
 
+  // No override on this device: follow the library default (see above).
+  const { getSetting, SYNC_INTERVAL_DEFAULT } = await import('../settingsRegistry');
+  const shared = getSetting<{ value: number; unit: string }>(SYNC_INTERVAL_DEFAULT);
+  if (shared && isSyncIntervalUnit(shared.unit) && Number.isFinite(shared.value) && shared.value > 0) {
+    return { value: shared.value, unit: shared.unit };
+  }
+
   return DEFAULT_SYNC_INTERVAL;
 }
 
-export async function setSyncInterval(interval: SyncInterval): Promise<void> {
+export async function hasSyncIntervalOverride(): Promise<boolean> {
+  const [{ value: rawValue }, { value: rawUnit }] = await Promise.all([
+    Preferences.get({ key: INTERVAL_VALUE_KEY }),
+    Preferences.get({ key: INTERVAL_UNIT_KEY }),
+  ]);
+  return !!(rawValue && rawUnit && isSyncIntervalUnit(rawUnit));
+}
+
+export async function setSyncInterval(interval: SyncInterval, scope: SettingScope = 'device'): Promise<void> {
   const value = Math.max(1, interval.value);
+  if (scope === 'all-devices') {
+    const { setSetting } = await import('../../services/settings.local');
+    const { SYNC_INTERVAL_DEFAULT } = await import('../settingsRegistry');
+    await setSetting(SYNC_INTERVAL_DEFAULT, { value, unit: interval.unit });
+    await Preferences.remove({ key: INTERVAL_VALUE_KEY });
+    await Preferences.remove({ key: INTERVAL_UNIT_KEY });
+    return;
+  }
   await Preferences.set({ key: INTERVAL_VALUE_KEY, value: String(value) });
   await Preferences.set({ key: INTERVAL_UNIT_KEY, value: interval.unit });
 }

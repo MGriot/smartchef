@@ -566,7 +566,11 @@ async function dispatchGeocode(sp: URLSearchParams): Promise<LocalDispatchResult
   // region picker offers city/sub-region suggestions from. `data` stays the
   // first match so callers that predate the search box are unaffected.
   const limit = Math.min(8, Math.max(1, Math.trunc(Number(sp.get('limit')) || 1)));
-  const results = isElectron() ? await electronGeocode(q, limit) : await androidGeocode(q, limit);
+  // `shape=1` asks for the place's outline as well. Opt-in, because the
+  // picker's as-you-type search wants six cheap answers and only the one
+  // chosen place needs an outline.
+  const shape = sp.get('shape') === '1';
+  const results = isElectron() ? await electronGeocode(q, limit, shape) : await androidGeocode(q, limit, shape);
   if (!results.length) return { status: 404, error: i18n.t('errors.noMatch') };
   return { status: 200, data: results[0], results };
 }

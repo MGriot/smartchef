@@ -1,3 +1,4 @@
+import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -1378,7 +1379,7 @@ const RecipeCreate: React.FC = () => {
                       {step.title || firstWordsOf(step.description) || t('recipeDetail.stepNumber', { number: idx + 1 })}
                     </span>
                     {step.durationMin ? (
-                      <span className="shrink-0 text-xs font-semibold text-zinc-400 dark:text-zinc-500 tabular-nums">{t('recipeDetail.durationMinutes', { count: step.durationMin })}</span>
+                      <span className="shrink-0 text-xs font-semibold text-zinc-400 dark:text-zinc-500 tabular-nums">{formatDurationWith(t, step.durationMin)}</span>
                     ) : null}
                     <span className="material-symbols-outlined text-[18px] text-zinc-300 dark:text-zinc-600 group-hover/row:text-primary">expand_more</span>
                   </button>

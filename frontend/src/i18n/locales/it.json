@@ -798,7 +798,12 @@
     "translatedOnCreate": "Le traduzioni verranno generate dall'AI alla creazione.",
     "readFileFailed": "Impossibile leggere quel file.",
     "pickCategoryFor": "Scegli una categoria per \"{{name}}\"",
-    "couldNotCreate": "Impossibile creare \"{{name}}\""
+    "couldNotCreate": "Impossibile creare \"{{name}}\"",
+    "scanPagesChosen_one": "{{count}} pagina scelta",
+    "scanPagesChosen_other": "{{count}} pagine scelte",
+    "scanPagesHint": "Verranno lette come un’unica ricetta, nell’ordine in cui le hai scelte: la lista degli ingredienti su una pagina e i passaggi su un’altra diventano un solo import.",
+    "scanMultiImageOnly": "Solo foto e scansioni possono essere unite in un’unica ricetta. Importa un PDF, una nota vocale o un video singolarmente.",
+    "scanOcrLeadHint": "Lettura su questo dispositivo: gratuita, offline e precisa sul testo stampato bene. Il risultato finisce nella casella di testo, così puoi controllarlo prima di importare."
   },
   "seasonality": {
     "hint": "Cosa è di stagione, mese per mese — modifica la stagionalità di un ingrediente dalla pagina Ingredienti.",
@@ -1076,7 +1081,13 @@
     "invalidCode": "Usa un codice come \"pt\" o \"pt-BR\".",
     "remove": "Rimuovi questa lingua",
     "bundledHint": "Inclusa nell’app — non rimovibile",
-    "note": "Le lingue che aggiungi restano su questo dispositivo. Le ricette scritte in quelle lingue si sincronizzano normalmente e i loro nomi vengono riconosciuti sugli altri dispositivi."
+    "note": "Le lingue che aggiungi restano su questo dispositivo. Le ricette scritte in quelle lingue si sincronizzano normalmente e i loro nomi vengono riconosciuti sugli altri dispositivi.",
+    "hide": "Nascondi questa lingua",
+    "unhide": "Mostra di nuovo questa lingua",
+    "englishRequired": "L'inglese non può essere nascosto — è la lingua di riserva quando manca una traduzione",
+    "hiddenCount_one": "{{count}} lingua nascosta",
+    "hiddenCount_other": "{{count}} lingue nascoste",
+    "hiddenHint": "Le lingue nascoste spariscono solo dai selettori. Nulla di scritto in quelle lingue è stato eliminato, e mostrandone una torna subito tutto al suo posto."
   },
   "account": {
     "sync": {
@@ -1303,8 +1314,8 @@
       "ownChangesCommitted": "Le tue modifiche sono state registrate.",
       "fieldsNeedReview_one": "{{count}} campo richiede la tua revisione.",
       "fieldsNeedReview_other": "{{count}} campi richiedono la tua revisione.",
-      "failedEntities_one": "Non è stato possibile salvare qui {{count}} elemento dagli altri dispositivi ({{types}}) — prova “Ripara dati locali” qui sotto.",
-      "failedEntities_other": "Non è stato possibile salvare qui {{count}} elementi dagli altri dispositivi ({{types}}) — prova “Ripara dati locali” qui sotto.",
+      "failedEntities_one": "{{count}} elemento da altri dispositivi non è stato salvato qui ({{types}}) — la sincronizzazione riproverà.",
+      "failedEntities_other": "{{count}} elementi da altri dispositivi non sono stati salvati qui ({{types}}) — la sincronizzazione riproverà.",
       "scanCounts": "Scansione (remoti↓/locali↑):",
       "syncNow": "Sincronizza ora",
       "syncing": "Sincronizzazione…",
@@ -1352,7 +1363,23 @@
       "repaired_one": "Riparato {{count}} elemento dalla cronologia di sincronizzazione di questo dispositivo.",
       "repaired_other": "Riparati {{count}} elementi dalla cronologia di sincronizzazione di questo dispositivo.",
       "nothingToRepair": "Niente da riparare: i dati di questo dispositivo corrispondono già alla sua cronologia di sincronizzazione.",
-      "repairFailedSome": "{{count}} elementi non sono ancora riparabili: vedi la console per i dettagli."
+      "repairFailedSome": "{{count}} elementi non sono ancora riparabili: vedi la console per i dettagli.",
+      "stuck": {
+        "title_one": "{{count}} elemento non può essere salvato su questo dispositivo",
+        "title_other": "{{count}} elementi non possono essere salvati su questo dispositivo",
+        "andMore": "e altri {{count}}",
+        "tryAgain": "Riprova",
+        "retrying": "Nuovo tentativo…",
+        "reasonDuplicateName": "un altro elemento qui ha già questo nome",
+        "reasonMissingReference": "fa riferimento a qualcosa che questo dispositivo non ha",
+        "reasonUnknown": "questo dispositivo non è riuscito a salvarlo"
+      },
+      "settingScope": {
+        "label": "Dove si applica",
+        "thisDevice": "Solo questo dispositivo",
+        "allDevices": "Tutti i miei dispositivi",
+        "hint": "Impostandolo per tutti i dispositivi, quelli che non hanno una scelta propria lo seguiranno."
+      }
     },
     "setupFile": {
       "label": "File di configurazione",
@@ -1469,10 +1496,28 @@
       "subtitle": "Scegli come appare SmartChef su questo dispositivo.",
       "light": "Chiaro",
       "dark": "Scuro",
-      "system": "Sistema"
+      "system": "Sistema",
+      "accentLabel": "Colori principali",
+      "accentHint": "Cambia il colore dell’app e quelli che distinguono ingredienti, strumenti e tecniche in un passaggio. Si porta sugli altri dispositivi.",
+      "accent": {
+        "garden": "Orto",
+        "ember": "Brace",
+        "indigo": "Indaco",
+        "plum": "Prugna"
+      }
     },
     "serverAccount": {
       "newPassword": "Nuova password (lascia vuoto per mantenere l’attuale)"
+    },
+    "entityLabel": {
+      "recipe": "Ricetta",
+      "ingredient": "Ingrediente",
+      "tool": "Strumento",
+      "tag": "Tag",
+      "technique": "Tecnica",
+      "profile": "Profilo",
+      "category": "Categoria",
+      "unit": "Unità"
     }
   },
   "connect": {
@@ -1682,6 +1727,25 @@
       "document": "i PDF",
       "audio": "l'audio",
       "video": "i video"
-    }
+    },
+    "multiImageOnly": "Solo foto e scansioni possono essere inviate insieme come pagine di un’unica ricetta."
+  },
+  "duration": {
+    "weekShort_one": "{{count}} set",
+    "weekShort_other": "{{count}} set",
+    "dayShort_one": "{{count}}g",
+    "dayShort_other": "{{count}}g",
+    "hourShort_one": "{{count}}h",
+    "hourShort_other": "{{count}}h",
+    "minuteShort_one": "{{count}}m",
+    "minuteShort_other": "{{count}}m",
+    "week_one": "{{count}} settimana",
+    "week_other": "{{count}} settimane",
+    "day_one": "{{count}} giorno",
+    "day_other": "{{count}} giorni",
+    "hour_one": "{{count}} ora",
+    "hour_other": "{{count}} ore",
+    "minute_one": "{{count}} minuto",
+    "minute_other": "{{count}} minuti"
   }
 }

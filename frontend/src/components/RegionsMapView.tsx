@@ -6,7 +6,7 @@ import type { Feature, Geometry } from 'geojson';
 import { countryCentroid, countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { countryFeatureFor } from '../lib/worldGeo';
 
-interface RegionCoord { lat: number; lng: number }
+import type { RegionCoord } from './RegionPicker';
 
 interface RegionsMapProps {
   regions: string[];
@@ -35,13 +35,21 @@ const placeIcon = dotIcon('#3b82f6');
  *  - an ISO country code we can't resolve a boundary for (a handful of tiny
  *    territories missing from the 110m dataset) falls back to the same
  *    centroid dot as before, so nothing silently disappears.
- *  - a free-text region that's been geocoded (`coords`) still gets a plain
- *    point marker (blue) — a single address/city has no "area" to fill.
+ *  - a free-text region that's been geocoded (`coords`) is drawn as its own
+ *    AREA when RegionPicker stored an outline for it — a region, a
+ *    province or an island is a shape, and marking Sardinia with a pin in
+ *    the sea off its east coast said something false about the recipe.
+ *  - a city, an address or anything with no outline stays a point marker
+ *    (blue), which is what a point actually is.
  * Selection itself happens in RegionPicker; this never writes back.
  */
 export default function RegionsMap({ regions, coords = {} }: RegionsMapProps) {
-  const { areas, points } = useMemo(() => {
+  const { areas, placeAreas, points } = useMemo(() => {
     const areas: { key: string; label: string; geo: Feature<Geometry> }[] = [];
+    // A sub-national area drawn from the outline RegionPicker stored, kept
+    // apart from `areas` only so the tooltip can use the plain label
+    // rather than a country name and flag.
+    const placeAreas: { key: string; label: string; geo: Feature<Geometry> }[] = [];
     const countryDots: { key: string; lat: number; lng: number; isCountry: true; label: string }[] = [];
     for (const code of regions.filter(isCountryCode)) {
       const geo = countryFeatureFor(code);
@@ -52,26 +60,29 @@ export default function RegionsMap({ regions, coords = {} }: RegionsMapProps) {
       const centroid = countryCentroid(code);
       if (centroid) countryDots.push({ key: code, lat: centroid.lat, lng: centroid.lng, isCountry: true, label: code });
     }
-    const placePoints = regions
-      .filter((r) => !isCountryCode(r))
-      .map((label) => {
-        const c = coords[label.toLowerCase()];
-        return c ? { key: label, lat: c.lat, lng: c.lng, isCountry: false as const, label } : null;
-      })
-      .filter((p): p is NonNullable<typeof p> => !!p);
-    return { areas, points: [...countryDots, ...placePoints] };
+    const placePoints: { key: string; lat: number; lng: number; isCountry: false; label: string }[] = [];
+    for (const label of regions.filter((r) => !isCountryCode(r))) {
+      const c = coords[label.toLowerCase()];
+      if (!c) continue;
+      if (c.shape) {
+        placeAreas.push({ key: label, label, geo: { type: 'Feature', properties: {}, geometry: c.shape as unknown as Geometry } });
+        continue;
+      }
+      placePoints.push({ key: label, lat: c.lat, lng: c.lng, isCountry: false, label });
+    }
+    return { areas, placeAreas, points: [...countryDots, ...placePoints] };
   }, [regions, coords]);
 
   // Plain computation, not useMemo — hooks can't follow the early return
   // below, and this is cheap enough (a handful of regions at most) to not
   // need memoizing anyway.
   const bounds = L.latLngBounds([]);
-  for (const a of areas) bounds.extend(L.geoJSON(a.geo).getBounds());
+  for (const a of [...areas, ...placeAreas]) bounds.extend(L.geoJSON(a.geo).getBounds());
   for (const p of points) bounds.extend([p.lat, p.lng]);
 
-  if (areas.length === 0 && points.length === 0) return null;
+  if (areas.length === 0 && placeAreas.length === 0 && points.length === 0) return null;
 
-  const singlePoint = areas.length === 0 && points.length === 1;
+  const singlePoint = areas.length === 0 && placeAreas.length === 0 && points.length === 1;
 
   return (
     <div className="rounded-2xl overflow-hidden h-56 relative z-0">
@@ -141,6 +152,17 @@ export default function RegionsMap({ regions, coords = {} }: RegionsMapProps) {
             style={{ color: '#f97316', weight: 1.5, fillColor: '#f97316', fillOpacity: 0.35 }}
           >
             <Tooltip>{`${flagEmoji(a.label)} ${countryDisplayName(a.label, navigator.language)}`}</Tooltip>
+          </GeoJSON>
+        ))}
+        {placeAreas.map((a) => (
+          <GeoJSON
+            key={a.key}
+            data={a.geo}
+            // The place colour, so an area and a pin for the same kind of
+            // thing still read as the same kind of thing.
+            style={{ color: '#3b82f6', weight: 1.5, fillColor: '#3b82f6', fillOpacity: 0.3 }}
+          >
+            <Tooltip>{a.label}</Tooltip>
           </GeoJSON>
         ))}
         {points.map((p) => (

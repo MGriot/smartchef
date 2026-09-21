@@ -52,6 +52,21 @@
 
   --color-background: 250 250 245;
   --color-on-background: 26 28 25;
+
+  /* ── Entity colours ──────────────────────────────────────────────────
+     An ingredient reads green, a tool amber, a technique blue — the one
+     piece of colour in this app that carries meaning rather than style,
+     since a step's text is a run of all three. They were hard-coded
+     Tailwind palette classes in RenderStepText.tsx and StepEditor.tsx,
+     which is why an accent scheme could not touch them.
+
+     Note these are for TOOLS and TECHNIQUES specifically. The amber on a
+     warning banner, on an "optional" badge or on a rating star is a
+     different idea wearing the same colour, and deliberately does not
+     follow the scheme. */
+  --color-ingredient: 0 108 73;
+  --color-tool: 217 119 6;
+  --color-technique: 2 132 199;
 }
 
 .dark {
@@ -108,4 +123,100 @@
 
   --color-background: 18 19 17;
   --color-on-background: 227 227 222;
+
+  --color-ingredient: 78 222 163;
+  --color-tool: 245 158 11;
+  --color-technique: 56 189 248;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Accent schemes
+   ────────────────────────────────────────────────────────────────────────
+   Set as `data-accent` on <html> by lib/applySettings.ts, chosen in
+   Account → Appearance and carried between devices as a synced setting.
+
+   The default ("garden") sets no attribute at all, so the palette above is
+   the whole of it and nothing has to be kept in two places.
+
+   Each scheme redefines the primary family plus the entity triad — enough
+   for the app to read as one design rather than a green app with a
+   different button colour. Everything else (surfaces, outlines, error) is
+   deliberately shared: those carry no brand, and re-tinting them is how a
+   theme picker starts producing combinations nobody checked.
+
+   Specificity note: `[data-accent]` and `.dark` are both one class-level
+   selector, so the light blocks MUST come after `.dark` to win, and each
+   dark block is `.dark[data-accent=...]` to outrank its own light one.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Ember — terracotta and brass, the colours of a cast-iron kitchen. */
+[data-accent="ember"] {
+  --color-primary: 176 58 26;
+  --color-on-primary: 255 255 255;
+  --color-primary-container: 226 114 91;
+  --color-on-primary-container: 92 26 8;
+  --color-inverse-primary: 255 181 156;
+  --color-surface-tint: 176 58 26;
+  --color-ingredient: 176 58 26;
+  --color-tool: 124 111 30;
+  --color-technique: 46 111 142;
+}
+.dark[data-accent="ember"] {
+  --color-primary: 255 181 156;
+  --color-on-primary: 92 26 8;
+  --color-primary-container: 138 44 18;
+  --color-on-primary-container: 255 217 204;
+  --color-inverse-primary: 176 58 26;
+  --color-surface-tint: 255 181 156;
+  --color-ingredient: 255 181 156;
+  --color-tool: 214 198 90;
+  --color-technique: 143 197 224;
+}
+
+/* Indigo — cool and high-contrast, for reading in a bright kitchen. */
+[data-accent="indigo"] {
+  --color-primary: 67 56 202;
+  --color-on-primary: 255 255 255;
+  --color-primary-container: 129 140 248;
+  --color-on-primary-container: 36 28 107;
+  --color-inverse-primary: 199 210 254;
+  --color-surface-tint: 67 56 202;
+  --color-ingredient: 67 56 202;
+  --color-tool: 194 65 12;
+  --color-technique: 15 118 110;
+}
+.dark[data-accent="indigo"] {
+  --color-primary: 199 210 254;
+  --color-on-primary: 36 28 107;
+  --color-primary-container: 55 48 163;
+  --color-on-primary-container: 224 231 255;
+  --color-inverse-primary: 67 56 202;
+  --color-surface-tint: 199 210 254;
+  --color-ingredient: 199 210 254;
+  --color-tool: 251 146 60;
+  --color-technique: 94 234 212;
+}
+
+/* Plum — deep purple with bronze, the warmest of the three alternates. */
+[data-accent="plum"] {
+  --color-primary: 134 25 143;
+  --color-on-primary: 255 255 255;
+  --color-primary-container: 217 70 239;
+  --color-on-primary-container: 74 13 80;
+  --color-inverse-primary: 240 171 252;
+  --color-surface-tint: 134 25 143;
+  --color-ingredient: 134 25 143;
+  --color-tool: 161 98 7;
+  --color-technique: 29 78 216;
+}
+.dark[data-accent="plum"] {
+  --color-primary: 240 171 252;
+  --color-on-primary: 74 13 80;
+  --color-primary-container: 107 18 112;
+  --color-on-primary-container: 250 232 255;
+  --color-inverse-primary: 134 25 143;
+  --color-surface-tint: 240 171 252;
+  --color-ingredient: 240 171 252;
+  --color-tool: 251 191 36;
+  --color-technique: 147 197 253;
 }

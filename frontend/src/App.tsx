@@ -169,6 +169,23 @@ export default function App() {
         // EXISTS + a PRAGMA table_info check per column) and keeps existing
         // devices' schemas current.
         await initLocalSchema();
+        // The database is the source of truth for a synced setting, but it
+        // only opens here — long after i18n and the theme read their
+        // synchronous cache. This is where the two are reconciled, and
+        // where a preference another device changed takes effect.
+        try {
+          const { hydrateSettings, importLegacySettingsOnce } = await import('./services/settings.local');
+          const changed = await hydrateSettings();
+          const { applySyncedSettings } = await import('./lib/applySettings');
+          applySyncedSettings(changed);
+          // A device with a Sync Folder imports after its first pull
+          // instead (gitSync.syncNow), so it cannot clobber a value the
+          // other devices already agreed on.
+          const { hasConfiguredRemote } = await import('./lib/sync/gitSync');
+          if (!(await hasConfiguredRemote())) await importLegacySettingsOnce();
+        } catch (err) {
+          console.warn('SmartChef: loading synced settings failed:', err);
+        }
         setStandalone(true);
         setSetup("ready");
         const profile = await getActiveProfile();

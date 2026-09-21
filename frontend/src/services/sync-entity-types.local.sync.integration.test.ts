@@ -108,8 +108,18 @@ describe('every ENTITY_DIRS type survives createEntity() against real SQLite', (
     expect((toolRows[0] as { tool_id: string }).tool_id).toBe('tool-1');
   });
 
-  it('throws writing recipe_tools when the referenced tool does not exist yet — documents why mergeBridge.ts must create tools before recipes, not just recipes before nothing', async () => {
-    const { initLocalSchema } = await import('../db/local');
+  it('keeps the recipe and drops the reference when a tool it names never synced', async () => {
+    // This used to assert `rejects.toThrow(/FOREIGN KEY constraint failed/)`
+    // and was written to document why mergeBridge.ts creates tools before
+    // recipes. That ordering is still right, but it was never sufficient:
+    // toolIds is a SET_FIELD, so a merge with no common base UNIONS both
+    // devices' tool ids, and an id the other device minted cannot be
+    // created here at all when its name collides with a local tool. The FK
+    // then failed the WHOLE recipe, which went to sync_repair and was
+    // retried — and re-prompted — every sync, forever.
+    //
+    // A reference nobody can resolve is now a recipe missing one tool.
+    const { initLocalSchema, query } = await import('../db/local');
     await initLocalSchema();
     const { createEntity } = await import('./conflicts.local');
 
@@ -120,6 +130,30 @@ describe('every ENTITY_DIRS type survives createEntity() against real SQLite', (
         servings: 1,
         toolIds: ['tool-that-does-not-exist'],
       })
-    ).rejects.toThrow(/FOREIGN KEY constraint failed/);
+    ).resolves.not.toThrow();
+
+    const saved = await query('SELECT title FROM recipes WHERE id=$1', ['recipe-2']);
+    expect(saved).toHaveLength(1);
+    expect(await query('SELECT * FROM recipe_tools WHERE recipe_id=$1', ['recipe-2'])).toHaveLength(0);
+  });
+
+  it('folds a tool another device created under its own id onto the local row of the same name', async () => {
+    const { initLocalSchema, query } = await import('../db/local');
+    await initLocalSchema();
+    const { createEntity, resolveAlias, resetAliasCache } = await import('./conflicts.local');
+    resetAliasCache();
+
+    await createEntity('tool', 'local-uuid', { name: 'Frusta' });
+    // Same real-world tool, minted independently on the other device. The
+    // active-name unique index rejects the row; the id becomes an alias.
+    await createEntity('tool', 'remote-uuid', { name: 'Frusta' });
+
+    expect(await query('SELECT id FROM tools WHERE id=$1', ['remote-uuid'])).toHaveLength(0);
+    expect(await resolveAlias('tool', 'remote-uuid')).toBe('local-uuid');
+
+    // A recipe published by the other device references the foreign id.
+    await createEntity('recipe', 'recipe-3', { id: 'recipe-3', title: 'Meringa', toolIds: ['remote-uuid'] });
+    const rows = await query<{ tool_id: string }>('SELECT tool_id FROM recipe_tools WHERE recipe_id=$1', ['recipe-3']);
+    expect(rows.map((r) => r.tool_id)).toEqual(['local-uuid']);
   });
 });

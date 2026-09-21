@@ -267,8 +267,13 @@ export interface LLMParseRequest {
   input: string; // URL o testo grezzo
   inputType: "url" | "text" | "media";
   /** Required when inputType is "media". `input` then carries whatever
-   *  extra context the user typed (or "" for none), not the recipe. */
-  media?: LLMParseMedia;
+   *  extra context the user typed (or "" for none), not the recipe.
+   *
+   *  A list, because one recipe is often two cookbook pages or three
+   *  photographs; only images may arrive as a set (see llm.parser.ts's
+   *  assertMediaListSupported). The single-object form is still accepted
+   *  so an older client keeps working against a newer server. */
+  media?: LLMParseMedia | LLMParseMedia[];
   /** The app's content language. Decides which language the library
    *  catalog sent to the model is labelled in (importCatalog.service.ts),
    *  so a recipe written in that language can be recognized against it.

@@ -14,9 +14,10 @@
 import { query, queryOne } from "../db/local";
 import { pickNewer, type ConflictPolicy, type EntityMergeResult } from "../lib/structuredMerge";
 import { fieldValuesEqual, isEmptyValue, mergeKeyedList, mergeSetField, parseTimestamp, KEYED_LIST_FIELDS, SET_FIELDS } from "../lib/mergeNormalize";
-import { healIngredientsValue } from "../lib/sync/referenceHeal";
+import { healIngredientsValue, healToolIdsValue } from "../lib/sync/referenceHeal";
 import {
-  EXTRA_FIELDS, isExtraField, writeExtraField, writeStepTranslations, writeRecipeIngredientTranslations, portableCategoryId,
+  EXTRA_FIELDS, isExtraField, writeExtraField, writeStepTranslations, writeRecipeIngredientTranslations,
+  portableCategoryId, portableToolId, portableTechniqueId, portableTagId,
 } from "./syncExtras.local";
 
 function newId(): string {
@@ -207,6 +208,16 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
     nameColumn: 'name',
     scalarFields: new Set(['name', 'avatar_url', 'role', 'deleted_at']),
   },
+  // A preference that travels between this user's own devices (theme,
+  // languages, units, the LLM provider). The setting KEY is the row id, so
+  // every generic path in this file works unchanged — no branch anywhere
+  // reads `setting` specially. Credentials are never registered: see
+  // SYNCED_SETTINGS in services/settings.local.ts for the full boundary.
+  setting: {
+    table: 'settings',
+    nameColumn: 'id',
+    scalarFields: new Set(['value', 'deleted_at']),
+  },
   // Synced since ADR 0006, on the portable ids db/local.ts rekeyPortableIds()
   // gives them — before, each device had its own random ids for these.
   category: {
@@ -263,6 +274,113 @@ export function getMergeableFieldNames(entityType: string): string[] | null {
 
 const CATEGORY_NAME_FIELD = 'category_name';
 
+// ── Entity types whose NAME is unique among live rows ───────────────────
+// tools, tags, techniques and ingredient_categories each carry a partial
+// unique index on name (db/local.ts idx_*_name_active). createEntity()
+// guards only the primary key with ON CONFLICT(id) DO NOTHING, so a remote
+// row whose name a local row already owns under a DIFFERENT id does not
+// no-op — it throws `UNIQUE constraint failed`, lands in mergeBridge's
+// failedEntities, and is re-queued for repair every single sync forever.
+//
+// Two rows that share a name here are not two things, they are one thing
+// two devices created independently before portable ids existed. So the
+// arriving id is recorded as an ALIAS of the local row rather than
+// inserted, and every reference published under it keeps resolving.
+//
+// Matched case-sensitively, exactly as the indexes are: the question this
+// answers is precisely "would the INSERT throw?".
+const NAME_UNIQUE_TYPES: Record<string, { table: string; portableId(name: string): string }> = {
+  tool: { table: 'tools', portableId: portableToolId },
+  technique: { table: 'techniques', portableId: portableTechniqueId },
+  tag: { table: 'tags', portableId: portableTagId },
+  category: { table: 'ingredient_categories', portableId: portableCategoryId },
+};
+
+/** Whole sync_alias table, cached: resolveAlias() is called once per tool
+ *  id per recipe, and on Android every query crosses the JSON bridge. The
+ *  table is a handful of rows and only recordAlias() (or a re-key) changes
+ *  it, so one read per session is right. */
+let aliasCache: Map<string, string> | null = null;
+
+/** Drops the cache — for the re-key migration and for tests. */
+export function resetAliasCache(): void {
+  aliasCache = null;
+}
+
+async function loadAliases(): Promise<Map<string, string>> {
+  if (aliasCache) return aliasCache;
+  const rows = await query<{ entity_type: string; foreign_id: string; local_id: string }>(
+    `SELECT entity_type, foreign_id, local_id FROM sync_alias`
+  );
+  aliasCache = new Map(rows.map((r) => [`${r.entity_type}:${r.foreign_id}`, r.local_id]));
+  return aliasCache;
+}
+
+/** The local row an incoming entity id actually names, following any alias
+ *  recorded by createEntity() or the re-key. Returns `entityId` unchanged
+ *  when there is no alias, which is the normal case. Follows a short chain
+ *  (a → b → c) but refuses to loop. */
+export async function resolveAlias(entityType: string, entityId: string): Promise<string> {
+  if (!entityId) return entityId;
+  const map = await loadAliases();
+  if (map.size === 0) return entityId;
+  let id = entityId;
+  for (let hop = 0; hop < 4; hop++) {
+    const next = map.get(`${entityType}:${id}`);
+    if (!next || next === id) break;
+    id = next;
+  }
+  return id;
+}
+
+/** Records that `foreignId` names the same real-world row as `localId`. */
+export async function recordAlias(entityType: string, foreignId: string, localId: string): Promise<void> {
+  if (!foreignId || !localId || foreignId === localId) return;
+  await query(
+    `INSERT INTO sync_alias (entity_type, foreign_id, local_id) VALUES ($1, $2, $3)
+     ON CONFLICT(entity_type, foreign_id) DO UPDATE SET local_id = excluded.local_id`,
+    [entityType, foreignId, localId]
+  );
+  if (aliasCache) aliasCache.set(`${entityType}:${foreignId}`, localId);
+}
+
+/** The live row that already owns this name, if any — the collision the
+ *  unique index would reject. */
+async function findNameTwin(entityType: string, name: string, excludeId: string): Promise<string | null> {
+  const spec = NAME_UNIQUE_TYPES[entityType];
+  if (!spec) return null;
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM ${spec.table} WHERE name = $1 AND deleted_at IS NULL AND id <> $2`,
+    [name, excludeId]
+  );
+  return row?.id ?? null;
+}
+
+/** Maps every id in a serialized id array through sync_alias, keeping the
+ *  representation (JSON string vs array) it arrived in. */
+async function resolveIdArray(entityType: string, raw: unknown): Promise<unknown> {
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+  if (!Array.isArray(parsed)) return raw;
+  const out: string[] = [];
+  let changed = false;
+  for (const id of parsed) {
+    if (typeof id !== 'string' || !id) continue;
+    const resolved = await resolveAlias(entityType, id);
+    if (resolved !== id) changed = true;
+    if (out.includes(resolved)) changed = true; // two ids folded onto one
+    else out.push(resolved);
+  }
+  if (!changed) return raw;
+  return typeof raw === 'string' ? JSON.stringify(out) : out;
+}
+
 /** This device's ingredient category for a name, created if it has none —
  *  a category someone made on another device arrives with its first
  *  ingredient instead of that ingredient landing in "Uncategorized". */
@@ -311,8 +429,50 @@ async function writeScalarField(config: EntityConfig, entityType: string, entity
   if (!config.scalarFields.has(fieldName)) {
     throw new Error(`writeScalarField: '${fieldName}' is not a recognized scalar field on '${entityType}'`);
   }
+  if (fieldName === 'name' && NAME_UNIQUE_TYPES[entityType] && typeof value === 'string' && value.trim()) {
+    const twinId = await findNameTwin(entityType, value, entityId);
+    // This row is now called what another row is already called: one
+    // thing held as two rows. A plain UPDATE throws on the active-name
+    // unique index, so fold instead — the fold also repoints recipe_tools
+    // / ingredient_tags and rewrites the steps' JSON id arrays, which an
+    // UPDATE could not have done anyway.
+    if (twinId && (await foldIntoNameTwin(entityType, entityId, twinId))) return;
+  }
   const touch = config.hasUpdatedAt === false ? '' : ', updated_at = now()';
   await query(`UPDATE ${config.table} SET ${fieldName} = $1${touch} WHERE id = $2`, [value, entityId]);
+}
+
+/** Folds one row into the row that already owns its new name, reusing the
+ *  library's own merge helpers (they repoint the join tables and rewrite
+ *  the steps' id arrays, then re-serialize every affected recipe). Returns
+ *  false when there is no fold helper for the type, leaving the caller to
+ *  apply the rename normally. */
+async function foldIntoNameTwin(entityType: string, sourceId: string, targetId: string): Promise<boolean> {
+  try {
+    if (entityType === 'tool') {
+      const { mergeTools } = await import('./ingredients.local');
+      await mergeTools(sourceId, targetId);
+    } else if (entityType === 'tag') {
+      const { mergeTags } = await import('./tags.local');
+      await mergeTags(sourceId, targetId);
+    } else if (entityType === 'technique') {
+      const { mergeTechniques } = await import('./techniques.local');
+      await mergeTechniques(sourceId, targetId);
+    } else {
+      // Ingredient categories have no fold helper, and ingredients carry
+      // their category by NAME through sync anyway (see
+      // getMergeableFieldNames), so there is nothing here worth a bespoke
+      // one. Fall through and let the rename apply.
+      return false;
+    }
+  } catch (err) {
+    // A fold that cannot complete must not fail the whole entity — that is
+    // the failure mode this entire path exists to remove.
+    console.error(`SmartChef sync: could not fold ${entityType} ${sourceId} into ${targetId}:`, err);
+    return false;
+  }
+  await recordAlias(entityType, sourceId, targetId);
+  return true;
 }
 
 // recipes.steps/ingredients/toolIds are normalized child tables (recipe_
@@ -438,7 +598,8 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
            step_ingredients = excluded.step_ingredients`,
         [
           row.id ?? newId(), entityId, row.step_number ?? 0, row.title ?? null, row.description ?? '',
-          row.duration_min ?? null, row.tool_ids ?? '[]', row.technique_ids ?? '[]', row.notes ?? null,
+          row.duration_min ?? null, await resolveIdArray('tool', row.tool_ids ?? '[]'),
+          await resolveIdArray('technique', row.technique_ids ?? '[]'), row.notes ?? null,
           row.image_url ?? null, row.step_ingredients ?? '[]',
         ]
       );
@@ -448,9 +609,29 @@ async function writeArrayField(entityType: string, entityId: string, fieldName: 
   }
 
   // toolIds
+  //
+  // recipe_tools.tool_id is a hard FK to tools(id) with no ON DELETE
+  // clause, so a bare INSERT of an id this device does not have threw
+  // `FOREIGN KEY constraint failed` and failed the WHOLE RECIPE — not just
+  // the tool. And because toolIds is a SET_FIELD (mergeNormalize.ts), a
+  // merge with no common base UNIONS the two sides' ids, which made that
+  // guaranteed rather than merely possible whenever two devices held
+  // different ids for the same tool.
+  //
+  // INSERT…SELECT makes the row conditional on the tool existing, the same
+  // shape syncExtras.local.ts's writeIngredientTagIds() already uses. An
+  // unresolvable tool is now a recipe missing one tool — recoverable, and
+  // visible — instead of a recipe that can never sync at all.
   await query(`DELETE FROM recipe_tools WHERE recipe_id = $1`, [entityId]);
-  for (const toolId of (value as string[] | null) ?? []) {
-    await query(`INSERT INTO recipe_tools (recipe_id, tool_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [entityId, toolId]);
+  for (const rawId of (value as string[] | null) ?? []) {
+    if (typeof rawId !== 'string' || !rawId) continue;
+    const toolId = await resolveAlias('tool', rawId);
+    await query(
+      `INSERT INTO recipe_tools (recipe_id, tool_id)
+       SELECT $1, id FROM tools WHERE id = $2
+       ON CONFLICT DO NOTHING`,
+      [entityId, toolId]
+    );
   }
 }
 
@@ -589,6 +770,10 @@ export async function resyncEntityToGit(entityType: string, entityId: string): P
       const { syncRecipe } = await import('./recipes.local');
       return syncRecipe(entityId);
     }
+    case 'setting': {
+      const { syncSetting } = await import('./settings.local');
+      return syncSetting(entityId);
+    }
     case 'ingredient': {
       const { syncIngredient } = await import('./ingredients.local');
       return syncIngredient(entityId);
@@ -685,6 +870,10 @@ export async function applyEntityMergeResult(
   if (!config) {
     throw new Error(`applyEntityMergeResult: unknown entity type '${entityType}'`);
   }
+  // Every write below targets the row this id resolves to, not the id as
+  // published — see resolveAlias(). Conflicts are recorded against it too,
+  // or the Conflicts card would name a row that does not exist here.
+  entityId = await resolveAlias(entityType, entityId);
 
   for (const conflict of result.conflicts) {
     await upsertConflict({
@@ -781,7 +970,11 @@ export async function overlayPendingConflicts(
 export async function entityExists(entityType: string, entityId: string): Promise<boolean> {
   const config = ENTITY_CONFIG[entityType];
   if (!config) return false;
-  const row = await queryOne(`SELECT id FROM ${config.table} WHERE id = $1`, [entityId]);
+  // Through sync_alias: an id another device published for a row this
+  // device already holds under its own id DOES exist here, and answering
+  // "no" would send the caller down createEntity() into the very unique-
+  // index collision the alias was recorded to avoid.
+  const row = await queryOne(`SELECT id FROM ${config.table} WHERE id = $1`, [await resolveAlias(entityType, entityId)]);
   return row !== null;
 }
 
@@ -808,6 +1001,16 @@ export async function createEntity(entityType: string, entityId: string, fields:
     throw new Error(`createEntity: unknown entity type '${entityType}'`);
   }
   const alreadyExists = await entityExists(entityType, entityId);
+  if (!alreadyExists && NAME_UNIQUE_TYPES[entityType] && typeof fields.name === 'string' && fields.name.trim()) {
+    // Not a new row: the same real-world tool/tag/technique/category, made
+    // independently on two devices. Insert would throw on the active-name
+    // unique index; record the alias and let the existing row stand.
+    const twinId = await findNameTwin(entityType, fields.name as string, entityId);
+    if (twinId) {
+      await recordAlias(entityType, entityId, twinId);
+      return;
+    }
+  }
   if (entityType === 'ingredient' && typeof fields[CATEGORY_NAME_FIELD] === 'string' && (fields[CATEGORY_NAME_FIELD] as string).trim()) {
     // See getMergeableFieldNames(): the category travels by name.
     fields = { ...fields, category_id: await resolveCategoryIdByName((fields[CATEGORY_NAME_FIELD] as string).trim(), fields.category_id) };
@@ -882,6 +1085,21 @@ export async function resolveConflict(id: string, chosen: 'local' | 'remote'): P
 
 type ConflictDecision = { value: unknown; reason: 'equal' | 'empty-side' | 'set-merge' | 'newest' | 'user' };
 
+/** `toolId → name` for every tool this device knows, including the ids it
+ *  has aliased away — healToolIdsValue() needs to recognise both sides of
+ *  a conflict recorded before the alias existed. */
+async function localToolNames(): Promise<Map<string, string>> {
+  const rows = await query<{ id: string; name: string }>(`SELECT id, name FROM tools`);
+  const out = new Map(rows.map((r) => [r.id, r.name]));
+  for (const a of await query<{ foreign_id: string; local_id: string }>(
+    `SELECT foreign_id, local_id FROM sync_alias WHERE entity_type = 'tool'`
+  )) {
+    const name = out.get(a.local_id);
+    if (name && !out.has(a.foreign_id)) out.set(a.foreign_id, name);
+  }
+  return out;
+}
+
 async function entityUpdatedAt(entityType: string, entityId: string): Promise<string | null> {
   const config = ENTITY_CONFIG[entityType];
   if (!config) return null;
@@ -895,7 +1113,7 @@ export function newerSide(conflict: Pick<SyncConflict, 'localUpdatedAt' | 'remot
 }
 
 /** The rule-based answer for one conflict, or null if it has to be asked. */
-function decideConflict(conflict: SyncConflict, policy: ConflictPolicy): ConflictDecision | null {
+function decideConflict(conflict: SyncConflict, policy: ConflictPolicy, toolNames?: Map<string, string>): ConflictDecision | null {
   const { fieldName, baseValue } = conflict;
   let { localValue, remoteValue } = conflict;
   if (fieldName === 'ingredients') {
@@ -903,6 +1121,15 @@ function decideConflict(conflict: SyncConflict, policy: ConflictPolicy): Conflic
     // lib/sync/referenceHeal.ts. Backlog recorded before that existed.
     localValue = healIngredientsValue(localValue, remoteValue, baseValue);
     remoteValue = healIngredientsValue(remoteValue, localValue, baseValue);
+  }
+  if (fieldName === 'toolIds' && toolNames && toolNames.size > 0) {
+    // Two ids naming the same tool are not a disagreement either. Without
+    // this the pair is unioned by mergeSetField() every cycle, so the
+    // conflict reappears immediately after the user resolves it — the
+    // backlog this settles was recorded before syncRecipe() carried
+    // toolNames at all.
+    localValue = healToolIdsValue(localValue, toolNames) ?? localValue;
+    remoteValue = healToolIdsValue(remoteValue, toolNames) ?? remoteValue;
   }
   if (fieldValuesEqual(fieldName, localValue, remoteValue)) return { value: localValue, reason: 'equal' };
   if (isEmptyValue(localValue)) return { value: remoteValue, reason: 'empty-side' };
@@ -963,6 +1190,9 @@ export async function autoResolvePendingConflicts(
   const decided: Array<{ conflict: SyncConflict; value: unknown }> = [];
   let remaining = 0;
   let obsolete = 0;
+  // One read for the whole pass, and only when something actually needs
+  // it — this runs after every sync cycle.
+  const toolNames = pending.some((c) => c.fieldName === 'toolIds') ? await localToolNames() : undefined;
   for (const original of pending) {
     // A field the merge no longer compares (an ingredient's category_id,
     // merged by name since ADR 0006) can never be settled by a sync, and
@@ -980,7 +1210,7 @@ export async function autoResolvePendingConflicts(
         remoteUpdatedAt: conflict.remoteUpdatedAt ?? (remoteUpdatedAt ? await remoteUpdatedAt(conflict.entityType, conflict.entityId) : null),
       };
     }
-    const decision = decideConflict(conflict, policy);
+    const decision = decideConflict(conflict, policy, toolNames);
     if (decision) decided.push({ conflict, value: decision.value });
     else remaining++;
   }
@@ -1042,7 +1272,10 @@ export async function forceApplyEntity(entityType: string, entityId: string, rem
  *  Profiles are never removed — the active one is this device's identity. */
 export async function discardLocalEntity(entityType: string, entityId: string): Promise<void> {
   const config = ENTITY_CONFIG[entityType];
-  if (!config || entityType === 'profile') return;
+  // A settings row only this device has is far more likely to be a key a
+  // newer build knows about than garbage, so it is kept for the same
+  // reason a profile is.
+  if (!config || entityType === 'profile' || entityType === 'setting') return;
   if (entityType === 'recipe') {
     // No FK from these two, so nothing else would clear them.
     await query(`DELETE FROM collection_recipes WHERE recipe_id = $1`, [entityId]);

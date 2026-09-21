@@ -1,3 +1,4 @@
+import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect, useRef } from 'react';
 import { getSyncStatus, subscribeSyncStatus, hasEverCompletedSync } from '../lib/sync/syncStatus';
 import { Link } from 'react-router-dom';
@@ -27,6 +28,7 @@ interface Recipe {
   cover_image_url: string;
   prep_time_min: number;
   cook_time_min: number;
+  rest_time_min: number | null;
   difficulty: 'easy' | 'medium' | 'hard' | 'expert';
   tags: string[];
   tags_display?: TagDisplay[];
@@ -653,7 +655,10 @@ const Home: React.FC = () => {
             >
               {recipes.map((recipe) => {
                 const badges = getCardBadges(recipe);
-                const totalTime = (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0);
+                // Waiting time counts: leaving rest_time_min out is what
+                // made a 15-day mirto advertise "25 min" on its card while
+                // its own page said 360 hours. Matches RecipeDetail.
+                const totalTime = (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0) + (recipe.rest_time_min || 0);
 
                 const selected = selectedIds.has(recipe.id);
 
@@ -726,7 +731,7 @@ const Home: React.FC = () => {
                           <span className={`material-symbols-outlined text-primary ${dense ? 'text-[14px]' : 'text-[18px]'}`} style={{ fontVariationSettings: "'FILL' 1" }}>
                             schedule
                           </span>
-                          {totalTime > 0 ? `${totalTime} min` : '—'}
+                          {formatDurationWith(t, totalTime, { short: true })}
                         </div>
                         <div className="flex items-center gap-1.5">
                           <span className={`material-symbols-outlined text-primary ${dense ? 'text-[14px]' : 'text-[18px]'}`} style={{ fontVariationSettings: "'FILL' 1" }}>
