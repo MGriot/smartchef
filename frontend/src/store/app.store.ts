@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import i18n from "../i18n";
 import { adoptUiLangForAccount, readUiLang } from "../lib/uiLanguage";
+import { getSetting, THEME_MODE } from "../lib/settingsRegistry";
+import { applyAppearanceFromCache, applyThemeMode } from "../lib/applySettings";
 
 interface Recipe {
   id: string;
@@ -50,19 +52,13 @@ function saveShoppingCart(key: string, items: ShoppingCartItem[]) {
 
 export type ThemeMode = "light" | "dark" | "system";
 
-const THEME_KEY = "smartchef.themeMode";
-
+// The theme is a SYNCED setting now (services/settings.local.ts), but it
+// is still read synchronously here, before React mounts — getSetting()
+// reads lib/settingsCache.ts, which is exactly the localStorage access
+// this used to do by hand. The database write and the push to other
+// devices happen behind setSetting(), after the class is already on.
 function loadThemeMode(): ThemeMode {
-  const stored = localStorage.getItem(THEME_KEY);
-  return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
-}
-
-// Not per-account (unlike contentLang) — the login/server-connect screens
-// render before any account is known and still need a resolved theme.
-function applyThemeMode(mode: ThemeMode) {
-  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-  const dark = mode === "dark" || (mode === "system" && prefersDark);
-  document.documentElement.classList.toggle("dark", dark);
+  return getSetting<ThemeMode>(THEME_MODE);
 }
 
 export interface Account {
@@ -192,16 +188,23 @@ export const useStore = create<AppStore>((set, get) => ({
 
   themeMode: loadThemeMode(),
   setThemeMode: (mode) => {
-    localStorage.setItem(THEME_KEY, mode);
+    // Paint first, persist after: the class going on is what the user
+    // asked for, and it must not wait on SQLite or on a Sync Folder that
+    // may be unreachable.
     applyThemeMode(mode);
     set({ themeMode: mode });
+    // Dynamically imported: this store is evaluated before React mounts,
+    // and services/settings.local pulls in SQLite.
+    void import("../services/settings.local")
+      .then(({ setSetting }) => setSetting(THEME_MODE, mode))
+      .catch((err) => console.warn("SmartChef: saving the theme failed:", err));
   },
 }));
 
 // Resolve immediately on module load (before React mounts) so there's no
 // light-mode flash for users who already chose dark, and keep it in sync
 // with OS-level changes while "system" is selected.
-applyThemeMode(useStore.getState().themeMode);
+applyAppearanceFromCache();
 window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
   if (useStore.getState().themeMode === "system") applyThemeMode("system");
 });

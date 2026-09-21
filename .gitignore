@@ -11,9 +11,11 @@ dist/
 .DS_Store
 backend/uploads/
 sync-data/
-.claude
-.scratch
-.stich
+# Local agent/editor state. `.github/` is deliberately NOT here: ignoring it
+# silently skips any new workflow, issue template or CODEOWNERS from `git add`.
+.claude/
+.scratch/
+.stitch/
 # Backup exports written by Account > Backup & Restore. They are a user's
 # whole library (recipes, and optionally every image inline), so they are
 # data rather than source and can be tens of megabytes.
@@ -28,3 +30,15 @@ smartchef-backup-*.json
 *.jks
 *.keystore
 keystore.properties
+
+# Staging folder for the installers and APKs attached to a GitHub release by
+# hand. Half a gigabyte of build output that already lives on the release
+# page; it has no business in the history.
+release-assets/
+
+# Root scratch kept on disk but out of the history: a one-line curl payload,
+# an April design mock that the Vite build never referenced, and a stale
+# self-analysis note superseded by docs/.
+/test_payload.json
+/gallery.html
+/REPO_ANALYSIS.md

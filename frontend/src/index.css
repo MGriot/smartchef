@@ -84,8 +84,12 @@
     font-weight: 700;
   }
 
+  /* The one focus indicator the whole app shares. Uses the primary token
+     rather than the literal green it used to hard-code, so it follows the
+     chosen accent scheme instead of staying green on a purple app — and so
+     it stays visible in dark mode, where the token is the light variant. */
   :focus-visible {
-    outline: 2px solid #006c49;
+    outline: 2px solid rgb(var(--color-primary));
     outline-offset: 2px;
   }
 

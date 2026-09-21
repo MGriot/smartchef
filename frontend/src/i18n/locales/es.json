@@ -762,7 +762,12 @@
     "translatedOnCreate": "La IA generará las traducciones al crearlo.",
     "readFileFailed": "No se pudo leer ese archivo.",
     "pickCategoryFor": "Elige una categoría para «{{name}}»",
-    "couldNotCreate": "No se pudo crear «{{name}}»"
+    "couldNotCreate": "No se pudo crear «{{name}}»",
+    "scanPagesChosen_one": "{{count}} página elegida",
+    "scanPagesChosen_other": "{{count}} páginas elegidas",
+    "scanPagesHint": "Se leerán como una sola receta, en el orden en que las elegiste: una lista de ingredientes en una página y los pasos en otra salen como una única importación.",
+    "scanMultiImageOnly": "Solo las fotos y los escaneos se pueden combinar en una receta. Importa un PDF, una nota de voz o un vídeo por separado.",
+    "scanOcrLeadHint": "Lectura en este dispositivo: gratuita, sin conexión y exacta con texto bien impreso. El resultado aparece en el cuadro de texto para que lo revises antes de importar."
   },
   "login": {
     "signingIn": "Iniciando…",
@@ -1076,7 +1081,13 @@
     "invalidCode": "Usa un código como «pt» o «pt-BR».",
     "remove": "Quitar este idioma",
     "bundledHint": "Incluido en la app — no se puede quitar",
-    "note": "Los idiomas que añadas se guardan en este dispositivo. Las recetas escritas en ellos se sincronizan con normalidad y sus nombres se reconocen en tus otros dispositivos."
+    "note": "Los idiomas que añadas se guardan en este dispositivo. Las recetas escritas en ellos se sincronizan con normalidad y sus nombres se reconocen en tus otros dispositivos.",
+    "hide": "Ocultar este idioma",
+    "unhide": "Volver a mostrar este idioma",
+    "englishRequired": "El inglés no se puede ocultar: es el idioma al que se recurre cuando falta una traducción",
+    "hiddenCount_one": "{{count}} idioma oculto",
+    "hiddenCount_other": "{{count}} idiomas ocultos",
+    "hiddenHint": "Los idiomas ocultos solo desaparecen de los selectores. No se ha borrado nada de lo escrito en ellos, y al volver a mostrar uno todo regresa tal cual."
   },
   "account": {
     "sync": {
@@ -1303,8 +1314,8 @@
       "ownChangesCommitted": "Tus propios cambios se han registrado.",
       "fieldsNeedReview_one": "{{count}} campo necesita tu revisión.",
       "fieldsNeedReview_other": "{{count}} campos necesitan tu revisión.",
-      "failedEntities_one": "No se pudo guardar aquí {{count}} elemento de otros dispositivos ({{types}}) — prueba «Reparar datos locales» más abajo.",
-      "failedEntities_other": "No se pudieron guardar aquí {{count}} elementos de otros dispositivos ({{types}}) — prueba «Reparar datos locales» más abajo.",
+      "failedEntities_one": "{{count}} elemento de otros dispositivos no se pudo guardar aquí ({{types}}) — la sincronización lo reintentará.",
+      "failedEntities_other": "{{count}} elementos de otros dispositivos no se pudieron guardar aquí ({{types}}) — la sincronización los reintentará.",
       "scanCounts": "Escaneo (remotos↓/locales↑):",
       "syncNow": "Sincronizar ahora",
       "syncing": "Sincronizando…",
@@ -1352,7 +1363,23 @@
       "repaired_one": "Se reparó {{count}} elemento desde el historial de sincronización de este dispositivo.",
       "repaired_other": "Se repararon {{count}} elementos desde el historial de sincronización de este dispositivo.",
       "nothingToRepair": "No había nada que reparar: los datos de este dispositivo ya coinciden con su historial de sincronización.",
-      "repairFailedSome": "{{count}} elemento(s) aún no se pudieron reparar: consulta la consola para más detalles."
+      "repairFailedSome": "{{count}} elemento(s) aún no se pudieron reparar: consulta la consola para más detalles.",
+      "stuck": {
+        "title_one": "{{count}} elemento no se puede guardar en este dispositivo",
+        "title_other": "{{count}} elementos no se pueden guardar en este dispositivo",
+        "andMore": "y {{count}} más",
+        "tryAgain": "Reintentar",
+        "retrying": "Reintentando…",
+        "reasonDuplicateName": "otro elemento de aquí ya tiene este nombre",
+        "reasonMissingReference": "hace referencia a algo que este dispositivo no tiene",
+        "reasonUnknown": "este dispositivo no pudo guardarlo"
+      },
+      "settingScope": {
+        "label": "Dónde se aplica",
+        "thisDevice": "Solo este dispositivo",
+        "allDevices": "Todos mis dispositivos",
+        "hint": "Si lo defines para todos los dispositivos, los que no hayan elegido lo suyo lo seguirán."
+      }
     },
     "setupFile": {
       "label": "Archivo de configuración",
@@ -1469,10 +1496,28 @@
       "subtitle": "Elige cómo se ve SmartChef en este dispositivo.",
       "light": "Claro",
       "dark": "Oscuro",
-      "system": "Sistema"
+      "system": "Sistema",
+      "accentLabel": "Colores de acento",
+      "accentHint": "Cambia el color de la aplicación y los que distinguen ingredientes, utensilios y técnicas en un paso. Se lleva a tus otros dispositivos.",
+      "accent": {
+        "garden": "Huerto",
+        "ember": "Brasa",
+        "indigo": "Índigo",
+        "plum": "Ciruela"
+      }
     },
     "serverAccount": {
       "newPassword": "Nueva contraseña (déjalo vacío para conservar la actual)"
+    },
+    "entityLabel": {
+      "recipe": "Receta",
+      "ingredient": "Ingrediente",
+      "tool": "Utensilio",
+      "tag": "Etiqueta",
+      "technique": "Técnica",
+      "profile": "Perfil",
+      "category": "Categoría",
+      "unit": "Unidad"
     }
   },
   "connect": {
@@ -1682,6 +1727,25 @@
       "document": "PDF",
       "audio": "audio",
       "video": "vídeo"
-    }
+    },
+    "multiImageOnly": "Solo las fotos y los escaneos se pueden enviar juntos como páginas de una misma receta."
+  },
+  "duration": {
+    "weekShort_one": "{{count}} sem",
+    "weekShort_other": "{{count}} sem",
+    "dayShort_one": "{{count}}d",
+    "dayShort_other": "{{count}}d",
+    "hourShort_one": "{{count}}h",
+    "hourShort_other": "{{count}}h",
+    "minuteShort_one": "{{count}}m",
+    "minuteShort_other": "{{count}}m",
+    "week_one": "{{count}} semana",
+    "week_other": "{{count}} semanas",
+    "day_one": "{{count}} día",
+    "day_other": "{{count}} días",
+    "hour_one": "{{count}} hora",
+    "hour_other": "{{count}} horas",
+    "minute_one": "{{count}} minuto",
+    "minute_other": "{{count}} minutos"
   }
 }

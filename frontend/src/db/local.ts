@@ -799,6 +799,49 @@ CREATE TABLE IF NOT EXISTS sync_repair (
   attempts    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (entity_type, entity_id)
 );
+
+-- An id another device published that this device resolved onto one of its
+-- own rows: the same real-world tool/tag/technique/category created
+-- independently on two devices before they had portable ids, so each minted
+-- its own crypto.randomUUID() and the active-name unique index rejected the
+-- other's row on arrival.
+--
+-- Permanent, NOT a repair queue. A device that never upgrades keeps
+-- publishing entity files and recipe references under the foreign id
+-- forever, and every one of them has to keep resolving. This is also why a
+-- re-key writes an alias instead of a Deletion Marker: a tombstone on the
+-- loser id would delete that device's live tool.
+-- One synced setting per row, the key AS the primary key.
+--
+-- A single settings blob would have been simpler, and wrong: sync_conflicts
+-- is keyed (entity_type, entity_id, field_name) and the 'newest' policy
+-- compares the entity's own updated_at, so a blob shares one timestamp
+-- across every setting in it — "theme changed here yesterday, language
+-- there today" would win or lose BOTH together. Per-key rows let each one
+-- fast-forward on its own merits.
+--
+-- The key being the id also makes these portable ids for free, and makes
+-- adding a setting one registry entry in services/settings.local.ts rather
+-- than a schema migration.
+--
+-- Deliberately NOT in backup.local.ts's exportSnapshot(): a backup is the
+-- recipe library, not this device's preferences.
+CREATE TABLE IF NOT EXISTS settings (
+  id         TEXT PRIMARY KEY,
+  value      TEXT,
+  deleted_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sync_alias (
+  entity_type TEXT NOT NULL,
+  foreign_id  TEXT NOT NULL,
+  local_id    TEXT NOT NULL,
+  created_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (entity_type, foreign_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_alias_local ON sync_alias(entity_type, local_id);
 `;
 
 // A small, sensible starting catalog so the app isn't a totally empty
@@ -1033,12 +1076,29 @@ export async function initLocalSchema(): Promise<void> {
     await addColumnIfMissing(db, 'sync_conflicts', 'local_updated_at', 'TEXT');
     await addColumnIfMissing(db, 'sync_conflicts', 'remote_updated_at', 'TEXT');
     await addColumnIfMissing(db, 'ingredient_translations', 'plural_translation', 'TEXT');
+    // A repair that can never succeed used to be retried — and re-reported
+    // to the user — on every single sync, forever. See
+    // syncReconcile.local.ts classifyRepairFailure().
+    await addColumnIfMissing(db, 'sync_repair', 'permanent', 'INTEGER NOT NULL DEFAULT 0');
+    await addColumnIfMissing(db, 'sync_repair', 'first_seen_at', 'TEXT');
     await dropDanglingForeignKeys(db);
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {
       await db.execute(SEED_SQL);
     }
     await rekeyPortableIds(db);
+    // Tools, techniques and tags — the same move, one release later, but
+    // with an alias for each loser id because these ARE referenced from
+    // other devices' trees. Must ship after the collision-safe write path
+    // in conflicts.local.ts, which is what lets a not-yet-upgraded device's
+    // stale references keep resolving. See db/rekeyNameEntities.ts.
+    const { rekeyNameEntityIds } = await import('./rekeyNameEntities');
+    const rekeyed = await rekeyNameEntityIds(db, portableSlug);
+    if (rekeyed > 0) {
+      console.info(`SmartChef: moved ${rekeyed} tool/technique/tag rows onto portable ids`);
+      const { resetAliasCache } = await import('../services/conflicts.local');
+      resetAliasCache();
+    }
   })();
   return initPromise;
 }

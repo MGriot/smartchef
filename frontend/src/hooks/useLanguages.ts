@@ -2,12 +2,17 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addCustomLanguage,
+  canHideLanguage,
   hasUiBundle,
+  hideLanguage,
+  listHiddenLanguages,
   listLanguages,
   removeCustomLanguage,
+  unhideLanguage,
   type Language,
 } from '../lib/languages';
 import { persistUiLang } from '../lib/uiLanguage';
+import { SETTINGS_CACHE_KEY } from '../lib/settingsCache';
 import { useStore } from '../store/app.store';
 
 // Custom languages live in localStorage, which fires no event in the tab
@@ -29,9 +34,11 @@ function notifyLanguagesChanged(): void {
 export function useLanguages() {
   const { i18n } = useTranslation();
   const [languages, setLanguages] = useState<Language[]>(() => listLanguages(i18n.language));
+  const [hidden, setHidden] = useState<Language[]>(() => listHiddenLanguages(i18n.language));
 
   const refresh = useCallback(() => {
     setLanguages(listLanguages(i18n.language));
+    setHidden(listHiddenLanguages(i18n.language));
   }, [i18n.language]);
 
   useEffect(() => {
@@ -45,8 +52,9 @@ export function useLanguages() {
   // Another tab (or the Electron second window) adding a language does fire
   // `storage`, so that case is covered too.
   useEffect(() => {
+    // Both lists live inside the settings cache blob now, under one key.
     const onStorage = (e: StorageEvent) => {
-      if (e.key === 'smartchef.customLanguages') refresh();
+      if (e.key === SETTINGS_CACHE_KEY) refresh();
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
@@ -62,7 +70,20 @@ export function useLanguages() {
     notifyLanguagesChanged();
   }, []);
 
-  return { languages, add, remove };
+  /** Takes a language out of every picker without deleting anything it
+   *  was used for — see lib/languages.ts. Works on the bundled four,
+   *  which `remove` deliberately cannot touch. */
+  const hide = useCallback((code: string) => {
+    hideLanguage(code);
+    notifyLanguagesChanged();
+  }, []);
+
+  const unhide = useCallback((code: string) => {
+    unhideLanguage(code);
+    notifyLanguagesChanged();
+  }, []);
+
+  return { languages, hidden, add, remove, hide, unhide, canHide: canHideLanguage };
 }
 
 /** The header/recipe-page language picker's own behaviour, in one place.

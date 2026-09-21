@@ -35,7 +35,7 @@ contextBridge.exposeInMainWorld('smartchefElectron', {
   // Standalone-mode geocode proxy (RegionPicker.tsx's free-text regions) —
   // see the `smartchef-geocode` handler in electron/src/index.ts for why
   // this can't just be a renderer-side fetch() call.
-  geocode: (q: string, limit?: number) => ipcRenderer.invoke('smartchef-geocode', q, limit),
+  geocode: (q: string, limit?: number, shape?: boolean) => ipcRenderer.invoke('smartchef-geocode', q, limit, shape),
   // Git Remote sync mode's HTTP transport — see the `smartchef-http-request`
   // handler in electron/src/index.ts for why this can't just be a
   // renderer-side fetch() call (same no-CORS-in-main-process reasoning as

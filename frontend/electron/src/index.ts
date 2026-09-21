@@ -168,27 +168,60 @@ ipcMain.handle('smartchef-get-hidden-clone-dir', async () => {
 // usage policy requires a real identifying User-Agent header, and browsers/
 // Chromium's fetch (unlike Node's) refuse to let script code set that
 // header at all — it's on the forbidden-headers list — regardless of CSP.
-interface GeocodeResult { lat: number; lng: number; displayName: string }
+interface GeocodeResult {
+  lat: number;
+  lng: number;
+  displayName: string;
+  /** The place's own outline, only when the caller asked for one. */
+  shape?: unknown;
+  /** Nominatim's classification: boundary/administrative is a region,
+   *  place/city is a point. */
+  category?: string;
+  kind?: string;
+}
 // Keyed by "<limit>:<query>" — a 1-result answer is not the answer to an
 // 8-result question, and the region picker asks both (one to place a pin,
 // many to offer city/sub-region suggestions as you type).
 const geocodeCache = new Map<string, GeocodeResult[]>();
-ipcMain.handle('smartchef-geocode', async (_e, q: string, limit?: number) => {
+/** Simplification tolerance in degrees (~1 km), and the size past which
+ *  the outline is dropped and only the point kept — an unsimplified
+ *  regional boundary is hundreds of kilobytes, and this one ends up inside
+ *  a recipe row that syncs to every device. Kept in step with
+ *  backend/src/routes/geocode.ts. */
+const POLYGON_THRESHOLD = 0.01;
+const MAX_SHAPE_BYTES = 60_000;
+
+/** The outline, unless it is not an area or is too big to carry. */
+function withinBudget(geojson: unknown): unknown {
+  if (!geojson || typeof geojson !== 'object') return undefined;
+  const type = (geojson as { type?: string }).type;
+  if (type !== 'Polygon' && type !== 'MultiPolygon') return undefined;
+  return JSON.stringify(geojson).length > MAX_SHAPE_BYTES ? undefined : geojson;
+}
+
+ipcMain.handle('smartchef-geocode', async (_e, q: string, limit?: number, shape?: boolean) => {
   const query = String(q ?? '').trim();
   if (!query) return [];
   const max = Math.min(8, Math.max(1, Math.trunc(Number(limit) || 1)));
-  const key = `${max}:${query.toLowerCase()}`;
+  const wantShape = shape === true;
+  const key = `${max}:${wantShape ? 'shape:' : ''}${query.toLowerCase()}`;
   if (geocodeCache.has(key)) return geocodeCache.get(key)!;
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=${max}&q=${encodeURIComponent(query)}`;
+    const shapeParams = wantShape ? `&polygon_geojson=1&polygon_threshold=${POLYGON_THRESHOLD}` : '';
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=${max}${shapeParams}&q=${encodeURIComponent(query)}`;
     const response = await fetch(url, {
       headers: { 'User-Agent': 'SmartChef/1.0 (self-hosted recipe app)' },
       signal: AbortSignal.timeout(8000),
     });
     if (!response.ok) throw new Error(`Nominatim error ${response.status}`);
-    const raw = (await response.json()) as Array<{ lat: string; lon: string; display_name: string }>;
-    const results: GeocodeResult[] = raw.map((r) => ({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), displayName: r.display_name }));
+    const raw = (await response.json()) as Array<{ lat: string; lon: string; display_name: string; geojson?: unknown; class?: string; type?: string }>;
+    const results: GeocodeResult[] = raw.map((r) => ({
+      lat: parseFloat(r.lat),
+      lng: parseFloat(r.lon),
+      displayName: r.display_name,
+      ...(wantShape ? { shape: withinBudget(r.geojson), category: r.class, kind: r.type } : {}),
+    }));
     geocodeCache.set(key, results);
     return results;
   } catch {

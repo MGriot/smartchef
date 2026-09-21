@@ -22,13 +22,13 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne } from '../db/local';
-import { getEntityTable, resyncEntityToGit, forceApplyEntity } from './conflicts.local';
+import { getEntityTable, resyncEntityToGit, forceApplyEntity, getEntityDisplayName } from './conflicts.local';
 import { unitSymbolsFromSteps } from '../lib/sync/referenceHeal';
 
 /** Every synced entity type, in the order writes must happen: categories
  *  and units before the ingredients that name them, and so on — the same
  *  order mergeBridge.ts merges in. */
-export const RECONCILE_TYPES = ['category', 'unit', 'tag', 'tool', 'technique', 'ingredient', 'profile', 'recipe'] as const;
+export const RECONCILE_TYPES = ['setting', 'category', 'unit', 'tag', 'tool', 'technique', 'ingredient', 'profile', 'recipe'] as const;
 
 /** Records that `entityType:id`'s file now reflects the row as of `updatedAt`. */
 /** Bookkeeping only: never fails the write it is recording — at worst the
@@ -203,16 +203,96 @@ export async function repairCategories(): Promise<{ moved: number; restored: num
   return { moved, restored: orphaned.length, folded };
 }
 
+/** Retries before an entity is given up on regardless of how its error
+ *  classifies. This is the backstop that does NOT depend on
+ *  classifyRepairFailure() getting the taxonomy right. */
+export const MAX_REPAIR_ATTEMPTS = 5;
+
+/** Whether retrying this entity on the next cycle could plausibly succeed.
+ *
+ *  Deliberately conservative: anything unrecognized is 'transient', so a
+ *  failure mode nobody anticipated is retried rather than silently
+ *  abandoned. Being wrong in that direction costs one wasted retry per
+ *  sync until MAX_REPAIR_ATTEMPTS; being wrong the other way loses data
+ *  the user can still see on another device. */
+export function classifyRepairFailure(error: string): 'transient' | 'permanent' {
+  const e = error.toLowerCase();
+  // A dependency that has not arrived yet genuinely may arrive next cycle
+  // — mergeBridge writes types in order, but a partial fetch does not.
+  if (e.includes('foreign key constraint failed')) return 'transient';
+  if (e.includes('database is locked') || e.includes('database table is locked')) return 'transient';
+  if (e.includes('notfound') || e.includes('could not find') || e.includes('enoent')) return 'transient';
+  // These describe the entity itself, and will describe it identically
+  // forever.
+  if (e.includes('unique constraint failed')) return 'permanent';
+  if (e.includes('not null constraint failed')) return 'permanent';
+  if (e.includes('no such column') || e.includes('no such table')) return 'permanent';
+  if (e.includes('unknown entity type')) return 'permanent';
+  if (e.includes('is not a recognized scalar field')) return 'permanent';
+  if (e.includes('unexpected token') || e.includes('is not valid json')) return 'permanent';
+  return 'transient';
+}
+
 export async function queueRepair(entityType: string, entityId: string, error: string): Promise<void> {
   try {
     await query(
-      `INSERT INTO sync_repair (entity_type, entity_id, error, attempts) VALUES ($1, $2, $3, 0)
-       ON CONFLICT(entity_type, entity_id) DO UPDATE SET error = excluded.error`,
+      `INSERT INTO sync_repair (entity_type, entity_id, error, attempts, first_seen_at) VALUES ($1, $2, $3, 0, now())
+       ON CONFLICT(entity_type, entity_id) DO UPDATE SET
+         error = excluded.error,
+         -- A DIFFERENT error is new information and earns a fresh chance.
+         -- The identical error for the sixth time is not, and resetting
+         -- the flag here is exactly what made gitSync.ts's re-queue of
+         -- every failure an unbreakable loop.
+         permanent = CASE WHEN sync_repair.error = excluded.error THEN sync_repair.permanent ELSE 0 END`,
       [entityType, entityId, error]
     );
   } catch (err) {
     console.warn('SmartChef: queueing a repair failed:', err);
   }
+}
+
+export interface StuckEntity {
+  entityType: string;
+  entityId: string;
+  displayName: string | null;
+  error: string;
+  attempts: number;
+  firstSeenAt: string | null;
+}
+
+/** Entities that will never apply on this device without intervention.
+ *  A standing condition, not a per-sync event — Account.tsx renders these
+ *  from here rather than from the last cycle's result. */
+export async function listStuckEntities(): Promise<StuckEntity[]> {
+  const rows = await query<{ entity_type: string; entity_id: string; error: string | null; attempts: number; first_seen_at: string | null }>(
+    `SELECT entity_type, entity_id, error, attempts, first_seen_at FROM sync_repair WHERE permanent = 1 ORDER BY first_seen_at, entity_type, entity_id`
+  );
+  const out: StuckEntity[] = [];
+  for (const r of rows) {
+    out.push({
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      displayName: await getEntityDisplayName(r.entity_type, r.entity_id).catch(() => null),
+      error: r.error ?? '',
+      attempts: r.attempts,
+      firstSeenAt: r.first_seen_at,
+    });
+  }
+  return out;
+}
+
+/** Puts every given-up entity back in the queue — the user's "Try again",
+ *  for after they have removed whatever was blocking it. */
+export async function retryStuckEntities(): Promise<number> {
+  const rows = await query<{ entity_type: string }>(`SELECT entity_type FROM sync_repair WHERE permanent = 1`);
+  await query(`UPDATE sync_repair SET permanent = 0, attempts = 0 WHERE permanent = 1`);
+  return rows.length;
+}
+
+/** Drops one stuck entity entirely: the user has decided they do not want
+ *  it here. It will be re-offered if another device republishes it. */
+export async function forgetStuckEntity(entityType: string, entityId: string): Promise<void> {
+  await query(`DELETE FROM sync_repair WHERE entity_type = $1 AND entity_id = $2`, [entityType, entityId]);
 }
 
 /** Ids of the rows this device holds, per type. */
@@ -237,7 +317,10 @@ export async function pullRepoIntoDatabase(
   readHead: (entityType: string, entityId: string) => Promise<Record<string, unknown> | null>,
 ): Promise<PullOutcome> {
   const outcome: PullOutcome = { applied: 0, failed: [] };
-  const repairs = await query<{ entity_type: string; entity_id: string }>(`SELECT entity_type, entity_id FROM sync_repair`);
+  // permanent = 0 only. A row that can never apply is not retried, so it
+  // stops feeding PullOutcome.failed -> SyncResult.failedEntities and
+  // stops re-rendering the same red line after every single sync.
+  const repairs = await query<{ entity_type: string; entity_id: string }>(`SELECT entity_type, entity_id FROM sync_repair WHERE permanent = 0`);
   const repairKeys = new Set(repairs.map((r) => `${r.entity_type}:${r.entity_id}`));
 
   for (const entityType of RECONCILE_TYPES) {
@@ -265,12 +348,21 @@ export async function pullRepoIntoDatabase(
         outcome.applied++;
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
+        const permanent = classifyRepairFailure(error) === 'permanent' ? 1 : 0;
         await query(
-          `INSERT INTO sync_repair (entity_type, entity_id, error, attempts) VALUES ($1, $2, $3, 1)
-           ON CONFLICT(entity_type, entity_id) DO UPDATE SET error = excluded.error, attempts = sync_repair.attempts + 1`,
-          [entityType, entityId, error]
+          `INSERT INTO sync_repair (entity_type, entity_id, error, attempts, permanent, first_seen_at)
+           VALUES ($1, $2, $3, 1, $4, now())
+           ON CONFLICT(entity_type, entity_id) DO UPDATE SET
+             error = excluded.error,
+             attempts = sync_repair.attempts + 1,
+             -- The attempt ceiling is the real loop-breaker: it settles an
+             -- entity even when classifyRepairFailure() misjudged it.
+             permanent = CASE WHEN $4 = 1 OR sync_repair.attempts + 1 >= ${MAX_REPAIR_ATTEMPTS} THEN 1 ELSE 0 END,
+             first_seen_at = COALESCE(sync_repair.first_seen_at, now())`,
+          [entityType, entityId, error, permanent]
         );
-        outcome.failed.push({ entityType, entityId, error });
+        // Reported as "retrying" only while it actually will be.
+        if (permanent === 0) outcome.failed.push({ entityType, entityId, error });
       }
     }
   }

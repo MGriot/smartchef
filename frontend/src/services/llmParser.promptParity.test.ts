@@ -26,9 +26,17 @@ const REPO = resolve(HERE, '../../..');
 const BACKEND = resolve(REPO, 'backend/src/services/llm.parser.ts');
 const STANDALONE = resolve(REPO, 'frontend/src/services/llmParser.local.ts');
 
-/** Everything between a BEGIN/END marker pair, markers included. */
+/** Everything between a BEGIN/END marker pair, markers included.
+ *
+ *  Line endings are normalised first. The two files are checked out with
+ *  different ones on Windows (the backend copy has CRLF, the frontend copy
+ *  LF), which made this comparison fail on every line while the prompts
+ *  themselves were identical — and a test that is always red is a test
+ *  nobody reads. It is not a loosening: a template literal normalises CR
+ *  and CRLF to LF per the language spec, so the string the model actually
+ *  receives is the same either way, which is exactly what this is for. */
 function twinBlock(file: string, label: string): string {
-  const source = readFileSync(file, 'utf8');
+  const source = readFileSync(file, 'utf8').split('\r\n').join('\n');
   const begin = source.indexOf(`BEGIN TWIN BLOCK: ${label}`);
   const end = source.indexOf(`END TWIN BLOCK: ${label}`);
   expect(begin, `${file} is missing the "${label}" BEGIN marker`).toBeGreaterThan(-1);

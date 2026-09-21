@@ -209,6 +209,7 @@ mode
 model_training
 money
 more
+more_horiz
 move
 move_down
 moving
@@ -280,6 +281,7 @@ resize
 restaurant
 restore
 resume
+road
 room
 route
 router
@@ -356,6 +358,7 @@ title
 today
 token
 toolbar
+tooltip
 transform
 translate
 travel

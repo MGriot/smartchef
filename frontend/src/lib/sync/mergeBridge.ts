@@ -55,6 +55,10 @@ import { mapWithConcurrency, TRANSFER_CONCURRENCY } from './gitObjectTransport';
 // Categories and units first (ingredients and recipe rows point at them),
 // tags before ingredients (ingredient_tags is a real foreign key).
 const ENTITY_DIRS: Array<{ dirName: string; entityType: string }> = [
+  // A leaf in both directions — nothing references a setting and a setting
+  // references nothing — so its position is free. First, so a preference
+  // another device changed is in place before anything reads it.
+  { dirName: 'settings', entityType: 'setting' },
   { dirName: 'categories', entityType: 'category' },
   { dirName: 'units', entityType: 'unit' },
   { dirName: 'tags', entityType: 'tag' },

@@ -627,12 +627,27 @@ recipeRouter.post("/parse", parseBodyParser, async (req: Request, res: Response)
       // carries whatever extra context the user typed.
       input: z.string(),
       inputType: z.enum(["url", "text", "media"]),
+      // One file, or several images that are pages of one recipe. The
+      // single-object form is still accepted so an older client keeps
+      // working against a newer server.
       media: z
-        .object({
-          mimeType: z.string().min(1),
-          data: z.string().min(1),
-          fileName: z.string().optional(),
-        })
+        .union([
+          z.object({
+            mimeType: z.string().min(1),
+            data: z.string().min(1),
+            fileName: z.string().optional(),
+          }),
+          z
+            .array(
+              z.object({
+                mimeType: z.string().min(1),
+                data: z.string().min(1),
+                fileName: z.string().optional(),
+              })
+            )
+            .min(1)
+            .max(8),
+        ])
         .optional(),
       // Which language to label the library catalog in when it is handed
       // to the model — see importCatalog.service.ts.

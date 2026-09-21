@@ -18,7 +18,7 @@
 // ids (see portableCategoryId/portableUnitId).
 // ════════════════════════════════════════════════════════════════════════
 
-import { query } from '../db/local';
+import { query, queryOne } from '../db/local';
 
 function newId(): string {
   return crypto.randomUUID();
@@ -253,4 +253,41 @@ export function portableCategoryId(name: string): string {
 
 export function portableUnitId(symbol: string): string {
   return `unit-${slugify(symbol)}`;
+}
+
+// Tools, techniques and tags carry the same hazard categories and units
+// carried before ADR 0006: created with crypto.randomUUID() on whichever
+// device saw them first, so the same real-world "Whisk" is two unrelated
+// ids on two devices. Their tables also hold a unique index on the active
+// name, so the second device's row cannot even be inserted — see
+// conflicts.local.ts NAME_UNIQUE_TYPES.
+//
+// Unlike a unit symbol, a tool's name is user-editable. That does not make
+// a name-derived id wrong: the id is assigned at birth (and at collision
+// repair) and NEVER recomputed on rename, exactly as updateCategory()
+// already behaves. It only has to be the id two devices would independently
+// arrive at for the same thing, not a name that never changes.
+
+export function portableToolId(name: string): string {
+  return `tool-${slugify(name)}`;
+}
+
+export function portableTechniqueId(name: string): string {
+  return `technique-${slugify(name)}`;
+}
+
+export function portableTagId(name: string): string {
+  return `tag-${slugify(name)}`;
+}
+
+/** A new row's id: the portable one for its name when that id is free, a
+ *  random one otherwise. Two devices creating the same thing land on the
+ *  same id; two genuinely different things whose names happen to slugify
+ *  alike still get rows of their own.
+ *
+ *  Lives here rather than in ingredients.local.ts (which has had a private
+ *  copy since ADR 0006) so tags and techniques can use it without
+ *  importing the ingredients module for one helper. */
+export async function freshPortableId(table: string, portable: string): Promise<string> {
+  return (await queryOne(`SELECT id FROM ${table} WHERE id=$1`, [portable])) ? crypto.randomUUID() : portable;
 }

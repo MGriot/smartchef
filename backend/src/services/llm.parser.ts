@@ -20,6 +20,12 @@ setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 
 const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "llama3";
+// Ollama accepts an `images` array against ANY model, and a text-only one
+// silently drops the picture and answers from the prompt alone — which
+// reads as the model inventing a recipe. So a media parse uses a vision
+// model instead. Not bundled: `ollama pull llama3.2-vision` is the
+// operator's job. Kept in step with the standalone twin.
+const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL ?? "llama3.2-vision:11b";
 
 /** account.ollama_url overrides the server-wide default above when set —
  *  lets a user point at an Ollama instance on a different host/port (e.g.
@@ -541,6 +547,29 @@ export function providersSupporting(kind: MediaKind): string[] {
   return Object.keys(MEDIA_SUPPORT).filter((p) => MEDIA_SUPPORT[p].includes(kind));
 }
 
+/** Several files as ONE recipe — a recipe printed across two cookbook
+ *  pages, or photographed in three shots. Images only, and deliberately:
+ *  two photos of one recipe are pages of a whole, while two voice notes
+ *  are two recordings. Kept identical in shape to the standalone twin's
+ *  assertMediaListSupported(). */
+function assertMediaListSupported(provider: string, media: LLMParseMedia[]): void {
+  if (media.length === 0) throw new MediaNotSupportedError("No file was attached.");
+  for (const m of media) assertMediaSupported(provider, m);
+  if (media.length === 1) return;
+  const kinds = media.map((m) => mediaKindFor(m.mimeType));
+  if (kinds.some((k) => k !== "image")) {
+    throw new MediaNotSupportedError(
+      "Only images can be sent together as pages of one recipe — send a PDF, a voice note or a video on its own."
+    );
+  }
+  const totalBytes = media.reduce((sum, m) => sum + Math.floor((m.data.length * 3) / 4), 0);
+  if (totalBytes > MAX_MEDIA_BYTES) {
+    throw new MediaNotSupportedError(
+      `Those ${media.length} images come to more than ${Math.round(MAX_MEDIA_BYTES / (1024 * 1024))} MB together — send fewer at a time.`
+    );
+  }
+}
+
 function assertMediaSupported(provider: string, media: LLMParseMedia): void {
   const kind = mediaKindFor(media.mimeType);
   if (!kind) {
@@ -575,7 +604,7 @@ async function callOllama(
   content: string,
   systemPrompt: string,
   ollamaUrl: string = OLLAMA_URL,
-  media?: LLMParseMedia
+  media?: LLMParseMedia[]
 ): Promise<string> {
   // Ollama attaches images as a base64 array on the message itself. It
   // accepts this against ANY model: a text-only one silently drops the
@@ -583,12 +612,13 @@ async function callOllama(
   // table's error text talks about needing a vision model rather than
   // assuming the right request shape is enough.
   const userMessage: Record<string, unknown> = { role: "user", content };
-  if (media) userMessage.images = [media.data];
+  if (media?.length) userMessage.images = media.map((m) => m.data);
+  const model = media?.length ? OLLAMA_VISION_MODEL : OLLAMA_MODEL;
   const response = await fetch(`${ollamaUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: OLLAMA_MODEL,
+      model,
       stream: false,
       messages: [
         { role: "system", content: systemPrompt },
@@ -647,7 +677,7 @@ export async function getConfiguredProvider(): Promise<string> {
 export async function callConfiguredProvider(
   content: string,
   systemPrompt: string,
-  media?: LLMParseMedia
+  media?: LLMParseMedia[]
 ): Promise<string> {
   const account = await queryOne<LLMAccountConfig>(
     `SELECT llm_provider, anthropic_api_key_encrypted, gemini_api_key_encrypted, openai_api_key_encrypted, ollama_url FROM account LIMIT 1`
@@ -656,7 +686,7 @@ export async function callConfiguredProvider(
   // Checked before the key checks below on purpose: "Gemini can't read
   // video" is the more useful sentence than "no key saved" when both are
   // true, since pasting a key would not have helped.
-  if (media) assertMediaSupported(provider, media);
+  if (media?.length) assertMediaListSupported(provider, media);
 
   if (provider === "anthropic") {
     if (!account?.anthropic_api_key_encrypted) {
@@ -824,9 +854,14 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
  *  as prose to summarize. Italian, like the system prompt, and for the same
  *  reason: the two are read together, and the unit-normalization rule is
  *  written against Italian. Kept identical to the standalone twin's. */
-const MEDIA_INSTRUCTION: Record<MediaKind, string> = {
+const MEDIA_INSTRUCTION: Record<MediaKind | "imageMulti", string> = {
   image:
     "Estrai la ricetta dall'immagine allegata (una foto, una scansione o uno screenshot di una pagina di ricetta). Leggi tutto il testo visibile, comprese le liste di ingredienti e i passaggi.",
+  // Kept beside the singular form rather than built by string surgery: the
+  // two say genuinely different things, and the multi-page one has to be
+  // explicit that these are ONE recipe or the model returns two.
+  imageMulti:
+    "Estrai UNA SOLA ricetta dalle immagini allegate: sono pagine o scatti successivi della stessa ricetta, in ordine. Uniscile — la lista degli ingredienti puo trovarsi su un'immagine e i passaggi su un'altra. Non restituire piu ricette e non ripetere un ingrediente che compare su due immagini.",
   document: "Estrai la ricetta dal documento allegato.",
   audio:
     "Ascolta l'audio allegato: è qualcuno che racconta o detta una ricetta. Trascrivila mentalmente e restituisci la ricetta strutturata. Gli ingredienti e le quantità possono essere detti in modo informale (\"un paio di cucchiai\") — in quel caso usa quantityText.",
@@ -857,20 +892,22 @@ export async function parseRecipeWithLLM(req: LLMParseRequest): Promise<LLMParse
   // throws away the layout that tells a model which column is the
   // ingredient list.
   if (req.inputType === "media") {
-    if (!req.media?.data) throw new MediaNotSupportedError("No file was attached.");
-    const kind = mediaKindFor(req.media.mimeType);
+    const files = (Array.isArray(req.media) ? req.media : req.media ? [req.media] : []).filter((m) => m?.data);
+    if (files.length === 0) throw new MediaNotSupportedError("No file was attached.");
+    const kind = mediaKindFor(files[0].mimeType);
     if (!kind) {
       throw new MediaNotSupportedError(
-        `SmartChef doesn't know what to do with a ${req.media.mimeType || "file of that type"}.`
+        `SmartChef doesn't know what to do with a ${files[0].mimeType || "file of that type"}.`
       );
     }
     const extra = req.input.trim();
-    const prompt = `${MEDIA_INSTRUCTION[kind]}${extra ? `
+    const instruction = files.length > 1 && kind === "image" ? MEDIA_INSTRUCTION.imageMulti : MEDIA_INSTRUCTION[kind];
+    const prompt = `${instruction}${extra ? `
 
 Note aggiuntive dall'utente:
 ${extra}` : ""}`;
     return dropUnknownCatalogNames(
-      parseJsonResponse(await callConfiguredProvider(prompt, systemPrompt, req.media)),
+      parseJsonResponse(await callConfiguredProvider(prompt, systemPrompt, files)),
       catalog,
       provider
     );

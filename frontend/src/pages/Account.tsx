@@ -12,8 +12,12 @@ import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal
 // hook to call — and passing it keeps them re-rendering with the language.
 import type { TFunction } from 'i18next';
 import { stalePush } from '../lib/sync/syncStatus';
+import type { SettingScope } from '../lib/sync/syncSettings';
+import { ACCENT_SCHEME, getSetting } from '../lib/settingsRegistry';
+import { applyAccentScheme } from '../lib/applySettings';
+import type { StuckEntity } from '../services/syncReconcile.local';
 import { useLanguages } from '../hooks/useLanguages';
-import { isValidLanguageCode, languageLabel, normalizeLanguageCode } from '../lib/languages';
+import { hasUiBundle, isValidLanguageCode, languageLabel, normalizeLanguageCode } from '../lib/languages';
 import { persistUiLang } from '../lib/uiLanguage';
 import type { ThemeMode } from '../store/app.store';
 import { apiFetch, isNative, getServerUrl } from '../lib/api';
@@ -126,9 +130,18 @@ function SyncSummaryPanel({ summary }: { summary: SyncSummary }) {
 /** The singular entity names Structured Merge reports against, mapped to
  *  the plural-aware `account.entity.*` keys. An unknown type falls back to
  *  its own raw name rather than being guessed at with an English "s". */
+/** A stuck entity's raw SQLite error, said in a sentence a cook can act on.
+ *  The raw text is still in the console; this is the line on the screen. */
+function stuckReason(t: TFunction, error: string): string {
+  const e = error.toLowerCase();
+  if (e.includes('unique constraint failed')) return t('account.folderSync.stuck.reasonDuplicateName');
+  if (e.includes('foreign key constraint failed')) return t('account.folderSync.stuck.reasonMissingReference');
+  return t('account.folderSync.stuck.reasonUnknown');
+}
+
 const ENTITY_TYPE_KEY: Record<string, string> = {
   recipe: 'recipes', ingredient: 'ingredients', tool: 'tools', tag: 'tags', technique: 'techniques', profile: 'profiles',
-  category: 'categories', unit: 'units',
+  category: 'categories', unit: 'units', setting: 'settings',
 };
 
 /** "3 recipes, 5 ingredients" — the "which type" half of what a sync cycle
@@ -231,8 +244,18 @@ function FolderSyncCard() {
   const [resyncProgress, setResyncProgress] = useState<{ phase: string; done: number; total: number } | null>(null);
   const [repairing, setRepairing] = useState(false);
   const [repairMessage, setRepairMessage] = useState<string | null>(null);
+  // Entities sync has given up on. A STANDING condition, so it is read from
+  // sync_repair rather than from the last cycle's SyncResult — the old red
+  // line only appeared on the syncs that happened to retry them, which is
+  // also why the same handful of tools were re-reported forever.
+  const [stuckEntities, setStuckEntities] = useState<StuckEntity[]>([]);
+  const [retryingStuck, setRetryingStuck] = useState(false);
   // ADR 0006: how a field both devices changed differently is settled.
   const [conflictPolicy, setConflictPolicyState] = useState<ConflictPolicy>('newest');
+  // Whether this choice is this device's alone or the library's default
+  // for every device that has not made one of its own. Defaults to
+  // 'device', which is how every existing install already behaves.
+  const [policyScope, setPolicyScope] = useState<SettingScope>('device');
   // "Replace with synced data" — preview first, then an explicit confirm.
   const [replacePreview, setReplacePreview] = useState<ReplacePreview | null>(null);
   const [preparingReplace, setPreparingReplace] = useState(false);
@@ -257,15 +280,17 @@ function FolderSyncCard() {
   /** Re-reads exactly what a Setup File import can change, so the card shows
    *  the imported values instead of the ones it loaded at mount. */
   const reloadSyncSettings = async () => {
-    const { getSyncMode, getGitRemoteConfig, getSyncInterval, getConflictPolicy } = await import('../lib/sync/syncSettings');
-    const [mode, interval, gitRemoteConfig, policy] = await Promise.all([
+    const { getSyncMode, getGitRemoteConfig, getSyncInterval, getConflictPolicy, hasConflictPolicyOverride } = await import('../lib/sync/syncSettings');
+    const [mode, interval, gitRemoteConfig, policy, overridden] = await Promise.all([
       getSyncMode(),
       getSyncInterval(),
       getGitRemoteConfig(),
       getConflictPolicy(),
+      hasConflictPolicyOverride(),
     ]);
     setSyncModeState(mode);
     setConflictPolicyState(policy);
+    setPolicyScope(overridden ? 'device' : 'all-devices');
     setIntervalValueState(interval.value);
     setIntervalUnitState(interval.unit);
     setGitRemoteUrl(gitRemoteConfig?.url ?? '');
@@ -301,6 +326,19 @@ function FolderSyncCard() {
     setPauseReason(reason);
     setLastPushAt(pushedAt);
     setAccessProblem(problem);
+    const { listStuckEntities } = await import('../services/syncReconcile.local');
+    setStuckEntities(await listStuckEntities().catch(() => []));
+  };
+
+  const handleRetryStuck = async () => {
+    setRetryingStuck(true);
+    try {
+      const { retryStuckEntities } = await import('../services/syncReconcile.local');
+      await retryStuckEntities();
+      await refreshSyncHealth();
+    } finally {
+      setRetryingStuck(false);
+    }
   };
 
   useEffect(() => {
@@ -456,10 +494,11 @@ function FolderSyncCard() {
     }
   };
 
-  const handleConflictPolicyChange = async (policy: ConflictPolicy) => {
+  const handleConflictPolicyChange = async (policy: ConflictPolicy, scope: SettingScope = policyScope) => {
     setConflictPolicyState(policy);
+    setPolicyScope(scope);
     const { setConflictPolicy } = await import('../lib/sync/syncSettings');
-    await setConflictPolicy(policy);
+    await setConflictPolicy(policy, scope);
     if (policy === 'newest') {
       // Switching to automatic settles what is already waiting, too —
       // otherwise the card would keep asking about the old backlog.
@@ -902,6 +941,25 @@ function FolderSyncCard() {
               );
             })}
           </div>
+          <div role="radiogroup" aria-label={t('account.folderSync.settingScope.label')} className="flex flex-wrap gap-2 mt-2">
+            {(['device', 'all-devices'] as SettingScope[]).map((scope) => (
+              <button
+                key={scope}
+                type="button"
+                role="radio"
+                aria-checked={policyScope === scope}
+                onClick={() => void handleConflictPolicyChange(conflictPolicy, scope)}
+                className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+                  policyScope === scope
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300'
+                }`}
+              >
+                {t(`account.folderSync.settingScope.${scope === 'device' ? 'thisDevice' : 'allDevices'}`)}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.settingScope.hint')}</p>
         </div>
 
         <div>
@@ -1036,12 +1094,39 @@ function FolderSyncCard() {
           </p>
         )}
         {!syncing && result && result.failedEntities.length > 0 && (
-          <p className="text-xs text-red-600 font-medium">
+          <p className="text-xs text-amber-600 font-medium">
             {t('account.folderSync.failedEntities', {
               count: result.failedEntities.length,
               types: result.failedEntities.map((f) => f.entityType).join(', '),
             })}
           </p>
+        )}
+        {stuckEntities.length > 0 && (
+          <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/60 dark:bg-red-950/20 p-3 space-y-2">
+            <p className="text-xs font-bold text-red-700 dark:text-red-400">
+              {t('account.folderSync.stuck.title', { count: stuckEntities.length })}
+            </p>
+            <ul className="space-y-1">
+              {stuckEntities.slice(0, 8).map((e) => (
+                <li key={`${e.entityType}:${e.entityId}`} className="text-xs text-red-700/90 dark:text-red-300/90">
+                  <span className="font-medium">{t(`account.entityLabel.${e.entityType}`, { defaultValue: e.entityType })}</span>
+                  {e.displayName ? ` "${e.displayName}"` : ''} — {stuckReason(t, e.error)}
+                </li>
+              ))}
+              {stuckEntities.length > 8 && (
+                <li className="text-xs text-red-700/70 dark:text-red-300/70">
+                  {t('account.folderSync.stuck.andMore', { count: stuckEntities.length - 8 })}
+                </li>
+              )}
+            </ul>
+            <button
+              onClick={handleRetryStuck}
+              disabled={retryingStuck}
+              className="text-xs font-bold text-red-700 dark:text-red-400 underline disabled:opacity-50"
+            >
+              {retryingStuck ? t('account.folderSync.stuck.retrying') : t('account.folderSync.stuck.tryAgain')}
+            </button>
+          </div>
         )}
         {!syncing && result && Object.keys(result.entityScanCounts).length > 0 && (
           <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">
@@ -2198,10 +2283,32 @@ const THEME_OPTIONS: { mode: ThemeMode; labelKey: string; icon: string }[] = [
   { mode: 'system', labelKey: 'account.appearance.system', icon: 'contrast' },
 ];
 
+/** The swatches are the scheme's own primary/tool/technique, so the picker
+ *  shows the actual palette rather than a name. Values mirror theme.css —
+ *  a small duplication, but the alternative is reading computed styles for
+ *  a scheme that is not currently applied. */
+const ACCENT_SCHEMES: { id: string; swatches: [string, string, string] }[] = [
+  { id: 'garden', swatches: ['#006C49', '#D97706', '#0284C7'] },
+  { id: 'ember', swatches: ['#B03A1A', '#7C6F1E', '#2E6F8E'] },
+  { id: 'indigo', swatches: ['#4338CA', '#C2410C', '#0F766E'] },
+  { id: 'plum', swatches: ['#86198F', '#A16207', '#1D4ED8'] },
+];
+
 function AppearanceCard() {
   const { t } = useTranslation();
   const themeMode = useStore((s) => s.themeMode);
   const setThemeMode = useStore((s) => s.setThemeMode);
+  const [accent, setAccent] = useState<string>(() => getSetting<string>(ACCENT_SCHEME));
+
+  const handleAccent = (scheme: string) => {
+    // Applied before it is saved, for the same reason the theme is: the
+    // colours changing IS the feedback, and it must not wait on SQLite.
+    setAccent(scheme);
+    applyAccentScheme(scheme);
+    void import('../services/settings.local')
+      .then(({ setSetting }) => setSetting(ACCENT_SCHEME, scheme))
+      .catch((err) => console.warn('SmartChef: saving the accent scheme failed:', err));
+  };
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
@@ -2226,13 +2333,44 @@ function AppearanceCard() {
           </button>
         ))}
       </div>
+
+      <p className="sc-label mt-6 mb-2">{t('account.appearance.accentLabel')}</p>
+      <div role="radiogroup" aria-label={t('account.appearance.accentLabel')} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {ACCENT_SCHEMES.map((scheme) => (
+          <button
+            key={scheme.id}
+            type="button"
+            role="radio"
+            aria-checked={accent === scheme.id}
+            onClick={() => handleAccent(scheme.id)}
+            className={`flex flex-col items-start gap-2 rounded-2xl border-2 p-3 transition-colors ${
+              accent === scheme.id
+                ? 'border-primary bg-primary/5'
+                : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'
+            }`}
+          >
+            <span className="flex gap-1" aria-hidden="true">
+              {scheme.swatches.map((hex) => (
+                <span key={hex} className="w-4 h-4 rounded-full border border-black/5" style={{ backgroundColor: hex }} />
+              ))}
+            </span>
+            <span className="text-xs font-black text-zinc-900 dark:text-zinc-100">
+              {t(`account.appearance.accent.${scheme.id}`)}
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-2 leading-relaxed">
+        {t('account.appearance.accentHint')}
+      </p>
     </div>
   );
 }
 
 function LanguagesCard() {
   const { t, i18n } = useTranslation();
-  const { languages, add, remove } = useLanguages();
+  const { languages, hidden, add, remove, hide, unhide, canHide } = useLanguages();
+  const [showHidden, setShowHidden] = useState(false);
   const contentLang = useStore((s) => s.contentLang);
   const setContentLang = useStore((s) => s.setContentLang);
   const accountId = useStore((s) => s.account?.id);
@@ -2274,7 +2412,12 @@ function LanguagesCard() {
     // asking the backend for a language no longer in the picker, so fall
     // back to English first.
     if (normalizeLanguageCode(code) === normalizeLanguageCode(contentLang)) setContentLang('en');
-    remove(code);
+    // A custom language leaves the list outright; a bundled one is hidden,
+    // because the shipped four are a fact about the build and cannot be
+    // un-shipped. Both disappear from every picker, which is what the user
+    // is actually asking for.
+    if (hasUiBundle(code)) hide(code);
+    else remove(code);
   };
 
   return (
@@ -2314,21 +2457,58 @@ function LanguagesCard() {
           >
             {l.label}
             <span className="opacity-50 font-mono text-[10px] uppercase">{l.code}</span>
-            {l.hasUiBundle ? (
-              <span title={t('languages.bundledHint')} className="material-symbols-outlined text-[14px] opacity-50">lock</span>
-            ) : (
+            {canHide(l.code) ? (
               <button
                 type="button"
                 onClick={() => handleRemove(l.code)}
-                title={t('languages.remove')}
+                title={l.hasUiBundle ? t('languages.hide') : t('languages.remove')}
                 className="w-5 h-5 rounded-full flex items-center justify-center hover:bg-primary/15 transition-colors"
               >
                 <span className="material-symbols-outlined text-[14px]">close</span>
               </button>
+            ) : (
+              // English alone cannot go: it is what every missing
+              // translation falls back to.
+              <span title={t('languages.englishRequired')} className="material-symbols-outlined text-[14px] opacity-50">lock</span>
             )}
           </span>
         ))}
       </div>
+
+      {hidden.length > 0 && (
+        <div className="mb-5">
+          <button
+            type="button"
+            onClick={() => setShowHidden((v) => !v)}
+            className="text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-primary transition-colors inline-flex items-center gap-1"
+          >
+            <span className="material-symbols-outlined text-[14px]">{showHidden ? 'expand_less' : 'expand_more'}</span>
+            {t('languages.hiddenCount', { count: hidden.length })}
+          </button>
+          {showHidden && (
+            <>
+              <div className="flex flex-wrap gap-2 mt-3">
+                {hidden.map((l) => (
+                  <button
+                    key={l.code}
+                    type="button"
+                    onClick={() => unhide(l.code)}
+                    title={t('languages.unhide')}
+                    className="inline-flex items-center gap-2 pl-3 pr-2 py-1.5 rounded-full text-xs font-bold border border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    {l.label}
+                    <span className="opacity-50 font-mono text-[10px] uppercase">{l.code}</span>
+                    <span className="material-symbols-outlined text-[14px]">add</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-2 leading-relaxed">
+                {t('languages.hiddenHint')}
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleAdd} className="flex flex-wrap items-start gap-2">
         <div className="flex-1 min-w-[180px]">

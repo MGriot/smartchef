@@ -17,6 +17,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne, chunk, inPlaceholders, type LocalClient } from "../db/local";
+import { freshPortableId, portableTagId } from "./syncExtras.local";
 
 function newId(): string {
   return crypto.randomUUID();
@@ -143,7 +144,8 @@ const resolveGroupName = (groupName: string | undefined | null): string =>
   groupName === undefined || groupName === null ? 'Altro' : groupName.trim();
 
 export async function createTag(d: TagInput): Promise<{ id: string }> {
-  const id = d.id ?? newId();
+  // Portable — see createTool() in ingredients.local.ts.
+  const id = d.id ?? await freshPortableId('tags', portableTagId(d.name));
   await query(
     "INSERT INTO tags (id, name, group_name, color, icon, exclude_tag_ids, synonyms) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     [id, d.name, resolveGroupName(d.groupName), d.color || null, d.icon || null, d.excludeTagIds ?? [], d.synonyms ?? []]

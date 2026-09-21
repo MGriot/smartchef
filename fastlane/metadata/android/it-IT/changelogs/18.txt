@@ -1,0 +1,5 @@
+Ingredienti, strumenti e tag duplicati possono essere uniti in uno solo, spostando su quello tutte le ricette che usavano l'altro.
+
+Le schermate del catalogo si caricano molto piu in fretta su Android.
+
+Un modello AI occupato non fa piu fallire un'importazione: la richiesta viene ripetuta e ripiega su un secondo modello se il primo non e disponibile.

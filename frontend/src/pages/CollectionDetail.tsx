@@ -1,3 +1,4 @@
+import { formatDurationWith } from '../lib/duration';
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +23,7 @@ interface CollectionRecipe {
   difficulty: string;
   prep_time_min: number | null;
   cook_time_min: number | null;
+  rest_time_min: number | null;
 }
 
 interface Collection {
@@ -225,7 +227,8 @@ export default function CollectionDetail() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
             {collection.recipes.map(recipe => {
-              const totalTime = (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0);
+              // Includes waiting time, same as the recipe's own page.
+              const totalTime = (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0) + (recipe.rest_time_min || 0);
               return (
                 <div key={recipe.id} className="group relative bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300">
                   <button
@@ -251,7 +254,7 @@ export default function CollectionDetail() {
                       <div className="flex items-center gap-5 text-zinc-500 dark:text-zinc-400 text-[13px] font-medium">
                         <div className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>schedule</span>
-                          {totalTime > 0 ? t('collections.minutes', { count: totalTime }) : '—'}
+                          {formatDurationWith(t, totalTime, { short: true })}
                         </div>
                         <div className="flex items-center gap-1.5">
                           <span className="material-symbols-outlined text-primary text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>restaurant</span>

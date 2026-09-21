@@ -24,7 +24,24 @@
 // languages usable despite the list itself being per-device.
 // ════════════════════════════════════════════════════════════════════════
 
-const CUSTOM_KEY = 'smartchef.customLanguages';
+import { CUSTOM_LANGUAGES, HIDDEN_LANGUAGES, getSetting } from './settingsRegistry';
+import { writeCachedSetting } from './settingsCache';
+
+/** The list is a SYNCED setting now (services/settings.local.ts), so a
+ *  language added on one device shows up in the other's picker instead of
+ *  having to be typed in twice.
+ *
+ *  Reads stay synchronous — they come from lib/settingsCache.ts, which is
+ *  the same localStorage access this file used to do by hand. Writes go to
+ *  the cache immediately and to SQLite/git behind a dynamic import, so a
+ *  picker never waits on a database that may not be open yet and this
+ *  module keeps its "imports nothing heavy" property. */
+function persist(key: string, codes: string[]): void {
+  writeCachedSetting(key, codes);
+  void import('../services/settings.local')
+    .then(({ setSetting }) => setSetting(key, codes))
+    .catch((err) => console.warn('SmartChef: saving the language list failed:', err));
+}
 
 export interface Language {
   code: string;
@@ -99,28 +116,67 @@ export function languageLabel(code: string, uiLang?: string): string {
 // picker — which is a preference, not data.
 
 export function getCustomLanguageCodes(): string[] {
-  try {
-    const raw = localStorage.getItem(CUSTOM_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((c): c is string => typeof c === 'string')
-      .map(normalizeLanguageCode)
-      .filter((c) => isValidLanguageCode(c) && !BUNDLED_LANGUAGE_CODES.includes(c as never));
-  } catch {
-    // Malformed JSON, or storage blocked entirely. An empty list is the
-    // right answer to both: the bundled languages still work.
-    return [];
-  }
+  return getSetting<string[]>(CUSTOM_LANGUAGES)
+    .map(normalizeLanguageCode)
+    .filter((c) => isValidLanguageCode(c) && !BUNDLED_LANGUAGE_CODES.includes(c as never));
 }
 
 function writeCustomLanguageCodes(codes: string[]): void {
-  try {
-    localStorage.setItem(CUSTOM_KEY, JSON.stringify(codes));
-  } catch {
-    /* private mode — the language just won't persist past this session */
-  }
+  persist(CUSTOM_LANGUAGES, codes);
+}
+
+// ── Hidden languages ────────────────────────────────────────────────────
+// Removing a language used to mean removing it from the custom list, which
+// left the four bundled ones permanently in every picker: a user who never
+// writes in French had French in front of them on every recipe, with a
+// padlock next to it.
+//
+// Hiding is a separate list rather than a hole punched in
+// BUNDLED_LANGUAGE_CODES, because that constant is doing a second job —
+// "has a shipped UI bundle" — which is a fact about the build, not a
+// preference. Hiding is also deliberately NOT a deletion: every
+// translation row stays in SQLite and keeps syncing, and languageLabel()
+// still resolves the code, so a recipe written in a hidden language
+// remains perfectly readable. Un-hiding puts everything back.
+
+export function getHiddenLanguageCodes(): string[] {
+  return getSetting<string[]>(HIDDEN_LANGUAGES)
+    .map(normalizeLanguageCode)
+    // English is the i18n fallback: with it hidden there is no language
+    // left to resolve a missing key against.
+    .filter((c) => isValidLanguageCode(c) && c !== 'en');
+}
+
+/** True when this language may be hidden at all. English may not. */
+export function canHideLanguage(code: string): boolean {
+  return normalizeLanguageCode(code) !== 'en';
+}
+
+export function hideLanguage(code: string): string[] {
+  const normalized = normalizeLanguageCode(code);
+  if (!canHideLanguage(normalized)) return getHiddenLanguageCodes();
+  const current = getHiddenLanguageCodes();
+  if (current.includes(normalized)) return current;
+  const next = [...current, normalized];
+  persist(HIDDEN_LANGUAGES, next);
+  return next;
+}
+
+export function unhideLanguage(code: string): string[] {
+  const normalized = normalizeLanguageCode(code);
+  const next = getHiddenLanguageCodes().filter((c) => c !== normalized);
+  persist(HIDDEN_LANGUAGES, next);
+  return next;
+}
+
+/** The hidden ones, with labels — for the "show hidden" disclosure that
+ *  makes hiding reversible. */
+export function listHiddenLanguages(uiLang?: string): Language[] {
+  return getHiddenLanguageCodes().map((code) => ({
+    code,
+    label: BUNDLED_LABELS[code] ?? languageLabel(code, uiLang),
+    hasUiBundle: BUNDLED_LANGUAGE_CODES.includes(code as never),
+  }));
 }
 
 /** Returns the updated list. Rejects a malformed code, and silently ignores
@@ -147,12 +203,13 @@ export function removeCustomLanguage(code: string): string[] {
 /** Every language the pickers should offer: the bundled ones first, in their
  *  declared order, then whatever the user added, in the order they added it. */
 export function listLanguages(uiLang?: string): Language[] {
-  const bundled = BUNDLED_LANGUAGE_CODES.map((code) => ({
+  const hidden = new Set(getHiddenLanguageCodes());
+  const bundled = BUNDLED_LANGUAGE_CODES.filter((code) => !hidden.has(code)).map((code) => ({
     code,
     label: BUNDLED_LABELS[code],
     hasUiBundle: true,
   }));
-  const custom = getCustomLanguageCodes().map((code) => ({
+  const custom = getCustomLanguageCodes().filter((code) => !hidden.has(code)).map((code) => ({
     code,
     label: languageLabel(code, uiLang),
     hasUiBundle: false,

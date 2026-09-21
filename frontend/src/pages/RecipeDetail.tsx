@@ -1,3 +1,4 @@
+import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -148,6 +149,9 @@ interface Recipe {
   region_coords: Record<string, { lat: number; lng: number }>;
   yield_amount: number | null;
   yield_unit_id: string | null;
+  /** The unit's symbol, carried beside the id by syncRecipe() so a device
+   *  that does not have the unit row can still say what the yield is in. */
+  yield_unit_symbol?: string | null;
   cover_image_url: string;
   source_url: string | null;
   sources: RecipeSourceEntry[];
@@ -237,13 +241,10 @@ const difficultyKey: Record<string, string> = {
   hard: 'gallery.difficultyAdvanced', expert: 'gallery.difficultyExpert',
 };
 
-const formatTime = (min: number | null | undefined): string => {
-  if (!min) return '—';
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
-};
+// Was a private helper here that stopped at hours, which is how a 15-day
+// maceration came out as "360h". Now lib/duration.ts, shared with every
+// other place a duration is shown.
+
 
 /** De-duplicates and tidies a pile of candidate names, case-insensitively
  *  and keeping the first spelling of each. Used to build the "show as"
@@ -702,6 +703,14 @@ const RecipeDetail: React.FC = () => {
     const converted = toSystem(v, unitSymbol, displaySystem);
     return converted ? `${converted.value} ${converted.symbol}` : fallback;
   };
+
+  /* The yield's unit, or null when this device cannot resolve it. The
+     recipe's own `yield_unit_symbol` (serialized by syncRecipe) is the
+     fallback for a unit row that never arrived here — better to render
+     "2 loaves" from the symbol than "2" from nothing. */
+  const yieldUnitSymbol =
+    allUnits.find((u) => u.id === recipe?.yield_unit_id)?.symbol
+    ?? (typeof recipe?.yield_unit_symbol === 'string' && recipe.yield_unit_symbol ? recipe.yield_unit_symbol : null);
 
   /* ── Scale nutrition totals (fetched once at base servings) against the current servings slider ── */
   const nutritionAtServings = (): NutritionTotals | null => {
@@ -1209,7 +1218,7 @@ const RecipeDetail: React.FC = () => {
                           className="flex items-center gap-2 mb-4 px-3 py-1.5 rounded-full border border-zinc-600/60 text-sm text-zinc-300 hover:border-primary hover:text-primary transition-colors"
                         >
                           <span className="material-symbols-outlined text-sm">timer</span>
-                          {t('recipeDetail.durationMinutes', { count: step.durationMin })}
+                          {formatDurationWith(t, step.durationMin)}
                           <span className="text-[10px] font-black uppercase tracking-wider opacity-70">{t('cookTimer.start')}</span>
                         </button>
                       )}
@@ -1412,7 +1421,7 @@ const RecipeDetail: React.FC = () => {
                         className="flex items-center gap-2 mb-4 px-3 py-1.5 rounded-full border border-zinc-600/60 text-sm text-zinc-300 hover:border-primary hover:text-primary transition-colors"
                       >
                         <span className="material-symbols-outlined text-sm">timer</span>
-                        {t('recipeDetail.durationMinutes', { count: step.durationMin })}
+                        {formatDurationWith(t, step.durationMin)}
                         <span className="text-[10px] font-black uppercase tracking-wider opacity-70">{t('cookTimer.start')}</span>
                       </button>
                     )}
@@ -1882,37 +1891,45 @@ const RecipeDetail: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 font-body">
         {/* Header */}
-        <header className="bg-[#fafaf5] dark:bg-zinc-950 sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
-          <button onClick={() => { setDraft(recipe); setRawTextMode(false); setRawTextError(null); setMode('view'); }} className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+        {/* Three text-labelled buttons and a centred title do not fit a
+            390px screen: they wrapped onto three lines and pushed Save off
+            the right edge entirely, so a recipe opened for editing on a
+            phone could not be saved. Below `sm` the labels collapse to
+            their icons (the `title` carries the words) and the centre
+            heading goes — the screen is unambiguous without it. */}
+        <header className="bg-[#fafaf5] dark:bg-zinc-950 sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-4 sm:px-8 py-4 flex items-center justify-between gap-2" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
+          <button onClick={() => { setDraft(recipe); setRawTextMode(false); setRawTextError(null); setMode('view'); }} title={t('common.cancel')} className="flex items-center gap-2 shrink-0 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
             <span className="material-symbols-outlined">close</span>
-            <span className="text-sm font-bold">{t('common.cancel')}</span>
+            <span className="hidden sm:inline text-sm font-bold">{t('common.cancel')}</span>
           </button>
-          <h2 className="text-lg font-headline font-bold text-zinc-800 dark:text-zinc-200">{t('recipeDetail.editRecipe')}</h2>
-          <div className="flex items-center gap-3">
+          <h2 className="hidden md:block text-lg font-headline font-bold text-zinc-800 dark:text-zinc-200 truncate">{t('recipeDetail.editRecipe')}</h2>
+          <div className="flex items-center gap-1 sm:gap-3 shrink-0">
             <button
               onClick={toggleRawText}
               disabled={saving}
               title={rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
-              className="flex items-center gap-2 px-4 py-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full font-bold text-sm transition-all disabled:opacity-50"
+              className="flex items-center gap-2 px-2 sm:px-4 py-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full font-bold text-sm transition-all disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-sm">{rawTextMode ? 'edit_note' : 'code'}</span>
-              {rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
+              <span className="hidden sm:inline">{rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}</span>
             </button>
             <button
               onClick={handleDelete}
               disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 text-red-500 hover:bg-red-50 rounded-full font-bold text-sm transition-all disabled:opacity-50"
+              title={t('common.delete')}
+              className="flex items-center gap-2 px-2 sm:px-4 py-2 text-red-500 hover:bg-red-50 rounded-full font-bold text-sm transition-all disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-sm">delete</span>
-              {t('common.delete')}
+              <span className="hidden sm:inline">{t('common.delete')}</span>
             </button>
             <button
               onClick={handleSaveClick}
               disabled={saving}
-              className="flex items-center gap-2 px-5 py-2 bg-primary text-white rounded-full font-bold text-sm hover:bg-primary/90 transition-all disabled:opacity-50"
+              title={t('recipeDetail.saveRecipe')}
+              className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-primary text-white rounded-full font-bold text-sm hover:bg-primary/90 transition-all disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-sm">{saving ? 'sync' : 'save'}</span>
-              {saving ? t('recipeDetail.saving') : t('recipeDetail.saveRecipe')}
+              <span className="hidden sm:inline">{saving ? t('recipeDetail.saving') : t('recipeDetail.saveRecipe')}</span>
             </button>
           </div>
         </header>
@@ -2394,7 +2411,7 @@ const RecipeDetail: React.FC = () => {
                             {step.title || firstWordsOf(step.description) || t('recipeDetail.stepNumber', { number: idx + 1 })}
                           </span>
                           {step.durationMin ? (
-                            <span className="shrink-0 text-xs font-semibold text-zinc-400 dark:text-zinc-500 tabular-nums">{t('recipeDetail.durationMinutes', { count: step.durationMin })}</span>
+                            <span className="shrink-0 text-xs font-semibold text-zinc-400 dark:text-zinc-500 tabular-nums">{formatDurationWith(t, step.durationMin)}</span>
                           ) : null}
                           <span className="material-symbols-outlined text-[18px] text-zinc-300 dark:text-zinc-600 group-hover/row:text-primary">expand_more</span>
                         </button>
@@ -3238,7 +3255,7 @@ const RecipeDetail: React.FC = () => {
               {[
                 recipe.creator_name ? `by ${recipe.creator_name}` : null,
                 `${t('recipeDetail.servings')}: ${servings}`,
-                totalTime ? `${t('recipeDetail.totalTime')}: ${formatTime(totalTime)}` : null,
+                totalTime ? `${t('recipeDetail.totalTime')}: ${formatDurationWith(t, totalTime, { short: true })}` : null,
               ].filter(Boolean).join('  ·  ')}
             </p>
             {recipe.source_url && (
@@ -3335,10 +3352,10 @@ const RecipeDetail: React.FC = () => {
       <div className="max-w-7xl mx-auto px-6 mt-8">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {[
-            { label: t('recipeDetail.prepTime'), val: formatTime(recipe.prep_time_min), icon: 'schedule' },
-            { label: t('recipeDetail.waitingTime'), val: formatTime(recipe.rest_time_min), icon: 'hourglass_empty' },
-            { label: t('recipeDetail.cookTime'), val: formatTime(recipe.cook_time_min), icon: 'oven_gen' },
-            { label: t('recipeDetail.totalTime'), val: formatTime(totalTime), icon: 'local_fire_department' },
+            { label: t('recipeDetail.prepTime'), val: formatDurationWith(t, recipe.prep_time_min, { short: true }), icon: 'schedule' },
+            { label: t('recipeDetail.waitingTime'), val: formatDurationWith(t, recipe.rest_time_min, { short: true }), icon: 'hourglass_empty' },
+            { label: t('recipeDetail.cookTime'), val: formatDurationWith(t, recipe.cook_time_min, { short: true }), icon: 'oven_gen' },
+            { label: t('recipeDetail.totalTime'), val: formatDurationWith(t, totalTime, { short: true }), icon: 'local_fire_department' },
             { label: t('recipeDetail.complexity'), val: difficultyKey[recipe.difficulty] ? t(difficultyKey[recipe.difficulty]) : recipe.difficulty, icon: 'restaurant', highlight: true },
           ].map((stat, i) => (
             <div key={i} className={`py-4 px-4 rounded-2xl flex flex-col items-center text-center ${stat.highlight ? 'bg-primary/8 border border-primary/15' : 'bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800'}`}>
@@ -3470,17 +3487,19 @@ const RecipeDetail: React.FC = () => {
                     {t('recipeDetail.yield')}
                   </span>
                   <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300 tabular-nums">
-                    {formatAmount(
-                      recipe.yield_amount,
-                      allUnits.find((u) => u.id === recipe.yield_unit_id)?.symbol ?? null
-                    )}
+                    {formatAmount(recipe.yield_amount, yieldUnitSymbol)}
                     {/* A yield with no unit on file renders as a bare number
                         ("315"), which says nothing — 315 grams, millilitres,
                         biscuits? The unit is an optional column and plenty of
                         rows were saved without it, so rather than hiding the
                         problem this offers the one-click way to fix it: the
                         edit form's yield row already has the unit picker. */}
-                    {!recipe.yield_unit_id && (
+                    {/* Keyed on whether a SYMBOL resolved, not on whether
+                        an id is set: a yield_unit_id pointing at a unit
+                        this device does not have rendered as a bare number
+                        with no way to fix it, because the affordance below
+                        only appeared when the column was null. */}
+                    {!yieldUnitSymbol && (
                       <button
                         type="button"
                         onClick={() => setMode('edit')}
@@ -3693,7 +3712,7 @@ const RecipeDetail: React.FC = () => {
                       {step.durationMin && (
                         <div className="flex items-center gap-2 text-sm text-zinc-400 dark:text-zinc-500 mb-4">
                           <span className="material-symbols-outlined text-sm">timer</span>
-                          {t('recipeDetail.durationMinutes', { count: step.durationMin })}
+                          {formatDurationWith(t, step.durationMin)}
                         </div>
                       )}
                     </div>

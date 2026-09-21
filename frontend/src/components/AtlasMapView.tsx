@@ -7,7 +7,8 @@ import CoverImage from './CoverImage';
 import { countryCentroid, countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { countryFeatureFor } from '../lib/worldGeo';
 
-interface RegionCoord { lat: number; lng: number }
+import type { RegionCoord } from './RegionPicker';
+import type { Feature, Geometry } from 'geojson';
 
 export interface AtlasPin {
   /** An ISO alpha-2 code, or a free-text region label. */
@@ -73,9 +74,10 @@ function shade(count: number, max: number): number {
 export default function AtlasMap({
   regions, coords, selected, onSelect, locale, showAllLabel, moreLabel,
 }: AtlasMapProps) {
-  const { pins, areas, max } = useMemo(() => {
+  const { pins, areas, placeAreas, max } = useMemo(() => {
     const pins: (AtlasPin & { lat: number; lng: number; isCountry: boolean })[] = [];
     const areas: { key: string; count: number; geo: NonNullable<ReturnType<typeof countryFeatureFor>> }[] = [];
+    const placeAreas: { key: string; count: number; geo: Feature<Geometry> }[] = [];
 
     for (const region of regions) {
       if (isCountryCode(region.key)) {
@@ -88,11 +90,22 @@ export default function AtlasMap({
         continue;
       }
       const c = coords[region.key.toLowerCase()];
-      if (c) pins.push({ ...region, lat: c.lat, lng: c.lng, isCountry: false });
+      if (!c) continue;
+      // The outline goes UNDER the pin rather than replacing it: unlike the
+      // recipe page, a pin here carries the recipe count and is what opens
+      // the popup, so a bare shape would have nothing to click.
+      if (c.shape) {
+        placeAreas.push({
+          key: region.key,
+          count: region.recipes.length,
+          geo: { type: 'Feature', properties: {}, geometry: c.shape as unknown as Geometry },
+        });
+      }
+      pins.push({ ...region, lat: c.lat, lng: c.lng, isCountry: false });
     }
 
     const max = Math.max(0, ...regions.map((r) => r.recipes.length));
-    return { pins, areas, max };
+    return { pins, areas, placeAreas, max };
   }, [regions, coords]);
 
   const bounds = L.latLngBounds([]);
@@ -136,6 +149,23 @@ export default function AtlasMap({
                 fillOpacity: isSelected ? 0.4 : shade(a.count, max),
               }}
               eventHandlers={{ click: () => onSelect(isSelected ? null : a.key) }}
+              interactive={false}
+            />
+          );
+        })}
+
+        {placeAreas.map((a) => {
+          const isSelected = selected === a.key;
+          return (
+            <GeoJSON
+              key={`place-${a.key}-${isSelected}-${a.count}`}
+              data={a.geo}
+              style={{
+                color: isSelected ? PIN_ACTIVE : PIN_PLACE,
+                weight: isSelected ? 2 : 0.8,
+                fillColor: isSelected ? PIN_ACTIVE : PIN_PLACE,
+                fillOpacity: isSelected ? 0.35 : shade(a.count, max),
+              }}
               interactive={false}
             />
           );

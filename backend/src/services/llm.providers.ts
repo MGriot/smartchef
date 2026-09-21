@@ -4,7 +4,11 @@
 // in llm.parser.ts. Hand-rolled fetch() calls, matching the existing
 // Ollama integration's style, rather than adding three SDK dependencies.
 //
-// Each call optionally carries ONE piece of media (a photo, a scan, a PDF,
+// Each call optionally carries media (a photo, a scan, a PDF, a voice
+// note, a clip) as a LIST, because one recipe is often two cookbook pages
+// or three photographs — see llm.parser.ts assertMediaListSupported() for
+// why only images may arrive as a set. Previously ONE piece of media
+// (a photo, a scan, a PDF,
 // a voice note, a clip). The prompt is unchanged either way — only the
 // shape of the user turn differs, and it differs per provider: Anthropic
 // wants base64 in an image/document block, Gemini wants inlineData (the
@@ -39,16 +43,18 @@ export async function callAnthropic(
   content: string,
   apiKey: string,
   systemPrompt: string,
-  media?: LLMParseMedia
+  media?: LLMParseMedia[]
 ): Promise<string> {
   // A media turn is content BLOCKS rather than a bare string; the file goes
   // first so the text after it reads as an instruction about it, which is
   // what Anthropic's own guidance asks for.
-  const userContent: unknown = media
+  const userContent: unknown = media?.length
     ? [
-        media.mimeType.toLowerCase().startsWith("application/pdf")
-          ? { type: "document", source: { type: "base64", media_type: media.mimeType, data: media.data } }
-          : { type: "image", source: { type: "base64", media_type: media.mimeType, data: media.data } },
+        ...media.map((m) =>
+          m.mimeType.toLowerCase().startsWith("application/pdf")
+            ? { type: "document", source: { type: "base64", media_type: m.mimeType, data: m.data } }
+            : { type: "image", source: { type: "base64", media_type: m.mimeType, data: m.data } }
+        ),
         { type: "text", text: content },
       ]
     : content;
@@ -85,12 +91,12 @@ export async function callGemini(
   content: string,
   apiKey: string,
   systemPrompt: string,
-  media?: LLMParseMedia
+  media?: LLMParseMedia[]
 ): Promise<string> {
   // inlineData covers images, PDFs, audio AND video with one shape — the
   // reason the capability table steers a voice note or a clip here.
-  const parts: Array<Record<string, unknown>> = media
-    ? [{ inlineData: { mimeType: media.mimeType, data: media.data } }, { text: content }]
+  const parts: Array<Record<string, unknown>> = media?.length
+    ? [...media.map((m) => ({ inlineData: { mimeType: m.mimeType, data: m.data } })), { text: content }]
     : [{ text: content }];
   const response = await fetch(
     // The key travels in a header, not the `?key=` query parameter this
@@ -122,13 +128,13 @@ export async function callOpenAI(
   content: string,
   apiKey: string,
   systemPrompt: string,
-  media?: LLMParseMedia
+  media?: LLMParseMedia[]
 ): Promise<string> {
   // OpenAI takes an image as a data URI in an image_url part rather than as
   // raw base64 — the one provider here that does.
-  const userContent: unknown = media
+  const userContent: unknown = media?.length
     ? [
-        { type: "image_url", image_url: { url: `data:${media.mimeType};base64,${media.data}` } },
+        ...media.map((m) => ({ type: "image_url", image_url: { url: `data:${m.mimeType};base64,${m.data}` } })),
         { type: "text", text: content },
       ]
     : content;

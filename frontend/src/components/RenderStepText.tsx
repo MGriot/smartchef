@@ -31,8 +31,8 @@ interface RenderStepTextProps {
 
 const BADGE_STYLE: Record<string, string> = {
   ing: 'text-primary decoration-primary',
-  tool: 'text-amber-600 decoration-amber-500',
-  tech: 'text-sky-600 decoration-sky-500',
+  tool: 'text-tool decoration-tool/70',
+  tech: 'text-technique decoration-technique/70',
 };
 
 /** Expands {{ing:N}} / {{tool:id}} / {{tech:id|params}} tokens into bold,

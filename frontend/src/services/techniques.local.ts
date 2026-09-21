@@ -9,6 +9,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne, chunk, inPlaceholders } from "../db/local";
+import { freshPortableId, portableTechniqueId } from "./syncExtras.local";
 
 function newId(): string {
   return crypto.randomUUID();
@@ -116,7 +117,8 @@ async function upsertTechniqueTranslations(techniqueId: string, translations?: T
 }
 
 export async function createTechnique(d: TechniqueInput): Promise<{ id: string }> {
-  const id = d.id ?? newId();
+  // Portable — see createTool() in ingredients.local.ts.
+  const id = d.id ?? await freshPortableId('techniques', portableTechniqueId(d.name));
   await query(
     "INSERT INTO techniques (id, name, description, icon, image_urls, synonyms) VALUES ($1, $2, $3, $4, $5, $6)",
     [id, d.name, d.description || null, d.icon || null, d.imageUrls || [], d.synonyms ?? []]
