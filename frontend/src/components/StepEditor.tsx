@@ -7,10 +7,14 @@ import {
   buildRef, stepIngredientConsumption, remainingBeforeStep,
   type StepIngredientRefLike, type StepLike,
 } from '../lib/stepRefs';
+import { ingredientLabel } from '../lib/ingredientDisplay';
 
 interface IngredientOption {
   sortOrder: number;
   ingredientName: string;
+  /** Set instead of ingredientName when the row is a recipe used as an
+   *  ingredient — see ingredientLabel(). */
+  subRecipeTitle?: string | null;
   quantity: number | null;
   unitId?: string | null;
   unitSymbol?: string | null;
@@ -249,7 +253,7 @@ export default function StepEditor({
         : (consumed != null ? amountText(consumed, i.unitSymbol) : undefined);
     return {
       sortOrder: i.sortOrder,
-      name: i.ingredientName,
+      name: ingredientLabel(i),
       quantity: i.quantity != null ? amountText(i.quantity, i.unitSymbol) : '',
       stepQuantity,
     };
@@ -295,7 +299,7 @@ export default function StepEditor({
                 const shown = left ?? i.quantity;
                 return {
                   id: String(i.sortOrder),
-                  label: `${i.ingredientName || t('editors.unnamed')}${shown ? ` — ${amountText(shown, i.unitSymbol)}` : ''}`,
+                  label: `${ingredientLabel(i) || t('editors.unnamed')}${shown ? ` — ${amountText(shown, i.unitSymbol)}` : ''}`,
                   sublabel: left !== null && i.quantity != null && left < i.quantity
                     ? t('editors.ofTotal', { total: amountText(i.quantity, i.unitSymbol) })
                     : undefined,
@@ -317,11 +321,11 @@ export default function StepEditor({
             <input
               type="text" list="step-ing-aliases" value={pickAlias}
               onChange={e => setPickAlias(e.target.value)}
-              placeholder={selectedIngredient?.ingredientName || t('editors.showAsPlaceholder')}
+              placeholder={(selectedIngredient && ingredientLabel(selectedIngredient)) || t('editors.showAsPlaceholder')}
               className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
             />
             {aliasDatalist('step-ing-aliases', [
-              selectedIngredient?.ingredientName || '',
+              selectedIngredient ? ingredientLabel(selectedIngredient) : '',
               ...(selectedIngredient?.aliases ?? []),
             ])}
           </div>

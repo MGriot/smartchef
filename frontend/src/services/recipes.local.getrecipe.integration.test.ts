@@ -210,3 +210,98 @@ describe('standalone getRecipe', () => {
     expect(small).toBeLessThanOrEqual(12);
   });
 });
+
+// ── A recipe used as an ingredient (matrioska) ───────────────────────────
+// Its row is named by the nested recipe's title, which has its own
+// translations in recipe_translations. It used to be the one ingredient on
+// a translated page still in its base language, and kitchen mode's
+// sub-recipe-first sequence ignored the language altogether.
+
+const SUB_ID = '22222222-3333-4444-8555-666666666666';
+const PARENT_ID = '33333333-4444-4555-8666-777777777777';
+
+async function seedNested(withSubTranslation = true) {
+  const { query, queryOne } = await import('../db/local');
+  const { createRecipe } = await import('./recipes.local');
+  const ml = await queryOne<{ id: string }>("SELECT id FROM units WHERE symbol='ml'");
+
+  await query('INSERT INTO ingredient_categories (id, name, sort_order, color, icon) VALUES ($1,$2,$3,$4,$5)',
+    ['cat-x', 'Other', 0, '#888', 'TbBox']);
+  await query("INSERT INTO ingredients (id, category_id, name, image_urls, sync_status) VALUES ('ing-yolk', 'cat-x', 'Egg Yolks', '[]', 'local')");
+  await query("INSERT INTO ingredient_translations (id, ingredient_id, language_code, translated_name) VALUES ('it-yolk', 'ing-yolk', 'it', 'Tuorli')");
+
+  await createRecipe({
+    id: SUB_ID,
+    title: 'Mayonnaise',
+    servings: 4,
+    ingredients: [{ sortOrder: 0, ingredientId: 'ing-yolk', quantity: 2 }],
+    steps: [{ stepNumber: 1, description: 'Whisk {{ing:0}}', translations: [{ lang: 'it', description: 'Sbattete {{ing:0}}' }] }],
+    translations: withSubTranslation ? [{ lang: 'it', title: 'Maionese' }] : [],
+  } as never, 'Matteo');
+
+  await createRecipe({
+    id: PARENT_ID,
+    title: 'Pink sauce',
+    servings: 4,
+    ingredients: [{ sortOrder: 0, subRecipeId: SUB_ID, quantity: 250, unitId: ml?.id ?? null }],
+    steps: [{ stepNumber: 1, description: 'Pour {{ing:0}}' }],
+    translations: [{ lang: 'it', title: 'Salsa rosa' }],
+  } as never, 'Matteo');
+}
+
+type SubRow = { ingredientName: string | null; subRecipeId: string; subRecipeTitle: string; subRecipeOriginalTitle: string };
+
+describe('standalone getRecipe — sub-recipe ingredients', () => {
+  it('names a nested recipe by its translated title, keeping the original beside it', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedNested();
+    const { getRecipe } = await import('./recipes.local');
+
+    const recipe = (await getRecipe(PARENT_ID, 'it')) as never as { ingredients: SubRow[] };
+    expect(recipe.ingredients[0]).toMatchObject({
+      ingredientName: null,
+      subRecipeId: SUB_ID,
+      subRecipeTitle: 'Maionese',
+      subRecipeOriginalTitle: 'Mayonnaise',
+    });
+  });
+
+  it('falls back to the base title with no language, or no translation for it', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedNested(false);
+    const { getRecipe } = await import('./recipes.local');
+
+    const inItalian = (await getRecipe(PARENT_ID, 'it')) as never as { ingredients: SubRow[] };
+    expect(inItalian.ingredients[0].subRecipeTitle).toBe('Mayonnaise');
+    const noLang = (await getRecipe(PARENT_ID)) as never as { ingredients: SubRow[] };
+    expect(noLang.ingredients[0].subRecipeTitle).toBe('Mayonnaise');
+  });
+});
+
+describe('standalone cook sequence — language', () => {
+  it('returns every section in the requested language', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedNested();
+    const { resolveCookSequence } = await import('./matrioska.local');
+
+    const [sub, main] = await resolveCookSequence(PARENT_ID, 'it');
+    expect(sub.recipeTitle).toBe('Maionese');
+    expect(sub.ingredients[0].ingredientName).toBe('Tuorli');
+    expect(sub.steps[0].translatedDescription).toBe('Sbattete {{ing:0}}');
+    expect(main.recipeTitle).toBe('Salsa rosa');
+    expect(main.ingredients[0].ingredientName).toBe('Maionese');
+    // An untranslated step keeps a null, so the base text shows.
+    expect(main.steps[0].translatedDescription).toBeNull();
+  });
+
+  it('is unchanged when no language is asked for', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedNested();
+    const { resolveCookSequence } = await import('./matrioska.local');
+
+    const [sub, main] = await resolveCookSequence(PARENT_ID);
+    expect(sub.recipeTitle).toBe('Mayonnaise');
+    expect(sub.ingredients[0].ingredientName).toBe('Egg Yolks');
+    expect(main.ingredients[0].ingredientName).toBe('Mayonnaise');
+  });
+});

@@ -14,3 +14,12 @@ export function pickIngredientName(name: string, pluralName: string | null | und
   if (isPlural && pluralName) return pluralName;
   return name;
 }
+
+/** What a recipe's ingredient row is called: its catalog ingredient's name,
+ *  or — for a recipe used as an ingredient — that recipe's title. A
+ *  sub-recipe row has no ingredientName at all, so anything that reads only
+ *  that field shows it as nameless. Both are already in the reader's
+ *  language when the recipe was fetched with ?lang=. */
+export function ingredientLabel(ing: { ingredientName?: string | null; subRecipeTitle?: string | null }): string {
+  return ing.ingredientName || ing.subRecipeTitle || '';
+}

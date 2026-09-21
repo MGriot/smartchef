@@ -329,7 +329,8 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'ingredientName', ${ingredientNameCol},
               'ingredientPluralName', ${ingredientPluralNameCol},
               'subRecipeId', ri.sub_recipe_id,
-              'subRecipeTitle', sr.title,
+              'subRecipeTitle', ${lang ? "COALESCE(srt_lang.title, sr.title)" : "sr.title"},
+              'subRecipeOriginalTitle', sr.title,
               'quantity', ri.quantity,
               'quantityText', ri.quantity_text,
               'unitSymbol', u.symbol, 'unitId', ri.unit_id,
@@ -373,6 +374,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
      ${lang ? "LEFT JOIN ingredient_translations it_lang ON it_lang.ingredient_id = i.id AND LOWER(it_lang.language_code) = LOWER($2)" : ""}
      ${lang ? "LEFT JOIN recipe_ingredient_translations rit_lang ON rit_lang.recipe_ingredient_id = ri.id AND LOWER(rit_lang.language_code) = LOWER($2)" : ""}
      LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
+     ${lang ? "LEFT JOIN recipe_translations srt_lang ON srt_lang.recipe_id = sr.id AND LOWER(srt_lang.language_code) = LOWER($2)" : ""}
      LEFT JOIN units u ON u.id = ri.unit_id
      LEFT JOIN recipe_steps rs ON rs.recipe_id = r.id
      ${lang ? "LEFT JOIN recipe_step_translations rst ON rst.step_id = rs.id AND LOWER(rst.language_code) = LOWER($2)" : ""}
@@ -565,7 +567,8 @@ recipeRouter.get("/:id/portions", async (req: Request, res: Response) => {
 // the main recipe that uses them.
 
 recipeRouter.get("/:id/cook-sequence", async (req: Request, res: Response) => {
-  const sections = await resolveCookSequence(req.params.id);
+  const lang = typeof req.query.lang === "string" && req.query.lang ? req.query.lang : undefined;
+  const sections = await resolveCookSequence(req.params.id, lang);
   res.json({ data: { sections } });
 });
 

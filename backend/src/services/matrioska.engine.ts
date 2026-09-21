@@ -24,6 +24,10 @@ export interface CookSequenceStep {
   toolIds: UUID[];
   imageUrl: string | null;
   notes: string | null;
+  /** The step in the reader's language, when one was asked for and exists. */
+  translatedTitle?: string | null;
+  translatedDescription?: string | null;
+  translatedNotes?: string | null;
   /** Which of the section's ingredients this step uses, and how much —
    *  the same shape recipe_steps.step_ingredients holds. Kitchen mode
    *  renders it as a tickable checklist. */
@@ -75,21 +79,36 @@ async function loadSubRecipeRefs(recipeId: UUID): Promise<SubRecipeRef[]> {
   );
 }
 
-async function loadRecipeSteps(recipeId: UUID): Promise<CookSequenceStep[]> {
+async function loadRecipeSteps(recipeId: UUID, lang?: string): Promise<CookSequenceStep[]> {
   return query<CookSequenceStep>(
-    `SELECT id, step_number AS "stepNumber", title, description,
-            duration_min AS "durationMin", tool_ids AS "toolIds", image_url AS "imageUrl", notes,
-            step_ingredients AS "stepIngredients"
-     FROM recipe_steps
-     WHERE recipe_id = $1
-     ORDER BY step_number`,
-    [recipeId]
+    `SELECT rs.id, rs.step_number AS "stepNumber", rs.title, rs.description,
+            rs.duration_min AS "durationMin", rs.tool_ids AS "toolIds", rs.image_url AS "imageUrl", rs.notes,
+            rs.step_ingredients AS "stepIngredients",
+            ${lang ? "rst.title" : "NULL"} AS "translatedTitle",
+            ${lang ? "rst.description" : "NULL"} AS "translatedDescription",
+            ${lang ? "rst.notes" : "NULL"} AS "translatedNotes"
+     FROM recipe_steps rs
+     ${lang ? "LEFT JOIN recipe_step_translations rst ON rst.step_id = rs.id AND LOWER(rst.language_code) = LOWER($2)" : ""}
+     WHERE rs.recipe_id = $1
+     ORDER BY rs.step_number`,
+    lang ? [recipeId, lang] : [recipeId]
   );
 }
 
-async function loadSectionIngredients(recipeId: UUID): Promise<CookSequenceIngredientRef[]> {
+async function loadSectionIngredients(recipeId: UUID, lang?: string): Promise<CookSequenceIngredientRef[]> {
+  // A catalog ingredient takes its ingredient_translations name, a nested
+  // recipe its recipe_translations title — each falling back to the base.
+  const nameCol = lang
+    ? `COALESCE(
+         (SELECT it.translated_name FROM ingredient_translations it
+          WHERE it.ingredient_id = i.id AND LOWER(it.language_code) = LOWER($2) LIMIT 1),
+         i.name,
+         (SELECT rt.title FROM recipe_translations rt
+          WHERE rt.recipe_id = sr.id AND LOWER(rt.language_code) = LOWER($2) LIMIT 1),
+         sr.title)`
+    : "COALESCE(i.name, sr.title)";
   return query<CookSequenceIngredientRef>(
-    `SELECT ri.sort_order AS "sortOrder", COALESCE(i.name, sr.title) AS "ingredientName",
+    `SELECT ri.sort_order AS "sortOrder", ${nameCol} AS "ingredientName",
             ri.quantity, u.symbol AS "unitSymbol"
      FROM recipe_ingredients ri
      LEFT JOIN ingredients i ON i.id = ri.ingredient_id
@@ -97,17 +116,21 @@ async function loadSectionIngredients(recipeId: UUID): Promise<CookSequenceIngre
      LEFT JOIN units u ON u.id = ri.unit_id
      WHERE ri.recipe_id = $1
      ORDER BY ri.sort_order`,
-    [recipeId]
+    lang ? [recipeId, lang] : [recipeId]
   );
 }
 
-async function loadSectionTools(recipeId: UUID): Promise<CookSequenceToolRef[]> {
+async function loadSectionTools(recipeId: UUID, lang?: string): Promise<CookSequenceToolRef[]> {
+  const nameCol = lang
+    ? `COALESCE((SELECT tt.name FROM tool_translations tt
+                 WHERE tt.tool_id = t.id AND LOWER(tt.language_code) = LOWER($2) LIMIT 1), t.name)`
+    : "t.name";
   return query<CookSequenceToolRef>(
-    `SELECT t.id, t.name, t.icon
+    `SELECT t.id, ${nameCol} AS name, t.icon
      FROM recipe_tools rt
      JOIN tools t ON t.id = rt.tool_id
      WHERE rt.recipe_id = $1`,
-    [recipeId]
+    lang ? [recipeId, lang] : [recipeId]
   );
 }
 
@@ -121,14 +144,22 @@ async function resolveCookSequenceRecursive(
   recipeId: UUID,
   isMain: boolean,
   depth: number,
-  visited: Set<UUID>
+  visited: Set<UUID>,
+  lang?: string
 ): Promise<CookSequenceSection[]> {
   if (depth > MAX_DEPTH || visited.has(recipeId)) return [];
   visited.add(recipeId);
 
   const [subRefs, recipeRow] = await Promise.all([
     loadSubRecipeRefs(recipeId),
-    query<{ title: string }>("SELECT title FROM recipes WHERE id = $1", [recipeId]),
+    lang
+      ? query<{ title: string }>(
+          `SELECT COALESCE((SELECT rt.title FROM recipe_translations rt
+                            WHERE rt.recipe_id = r.id AND LOWER(rt.language_code) = LOWER($2) LIMIT 1), r.title) AS title
+           FROM recipes r WHERE r.id = $1`,
+          [recipeId, lang]
+        )
+      : query<{ title: string }>("SELECT title FROM recipes WHERE id = $1", [recipeId]),
   ]);
 
   const sections: CookSequenceSection[] = [];
@@ -137,15 +168,16 @@ async function resolveCookSequenceRecursive(
       ref.sub_recipe_id,
       false,
       depth + 1,
-      new Set(visited)
+      new Set(visited),
+      lang
     );
     sections.push(...subSections);
   }
 
   const [steps, ingredients, tools] = await Promise.all([
-    loadRecipeSteps(recipeId),
-    loadSectionIngredients(recipeId),
-    loadSectionTools(recipeId),
+    loadRecipeSteps(recipeId, lang),
+    loadSectionIngredients(recipeId, lang),
+    loadSectionTools(recipeId, lang),
   ]);
   sections.push({
     recipeId,
@@ -159,8 +191,8 @@ async function resolveCookSequenceRecursive(
   return sections;
 }
 
-export async function resolveCookSequence(recipeId: UUID): Promise<CookSequenceSection[]> {
-  return resolveCookSequenceRecursive(recipeId, true, 0, new Set());
+export async function resolveCookSequence(recipeId: UUID, lang?: string): Promise<CookSequenceSection[]> {
+  return resolveCookSequenceRecursive(recipeId, true, 0, new Set(), lang);
 }
 
 interface RawRecipeIngredient {

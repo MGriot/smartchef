@@ -51,6 +51,9 @@ interface Ingredient {
   ingredientPluralName?: string | null;
   subRecipeId?: string | null;
   subRecipeTitle?: string | null;
+  /** The nested recipe's own base-language title, kept beside the
+   *  translated subRecipeTitle for the editor's "show as" suggestions. */
+  subRecipeOriginalTitle?: string | null;
   quantity: number | null;
   quantityText?: string | null;
   unitId: string | null;
@@ -179,6 +182,11 @@ interface CookSequenceStep {
   techniqueIds: string[];
   imageUrl: string | null;
   notes: string | null;
+  /** In the reader's language when the sequence was fetched with ?lang= —
+   *  null where the step has no translation. */
+  translatedTitle?: string | null;
+  translatedDescription?: string | null;
+  translatedNotes?: string | null;
   /** What this step takes out of the section's ingredients — see
    *  matrioska.local.ts. Optional because a recipe saved before this was
    *  carried through the cook sequence simply has none. */
@@ -293,8 +301,8 @@ const formatDate = (iso: string | null | undefined): string => {
 
 /* ── Sub-recipe ingredient fetcher ─────────────────────────────────── */
 const SubIngredientList: React.FC<{
-  subRecipeId: string; servings: number; baseServings: number;
-}> = ({ subRecipeId, servings, baseServings }) => {
+  subRecipeId: string; servings: number; baseServings: number; lang?: string;
+}> = ({ subRecipeId, servings, baseServings, lang }) => {
   const { t } = useTranslation();
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [open, setOpen] = useState(true);
@@ -303,13 +311,13 @@ const SubIngredientList: React.FC<{
   useEffect(() => {
     (async () => {
       try {
-        const res = await apiFetch(`/api/recipes/${subRecipeId}`);
+        const res = await apiFetch(`/api/recipes/${subRecipeId}${lang ? `?lang=${lang}` : ''}`);
         const json = await res.json();
         setIngredients(json.data?.ingredients || []);
       } catch { /* ignore */ }
       finally { setLoading(false); }
     })();
-  }, [subRecipeId]);
+  }, [subRecipeId, lang]);
 
   if (loading) return <div className="pl-6 py-2 text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">{t('common.loading')}</div>;
   if (!ingredients.length) return null;
@@ -321,7 +329,7 @@ const SubIngredientList: React.FC<{
         className="flex items-center gap-1 text-[11px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider hover:text-primary transition-colors mb-1"
       >
         <span className="material-symbols-outlined text-sm">{open ? 'expand_less' : 'expand_more'}</span>
-        {ingredients.length} sub-ingredients
+        {t('recipeDetail.subIngredientsCount', { count: ingredients.length })}
       </button>
       {open && (
         <div className="space-y-1 pl-2 border-l-2 border-primary/10">
@@ -649,7 +657,7 @@ const RecipeDetail: React.FC = () => {
     if (!hasSubRecipe) { setCookSequence(null); return; }
     (async () => {
       try {
-        const res = await apiFetch(`/api/recipes/${id}/cook-sequence`);
+        const res = await apiFetch(`/api/recipes/${id}/cook-sequence${shownLang ? `?lang=${shownLang}` : ''}`);
         const json = await res.json();
         setCookSequence(json.data?.sections || null);
       } catch (err) {
@@ -657,7 +665,7 @@ const RecipeDetail: React.FC = () => {
         setCookSequence(null);
       }
     })();
-  }, [mode, id, recipe]);
+  }, [mode, id, recipe, shownLang]);
 
   /* ── Nutrition: fetched once at the recipe's base servings, then scaled
      client-side against the servings slider (same pattern as scale()) so
@@ -1122,11 +1130,11 @@ const RecipeDetail: React.FC = () => {
                     </div>
                     <div className="flex-1">
                       <h3 className={`font-headline font-bold text-xl mb-3 ${done ? 'text-primary line-through' : 'text-white'}`}>
-                        {step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
+                        {step.translatedTitle || step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
                       </h3>
                       <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
                       <p className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4">
-                        <RenderStepText text={step.description} ingredients={sectionIngredients} tools={sectionTools} techniques={stepTextTechniques} />
+                        <RenderStepText text={step.translatedDescription || step.description} ingredients={sectionIngredients} tools={sectionTools} techniques={stepTextTechniques} />
                       </p>
 
                       {(step.stepIngredients || []).length > 0 && (
@@ -1516,8 +1524,14 @@ const RecipeDetail: React.FC = () => {
      *  "Farina di grano tipo 00". */
     const ingredientAliases = (ing: Ingredient): string[] => {
       const row = allIngredients.find(i => i.id === ing.ingredientId);
+      // A recipe used as an ingredient answers to its title, translated and not.
+      const subRecipe = ing.subRecipeId ? allRecipes.find(r => r.id === ing.subRecipeId) : undefined;
       return uniqueNames([
         ing.ingredientName,
+        ing.subRecipeTitle,
+        subRecipe?.translated_title,
+        subRecipe?.title,
+        ing.subRecipeOriginalTitle,
         row?.translated_name,
         row?.name,
         row?.plural_name,
@@ -3616,6 +3630,7 @@ const RecipeDetail: React.FC = () => {
                         subRecipeId={ing.subRecipeId}
                         servings={servings}
                         baseServings={recipe.servings}
+                        lang={shownLang}
                       />
                     )}
                   </div>

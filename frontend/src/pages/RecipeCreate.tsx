@@ -483,8 +483,12 @@ const RecipeCreate: React.FC = () => {
    *  inline step reference — see RecipeDetail.tsx's identical helper. */
   const ingredientAliases = (ing: Ingredient): string[] => {
     const row = allIngredients.find(i => i.id === ing.ingredientId);
+    const subRecipe = ing.subRecipeId ? allRecipes.find(r => r.id === ing.subRecipeId) : undefined;
     return uniqueNames([
       ing.ingredientName,
+      ing.subRecipeTitle,
+      subRecipe?.translated_title,
+      subRecipe?.title,
       row?.translated_name,
       row?.name,
       row?.plural_name,
@@ -1549,7 +1553,7 @@ const RecipeCreate: React.FC = () => {
                               onClick={() => toggleStepIngredient(idx, ing.sortOrder)}
                               className={`text-xs font-bold flex-1 text-left ${isUsed ? 'text-primary' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
                             >
-                              {ing.ingredientName || t('recipeDetail.unnamedIngredient')}
+                              {ing.ingredientName || ing.subRecipeTitle || t('recipeDetail.unnamedIngredient')}
                               {ing.quantity ? ` (${formatEditorAmount(ing.quantity, ing.unitSymbol)} ${t('recipeDetail.totalLower')})` : ''}
                               {/* What is still unspoken for by the time this
                                   step runs — see RecipeDetail.tsx's edit mode. */}

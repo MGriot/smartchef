@@ -543,6 +543,8 @@
     "stepsProgress": "{{done}}/{{total}} pasos",
     "mainRecipe": "Receta Principal",
     "subRecipe": "Subreceta",
+    "subIngredientsCount_one": "{{count}} subingrediente",
+    "subIngredientsCount_other": "{{count}} subingredientes",
     "stepNumber": "Paso {{number}}",
     "durationMinutes_one": "{{count}} minuto",
     "durationMinutes_other": "{{count}} minutos",

@@ -528,6 +528,25 @@ export async function getRecipe(id: string, lang?: string) {
     }
   }
 
+  // A recipe used as an ingredient is named by its title, which has its own
+  // translations in recipe_translations — without this it was the one row
+  // on a translated page still showing its base-language name.
+  const subRecipeTitleById = new Map<string, string>();
+  const subRecipeIds = [...new Set(ingredientRows.map(r => r.sub_recipe_id).filter(Boolean))] as string[];
+  if (lang && subRecipeIds.length > 0) {
+    for (const batch of chunk(subRecipeIds)) {
+      const p: unknown[] = [];
+      const placeholders = inPlaceholders(p, batch);
+      p.push(lang);
+      const rows = await query<{ recipe_id: string; title: string | null }>(
+        `SELECT recipe_id, title FROM recipe_translations
+         WHERE recipe_id IN (${placeholders}) AND LOWER(language_code) = LOWER($${p.length})`,
+        p
+      );
+      for (const r of rows) if (r.title) subRecipeTitleById.set(r.recipe_id, r.title);
+    }
+  }
+
   // Fetched for every language at once: the same rows serve both the
   // `translations` array the editor round-trips and the single translated
   // note the current language renders.
@@ -567,7 +586,8 @@ export async function getRecipe(id: string, lang?: string) {
       ingredientName,
       ingredientPluralName,
       subRecipeId: row.sub_recipe_id,
-      subRecipeTitle: row.sub_recipe_title,
+      subRecipeTitle: (row.sub_recipe_id && subRecipeTitleById.get(row.sub_recipe_id as string)) || row.sub_recipe_title,
+      subRecipeOriginalTitle: row.sub_recipe_title,
       quantity: row.quantity,
       quantityText: row.quantity_text,
       unitSymbol: row.unit_symbol,
@@ -1016,8 +1036,8 @@ export async function getPortions(id: string, servings: number) {
   return calculatePortions(id, servings);
 }
 
-export async function getCookSequenceFor(id: string) {
-  return { sections: await resolveCookSequence(id) };
+export async function getCookSequenceFor(id: string, lang?: string) {
+  return { sections: await resolveCookSequence(id, lang) };
 }
 
 // ── POST /recipes/:id/translate/:lang ───────────────────────────────────

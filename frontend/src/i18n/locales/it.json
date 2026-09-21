@@ -541,6 +541,8 @@
     "exitKitchen": "Esci dalla cucina",
     "mainRecipe": "Ricetta principale",
     "subRecipe": "Sottoricetta",
+    "subIngredientsCount_one": "{{count}} sotto-ingrediente",
+    "subIngredientsCount_other": "{{count}} sotto-ingredienti",
     "stepNumber": "Passo {{number}}",
     "durationMinutes_one": "{{count}} minuti",
     "durationMinutes_other": "{{count}} minuti",

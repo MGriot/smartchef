@@ -123,7 +123,7 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     return { status: 200, data: await recipes.getPortions(id, servings) };
   }
   if (sub === 'cook-sequence' && method === 'GET') {
-    return { status: 200, data: await recipes.getCookSequenceFor(id) };
+    return { status: 200, data: await recipes.getCookSequenceFor(id, sp.get('lang') ?? undefined) };
   }
   if (sub === 'rating' && method === 'PATCH') {
     const body = parseBody(init);
