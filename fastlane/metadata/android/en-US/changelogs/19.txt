@@ -1,0 +1,15 @@
+Sync no longer asks you to verify the same tools after every sync, and a recipe whose tools came from another device applies properly instead of failing outright.
+
+Themes, accent colours, languages and your chosen AI provider now follow you to your other devices.
+
+Long waits read in days and weeks: a 15-day maceration said "360h" before.
+
+A recipe's actions are one button on a phone, fanning out when you need them, and a recipe opened for editing on a phone can be saved again.
+
+Four accent colour schemes, in Account > Appearance.
+
+Regions and areas are drawn as shapes on the map instead of a pin in the middle of them.
+
+Photo import leads with AI when your provider can read the file, and several photos can be sent as pages of one recipe.
+
+Languages can be removed, not only added.

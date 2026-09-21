@@ -1,0 +1,15 @@
+La sincronizzazione non chiede piu di verificare gli stessi strumenti a ogni ciclo, e una ricetta con strumenti creati su un altro dispositivo viene applicata invece di fallire del tutto.
+
+Tema, colori, lingue e il provider AI scelto ti seguono sugli altri dispositivi.
+
+Le attese lunghe si leggono in giorni e settimane: una macerazione di 15 giorni prima diceva "360h".
+
+Su telefono le azioni di una ricetta stanno in un solo pulsante che si apre a ventaglio, e una ricetta aperta in modifica sul telefono si puo di nuovo salvare.
+
+Quattro combinazioni di colori, in Account > Aspetto.
+
+Regioni e aree sono disegnate come forme sulla mappa invece che con uno spillo al centro.
+
+L'importazione da foto parte dall'AI quando il provider puo leggere il file, e piu foto possono essere inviate come pagine di un'unica ricetta.
+
+Le lingue si possono rimuovere, non solo aggiungere.
