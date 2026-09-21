@@ -1,0 +1,3 @@
+Una ricetta usata come ingrediente di un'altra ora segue la lingua in cui stai leggendo: il nome, i suoi ingredienti e i suoi passaggi in Modalita Cucina, invece di restare nella lingua in cui e stata scritta.
+
+Modificando un passaggio, una ricetta usata come ingrediente compare con il suo nome nella scelta degli ingredienti e nell'anteprima, invece di "Senza nome" e "[ingredient]".

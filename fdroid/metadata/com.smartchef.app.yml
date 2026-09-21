@@ -89,6 +89,27 @@ Builds:
     gradle:
       - yes
 
+  - versionName: 1.6.1
+    versionCode: 20
+    commit: v1.6.1
+    subdir: frontend/android/app
+    sudo:
+      - curl -Lo node.tar.xz https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-x64.tar.xz
+      # From https://nodejs.org/dist/v20.18.1/SHASUMS256.txt — an unverified
+      # download is something a reviewer will ask about, and `fdroid build`
+      # is right not to vouch for one.
+      - echo "c6fa75c841cbffac851678a472f2a5bd612fff8308ef39236190e1f8dbb0e567  node.tar.xz" | sha256sum -c -
+      - tar xJf node.tar.xz -C /opt
+      - ln -s /opt/node-v20.18.1-linux-x64/bin/node /usr/local/bin/node
+      - ln -s /opt/node-v20.18.1-linux-x64/bin/npm /usr/local/bin/npm
+    build:
+      - cd ../..
+      - npm ci
+      - npm run build
+      - npx cap sync android
+    gradle:
+      - yes
+
 # The optional cloud language models (Anthropic/Gemini/OpenAI) are off by
 # default — the default is a local Ollama — but they are non-free network
 # services, so this is declared rather than waited to be asked about.
@@ -97,5 +118,5 @@ AntiFeatures:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.6.0
-CurrentVersionCode: 19
+CurrentVersion: 1.6.1
+CurrentVersionCode: 20

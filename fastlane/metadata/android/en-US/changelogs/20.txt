@@ -1,0 +1,3 @@
+A recipe used as an ingredient of another now follows the language you are reading in: its name, its own ingredients, and its steps in Kitchen mode, instead of staying in the language it was written in.
+
+When editing a step, a recipe used as an ingredient shows up by name in the ingredient picker and the preview, instead of "Unnamed" and "[ingredient]".
