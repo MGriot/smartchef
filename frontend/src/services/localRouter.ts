@@ -133,9 +133,17 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
   if (sub === 'merge' && method === 'POST') {
     const body = parseBody(init) ?? {};
     if (!body.targetId) return { status: 400, error: i18n.t('errors.recipeRequired') };
-    const result = await recipes.mergeRecipes(id, body.targetId);
+    const choices = body.choices && typeof body.choices === 'object' ? body.choices : undefined;
+    const result = await recipes.mergeRecipes(id, body.targetId, choices);
     if (!result) return { status: 404, error: i18n.t('errors.recipeNotFound') };
     return { status: 200, data: result };
+  }
+  if (sub === 'merge-preview' && method === 'GET') {
+    const targetId = sp.get('targetId');
+    if (!targetId) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    const preview = await recipes.getRecipeMergePreview(id, targetId);
+    if (!preview) return { status: 404, error: i18n.t('errors.recipeNotFound') };
+    return { status: 200, data: preview };
   }
   if (sub === 'cooked' && method === 'POST') {
     const profile = await getStandaloneProfile();

@@ -34,6 +34,8 @@
 // edits — see syncIngredientRefAmount().
 // ════════════════════════════════════════════════════════════════════════
 
+import { parseAmount } from './ingredientAmount';
+
 export type StepRefType = 'ing' | 'tool' | 'tech';
 
 export interface StepRefParams {
@@ -106,6 +108,33 @@ export function syncIngredientRefAmount(text: string, sortOrder: number, amount:
     else params.amount = amount;
     return buildRef('ing', id.trim(), params);
   });
+}
+
+function formatScaled(value: number): string {
+  return String(value % 1 === 0 ? value : Number(value.toFixed(value < 10 ? 2 : 1)));
+}
+
+const AMOUNT_PREFIX_RE = /^\s*([\d½¼¾⅓⅔⅕⅖⅗⅘⅙⅚⅐⅛⅜⅝⅞⅑⅒]+(?:[.,]\d+)?(?:\s*[-\s]\s*\d+\s*\/\s*\d+|\s*\/\s*\d+)?)/;
+const RANGE_RE = /^\s*(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)(?!\s*\/)/;
+
+/**
+ * Multiplies the leading number of a `q=` amount by `factor` — "500 g" at
+ * double servings reads "1000 g", "3-4" reads "6-8", "1 1/2 cup" reads
+ * "3 cup". Text that doesn't start with a number ("un pizzico", "q.b.") is
+ * returned unchanged: there is nothing in it that could scale.
+ */
+export function scaleAmountText(text: string, factor: number): string {
+  if (!text || !Number.isFinite(factor) || factor === 1) return text;
+  const num = (s: string) => Number(s.replace(',', '.'));
+  const range = RANGE_RE.exec(text);
+  if (range) {
+    return `${formatScaled(num(range[1]) * factor)}-${formatScaled(num(range[2]) * factor)}${text.slice(range[0].length)}`;
+  }
+  const prefix = AMOUNT_PREFIX_RE.exec(text);
+  if (!prefix) return text;
+  const value = parseAmount(prefix[1]);
+  if (value === undefined) return text;
+  return `${formatScaled(value * factor)}${text.slice(prefix[0].length)}`;
 }
 
 /** Shifts/drops {{ing:N}} references after an ingredient row is deleted —

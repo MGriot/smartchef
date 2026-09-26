@@ -690,6 +690,7 @@ const RecipeDetail: React.FC = () => {
     if (!recipe) return qty;
     return (qty * servings) / recipe.servings;
   };
+  const servingsScale = recipe?.servings ? servings / recipe.servings : 1;
   const scale = (qty: number | null): string => {
     const v = scaleNum(qty);
     if (v === null) return '';
@@ -1084,15 +1085,19 @@ const RecipeDetail: React.FC = () => {
               const ing = section.ingredients.find(i => i.sortOrder === sortOrder);
               if (!ref || !ing) return null;
               const totals = { sortOrder, quantity: ing.quantity, unitSymbol: ing.unitSymbol };
-              const used = stepIngredientConsumption(ref, totals);
+              // The cook sequence arrives at the recipe's own servings; every
+              // amount in it is linear in them, so scaling the results is the
+              // same as scaling the inputs.
+              const rawUsed = stepIngredientConsumption(ref, totals);
               const before = remainingBeforeStep(sectionSteps, stepIndexInSection, totals);
+              const used = rawUsed != null ? rawUsed * servingsScale : null;
               return {
                 ref,
                 name: ing.ingredientName,
                 unitSymbol: ref.amountMode === 'absolute' ? (ref.unitSymbol || ing.unitSymbol) : ing.unitSymbol,
                 totalUnitSymbol: ing.unitSymbol,
                 used,
-                after: before != null && used != null ? Math.max(0, before - used) : null,
+                after: before != null && rawUsed != null ? Math.max(0, before - rawUsed) * servingsScale : null,
               };
             };
             const sectionIngredients = section.ingredients.map(ing => {
@@ -1100,7 +1105,7 @@ const RecipeDetail: React.FC = () => {
               return {
                 sortOrder: ing.sortOrder,
                 name: ing.ingredientName,
-                quantity: ing.quantity != null ? `${ing.quantity}${ing.unitSymbol ? ' ' + ing.unitSymbol : ''}` : '',
+                quantity: ing.quantity != null ? formatEditorAmount(ing.quantity * servingsScale, ing.unitSymbol) : '',
                 stepQuantity: here?.used != null
                   ? `${formatEditorAmount(here.used, here.unitSymbol)}`
                   : undefined,
@@ -1134,7 +1139,7 @@ const RecipeDetail: React.FC = () => {
                       </h3>
                       <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
                       <p className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4">
-                        <RenderStepText text={step.translatedDescription || step.description} ingredients={sectionIngredients} tools={sectionTools} techniques={stepTextTechniques} />
+                        <RenderStepText text={step.translatedDescription || step.description} ingredients={sectionIngredients} tools={sectionTools} techniques={stepTextTechniques} scale={servingsScale} />
                       </p>
 
                       {(step.stepIngredients || []).length > 0 && (
@@ -1336,7 +1341,7 @@ const RecipeDetail: React.FC = () => {
                     </h3>
                     <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
                     <p className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4">
-                      <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredientsFor(step)} tools={stepTextTools} techniques={stepTextTechniques} />
+                      <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredientsFor(step)} tools={stepTextTools} techniques={stepTextTechniques} scale={servingsScale} />
                     </p>
 
                     {/* Kitchen mode gets a checklist, not a row of chips:
@@ -3710,7 +3715,7 @@ const RecipeDetail: React.FC = () => {
                     <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 group-hover:border-primary/15 transition-colors">
                       <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-xl mb-4" />
                       <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 mb-4">
-                        <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredientsFor(step)} tools={stepTextTools} techniques={stepTextTechniques} />
+                        <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredientsFor(step)} tools={stepTextTools} techniques={stepTextTechniques} scale={servingsScale} />
                       </p>
 
                       {stepIngredientList(step).length > 0 && (

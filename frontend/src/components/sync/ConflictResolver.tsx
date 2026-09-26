@@ -22,7 +22,31 @@ import { isEmptyValue, parseTimestamp, setMembers, SET_FIELDS } from '../../lib/
 import { diffLines, type DiffOp } from '../../lib/lineDiff';
 import CoverImage from '../CoverImage';
 
-type Side = 'local' | 'remote';
+export type Side = 'local' | 'remote';
+
+/** What each side is called. The sync card's defaults are this device and
+ *  the other one; the recipe merge view passes the kept recipe and the
+ *  duplicate instead. */
+export interface SideLabels {
+  local: string;
+  remote: string;
+  localOnly: string;
+  remoteOnly: string;
+  useLocal: string;
+  useRemote: string;
+}
+
+function useSideLabels(labels?: SideLabels): SideLabels {
+  const { t } = useTranslation();
+  return labels ?? {
+    local: t('account.conflicts.thisDevice'),
+    remote: t('account.conflicts.otherDevice'),
+    localOnly: t('account.conflicts.mineOnly'),
+    remoteOnly: t('account.conflicts.theirsOnly'),
+    useLocal: t('account.conflicts.useThisDevice'),
+    useRemote: t('account.conflicts.useOtherDevice'),
+  };
+}
 
 export interface DisplayConflict extends SyncConflict {
   entityName: string;
@@ -35,15 +59,15 @@ const LIST_FIELDS = new Set(['steps', 'ingredients', 'toolIds', 'exclude_tag_ids
 const TRANSLATION_FIELDS = new Set(['translations', 'group_translations']);
 
 /** Sections of an entity's card, in the order the recipe itself reads. */
-type SectionKey = 'info' | 'ingredients' | 'steps' | 'translations' | 'other';
-const SECTION_ORDER: SectionKey[] = ['info', 'ingredients', 'steps', 'translations', 'other'];
+export type SectionKey = 'info' | 'ingredients' | 'steps' | 'translations' | 'other';
+export const SECTION_ORDER: SectionKey[] = ['info', 'ingredients', 'steps', 'translations', 'other'];
 const INFO_FIELDS = new Set([
   'title', 'name', 'description', 'difficulty', 'servings', 'prep_time_min', 'cook_time_min', 'rest_time_min',
   'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url', 'tags', 'regions', 'creator_name',
   'storage_instructions', 'tips', 'category_name', 'icon', 'color', 'image_urls', 'symbol', 'plural_name',
 ]);
 
-function sectionOf(fieldName: string): SectionKey {
+export function sectionOf(fieldName: string): SectionKey {
   if (fieldName === 'steps') return 'steps';
   if (fieldName === 'ingredients' || fieldName === 'toolIds') return 'ingredients';
   if (TRANSLATION_FIELDS.has(fieldName)) return 'translations';
@@ -133,15 +157,16 @@ function DiffRow({ side, children }: { side: Side; children: ReactNode }) {
 
 /** The "■ solo i miei ■ solo i loro" strip at the top of a diff block,
  *  with a "più recente" badge beside whichever side was edited last. */
-function DiffLegend({ newer }: { newer?: Side | null }) {
+function DiffLegend({ newer, labels }: { newer?: Side | null; labels?: SideLabels }) {
   const { t } = useTranslation();
+  const l = useSideLabels(labels);
   const badge = (
     <span className="px-1.5 py-px rounded bg-primary/10 text-primary tracking-wider normal-case font-black">{t('account.conflicts.newer')}</span>
   );
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700 text-[10px] font-black uppercase tracking-widest">
-      <span className="flex items-center gap-1.5 text-[#cf222e] dark:text-[#ff7b72]"><span className="w-2.5 h-2.5 rounded-sm bg-[#cf222e] dark:bg-[#ff7b72]" />{t('account.conflicts.mineOnly')}{newer === 'local' && badge}</span>
-      <span className="flex items-center gap-1.5 text-[#1a7f37] dark:text-[#56d364]"><span className="w-2.5 h-2.5 rounded-sm bg-[#1a7f37] dark:bg-[#56d364]" />{t('account.conflicts.theirsOnly')}{newer === 'remote' && badge}</span>
+      <span className="flex items-center gap-1.5 text-[#cf222e] dark:text-[#ff7b72]"><span className="w-2.5 h-2.5 rounded-sm bg-[#cf222e] dark:bg-[#ff7b72]" />{l.localOnly}{newer === 'local' && badge}</span>
+      <span className="flex items-center gap-1.5 text-[#1a7f37] dark:text-[#56d364]"><span className="w-2.5 h-2.5 rounded-sm bg-[#1a7f37] dark:bg-[#56d364]" />{l.remoteOnly}{newer === 'remote' && badge}</span>
     </div>
   );
 }
@@ -245,24 +270,31 @@ function TranslationsView({ value, other, side }: { value: unknown; other: unkno
 }
 
 /** A version the user can keep by tapping it — one row of the diff. */
-function VersionCard({ conflict, side, newer, onPick, children }: {
+function VersionCard({ conflict, side, newer, onPick, children, labels, selected }: {
   conflict: DisplayConflict; side: Side; newer: Side | null; onPick: () => void; children: ReactNode;
+  labels?: SideLabels; selected?: boolean;
 }) {
   const { t } = useTranslation();
+  const l = useSideLabels(labels);
   const ms = parseTimestamp(side === 'local' ? conflict.localUpdatedAt : conflict.remoteUpdatedAt);
   return (
-    <button type="button" onClick={onPick} className="group block w-full min-w-0 text-left hover:brightness-[0.97] dark:hover:brightness-110 transition">
+    <button
+      type="button"
+      onClick={onPick}
+      aria-pressed={selected}
+      className={`group block w-full min-w-0 text-left hover:brightness-[0.97] dark:hover:brightness-110 transition ${selected ? 'ring-2 ring-inset ring-primary' : ''}`}
+    >
       <DiffRow side={side}>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
           <span className="text-[11px] font-black text-zinc-700 dark:text-zinc-200">
-            {side === 'local' ? t('account.conflicts.thisDevice') : t('account.conflicts.otherDevice')}
+            {side === 'local' ? l.local : l.remote}
           </span>
           {ms !== null && <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{relativeTime(t, ms)}</span>}
           {newer === side && (
             <span className="px-1.5 py-px rounded bg-white/80 dark:bg-zinc-900/60 text-primary text-[10px] font-black uppercase tracking-wider">{t('account.conflicts.newer')}</span>
           )}
-          <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-black text-zinc-500 group-hover:text-primary">
-            <span className="material-symbols-outlined text-[16px]">check_circle</span>
+          <span className={`ml-auto inline-flex items-center gap-1 text-[11px] font-black group-hover:text-primary ${selected ? 'text-primary' : 'text-zinc-500'}`}>
+            <span className="material-symbols-outlined text-[16px]">{selected ? 'check_circle' : 'radio_button_unchecked'}</span>
             {t('account.conflicts.keepThisVersion')}
           </span>
         </div>
@@ -300,8 +332,11 @@ function alignLists(ops: DiffOp[]): AlignedRow[] {
   return rows;
 }
 
-function ListCompare({ conflict, newer, onPick }: { conflict: DisplayConflict; newer: Side | null; onPick: (side: Side) => void }) {
+function ListCompare({ conflict, newer, onPick, labels, selected }: {
+  conflict: DisplayConflict; newer: Side | null; onPick: (side: Side) => void; labels?: SideLabels; selected?: Side | null;
+}) {
   const { t } = useTranslation();
+  const l = useSideLabels(labels);
   const [rows, setRows] = useState<AlignedRow[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -329,7 +364,7 @@ function ListCompare({ conflict, newer, onPick }: { conflict: DisplayConflict; n
   return (
     <div className="space-y-3">
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 overflow-hidden">
-        <DiffLegend newer={newer} />
+        <DiffLegend newer={newer} labels={labels} />
         {failed && <p className="p-4 text-sm text-zinc-500">{t('account.conflicts.cannotCompare')}</p>}
         {!failed && !rows && <p className="p-4 text-sm text-zinc-400">{t('common.loading')}</p>}
         <div className="divide-y divide-white/60 dark:divide-zinc-900">
@@ -369,14 +404,15 @@ function ListCompare({ conflict, newer, onPick }: { conflict: DisplayConflict; n
             key={side}
             type="button"
             onClick={() => onPick(side)}
-            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black transition-colors ${
+            aria-pressed={selected === side}
+            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black transition-colors ${selected === side ? 'ring-2 ring-primary ring-offset-2 ring-offset-white dark:ring-offset-zinc-950' : ''} ${
               side === 'local'
                 ? 'bg-zinc-100 text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700'
                 : 'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900'
             }`}
           >
             <span className={`font-mono ${side === 'local' ? 'text-[#cf222e] dark:text-[#ff7b72]' : 'text-[#56d364] dark:text-[#1a7f37]'}`}>{DIFF[side].sign}</span>
-            {side === 'local' ? t('account.conflicts.useThisDevice') : t('account.conflicts.useOtherDevice')}
+            {side === 'local' ? l.useLocal : l.useRemote}
           </button>
         ))}
       </div>
@@ -384,7 +420,16 @@ function ListCompare({ conflict, newer, onPick }: { conflict: DisplayConflict; n
   );
 }
 
-function FieldConflict({ conflict, onResolve }: { conflict: DisplayConflict; onResolve: (side: Side) => void }) {
+export function FieldConflict({ conflict, onResolve, labels, selected, children }: {
+  conflict: DisplayConflict;
+  onResolve: (side: Side) => void;
+  labels?: SideLabels;
+  /** The side currently chosen, for a view that keeps the field on screen
+   *  after a pick instead of resolving it away. */
+  selected?: Side | null;
+  /** Extra choices under the versions (the merge view's "keep both"). */
+  children?: ReactNode;
+}) {
   const { t } = useTranslation();
   const newer = newerOf(conflict);
   const isList = LIST_FIELDS.has(conflict.fieldName);
@@ -392,17 +437,18 @@ function FieldConflict({ conflict, onResolve }: { conflict: DisplayConflict; onR
     <div className="space-y-2">
       <p className="text-xs font-black uppercase tracking-widest text-zinc-500 dark:text-zinc-400">{fieldLabel(t, conflict.fieldName)}</p>
       {isList ? (
-        <ListCompare conflict={conflict} newer={newer} onPick={onResolve} />
+        <ListCompare conflict={conflict} newer={newer} onPick={onResolve} labels={labels} selected={selected} />
       ) : (
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-          <DiffLegend newer={newer} />
+          <DiffLegend newer={newer} labels={labels} />
           {(['local', 'remote'] as Side[]).map((side) => (
-            <VersionCard key={side} conflict={conflict} side={side} newer={newer} onPick={() => onResolve(side)}>
+            <VersionCard key={side} conflict={conflict} side={side} newer={newer} onPick={() => onResolve(side)} labels={labels} selected={selected === side}>
               <ValueView conflict={conflict} side={side} />
             </VersionCard>
           ))}
         </div>
       )}
+      {children}
     </div>
   );
 }

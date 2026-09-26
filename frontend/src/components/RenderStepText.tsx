@@ -1,5 +1,5 @@
 import React from 'react';
-import { STEP_REF_RE, parseRefParams } from '../lib/stepRefs';
+import { STEP_REF_RE, parseRefParams, scaleAmountText } from '../lib/stepRefs';
 
 export interface StepTextIngredientCtx {
   sortOrder: number;
@@ -27,6 +27,9 @@ interface RenderStepTextProps {
   ingredients: StepTextIngredientCtx[];
   tools: StepTextToolCtx[];
   techniques: StepTextTechniqueCtx[];
+  /** Current servings ÷ the recipe's own, for a `q=` amount the step has
+   *  no stepIngredients row to take a scaled figure from. */
+  scale?: number;
 }
 
 const BADGE_STYLE: Record<string, string> = {
@@ -43,8 +46,14 @@ const BADGE_STYLE: Record<string, string> = {
  *  row says it uses, then the recipe's total. The middle one is what makes
  *  "500 g of the 620 g of flour" read as 500 g here and 120 g three steps
  *  later; the total is only the fallback for a step that never said how
- *  much it wanted. */
-export default function RenderStepText({ text, ingredients, tools, techniques }: RenderStepTextProps) {
+ *  much it wanted.
+ *
+ *  A `q=` amount is text the editor copied out of that same stepIngredients
+ *  row, so it is only a mirror: printed as written, it froze at the recipe's
+ *  own servings while the list under the step followed the slider. The
+ *  scaled row amount wins whenever there is one, and a lone `q=` is scaled
+ *  by its leading number. */
+export default function RenderStepText({ text, ingredients, tools, techniques, scale = 1 }: RenderStepTextProps) {
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let key = 0;
@@ -59,7 +68,11 @@ export default function RenderStepText({ text, ingredients, tools, techniques }:
     if (type === 'ing') {
       const ing = ingredients.find(i => String(i.sortOrder) === id);
       const name = params.alias || ing?.name || '[ingredient]';
-      const amount = params.amount !== undefined ? params.amount : (ing?.stepQuantity ?? ing?.quantity ?? '');
+      const amount = params.amount === undefined
+        ? (ing?.stepQuantity ?? ing?.quantity ?? '')
+        : params.amount === ''
+          ? ''
+          : (ing?.stepQuantity ?? scaleAmountText(params.amount, scale));
       label = `${amount ? amount + ' ' : ''}${name}`;
     } else if (type === 'tool') {
       const tool = tools.find(t => t.id === id);

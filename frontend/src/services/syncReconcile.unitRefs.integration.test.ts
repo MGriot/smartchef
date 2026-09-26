@@ -180,3 +180,63 @@ describe('mergeRecipes', () => {
     expect(await query(`SELECT recipe_id FROM cook_log`)).toEqual([{ recipe_id: 'keep' }]);
   });
 });
+
+describe('field-by-field recipe merge', () => {
+  async function seedPair() {
+    const { query, initLocalSchema } = await import('../db/local');
+    await initLocalSchema();
+    await query(
+      `INSERT INTO recipes (id, title, description, servings, times_cooked, tags, updated_at) VALUES
+        ('keep', 'Crema', 'Old text', 4, 1, '["dolci"]', '2026-01-01 00:00:00'),
+        ('dup', 'Crema', 'Better text', 6, 2, '["base"]', '2026-02-01 00:00:00')`
+    );
+    await query(`INSERT INTO recipe_ingredients (id, recipe_id, sort_order, quantity, quantity_text) VALUES ('k0', 'keep', 0, 500, 'latte'), ('d0', 'dup', 0, 1, 'litro di latte'), ('d1', 'dup', 1, 4, 'tuorli')`);
+    await query(
+      `INSERT INTO recipe_steps (id, recipe_id, step_number, description, step_ingredients) VALUES
+        ('ks1', 'keep', 1, 'Scalda il latte', '[]'),
+        ('ds1', 'dup', 1, 'Scalda il latte', '[]'),
+        ('ds2', 'dup', 2, 'Aggiungi i tuorli', $1)`,
+      [JSON.stringify([{ ingredientSortOrder: 1, amountMode: 'fraction', portion: 1 }])]
+    );
+    return { query };
+  }
+
+  it('previews which fields differ and what each defaults to', async () => {
+    await seedPair();
+    const { getRecipeMergePreview } = await import('./recipes.local');
+    const preview = (await getRecipeMergePreview('dup', 'keep'))!;
+    const byName = Object.fromEntries(preview.fields.map((f) => [f.fieldName, f]));
+    expect(byName.title.equal).toBe(true);
+    expect(byName.description).toMatchObject({ equal: false, defaultSide: 'target', sourceValue: 'Better text', targetValue: 'Old text' });
+    expect(byName.servings).toMatchObject({ equal: false, defaultSide: 'target' });
+    expect(byName.tags).toMatchObject({ equal: false, canKeepBoth: true, defaultSide: 'both' });
+    expect(byName.steps.equal).toBe(false);
+    expect(byName.ingredients.equal).toBe(false);
+    expect(byName.sync_status).toBeUndefined();
+  });
+
+  it('writes the chosen versions onto the kept recipe and deletes the duplicate', async () => {
+    const { query } = await seedPair();
+    const { mergeRecipes } = await import('./recipes.local');
+    await mergeRecipes('dup', 'keep', { description: 'source', steps: 'source', ingredients: 'source', tags: 'both', servings: 'target' });
+
+    const keep = (await query<any>(`SELECT description, servings, times_cooked, tags FROM recipes WHERE id = 'keep'`))[0];
+    expect(keep).toMatchObject({ description: 'Better text', servings: 4, times_cooked: 3 });
+    expect(JSON.parse(keep.tags).sort()).toEqual(['base', 'dolci']);
+    expect(await query(`SELECT description FROM recipe_steps WHERE recipe_id = 'keep' ORDER BY step_number`))
+      .toEqual([{ description: 'Scalda il latte' }, { description: 'Aggiungi i tuorli' }]);
+    expect(await query(`SELECT quantity_text FROM recipe_ingredients WHERE recipe_id = 'keep' ORDER BY sort_order`))
+      .toEqual([{ quantity_text: 'litro di latte' }, { quantity_text: 'tuorli' }]);
+    expect(await query(`SELECT sync_status FROM recipes WHERE id = 'dup'`)).toEqual([{ sync_status: 'deleted' }]);
+  });
+
+  it('drops step links to ingredients the kept list does not have', async () => {
+    const { query } = await seedPair();
+    const { mergeRecipes } = await import('./recipes.local');
+    // Steps from the duplicate (step 2 uses ingredient #1), ingredients
+    // from the kept recipe (only #0).
+    await mergeRecipes('dup', 'keep', { steps: 'source' });
+    const step2 = (await query<any>(`SELECT step_ingredients FROM recipe_steps WHERE recipe_id = 'keep' AND step_number = 2`))[0];
+    expect(JSON.parse(step2.step_ingredients)).toEqual([]);
+  });
+});

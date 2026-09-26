@@ -64,68 +64,78 @@ async function resolveExistingId(client: LocalClient, table: string, id: string 
 // or the merge would never propagate through Folder Sync to other devices.
 export async function syncRecipe(id: string): Promise<void> {
   try {
-    const row = await queryOne<Record<string, unknown>>('SELECT * FROM recipes WHERE id=$1', [id]);
-    if (!row) return;
-    // The yield's unit travels as a SYMBOL as well as an id, for the same
-    // reason each ingredient row does: a bare id another device cannot
-    // resolve renders as a naked number ("YIELD 2" — two of what?), and
-    // nothing in the file says what it meant.
-    if (row.yield_unit_id) {
-      const unit = await queryOne<{ symbol: string }>('SELECT symbol FROM units WHERE id=$1', [row.yield_unit_id as string]);
-      if (unit?.symbol) row.yield_unit_symbol = unit.symbol;
-    }
-    // Ordered, so the same recipe serializes identically on every device,
-    // and each ingredient row carries its unit's symbol: unit ids are
-    // per-device random (db/local.ts), and the symbol is what a receiving
-    // device maps back to its own unit (conflicts.local.ts writeArrayField).
-    const ingredients = await query<Record<string, unknown>>(
-      `SELECT ri.*, u.symbol AS unit_symbol FROM recipe_ingredients ri
-         LEFT JOIN units u ON u.id = ri.unit_id
-        WHERE ri.recipe_id=$1 ORDER BY ri.sort_order, ri.id`,
-      [id]
-    );
-    const steps = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number, id', [id]);
-    // The tool's NAME travels beside its id, for the same reason each
-    // ingredient row carries unit_symbol: tool ids were per-device random
-    // until portable ids, so a receiving device that cannot resolve an id
-    // can still tell what it means. referenceHeal.ts folds two ids naming
-    // the same tool onto one before the merge compares them.
-    const toolRows = await query<{ tool_id: string; name: string | null }>(
-      `SELECT rt.tool_id, t.name FROM recipe_tools rt
-         LEFT JOIN tools t ON t.id = rt.tool_id
-        WHERE rt.recipe_id=$1 ORDER BY rt.tool_id`,
-      [id]
-    );
-    const [{ writeEntityFile }, extras, { unitSymbolsFromSteps, hasUnknownUnit }] = await Promise.all([
-      import('../lib/sync/gitSync'), import('./syncExtras.local'), import('../lib/sync/referenceHeal'),
-    ]);
-    // A row still pointing at a unit id this device doesn't have would be
-    // written with no symbol, which no device can resolve. The recipe's own
-    // step amounts carry id and symbol together — use them when they can.
-    const stepSymbols = unitSymbolsFromSteps(steps);
-    for (const r of ingredients) {
-      const symbol = hasUnknownUnit(r) ? stepSymbols.get(r.unit_id as string) : undefined;
-      if (symbol) Object.assign(r, { unit_id: extras.portableUnitId(symbol), unit_symbol: symbol });
-    }
-    // Translations travel inside the recipe's own file — the recipe's, and
-    // each step's and ingredient row's — so a recipe never arrives on another
-    // device without them (ADR 0006).
-    const rowTranslations = await extras.readRecipeRowTranslations(id);
-    await writeEntityFile('recipes', id, {
-      ...row,
-      ingredients: ingredients.map(r => ({ ...r, translations: rowTranslations.ingredients.get(r.id as string) ?? [] })),
-      steps: steps.map(r => ({ ...r, translations: rowTranslations.steps.get(r.id as string) ?? [] })),
-      toolIds: toolRows.map(t => t.tool_id),
-      // A MAP, not a parallel array: toolIds is a SET_FIELD, so a merge may
-      // reorder and union it and index alignment would not survive. Carried
-      // metadata only — deliberately absent from ENTITY_CONFIG.recipe's
-      // scalarFields, so it can never itself become a conflict.
-      toolNames: Object.fromEntries(toolRows.filter(t => t.name).map(t => [t.tool_id, t.name as string])),
-      ...(await extras.readExtraFields('recipe', id, row)),
-    });
+    const entity = await buildRecipeEntity(id);
+    if (!entity) return;
+    const { writeEntityFile } = await import('../lib/sync/gitSync');
+    await writeEntityFile('recipes', id, entity);
   } catch (err) {
     console.error('SmartChef sync (recipe) failed:', err);
   }
+}
+
+/** A recipe as one object — its row plus ingredients, steps, tools and
+ *  translations — exactly as its sync file holds it. Also what the merge
+ *  view compares field by field. */
+export async function buildRecipeEntity(id: string): Promise<Record<string, unknown> | null> {
+  const row = await queryOne<Record<string, unknown>>('SELECT * FROM recipes WHERE id=$1', [id]);
+  if (!row) return null;
+  // The yield's unit travels as a SYMBOL as well as an id, for the same
+  // reason each ingredient row does: a bare id another device cannot
+  // resolve renders as a naked number ("YIELD 2" — two of what?), and
+  // nothing in the file says what it meant.
+  if (row.yield_unit_id) {
+    const unit = await queryOne<{ symbol: string }>('SELECT symbol FROM units WHERE id=$1', [row.yield_unit_id as string]);
+    if (unit?.symbol) row.yield_unit_symbol = unit.symbol;
+  }
+  // Ordered, so the same recipe serializes identically on every device,
+  // and each ingredient row carries its unit's symbol: unit ids are
+  // per-device random (db/local.ts), and the symbol is what a receiving
+  // device maps back to its own unit (conflicts.local.ts writeArrayField).
+  const ingredients = await query<Record<string, unknown>>(
+    `SELECT ri.*, u.symbol AS unit_symbol FROM recipe_ingredients ri
+       LEFT JOIN units u ON u.id = ri.unit_id
+      WHERE ri.recipe_id=$1 ORDER BY ri.sort_order, ri.id`,
+    [id]
+  );
+  const steps = await query<Record<string, unknown>>('SELECT * FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number, id', [id]);
+  // The tool's NAME travels beside its id, for the same reason each
+  // ingredient row carries unit_symbol: tool ids were per-device random
+  // until portable ids, so a receiving device that cannot resolve an id
+  // can still tell what it means. referenceHeal.ts folds two ids naming
+  // the same tool onto one before the merge compares them.
+  const toolRows = await query<{ tool_id: string; name: string | null }>(
+    `SELECT rt.tool_id, t.name FROM recipe_tools rt
+       LEFT JOIN tools t ON t.id = rt.tool_id
+      WHERE rt.recipe_id=$1 ORDER BY rt.tool_id`,
+    [id]
+  );
+  const [extras, { unitSymbolsFromSteps, hasUnknownUnit }] = await Promise.all([
+    import('./syncExtras.local'), import('../lib/sync/referenceHeal'),
+  ]);
+  // A row still pointing at a unit id this device doesn't have would be
+  // written with no symbol, which no device can resolve. The recipe's own
+  // step amounts carry id and symbol together — use them when they can.
+  const stepSymbols = unitSymbolsFromSteps(steps);
+  for (const r of ingredients) {
+    const symbol = hasUnknownUnit(r) ? stepSymbols.get(r.unit_id as string) : undefined;
+    if (symbol) Object.assign(r, { unit_id: extras.portableUnitId(symbol), unit_symbol: symbol });
+  }
+  // Translations travel inside the recipe's own file — the recipe's, and
+  // each step's and ingredient row's — so a recipe never arrives on another
+  // device without them (ADR 0006).
+  const rowTranslations = await extras.readRecipeRowTranslations(id);
+  return {
+    ...row,
+    ingredients: ingredients.map(r => ({ ...r, translations: rowTranslations.ingredients.get(r.id as string) ?? [] })),
+    steps: steps.map(r => ({ ...r, translations: rowTranslations.steps.get(r.id as string) ?? [] })),
+    toolIds: toolRows.map(t => t.tool_id),
+    // A MAP, not a parallel array: toolIds is a SET_FIELD, so a merge may
+    // reorder and union it and index alignment would not survive. Carried
+    // metadata only — deliberately absent from ENTITY_CONFIG.recipe's
+    // scalarFields, so it can never itself become a conflict.
+    toolNames: Object.fromEntries(toolRows.filter(t => t.name).map(t => [t.tool_id, t.name as string])),
+    ...(await extras.readExtraFields('recipe', id, row)),
+  };
 }
 
 /** Re-writes every local recipe's entity file regardless of whether
@@ -979,22 +989,86 @@ export async function deleteRecipe(id: string): Promise<void> {
   syncRecipeInBackground(id);
 }
 
+// ── GET /recipes/:id/merge-preview ─────────────────────────────────────
+// The two recipes side by side, field by field, for the merge view to ask
+// which version of each to keep. Values are the recipes' sync-file shape
+// (buildRecipeEntity), so the conflict resolver's renderers read them as is.
+
+export type MergeSide = 'source' | 'target' | 'both';
+
+export interface RecipeMergeField {
+  fieldName: string;
+  sourceValue: unknown;
+  targetValue: unknown;
+  equal: boolean;
+  /** Set fields (tags, regions, tools) can keep both sides' members. */
+  canKeepBoth: boolean;
+  defaultSide: MergeSide;
+}
+
+export interface RecipeMergePreview {
+  source: { id: string; title: string; updated_at: string | null };
+  target: { id: string; title: string; updated_at: string | null };
+  fields: RecipeMergeField[];
+}
+
+// Bookkeeping, not content: nobody picks a side for these.
+const MERGE_SKIPPED_FIELDS = new Set(['sync_status', 'language_code', 'is_component', 'source_url', 'region_coords']);
+
+async function liveRecipeEntity(id: string): Promise<Record<string, unknown> | null> {
+  const entity = await buildRecipeEntity(id);
+  return entity && entity.sync_status !== 'deleted' ? entity : null;
+}
+
+export async function getRecipeMergePreview(sourceId: string, targetId: string): Promise<RecipeMergePreview | null> {
+  if (sourceId === targetId) throw new Error(i18n.t('errors.mergeIntoSelf'));
+  const [source, target] = await Promise.all([liveRecipeEntity(sourceId), liveRecipeEntity(targetId)]);
+  if (!source || !target) return null;
+  const [{ getMergeableFieldNames }, { fieldValuesEqual, isEmptyValue, SET_FIELDS }] = await Promise.all([
+    import('./conflicts.local'), import('../lib/mergeNormalize'),
+  ]);
+  const fields = (getMergeableFieldNames('recipe') ?? [])
+    .filter((f) => !MERGE_SKIPPED_FIELDS.has(f))
+    .map((fieldName): RecipeMergeField => {
+      const sourceValue = source[fieldName] ?? null;
+      const targetValue = target[fieldName] ?? null;
+      const equal = fieldValuesEqual(fieldName, sourceValue, targetValue);
+      const canKeepBoth = SET_FIELDS.has(fieldName);
+      // What the merge did before there was a choice: the kept recipe's
+      // value, unless it has none; sets were already unioned.
+      const defaultSide: MergeSide = equal ? 'target'
+        : canKeepBoth ? 'both'
+        : isEmptyValue(targetValue) && !isEmptyValue(sourceValue) ? 'source' : 'target';
+      return { fieldName, sourceValue, targetValue, equal, canKeepBoth, defaultSide };
+    });
+  const summary = (e: Record<string, unknown>) => ({ id: String(e.id), title: String(e.title ?? ''), updated_at: (e.updated_at as string | null) ?? null });
+  return { source: summary(source), target: summary(target), fields };
+}
+
 // ── POST /recipes/:id/merge ────────────────────────────────────────────
 // The same recipe saved twice — imported from the same page on two devices,
-// or re-imported after an edit. The kept recipe's own content (ingredients,
-// steps, text) is what survives; a merge is not a diff tool. What moves
-// over is everything that refers to the duplicate: collections, planned
-// meals, the cook log and its count, other recipes using it as a
-// sub-recipe, and a rating, cover or tags the kept one lacks. Then the
-// duplicate is deleted the way any recipe is, so the deletion syncs.
+// or re-imported after an edit. Without `choices` the kept recipe's own
+// content (ingredients, steps, text) is what survives. With them — from
+// the merge view — each field named takes the source's version, or for a
+// set field both sides' members, before anything else happens. Either way
+// what moves over is everything that refers to the duplicate: collections,
+// planned meals, the cook log and its count, other recipes using it as a
+// sub-recipe. Then the duplicate is deleted the way any recipe is, so the
+// deletion syncs.
 
-export async function mergeRecipes(sourceId: string, targetId: string): Promise<{ recipesUpdated: number } | null> {
+export async function mergeRecipes(
+  sourceId: string,
+  targetId: string,
+  choices?: Record<string, MergeSide>,
+): Promise<{ recipesUpdated: number } | null> {
   if (sourceId === targetId) throw new Error(i18n.t('errors.mergeIntoSelf'));
   const [source, target] = await Promise.all([
     queryOne<Record<string, any>>("SELECT * FROM recipes WHERE id=$1 AND COALESCE(sync_status,'')!='deleted'", [sourceId]),
     queryOne<Record<string, any>>("SELECT * FROM recipes WHERE id=$1 AND COALESCE(sync_status,'')!='deleted'", [targetId]),
   ]);
   if (!source || !target) return null;
+
+  if (choices) await applyMergeChoices(sourceId, targetId, choices);
 
   await query(
     `INSERT INTO collection_recipes (collection_id, recipe_id)
@@ -1011,23 +1085,80 @@ export async function mergeRecipes(sourceId: string, targetId: string): Promise<
   );
   await query("UPDATE recipe_ingredients SET sub_recipe_id=$1 WHERE sub_recipe_id=$2 AND recipe_id != $1", [targetId, sourceId]);
 
-  const parseList = (v: unknown): unknown[] => {
-    if (Array.isArray(v)) return v;
-    try { const p = JSON.parse(String(v ?? '[]')); return Array.isArray(p) ? p : []; } catch { return []; }
-  };
-  const tags = [...new Set([...parseList(target.tags), ...parseList(source.tags)].map(String))];
-  await query(
-    `UPDATE recipes SET times_cooked = COALESCE(times_cooked, 0) + $1,
-            rating = COALESCE(rating, $2), cover_image_url = COALESCE(cover_image_url, $3),
-            tags = $4, updated_at = now()
-      WHERE id = $5`,
-    [Number(source.times_cooked) || 0, source.rating ?? null, source.cover_image_url ?? null, JSON.stringify(tags), targetId]
-  );
+  if (choices) {
+    await query(
+      "UPDATE recipes SET times_cooked = COALESCE(times_cooked, 0) + $1, updated_at = now() WHERE id = $2",
+      [Number(source.times_cooked) || 0, targetId]
+    );
+  } else {
+    const parseList = (v: unknown): unknown[] => {
+      if (Array.isArray(v)) return v;
+      try { const p = JSON.parse(String(v ?? '[]')); return Array.isArray(p) ? p : []; } catch { return []; }
+    };
+    const tags = [...new Set([...parseList(target.tags), ...parseList(source.tags)].map(String))];
+    await query(
+      `UPDATE recipes SET times_cooked = COALESCE(times_cooked, 0) + $1,
+              rating = COALESCE(rating, $2), cover_image_url = COALESCE(cover_image_url, $3),
+              tags = $4, updated_at = now()
+        WHERE id = $5`,
+      [Number(source.times_cooked) || 0, source.rating ?? null, source.cover_image_url ?? null, JSON.stringify(tags), targetId]
+    );
+  }
 
   await deleteRecipe(sourceId);
   await syncRecipe(targetId);
   for (const p of parents) await syncRecipe(p.recipe_id);
   return { recipesUpdated: parents.length + 1 };
+}
+
+// Stored as JSON text on the recipes row, unlike toolIds (an array the
+// child-table writer takes as is).
+const JSON_TEXT_SET_FIELDS = new Set(['tags', 'regions', 'image_urls']);
+
+/** Writes each field the merge view took from the source onto the target.
+ *  Steps and ingredients move as rows (writeArrayField upserts by id, so
+ *  the source's rows, with their translations, change owner), which is
+ *  safe only because the source is deleted straight after. */
+async function applyMergeChoices(sourceId: string, targetId: string, choices: Record<string, MergeSide>): Promise<void> {
+  const [source, target] = await Promise.all([buildRecipeEntity(sourceId), buildRecipeEntity(targetId)]);
+  if (!source || !target) return;
+  const [{ applyResolvedConflict, getMergeableFieldNames }, { setMembers, SET_FIELDS }] = await Promise.all([
+    import('./conflicts.local'), import('../lib/mergeNormalize'),
+  ]);
+  const allowed = new Set((getMergeableFieldNames('recipe') ?? []).filter((f) => !MERGE_SKIPPED_FIELDS.has(f)));
+  for (const [fieldName, side] of Object.entries(choices)) {
+    if (!allowed.has(fieldName) || side === 'target') continue;
+    let chosenValue: unknown = source[fieldName] ?? null;
+    if (side === 'both' && SET_FIELDS.has(fieldName)) {
+      const members = [...setMembers(target[fieldName]), ...setMembers(source[fieldName])];
+      const union = [...new Map(members.map((m) => [JSON.stringify(m), m])).values()];
+      chosenValue = JSON_TEXT_SET_FIELDS.has(fieldName) ? JSON.stringify(union) : union;
+    }
+    await applyResolvedConflict({ entityType: 'recipe', entityId: targetId, fieldName, chosenValue });
+  }
+
+  // Steps point at ingredients by position ({{ing:N}}, step_ingredients).
+  // Taken from one recipe and ingredients from the other, a step may name
+  // a position the kept ingredient list lacks; drop those links rather
+  // than leave a step reading "[ingredient]" with a phantom amount.
+  const stepsSide = choices.steps ?? 'target';
+  const ingredientsSide = choices.ingredients ?? 'target';
+  if (stepsSide !== ingredientsSide) {
+    const rows = await query<{ sort_order: number }>("SELECT sort_order FROM recipe_ingredients WHERE recipe_id=$1", [targetId]);
+    const present = new Set(rows.map((r) => Number(r.sort_order)));
+    const steps = await query<{ id: string; step_ingredients: string | null }>(
+      "SELECT id, step_ingredients FROM recipe_steps WHERE recipe_id=$1", [targetId]
+    );
+    for (const step of steps) {
+      let refs: Array<{ ingredientSortOrder?: number }> = [];
+      try { refs = JSON.parse(step.step_ingredients || '[]'); } catch { continue; }
+      if (!Array.isArray(refs)) continue;
+      const kept = refs.filter((r) => present.has(Number(r?.ingredientSortOrder)));
+      if (kept.length !== refs.length) {
+        await query("UPDATE recipe_steps SET step_ingredients=$1 WHERE id=$2", [JSON.stringify(kept), step.id]);
+      }
+    }
+  }
 }
 
 // ── Portions / cook-sequence ────────────────────────────────────────────

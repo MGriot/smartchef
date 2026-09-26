@@ -642,9 +642,30 @@
     "removeOfflineDownload": "Remove offline download",
     "downloadedOffline": "Downloaded for offline — tap to remove",
     "mergeTitle": "Merge into another recipe",
-    "mergeSubtitle": "\"{{title}}\" is the same recipe as the one you pick: it is deleted, and its collections, planned meals, cook history and uses as a sub-recipe move to the recipe you keep. The kept recipe's ingredients and steps stay as they are.",
+    "mergeSubtitle": "\"{{title}}\" is the same recipe as the one you pick. Next you compare the two field by field and choose which version of each to keep; then this one is deleted, and its collections, planned meals, cook history and uses as a sub-recipe move to the recipe you keep.",
     "mergeHint": "The recipe to keep.",
-    "mergeFailed": "The recipes could not be merged."
+    "mergeFailed": "The recipes could not be merged.",
+    "mergeCompare": {
+      "compare": "Compare",
+      "title": "Compare and merge",
+      "subtitle_one": "{{count}} field differs — pick the version to keep",
+      "subtitle_other": "{{count}} fields differ — pick the version to keep of each",
+      "kept": "Recipe kept",
+      "duplicate": "Duplicate (deleted)",
+      "keptOnly": "only in the kept recipe",
+      "duplicateOnly": "only in the duplicate",
+      "useKept": "Use the kept recipe's",
+      "useDuplicate": "Use the duplicate's",
+      "keepBoth": "Keep both",
+      "swap": "Swap",
+      "back": "Back",
+      "keepAllKept": "All from the kept recipe",
+      "keepAllDuplicate": "All from the duplicate",
+      "explain": "Tap a version to keep it. Whatever you pick ends up in the kept recipe; the duplicate is then deleted.",
+      "allIdentical": "The two recipes have the same content — merging only moves collections, plans and cook history.",
+      "identicalFields_one": "{{count}} field is identical",
+      "identicalFields_other": "{{count}} fields are identical"
+    }
   },
   "recipeCreate": {
     "newRecipe": "New Recipe",

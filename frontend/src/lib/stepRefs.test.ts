@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseRefParams, formatRefParams, buildRef,
-  syncIngredientRefAmount, reindexIngredientRefs,
+  syncIngredientRefAmount, reindexIngredientRefs, scaleAmountText,
   stepIngredientConsumption, remainingBeforeStep,
   matchStepIngredients, linkIngredientsInText,
 } from './stepRefs';
@@ -201,5 +201,26 @@ describe('linkIngredientsInText', () => {
   it('does not match a name inside a longer word', () => {
     const text = 'Usa lo zuccherificio del paese.';
     expect(linkIngredientsInText(text, [refs[1]], ingredients)).toBe(text);
+  });
+});
+
+describe('scaleAmountText', () => {
+  it('scales the leading number and keeps the unit', () => {
+    expect(scaleAmountText('500 g', 2)).toBe('1000 g');
+    expect(scaleAmountText('1,5 kg', 2)).toBe('3 kg');
+    expect(scaleAmountText('250 ml', 0.5)).toBe('125 ml');
+  });
+  it('scales fractions, mixed numbers and ranges', () => {
+    expect(scaleAmountText('1/2 cup', 2)).toBe('1 cup');
+    expect(scaleAmountText('1 1/2 cup', 2)).toBe('3 cup');
+    expect(scaleAmountText('½ tsp', 3)).toBe('1.5 tsp');
+    expect(scaleAmountText('3-4 uova', 2)).toBe('6-8 uova');
+  });
+  it('leaves text with no leading number alone', () => {
+    expect(scaleAmountText('un pizzico', 2)).toBe('un pizzico');
+    expect(scaleAmountText('q.b.', 2)).toBe('q.b.');
+  });
+  it('is a no-op at factor 1', () => {
+    expect(scaleAmountText('500 g', 1)).toBe('500 g');
   });
 });

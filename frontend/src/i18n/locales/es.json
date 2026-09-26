@@ -642,9 +642,30 @@
     "removeOfflineDownload": "Quitar la descarga sin conexión",
     "downloadedOffline": "Descargada para usar sin conexión: toca para quitarla",
     "mergeTitle": "Combinar con otra receta",
-    "mergeSubtitle": "«{{title}}» es la misma receta que la que elijas: se elimina, y sus colecciones, comidas planificadas, historial de cocina y usos como subreceta pasan a la receta que conservas. Los ingredientes y pasos de esa receta no cambian.",
+    "mergeSubtitle": "\"{{title}}\" es la misma receta que la que eliges. Después comparas las dos campo por campo y eliges qué versión conservar de cada uno; luego esta se elimina, y sus colecciones, comidas planificadas, historial de cocina y usos como subreceta pasan a la receta que conservas.",
     "mergeHint": "La receta que se conserva.",
-    "mergeFailed": "No se pudieron combinar las recetas."
+    "mergeFailed": "No se pudieron combinar las recetas.",
+    "mergeCompare": {
+      "compare": "Comparar",
+      "title": "Comparar y combinar",
+      "subtitle_one": "{{count}} campo es distinto: elige la versión que conservar",
+      "subtitle_other": "{{count}} campos son distintos: elige la versión que conservar de cada uno",
+      "kept": "Receta conservada",
+      "duplicate": "Duplicado (se elimina)",
+      "keptOnly": "solo en la receta conservada",
+      "duplicateOnly": "solo en el duplicado",
+      "useKept": "Usar la conservada",
+      "useDuplicate": "Usar la del duplicado",
+      "keepBoth": "Conservar ambos",
+      "swap": "Intercambiar",
+      "back": "Atrás",
+      "keepAllKept": "Todo de la receta conservada",
+      "keepAllDuplicate": "Todo del duplicado",
+      "explain": "Toca una versión para conservarla. Lo que elijas queda en la receta conservada; después se elimina el duplicado.",
+      "allIdentical": "Las dos recetas tienen el mismo contenido: combinar solo mueve colecciones, planes e historial de cocina.",
+      "identicalFields_one": "{{count}} campo es idéntico",
+      "identicalFields_other": "{{count}} campos son idénticos"
+    }
   },
   "recipeCreate": {
     "newRecipe": "Nueva receta",

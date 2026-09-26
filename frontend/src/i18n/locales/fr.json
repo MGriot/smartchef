@@ -642,9 +642,30 @@
     "removeOfflineDownload": "Supprimer le téléchargement hors ligne",
     "downloadedOffline": "Téléchargée pour hors ligne — touchez pour la retirer",
     "mergeTitle": "Fusionner avec une autre recette",
-    "mergeSubtitle": "« {{title}} » est la même recette que celle que vous choisissez : elle est supprimée, et ses collections, repas planifiés, historique de cuisine et usages comme sous-recette passent à la recette conservée. Les ingrédients et étapes de celle-ci ne changent pas.",
+    "mergeSubtitle": "« {{title}} » est la même recette que celle que vous choisissez. Vous comparez ensuite les deux champ par champ et choisissez la version à garder pour chacun ; celle-ci est alors supprimée, et ses collections, repas planifiés, historique de cuisson et utilisations comme sous-recette passent à la recette conservée.",
     "mergeHint": "La recette à conserver.",
-    "mergeFailed": "Impossible de fusionner les recettes."
+    "mergeFailed": "Impossible de fusionner les recettes.",
+    "mergeCompare": {
+      "compare": "Comparer",
+      "title": "Comparer et fusionner",
+      "subtitle_one": "{{count}} champ diffère — choisissez la version à garder",
+      "subtitle_other": "{{count}} champs diffèrent — choisissez la version à garder pour chacun",
+      "kept": "Recette conservée",
+      "duplicate": "Doublon (supprimé)",
+      "keptOnly": "uniquement dans la recette conservée",
+      "duplicateOnly": "uniquement dans le doublon",
+      "useKept": "Garder la conservée",
+      "useDuplicate": "Garder celle du doublon",
+      "keepBoth": "Garder les deux",
+      "swap": "Inverser",
+      "back": "Retour",
+      "keepAllKept": "Tout de la recette conservée",
+      "keepAllDuplicate": "Tout du doublon",
+      "explain": "Touchez une version pour la garder. Vos choix vont dans la recette conservée ; le doublon est ensuite supprimé.",
+      "allIdentical": "Les deux recettes ont le même contenu : la fusion ne déplace que les collections, les plans et l'historique de cuisson.",
+      "identicalFields_one": "{{count}} champ est identique",
+      "identicalFields_other": "{{count}} champs sont identiques"
+    }
   },
   "recipeCreate": {
     "newRecipe": "Nouvelle recette",

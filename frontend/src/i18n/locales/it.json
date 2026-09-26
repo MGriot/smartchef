@@ -642,9 +642,30 @@
     "removeOfflineDownload": "Rimuovi download offline",
     "downloadedOffline": "Scaricata per l'uso offline: tocca per rimuoverla",
     "mergeTitle": "Unisci a un'altra ricetta",
-    "mergeSubtitle": "\"{{title}}\" è la stessa ricetta di quella che scegli: viene eliminata, e raccolte, pasti pianificati, cronologia di cottura e usi come sotto-ricetta passano alla ricetta che tieni. Ingredienti e passaggi della ricetta tenuta restano com'erano.",
+    "mergeSubtitle": "\"{{title}}\" è la stessa ricetta di quella che scegli. Poi confronti le due campo per campo e scegli quale versione tenere di ciascuno; questa viene quindi eliminata, e raccolte, pasti pianificati, cronologia di cottura e usi come sotto-ricetta passano alla ricetta che tieni.",
     "mergeHint": "La ricetta da tenere.",
-    "mergeFailed": "Impossibile unire le ricette."
+    "mergeFailed": "Impossibile unire le ricette.",
+    "mergeCompare": {
+      "compare": "Confronta",
+      "title": "Confronta e unisci",
+      "subtitle_one": "{{count}} campo è diverso — scegli la versione da tenere",
+      "subtitle_other": "{{count}} campi sono diversi — scegli la versione da tenere di ciascuno",
+      "kept": "Ricetta tenuta",
+      "duplicate": "Duplicato (eliminato)",
+      "keptOnly": "solo nella ricetta tenuta",
+      "duplicateOnly": "solo nel duplicato",
+      "useKept": "Usa quella tenuta",
+      "useDuplicate": "Usa quella del duplicato",
+      "keepBoth": "Tieni entrambi",
+      "swap": "Inverti",
+      "back": "Indietro",
+      "keepAllKept": "Tutto dalla ricetta tenuta",
+      "keepAllDuplicate": "Tutto dal duplicato",
+      "explain": "Tocca una versione per tenerla. Ciò che scegli finisce nella ricetta tenuta; il duplicato viene poi eliminato.",
+      "allIdentical": "Le due ricette hanno lo stesso contenuto: l'unione sposta solo raccolte, pianificazioni e cronologia di cottura.",
+      "identicalFields_one": "{{count}} campo è identico",
+      "identicalFields_other": "{{count}} campi sono identici"
+    }
   },
   "login": {
     "password": "Password",
