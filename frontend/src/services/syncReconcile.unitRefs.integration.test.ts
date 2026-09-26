@@ -182,7 +182,7 @@ describe('mergeRecipes', () => {
 });
 
 describe('field-by-field recipe merge', () => {
-  async function seedPair() {
+  async function seedRecipes() {
     const { query, initLocalSchema } = await import('../db/local');
     await initLocalSchema();
     await query(
@@ -202,7 +202,7 @@ describe('field-by-field recipe merge', () => {
   }
 
   it('previews which fields differ and what each defaults to', async () => {
-    await seedPair();
+    await seedRecipes();
     const { getRecipeMergePreview } = await import('./recipes.local');
     const preview = (await getRecipeMergePreview('dup', 'keep'))!;
     const byName = Object.fromEntries(preview.fields.map((f) => [f.fieldName, f]));
@@ -216,7 +216,7 @@ describe('field-by-field recipe merge', () => {
   });
 
   it('writes the chosen versions onto the kept recipe and deletes the duplicate', async () => {
-    const { query } = await seedPair();
+    const { query } = await seedRecipes();
     const { mergeRecipes } = await import('./recipes.local');
     await mergeRecipes('dup', 'keep', { description: 'source', steps: 'source', ingredients: 'source', tags: 'both', servings: 'target' });
 
@@ -231,7 +231,7 @@ describe('field-by-field recipe merge', () => {
   });
 
   it('drops step links to ingredients the kept list does not have', async () => {
-    const { query } = await seedPair();
+    const { query } = await seedRecipes();
     const { mergeRecipes } = await import('./recipes.local');
     // Steps from the duplicate (step 2 uses ingredient #1), ingredients
     // from the kept recipe (only #0).
