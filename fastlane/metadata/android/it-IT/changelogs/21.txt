@@ -1,0 +1,3 @@
+Unire due copie della stessa ricetta ora le mostra una accanto all'altra, campo per campo: testo, tempi, tag, ingredienti e passaggi. Scegli quale versione tenere di ciascuno, oppure tieni i tag di entrambe.
+
+Cambiando le porzioni ora cambiano anche le quantita scritte nei passaggi, nella pagina della ricetta e in Modalita Cucina, non solo l'elenco degli ingredienti sotto ogni passaggio.

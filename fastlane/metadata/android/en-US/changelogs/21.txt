@@ -1,0 +1,3 @@
+Merging two copies of the same recipe now shows them side by side, field by field: text, times, tags, ingredients and steps. You choose which version of each to keep, or keep both sets of tags.
+
+Changing the servings now also changes the amounts written inside the steps, on the recipe page and in Kitchen mode, not only the ingredient list under each step.
