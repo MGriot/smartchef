@@ -9,6 +9,7 @@ import CoverImage from '../components/CoverImage';
 import { useStore } from '../store/app.store';
 import { useIsWideViewport } from '../hooks/useMediaQuery';
 import { apiFetch } from '../lib/api';
+import { useFileExport } from '../hooks/useFileExport';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
 
@@ -210,6 +211,7 @@ const Home: React.FC = () => {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const { exportFile, sheet: exportSheet } = useFileExport();
 
   const toggleSelectMode = () => {
     setSelectMode((v) => !v);
@@ -236,15 +238,11 @@ const Home: React.FC = () => {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('errors.exportFailed'));
-      const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `recipes-${selectedIds.size}.smartchef.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await exportFile({
+        fileName: `recipes-${selectedIds.size}.smartchef.json`,
+        mimeType: 'application/json',
+        data: JSON.stringify(json.data, null, 2),
+      });
     } catch (err) {
       console.error('Bulk export failed:', err);
     } finally {
@@ -324,6 +322,7 @@ const Home: React.FC = () => {
 
   return (
     <AppLayout>
+      {exportSheet}
       {/* px-8 was costing 64px of a 360px phone screen; the bottom padding
           clears the fixed mobile nav below, which previously overlapped the
           last row of cards. */}

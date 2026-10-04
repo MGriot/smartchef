@@ -162,3 +162,97 @@ describe('standalone ingredient naming', () => {
     expect(db.prepare("SELECT parent_ingredient_id FROM ingredients WHERE id='apple'").get()).toEqual({ parent_ingredient_id: null });
   });
 });
+
+describe('standalone ingredient tidy (category, tags, nutrition, synonyms)', () => {
+  async function seedSugar() {
+    const { query } = await import('../db/local');
+    await query("INSERT INTO ingredient_categories (id, name, sort_order) VALUES ('bak', 'Bakery', 0), ('pan', 'Pantry', 1)");
+    await query("INSERT INTO tags (id, name) VALUES ('t-vegan', 'Vegan'), ('t-gluten', 'Gluten')");
+    await query("INSERT INTO ingredients (id, category_id, name, synonyms) VALUES ('sugar', 'bak', 'Sugar', '[\"Granulated Sugar\"]')");
+    await query("INSERT INTO ingredient_tags (ingredient_id, tag_id) VALUES ('sugar', 't-gluten')");
+  }
+
+  it('asks only for the aspects requested and resolves categories and tags to ids', async () => {
+    await seedSugar();
+    providerAnswer = () => JSON.stringify({ items: [{
+      key: 'sugar', category: 'pantry', tags: ['vegan', 'Invented Tag'], wrongTags: ['Gluten'],
+      nutrition: { kcal: 387, protein: 0, carbs: 99.8, fat: 0, fiber: 0, sugar: 99.8, sodium: 1, bogus: 5 },
+      synonyms: ['Table Sugar'],
+      // Not asked for — must not come back.
+      name: 'Something Else', translations: { it: 'Altro' },
+    }] });
+
+    const res = await route('/api/ingredients/ai-tidy', 'POST', {
+      items: [{ key: 'sugar', text: 'Sugar', category: 'Bakery', tags: ['Gluten'], nutrition: {}, synonyms: ['Granulated Sugar'] }],
+      aspects: { naming: false, classification: true, nutrition: true, synonyms: true },
+    });
+    expect(res.status).toBe(200);
+    const [s] = res.data;
+    expect(s.categoryId).toBe('pan');
+    // Names are matched case-insensitively against the user's own lists;
+    // a tag the model made up is dropped.
+    expect(s.tagIds).toEqual(['t-vegan']);
+    expect(s.wrongTagIds).toEqual(['t-gluten']);
+    expect(s.nutrition).toMatchObject({ caloriesKcal: 387, carbsG: 99.8, sodiumMg: 1 });
+    expect(s.synonyms).toEqual(['Table Sugar']);
+    expect(s.name).toBeUndefined();
+    expect(s.translations).toBeUndefined();
+
+    const prompt = providerCalls[0].systemPrompt;
+    expect(prompt).toContain('"Pantry"');
+    expect(prompt).toContain('"Vegan"');
+    expect(prompt).not.toContain('"wrongTranslations"');
+    // Only what the asked-for aspects need is sent.
+    expect(JSON.parse(providerCalls[0].content).items[0]).not.toHaveProperty('known');
+  });
+
+  it('flags a wrong translation on file when naming is asked for', async () => {
+    const { query } = await import('../db/local');
+    await query("INSERT INTO ingredient_categories (id, name, sort_order) VALUES ('c', 'Pantry', 0)");
+    await query("INSERT INTO ingredients (id, category_id, name) VALUES ('sugar', 'c', 'Sugar')");
+    providerAnswer = () => JSON.stringify({ items: [{
+      key: 'sugar', name: 'Sugar', parent: null,
+      translations: { it: 'Zucchero', fr: 'Sucre', es: 'Azúcar' },
+      wrongTranslations: ['IT', 'de'],
+    }] });
+
+    const res = await route('/api/ingredients/ai-tidy', 'POST', {
+      items: [{ key: 'sugar', text: 'Sugar', known: { it: 'Farina' } }],
+      aspects: { naming: true, classification: false, nutrition: false, synonyms: false },
+    });
+    // Normalized to lower case and limited to the library's languages.
+    expect(res.data[0].wrongTranslations).toEqual(['it']);
+    expect(res.data[0].translations).toContainEqual({ lang: 'it', text: 'Zucchero' });
+    expect(providerCalls[0].systemPrompt).toContain('"wrongTranslations"');
+  });
+
+  it('refuses a request that asks for nothing', async () => {
+    const res = await route('/api/ingredients/ai-tidy', 'POST', { items: [{ key: 'a', text: 'A' }], aspects: {} });
+    expect(res.status).toBe(400);
+  });
+
+  it('applies category, tags, nutrition and synonyms without touching the rest', async () => {
+    await seedSugar();
+    const { query } = await import('../db/local');
+    await query("UPDATE ingredients SET description='keep me', fat_g=0.5 WHERE id='sugar'");
+
+    const res = await route('/api/ingredients/sugar/naming', 'POST', {
+      categoryId: 'pan',
+      addTagIds: ['t-vegan'],
+      removeTagIds: ['t-gluten'],
+      nutrition: { caloriesKcal: 387, carbsG: 99.8 },
+      addSynonyms: ['Table Sugar', 'granulated sugar'],
+      translations: [{ lang: 'it', text: 'Zucchero' }],
+    });
+    expect(res.status).toBe(200);
+    expect(db.prepare("SELECT category_id, calories_kcal, carbs_g, fat_g, description, synonyms FROM ingredients WHERE id='sugar'").get()).toEqual({
+      category_id: 'pan', calories_kcal: 387, carbs_g: 99.8, fat_g: 0.5, description: 'keep me',
+      synonyms: JSON.stringify(['Granulated Sugar', 'Table Sugar']),
+    });
+    expect(db.prepare("SELECT tag_id FROM ingredient_tags WHERE ingredient_id='sugar'").all()).toEqual([{ tag_id: 't-vegan' }]);
+
+    // A category that does not exist is ignored rather than orphaning the row.
+    await route('/api/ingredients/sugar/naming', 'POST', { categoryId: 'nope' });
+    expect(db.prepare("SELECT category_id FROM ingredients WHERE id='sugar'").get()).toEqual({ category_id: 'pan' });
+  });
+});

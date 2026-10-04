@@ -11,32 +11,23 @@ import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
+import EventMenu, { parseMenuDate } from '../components/planner/EventMenu';
+import {
+  MEAL_TYPES, menuKind,
+  type MealType, type MenuDetail, type MenuItem, type MenuKind, type MenuSummary, type RecipeOption,
+} from '../components/planner/types';
+import { defaultCourses } from '../lib/eventMenu';
 
-interface MenuSummary {
-  id: string;
+/** The create/edit form for a menu's own details — both kinds share it,
+ *  an event menu just has more of them. */
+interface DetailsForm {
+  kind: MenuKind;
   name: string;
-  week_start: string;
-  item_count: string | number;
-}
-
-interface MenuItem {
-  id: string;
-  recipeId: string;
-  recipe_title: string;
-  dayOfWeek: number;
-  mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
-  servings: number;
-  notes: string | null;
-}
-
-interface MenuDetail extends MenuSummary {
-  items: MenuItem[] | null;
-}
-
-interface RecipeOption {
-  id: string;
-  title: string;
-  translated_title?: string | null;
+  /** The week's Monday, or the event's day. */
+  date: string;
+  mealType: MealType;
+  guests: number;
+  notes: string;
 }
 
 interface NutritionTotals {
@@ -59,8 +50,6 @@ function weekDays(lang: string): Array<{ idx: number; label: string }> {
     return { idx, label: name.charAt(0).toLocaleUpperCase(lang) + name.slice(1) };
   });
 }
-
-const MEAL_TYPES: MenuItem['mealType'][] = ['breakfast', 'lunch', 'dinner', 'snack'];
 
 /** A planned meal you can pick up.
  *
@@ -142,12 +131,18 @@ const MEAL_TYPE_STYLE: Record<MenuItem['mealType'], string> = {
   snack: 'bg-pink-100 text-pink-700',
 };
 
+/** A local calendar day as YYYY-MM-DD — not toISOString(), which is the
+ *  UTC day and is yesterday for anyone east of Greenwich before dawn. */
+function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function todayMonday(): string {
   const d = new Date();
   const day = d.getDay(); // 0=Sun..6=Sat
   const diffToMonday = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diffToMonday);
-  return d.toISOString().slice(0, 10);
+  return localDay(d);
 }
 
 export default function Planner() {
@@ -162,10 +157,10 @@ export default function Planner() {
 
   const [allRecipes, setAllRecipes] = useState<RecipeOption[]>([]);
 
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newMenuName, setNewMenuName] = useState('');
-  const [newMenuWeekStart, setNewMenuWeekStart] = useState(todayMonday());
-  const [creating, setCreating] = useState(false);
+  // Create and edit share one modal. A create starts with form === null,
+  // which is the "weekly plan or a menu for one meal?" question.
+  const [detailsModal, setDetailsModal] = useState<{ mode: 'create' | 'edit'; form: DetailsForm | null } | null>(null);
+  const [savingDetails, setSavingDetails] = useState(false);
 
   const [addingForDay, setAddingForDay] = useState<number | null>(null);
   const [addRecipeId, setAddRecipeId] = useState('');
@@ -231,33 +226,86 @@ export default function Planner() {
     })();
   }, [contentLang]);
 
-  const handleCreateMenu = async (e: React.FormEvent) => {
+  const openCreate = () => setDetailsModal({ mode: 'create', form: null });
+
+  const chooseKind = (kind: MenuKind) => setDetailsModal({
+    mode: 'create',
+    form: kind === 'week'
+      ? { kind, name: '', date: todayMonday(), mealType: 'dinner', guests: 4, notes: '' }
+      : { kind, name: '', date: localDay(new Date()), mealType: 'dinner', guests: 4, notes: '' },
+  });
+
+  const openEditDetails = () => {
+    if (!menu) return;
+    const date = parseMenuDate(menu.week_start);
+    setDetailsModal({
+      mode: 'edit',
+      form: {
+        kind: menuKind(menu),
+        name: menu.name,
+        date: Number.isNaN(date.getTime()) ? menu.week_start : localDay(date),
+        mealType: menu.meal_type ?? 'dinner',
+        guests: menu.guests ?? 4,
+        notes: menu.notes ?? '',
+      },
+    });
+  };
+
+  const handleSaveDetails = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMenuName.trim()) return;
-    setCreating(true);
+    const form = detailsModal?.form;
+    if (!detailsModal || !form || !form.name.trim()) return;
+    setSavingDetails(true);
     try {
-      const res = await apiFetch('/api/menus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newMenuName.trim(), weekStart: newMenuWeekStart }),
-      });
-      const json = await res.json();
-      if (res.ok && json.data?.id) {
-        setShowCreateModal(false);
-        setNewMenuName('');
-        await fetchMenus();
-        setSelectedMenuId(json.data.id);
-      } else {
-        window.alert(t('planner.createFailed', { error: JSON.stringify(json.error || json) }));
+      const event = form.kind === 'event'
+        ? { mealType: form.mealType, guests: form.guests, notes: form.notes.trim() || null }
+        : {};
+      if (detailsModal.mode === 'create') {
+        const res = await apiFetch('/api/menus', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            weekStart: form.date,
+            kind: form.kind,
+            ...event,
+            // The classic courses, named in the language the menu is being
+            // written in — the user's to rename, reorder or drop.
+            ...(form.kind === 'event'
+              ? { courses: defaultCourses((key) => t(`planner.event.defaultCourses.${key}`)), notes: form.notes.trim() || undefined }
+              : {}),
+          }),
+        });
+        const json = await res.json();
+        if (res.ok && json.data?.id) {
+          setDetailsModal(null);
+          await fetchMenus();
+          setSelectedMenuId(json.data.id);
+        } else {
+          window.alert(t('planner.createFailed', { error: JSON.stringify(json.error || json) }));
+        }
+      } else if (menu) {
+        const res = await apiFetch(`/api/menus/${menu.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: form.name.trim(), weekStart: form.date, ...event }),
+        });
+        if (res.ok) {
+          setDetailsModal(null);
+          await Promise.all([fetchMenus(), fetchMenuDetail(menu.id)]);
+        } else {
+          const json = await res.json().catch(() => ({}));
+          window.alert(t('planner.saveFailed', { error: JSON.stringify(json.error || json) }));
+        }
       }
     } catch (err) {
       // Not just console.error: a failure here (before menus.local.ts, an
       // apiFetch against a server that isn't configured) made "New Menu"
       // look like a dead button rather than a broken one.
-      console.error('Create menu failed:', err);
+      console.error('Save menu failed:', err);
       window.alert(err instanceof Error ? err.message : t('planner.createFailedGeneric'));
     } finally {
-      setCreating(false);
+      setSavingDetails(false);
     }
   };
 
@@ -374,36 +422,56 @@ export default function Planner() {
   return (
     <AppLayout>
       <div className="px-8 lg:px-12 py-10 max-w-6xl mx-auto">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+        {/* no-print: the only thing this page prints is an event menu's
+            card (components/planner/EventMenu.tsx). */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10 no-print">
           <div>
             <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">{t('planner.heading')}</h1>
             <p className="text-zinc-500 dark:text-zinc-400 max-w-md">{t('planner.subtitle')}</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {menus.length > 0 && (
               <>
                 <select
                   value={selectedMenuId || ''}
                   onChange={e => setSelectedMenuId(e.target.value)}
-                  className="px-4 py-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+                  className="px-4 py-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 text-sm font-bold focus:ring-2 focus:ring-primary/20 max-w-full"
                 >
-                  {menus.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} ({new Date(m.week_start).toLocaleDateString(i18n.language)})</option>
-                  ))}
+                  {menus.map(m => {
+                    const date = parseMenuDate(m.week_start).toLocaleDateString(i18n.language);
+                    return (
+                      <option key={m.id} value={m.id}>
+                        {menuKind(m) === 'event'
+                          ? t('planner.eventOption', { name: m.name, meal: m.meal_type ? t(`planner.mealTypes.${m.meal_type}`) : '', date })
+                          : t('planner.weekOption', { name: m.name, date })}
+                      </option>
+                    );
+                  })}
                 </select>
                 {menu && (
-                  <button
-                    onClick={handleDeleteMenu}
-                    className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
-                    aria-label={t('planner.deleteMenu')}
-                  >
-                    <span className="material-symbols-outlined text-lg">delete</span>
-                  </button>
+                  <>
+                    {menuKind(menu) === 'week' && (
+                      <button
+                        onClick={openEditDetails}
+                        className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-primary flex items-center justify-center transition-colors"
+                        aria-label={t('planner.editDetails')}
+                      >
+                        <span className="material-symbols-outlined text-lg">edit</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={handleDeleteMenu}
+                      className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
+                      aria-label={t('planner.deleteMenu')}
+                    >
+                      <span className="material-symbols-outlined text-lg">delete</span>
+                    </button>
+                  </>
                 )}
               </>
             )}
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={openCreate}
               className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
             >
               <span className="material-symbols-outlined">add</span>
@@ -426,13 +494,20 @@ export default function Planner() {
               {t('planner.emptyHint')}
             </p>
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={openCreate}
               className="px-8 py-4 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95 flex items-center gap-2"
             >
               <span className="material-symbols-outlined">add</span>
               {t('planner.startPlanning')}
             </button>
           </div>
+        ) : menuKind(menu) === 'event' ? (
+          <EventMenu
+            menu={menu}
+            recipes={allRecipes}
+            onChanged={async () => { await Promise.all([fetchMenuDetail(menu.id), fetchMenus()]); }}
+            onEditDetails={openEditDetails}
+          />
         ) : (
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
@@ -475,10 +550,13 @@ export default function Planner() {
           </DndContext>
         )}
 
-        {/* Weekly nutrition summary */}
+        {/* Nutrition summary — the week, or the whole event menu. `weekly`
+            is the total over every planned dish either way. */}
         {menu && menuNutrition && menuNutrition.weekly.caloriesKcal > 0 && (
-          <div className="mt-8 bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
-            <h3 className="font-headline font-bold text-lg mb-4">{t('planner.weeklyNutrition')}</h3>
+          <div className="mt-8 bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 no-print">
+            <h3 className="font-headline font-bold text-lg mb-4">
+              {menuKind(menu) === 'event' ? t('planner.event.menuNutrition') : t('planner.weeklyNutrition')}
+            </h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-4">
               {[
                 { key: 'caloriesKcal', label: t('recipeDetail.calories'), unit: 'kcal' },
@@ -498,7 +576,9 @@ export default function Planner() {
               ))}
             </div>
             <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-              {t('planner.dailyAverage', { kcal: Math.round(menuNutrition.weekly.caloriesKcal / 7) })}
+              {menuKind(menu) === 'event'
+                ? t('planner.event.perGuest', { kcal: Math.round(menuNutrition.weekly.caloriesKcal / Math.max(1, menu.guests ?? 1)) })
+                : t('planner.dailyAverage', { kcal: Math.round(menuNutrition.weekly.caloriesKcal / 7) })}
             </p>
             {menuNutrition.unresolved.length > 0 && (
               <p className="text-[10px] text-amber-600 mt-2 italic">
@@ -509,37 +589,111 @@ export default function Planner() {
         )}
       </div>
 
-      {/* ─── Create Menu Modal ─────────────────────────────────────── */}
+      {/* ─── Create / edit a menu ─────────────────────────────────── */}
       <Modal
-        open={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onSubmit={handleCreateMenu}
+        open={detailsModal !== null}
+        onClose={() => setDetailsModal(null)}
+        onSubmit={detailsModal?.form ? handleSaveDetails : undefined}
         size="sm"
-        title={t('planner.newMenu')}
+        title={detailsModal?.mode === 'edit' ? t('planner.editDetails') : t('planner.newMenu')}
+        subtitle={detailsModal?.form
+          ? (detailsModal.form.kind === 'event' ? t('planner.kindEvent') : t('planner.kindWeek'))
+          : t('planner.kindQuestion')}
         footer={
           <>
-            <ModalCancelButton onClick={() => setShowCreateModal(false)}>{t('common.cancel')}</ModalCancelButton>
-            <ModalSubmitButton disabled={creating}>{creating ? t('planner.creating') : t('planner.createMenu')}</ModalSubmitButton>
+            {detailsModal?.mode === 'create' && detailsModal.form ? (
+              <ModalCancelButton onClick={() => setDetailsModal({ mode: 'create', form: null })}>{t('common.back')}</ModalCancelButton>
+            ) : (
+              <ModalCancelButton onClick={() => setDetailsModal(null)}>{t('common.cancel')}</ModalCancelButton>
+            )}
+            {detailsModal?.form && (
+              <ModalSubmitButton disabled={savingDetails}>
+                {savingDetails
+                  ? t('planner.creating')
+                  : detailsModal.mode === 'edit' ? t('common.save') : t('planner.createMenu')}
+              </ModalSubmitButton>
+            )}
           </>
         }
       >
-        <div className="space-y-4">
-          <Field label={t('planner.menuName')}>
-            <input
-              type="text" required value={newMenuName}
-              onChange={e => setNewMenuName(e.target.value)}
-              placeholder={t('planner.menuNamePlaceholder')}
-              className="sc-field"
-            />
-          </Field>
-          <Field label={t('planner.weekStart')}>
-            <input
-              type="date" required value={newMenuWeekStart}
-              onChange={e => setNewMenuWeekStart(e.target.value)}
-              className="sc-field"
-            />
-          </Field>
-        </div>
+        {detailsModal && !detailsModal.form && (
+          /* Step one: which kind of menu. Both live in this one Planner;
+             they differ in what a dish is placed by — a weekday, or a course. */
+          <div className="grid grid-cols-1 gap-3">
+            {([
+              { kind: 'week' as const, icon: 'calendar_month', title: t('planner.kindWeek'), hint: t('planner.kindWeekHint') },
+              { kind: 'event' as const, icon: 'restaurant_menu', title: t('planner.kindEvent'), hint: t('planner.kindEventHint') },
+            ]).map(option => (
+              <button
+                key={option.kind}
+                type="button"
+                onClick={() => chooseKind(option.kind)}
+                className="flex items-start gap-4 text-left p-4 rounded-2xl border border-zinc-200 dark:border-zinc-700 hover:border-primary hover:bg-primary/5 transition-colors"
+              >
+                <span className="w-11 h-11 shrink-0 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined">{option.icon}</span>
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-bold text-zinc-900 dark:text-zinc-100">{option.title}</span>
+                  <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{option.hint}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {detailsModal?.form && (() => {
+          const form = detailsModal.form;
+          const update = (patch: Partial<DetailsForm>) => setDetailsModal({ ...detailsModal, form: { ...form, ...patch } });
+          return (
+            <div className="space-y-4">
+              <Field label={t('planner.menuName')}>
+                <input
+                  type="text" required value={form.name}
+                  onChange={e => update({ name: e.target.value })}
+                  placeholder={form.kind === 'event' ? t('planner.eventNamePlaceholder') : t('planner.menuNamePlaceholder')}
+                  className="sc-field"
+                />
+              </Field>
+              <Field label={form.kind === 'event' ? t('planner.eventDate') : t('planner.weekStart')}>
+                <input
+                  type="date" required value={form.date}
+                  onChange={e => update({ date: e.target.value })}
+                  className="sc-field"
+                />
+              </Field>
+              {form.kind === 'event' && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label={t('planner.meal')}>
+                      <select
+                        value={form.mealType}
+                        onChange={e => update({ mealType: e.target.value as MealType })}
+                        className="sc-field cursor-pointer"
+                      >
+                        {MEAL_TYPES.map(mt => <option key={mt} value={mt}>{t(`planner.mealTypes.${mt}`)}</option>)}
+                      </select>
+                    </Field>
+                    <Field label={t('planner.guests')}>
+                      <input
+                        type="number" min={1} max={500} required value={form.guests}
+                        onChange={e => update({ guests: Math.max(1, parseInt(e.target.value) || 1) })}
+                        className="sc-field"
+                      />
+                    </Field>
+                  </div>
+                  <Field label={t('planner.eventNotes')}>
+                    <textarea
+                      rows={2} value={form.notes}
+                      onChange={e => update({ notes: e.target.value })}
+                      placeholder={t('planner.eventNotesPlaceholder')}
+                      className="sc-field"
+                    />
+                  </Field>
+                </>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* ─── Add Recipe Modal ──────────────────────────────────────── */}

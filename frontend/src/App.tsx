@@ -15,6 +15,7 @@ import ProfilePicker from "./pages/ProfilePicker";
 // paint.
 const Home = lazy(() => import("./pages/Home"));
 const RecipeDetail = lazy(() => import("./pages/RecipeDetail"));
+const RecipeReport = lazy(() => import("./pages/RecipeReport"));
 const RecipeCreate = lazy(() => import("./pages/RecipeCreate"));
 const RecipeImport = lazy(() => import("./pages/RecipeImport"));
 const LibraryTools = lazy(() => import("./pages/LibraryTools"));
@@ -339,6 +340,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/recipe/new" element={<RecipeCreate />} />
         <Route path="/recipe/:id" element={<RecipeDetail />} />
+        <Route path="/recipe/:id/report" element={<RecipeReport />} />
         <Route path="/collection/:id" element={<CollectionDetail />} />
         <Route path="/import" element={<RecipeImport />} />
         <Route path="/library/tools" element={<LibraryTools />} />

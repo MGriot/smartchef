@@ -7,21 +7,15 @@
 // an imported one. Kept apart so the crypto stays testable with no mocks and
 // no platform branching.
 //
-// Saving a file is the one genuinely three-way platform split in the app:
-//
-//   - Electron: a real save dialog over IPC (lib/electronBridge.ts).
-//   - Android:  @capacitor/filesystem into Documents/SmartChef. The
-//               renderer's Blob + <a download> trick DOES NOTHING here —
-//               no DownloadListener is registered on the WebView
-//               (android/.../MainActivity.java) — so the file has to be
-//               written directly and its path reported back.
-//   - Web:      the blob download, which is the only option a browser has.
+// Saving the file goes through lib/fileExport.ts, like every other export:
+// Electron's native save dialog, Android's system "save as" picker, the
+// browser's download. It used to write straight into Documents/SmartChef on
+// Android, which needs a storage permission below API 30 that the app does
+// not declare; the picker needs none, and lets the user put the file
+// somewhere a file manager, a USB connection or a messaging app can reach.
 // ════════════════════════════════════════════════════════════════════════
 
-import { Capacitor } from '@capacitor/core';
-import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
-import { isElectron, saveFileViaDialog } from './electronBridge';
-import { isNative } from './api';
+import { saveExportFile } from './fileExport';
 import {
   decodeSetupFile,
   encodeSetupFile,
@@ -39,8 +33,8 @@ import {
 } from './sync/syncSettings';
 
 /** Where the exported file ended up, in whatever terms that platform can
- *  offer: an absolute path on Electron, a content URI or folder name on
- *  Android, and nothing meaningful on the web (the browser owns it). */
+ *  offer: an absolute path on Electron, the name the user gave it in the
+ *  Android picker, and nothing meaningful on the web (the browser owns it). */
 export interface SetupFileDestination {
   kind: 'electron' | 'android' | 'web';
   /** Human-readable, for "Saved to …". Absent on the web. */
@@ -76,35 +70,6 @@ export async function buildSetupPayload(deviceName?: string | null): Promise<Set
   };
 }
 
-async function saveOnAndroid(fileName: string, contents: string): Promise<SetupFileDestination> {
-  // Documents rather than the app's private data dir: the whole point is to
-  // move this file onto another device, so it has to be somewhere a file
-  // manager, a USB connection or a messaging app can reach.
-  const directory = Directory.Documents;
-  const path = `SmartChef/${fileName}`;
-  try {
-    await Filesystem.mkdir({ path: 'SmartChef', directory, recursive: true });
-  } catch {
-    // Already there. mkdir has no "if not exists" and throws on a
-    // collision, which is not a failure worth surfacing.
-  }
-  await Filesystem.writeFile({ path, directory, data: contents, encoding: Encoding.UTF8, recursive: true });
-  const { uri } = await Filesystem.getUri({ path, directory });
-  return { kind: 'android', location: uri.replace(/^file:\/\//, ''), fileName };
-}
-
-function saveInBrowser(fileName: string, contents: string): SetupFileDestination {
-  const url = URL.createObjectURL(new Blob([contents], { type: 'application/octet-stream' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  return { kind: 'web', fileName };
-}
-
 /** Encrypts the current settings and writes the file. Resolves to null when
  *  the user cancelled the native dialog — a cancel is not an error. */
 export async function exportSetupFile(
@@ -115,16 +80,13 @@ export async function exportSetupFile(
   const contents = await encodeSetupFile(payload, passphrase);
   const fileName = setupFileName();
 
-  if (isElectron()) {
-    const saved = await saveFileViaDialog(fileName, contents);
-    return saved ? { kind: 'electron', location: saved, fileName } : null;
-  }
-  // isNative() is true for both Electron and Android, so the Electron check
-  // above has to come first; anything native reaching here is Android.
-  if (isNative() && Capacitor.getPlatform() === 'android') {
-    return saveOnAndroid(fileName, contents);
-  }
-  return saveInBrowser(fileName, contents);
+  // Save only, no share sheet: the file carries a sync token, encrypted or
+  // not, and the point is to put it somewhere the user chose, not to post it.
+  const saved = await saveExportFile(
+    { fileName, mimeType: 'application/octet-stream', data: contents },
+    { dialogTitle: 'Save your SmartChef setup file' },
+  );
+  return saved ? { kind: saved.kind, location: saved.location, fileName } : null;
 }
 
 /** What applying an imported payload actually changed, for the summary the

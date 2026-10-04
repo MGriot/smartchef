@@ -257,6 +257,15 @@
     font-size: 11pt;
   }
 
+  /* AppLayout's own page colour sits on top of body's. Android's WebView
+     prints backgrounds, so without this every page printed from inside the
+     app shell (a shopping list, a menu card) came out on a cream sheet, or
+     a black one in dark mode. */
+  .app-shell {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
   /* App chrome. The sticky headers in particular would otherwise repeat
      their backdrop on every page. */
   header,
@@ -352,4 +361,286 @@
 /* Off-screen by default; the print block above reveals it. */
 .print-only {
   display: none;
+}
+
+/* ── Recipe report (pages/RecipeReport.tsx) ─────────────────────────────
+   A sheet made for paper. On screen it is previewed as a white page on a
+   grey desk; printed, the desk and the toolbar disappear and the sheet
+   flows across as many pages as it needs. Plain CSS rather than utilities
+   for the parts that are about pagination — those are the rules worth
+   reading together.
+
+   Chromium 114 (the Electron build) is the oldest engine this prints in:
+   nothing here relies on @page margin boxes or newer fragmentation
+   features. Page numbers, where there are any, come from Electron's
+   printToPDF footer. */
+.recipe-report {
+  color-scheme: light;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.recipe-report .report-h2 {
+  font-family: Manrope, system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #18181b;
+  padding-bottom: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #d4d4d8;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.recipe-report .report-h3 {
+  font-family: Manrope, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #52525b;
+  margin-bottom: 6px;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.recipe-report .report-heading {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.recipe-report .report-keep,
+.recipe-report .report-step,
+.recipe-report .report-ingredient {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* Two columns of ingredients on a sheet wide enough for them. Multi-column
+   is the layout that fragments cleanly across pages; a grid of groups
+   would be cut wherever the page ends. */
+.recipe-report .report-columns {
+  column-gap: 8mm;
+}
+@media (min-width: 640px) {
+  .recipe-report .report-columns {
+    columns: 2;
+  }
+}
+
+.recipe-report .report-ingredient-group + .report-ingredient-group {
+  margin-top: 10px;
+}
+
+.recipe-report .report-group-name {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #71717a;
+  margin-bottom: 3px;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.recipe-report .report-ingredient {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12.5px;
+  line-height: 1.35;
+  border-bottom: 1px dotted #e4e4e7;
+}
+
+/* A box to tick with a pen while gathering the mise en place. */
+.recipe-report .report-box {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin-top: 3px;
+  border: 1px solid #52525b;
+  border-radius: 2px;
+}
+
+.recipe-report .report-amount {
+  flex-shrink: 0;
+  min-width: 4.5em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #18181b;
+}
+
+.recipe-report .report-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.recipe-report .report-optional {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid #d97706;
+  border-radius: 999px;
+  font-size: 8.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #b45309;
+  vertical-align: 1px;
+}
+
+.recipe-report .report-note {
+  font-style: italic;
+  color: #71717a;
+}
+
+.recipe-report .report-see {
+  margin-left: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #71717a;
+  text-decoration: none;
+}
+
+.recipe-report .report-substitute {
+  display: block;
+  font-size: 11px;
+  color: #52525b;
+}
+
+.recipe-report .report-step-number {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #3f3f46;
+  border-radius: 999px;
+  font-family: Manrope, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  color: #18181b;
+}
+
+.recipe-report .report-chef-note {
+  border-left: 3px solid #d4d4d8;
+  padding-left: 8px;
+}
+
+@media print {
+  /* The desk, the toolbar's spacing and the sheet's own screen margins go;
+     @page's 14 mm is the margin on paper. */
+  .recipe-report-page,
+  .recipe-report-sheet-wrap {
+    background: #fff !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  .recipe-report {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  /* Printed at the sheet's full width, ingredients always get two columns
+     — whatever the width of the window the print was started from. */
+  .recipe-report .report-columns {
+    columns: 2;
+  }
+
+  /* The report's tag pills and the optional badge are outlines, which
+     print without forcing background graphics on. */
+  .recipe-report .report-see {
+    color: #71717a !important;
+  }
+}
+
+/* ── Event menu card (components/planner/EventMenu.tsx) ─────────────────
+   The Planner's menu for one meal, printed the way a restaurant prints
+   its menu: centred, one course after another, dish names large and the
+   notes under them small and italic. Print-only — the screen shows the
+   editor instead — so these rules only ever apply on paper. */
+@media print {
+  .menu-card {
+    max-width: 150mm;
+    margin: 0 auto !important;
+    padding-top: 6mm;
+    text-align: center;
+    color: #18181b;
+    font-family: Manrope, system-ui, sans-serif;
+  }
+
+  .menu-card-kicker {
+    font-size: 9pt;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #71717a;
+  }
+
+  .menu-card-title {
+    margin-top: 3mm;
+    font-size: 26pt;
+    font-weight: 800;
+    line-height: 1.15;
+  }
+
+  .menu-card-intro {
+    margin: 4mm auto 0;
+    max-width: 120mm;
+    font-family: Inter, system-ui, sans-serif;
+    font-size: 10.5pt;
+    font-style: italic;
+    color: #52525b;
+    white-space: pre-wrap;
+  }
+
+  .menu-card-rule {
+    width: 28mm;
+    margin: 8mm auto;
+    border-top: 0.75pt solid #a1a1aa;
+  }
+
+  .menu-card-course {
+    margin-bottom: 8mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .menu-card-course-name {
+    margin-bottom: 3mm;
+    font-size: 10pt;
+    font-weight: 800;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #52525b;
+  }
+
+  .menu-card-dish + .menu-card-dish {
+    margin-top: 3mm;
+  }
+
+  .menu-card-dish-name {
+    font-size: 14pt;
+    font-weight: 600;
+  }
+
+  .menu-card-dish-note {
+    margin-top: 0.5mm;
+    font-family: Inter, system-ui, sans-serif;
+    font-size: 9.5pt;
+    font-style: italic;
+    color: #71717a;
+  }
+
+  .menu-card-footer {
+    font-size: 9pt;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+  }
 }

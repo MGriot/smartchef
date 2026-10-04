@@ -11,6 +11,8 @@ apps
 architecture
 archive
 arrow_back
+arrow_downward
+arrow_upward
 assignment
 attribution
 auto_awesome
@@ -247,6 +249,7 @@ phone_android
 phone_iphone
 photo
 php
+picture_as_pdf
 pill
 pin
 pinch
@@ -279,6 +282,7 @@ reply
 report
 resize
 restaurant
+restaurant_menu
 restore
 resume
 road

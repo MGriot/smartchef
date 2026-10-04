@@ -8,6 +8,8 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(SafMirrorPlugin.class);
         registerPlugin(GitHttpPlugin.class);
+        registerPlugin(SmartChefPrintPlugin.class);
+        registerPlugin(SmartChefFilesPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

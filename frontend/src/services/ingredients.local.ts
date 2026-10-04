@@ -351,13 +351,93 @@ export async function suggestIngredientNaming(
   }));
 }
 
+/** The Library's "Tidy with AI": naming plus category, tags, nutrition and
+ *  synonyms — see aiTasks.local.ts tidyIngredients(). Categories and tags
+ *  come back as ids here, resolved from the names the model chose. */
+export interface TidySuggestionOut {
+  key: string;
+  name?: string;
+  parent?: string | null;
+  parentId?: string | null;
+  translations?: Array<{ lang: string; text: string }>;
+  wrongTranslations?: string[];
+  categoryId?: string | null;
+  tagIds?: string[];
+  wrongTagIds?: string[];
+  nutrition?: import('./aiTasks.local').NutritionPer100g;
+  synonyms?: string[];
+}
+
+export async function suggestIngredientTidy(
+  items: Array<{ key: string; text: string; known?: Record<string, string>; category?: string | null; tags?: string[]; nutrition?: Record<string, number | null>; synonyms?: string[] }>,
+  aspects: import('./aiTasks.local').TidyAspects,
+): Promise<TidySuggestionOut[]> {
+  const clean = items.filter((i) => i && typeof i.key === 'string' && typeof i.text === 'string' && i.text.trim());
+  if (clean.length === 0) return [];
+  const [catalog, categories, tags] = await Promise.all([
+    query<{ id: string; name: string }>("SELECT id, name FROM ingredients WHERE sync_status != 'deleted' ORDER BY name"),
+    query<{ id: string; name: string }>('SELECT id, name FROM ingredient_categories ORDER BY sort_order, name'),
+    query<{ id: string; name: string }>('SELECT id, name FROM tags WHERE deleted_at IS NULL ORDER BY name'),
+  ]);
+  const idByLower = (rows: Array<{ id: string; name: string }>) => {
+    const map = new Map<string, string>();
+    for (const r of rows) if (!map.has(r.name.trim().toLowerCase())) map.set(r.name.trim().toLowerCase(), r.id);
+    return map;
+  };
+  const ingredientIds = idByLower(catalog);
+  const categoryIds = idByLower(categories);
+  const tagIds = idByLower(tags);
+
+  const [{ tidyIngredients }, { listLanguages }] = await Promise.all([import('./aiTasks.local'), import('../lib/languages')]);
+  const langs = [...new Set(listLanguages().map((l) => l.code))].filter((code) => code !== 'en');
+  const results = await tidyIngredients(
+    clean.map((i) => ({ ...i, nutrition: i.nutrition as never })),
+    {
+      aspects,
+      langs,
+      catalogNames: catalog.map((c) => c.name),
+      categoryNames: categories.map((c) => c.name),
+      tagNames: tags.map((t) => t.name),
+    },
+  );
+
+  const resolve = (map: Map<string, string>, names?: string[]) =>
+    names ? names.map((n) => map.get(n.toLowerCase())).filter((id): id is string => !!id) : undefined;
+  return results.map((r) => ({
+    key: r.key,
+    ...(r.name !== undefined ? { name: r.name } : {}),
+    ...(r.parent !== undefined ? { parent: r.parent, parentId: r.parent ? ingredientIds.get(r.parent.toLowerCase()) ?? null : null } : {}),
+    ...(r.translations ? { translations: Object.entries(r.translations).map(([lang, text]) => ({ lang, text })) } : {}),
+    ...(r.wrongTranslations ? { wrongTranslations: r.wrongTranslations } : {}),
+    ...(r.category !== undefined ? { categoryId: r.category ? categoryIds.get(r.category.toLowerCase()) ?? null : null } : {}),
+    ...(r.tags ? { tagIds: resolve(tagIds, r.tags) } : {}),
+    ...(r.wrongTags ? { wrongTagIds: resolve(tagIds, r.wrongTags) } : {}),
+    ...(r.nutrition ? { nutrition: r.nutrition } : {}),
+    ...(r.synonyms ? { synonyms: r.synonyms } : {}),
+  }));
+}
+
 export interface NamingChange {
   name?: string;
   /** undefined = leave as is; null = clear. */
   parentIngredientId?: string | null;
   /** Upserted per language; languages not listed are left alone. */
   translations?: Array<{ lang: string; text: string }>;
+  /** The rest of "Tidy with AI" — each one optional, and only what is sent
+   *  is written. */
+  categoryId?: string;
+  addTagIds?: string[];
+  removeTagIds?: string[];
+  /** Per 100 g; only the fields present are written. */
+  nutrition?: Partial<Record<'caloriesKcal' | 'proteinG' | 'carbsG' | 'fatG' | 'fiberG' | 'sugarG' | 'sodiumMg', number>>;
+  /** Appended to the synonyms on file, duplicates skipped. */
+  addSynonyms?: string[];
 }
+
+const NUTRITION_COLUMNS: Record<keyof NonNullable<NamingChange['nutrition']>, string> = {
+  caloriesKcal: 'calories_kcal', proteinG: 'protein_g', carbsG: 'carbs_g', fatG: 'fat_g',
+  fiberG: 'fiber_g', sugarG: 'sugar_g', sodiumMg: 'sodium_mg',
+};
 
 /** Applies a naming change without touching anything else on the row —
  *  unlike updateIngredient(), which rewrites every column from a full form. */
@@ -382,6 +462,35 @@ export async function applyIngredientNaming(id: string, change: NamingChange): P
       "INSERT INTO ingredient_translations (id, ingredient_id, language_code, translated_name) VALUES ($1, $2, $3, $4)",
       [newId(), id, t.lang.trim().toLowerCase(), t.text.trim()]
     );
+  }
+  if (typeof change.categoryId === 'string' && change.categoryId) {
+    const category = await queryOne<{ id: string }>('SELECT id FROM ingredient_categories WHERE id=$1', [change.categoryId]);
+    if (category) await query('UPDATE ingredients SET category_id=$1 WHERE id=$2', [change.categoryId, id]);
+  }
+  for (const tagId of change.removeTagIds ?? []) {
+    await query('DELETE FROM ingredient_tags WHERE ingredient_id=$1 AND tag_id=$2', [id, tagId]);
+  }
+  for (const tagId of change.addTagIds ?? []) {
+    await query('INSERT INTO ingredient_tags (ingredient_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [id, tagId]);
+  }
+  if (change.nutrition) {
+    for (const [key, column] of Object.entries(NUTRITION_COLUMNS) as Array<[keyof typeof NUTRITION_COLUMNS, string]>) {
+      const value = change.nutrition[key];
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+        await query(`UPDATE ingredients SET ${column}=$1 WHERE id=$2`, [value, id]);
+      }
+    }
+  }
+  if (change.addSynonyms?.length) {
+    const current = await queryOne<{ synonyms: string | null }>('SELECT synonyms FROM ingredients WHERE id=$1', [id]);
+    let list: string[] = [];
+    try { list = JSON.parse(current?.synonyms ?? '[]'); } catch { list = []; }
+    const seen = new Set(list.map((s) => s.toLowerCase()));
+    for (const s of change.addSynonyms) {
+      const clean = typeof s === 'string' ? s.trim() : '';
+      if (clean && !seen.has(clean.toLowerCase())) { list.push(clean); seen.add(clean.toLowerCase()); }
+    }
+    await query('UPDATE ingredients SET synonyms=$1 WHERE id=$2', [JSON.stringify(list), id]);
   }
   await query("UPDATE ingredients SET updated_at=now() WHERE id=$1", [id]);
   syncIngredientInBackground(id);

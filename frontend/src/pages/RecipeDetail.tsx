@@ -6,7 +6,8 @@ import i18n from '../i18n';
 import { useStore } from '../store/app.store';
 import { listLanguages, languageLabel } from '../lib/languages';
 import { useLanguages } from '../hooks/useLanguages';
-import { canPrint, printPage } from '../lib/print';
+import { useFileExport } from '../hooks/useFileExport';
+import { slugForFilename } from '../lib/fileExport';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
 import StepEditor, { StepIngredientAmount } from '../components/StepEditor';
@@ -28,7 +29,9 @@ import CookTimerBar from '../components/CookTimerBar';
 import FloatingActionBar, { FLOATING_ACTION_BAR_CLEARANCE } from '../components/FloatingActionBar';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { startCookTimer, requestTimerNotifications } from '../lib/cookTimers';
-import { toSystem, type MeasurementSystem } from '../lib/unitConvert';
+import { type MeasurementSystem } from '../lib/unitConvert';
+import { createRecipeScaler } from '../lib/recipeScaling';
+import { difficultyKey, tidyNote } from '../lib/recipeReport';
 import ConverterPanel from '../components/ConverterPanel';
 import ShareLinkModal from '../components/ShareLinkModal';
 import RecipeMergeModal from '../components/RecipeMergeModal';
@@ -244,11 +247,6 @@ const popoverPlacement = (inBar: boolean) =>
   inBar ? 'fixed left-4 right-4 mx-auto max-w-sm z-50' : 'absolute right-0 top-8 z-50 w-64';
 const POPOVER_ABOVE_BAR: React.CSSProperties = { bottom: 'calc(5.5rem + env(safe-area-inset-bottom))' };
 
-const difficultyKey: Record<string, string> = {
-  easy: 'gallery.difficultyEasy', medium: 'gallery.difficultyIntermediate',
-  hard: 'gallery.difficultyAdvanced', expert: 'gallery.difficultyExpert',
-};
-
 // Was a private helper here that stopped at hours, which is how a 15-day
 // maceration came out as "360h". Now lib/duration.ts, shared with every
 // other place a duration is shown.
@@ -288,11 +286,6 @@ const firstWordsOf = (text: string | null | undefined, max = 60): string => {
   if (plain.length <= max) return plain;
   return plain.slice(0, max).replace(/\s\S*$/, '') + '…';
 };
-
-/** An ingredient note as imports leave it — ", 7 circa," — without the
- *  separators that belonged to the source line around it. */
-const tidyNote = (note: string | null | undefined): string =>
-  (note ?? '').replace(/^[\s,;]+|[\s,;]+$/g, '');
 
 const formatDate = (iso: string | null | undefined): string => {
   if (!iso) return '—';
@@ -422,6 +415,7 @@ const RecipeDetail: React.FC = () => {
   const [addedToCart, setAddedToCart] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const { exportFile, sheet: exportSheet } = useFileExport();
   const [showShareLink, setShowShareLink] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -685,33 +679,19 @@ const RecipeDetail: React.FC = () => {
   }, [id, recipe?.id, recipe?.servings]);
 
   /* ── Scale quantity ─────────────────────────────────────────────── */
-  const scaleNum = (qty: number | null): number | null => {
-    if (qty === null) return null;
-    if (!recipe) return qty;
-    return (qty * servings) / recipe.servings;
-  };
-  const servingsScale = recipe?.servings ? servings / recipe.servings : 1;
-  const scale = (qty: number | null): string => {
-    const v = scaleNum(qty);
-    if (v === null) return '';
-    return v % 1 === 0 ? String(v) : v.toFixed(1);
-  };
-
-  /** Scales to the current portion count AND restates in the chosen system.
-   *
-   *  toSystem() returns null for anything it must not touch — a countable
-   *  unit ("2 pz"), a vague one ("q.b."), a spoon, or a unit already in the
-   *  requested system — and the original is rendered unchanged in every one
-   *  of those cases. A quantityText with no number ("a pinch") never even
-   *  reaches it. */
-  const formatAmount = (qty: number | null, unitSymbol?: string | null, quantityText?: string | null): string => {
-    const v = scaleNum(qty);
-    if (v === null) return quantityText || '';
-    const fallback = `${v % 1 === 0 ? v : v.toFixed(1)}${unitSymbol ? ` ${unitSymbol}` : quantityText ? ` ${quantityText}` : ''}`;
-    if (!unitSymbol) return fallback;
-    const converted = toSystem(v, unitSymbol, displaySystem);
-    return converted ? `${converted.value} ${converted.symbol}` : fallback;
-  };
+  // The scaling itself lives in lib/recipeScaling.ts, shared with the
+  // printed report so paper and screen never disagree on an amount.
+  const {
+    scaleNum, servingsScale, formatAmount,
+    stepTextIngredientsFor, stepIngredientList,
+  } = createRecipeScaler({
+    ingredients: recipe?.ingredients || [],
+    steps: recipe?.steps || [],
+    baseServings: recipe?.servings,
+    servings,
+    displaySystem,
+    fallbackName: t('shopping.ingredientFallback'),
+  });
 
   /* The yield's unit, or null when this device cannot resolve it. The
      recipe's own `yield_unit_symbol` (serialized by syncRecipe) is the
@@ -732,86 +712,9 @@ const RecipeDetail: React.FC = () => {
     };
   };
 
-  /* ── Context for resolving {{ing:N}}/{{tool:id}}/{{tech:id}} inline refs in step text ── */
-  const stepTextIngredients = (recipe?.ingredients || []).map(ing => ({
-    sortOrder: ing.sortOrder,
-    name: ing.ingredientName || ing.subRecipeTitle || 'ingredient',
-    quantity: ing.quantity !== null ? formatAmount(ing.quantity, ing.unitSymbol, ing.quantityText) : '',
-  }));
-
-  /** The same context, narrowed to one step: an inline reference inside a
-   *  step that says it uses 500 of the 620 g of flour should read "500 g",
-   *  not the recipe's total. It used to read the total for every step,
-   *  because the only context the renderer ever got was the recipe-wide
-   *  one above — the amount picked when the reference was inserted went
-   *  into stepIngredients and was then never shown anywhere in the text. */
-  const stepTextIngredientsFor = (step: { stepIngredients?: StepIngredientRef[] | null }) => {
-    const refs = step.stepIngredients || [];
-    if (refs.length === 0) return stepTextIngredients;
-    return stepTextIngredients.map(ctx => {
-      const ref = refs.find(r => r.ingredientSortOrder === ctx.sortOrder);
-      if (!ref) return ctx;
-      const ing = (recipe?.ingredients || []).find(i => i.sortOrder === ctx.sortOrder);
-      if (!ing) return ctx;
-      if (ref.amountMode === 'absolute') {
-        return {
-          ...ctx,
-          stepQuantity: ref.quantity != null
-            ? formatAmount(ref.quantity, ref.unitSymbol || ing.unitSymbol)
-            : undefined,
-        };
-      }
-      const consumed = stepIngredientConsumption(ref, { sortOrder: ing.sortOrder, quantity: ing.quantity, unitSymbol: ing.unitSymbol });
-      return { ...ctx, stepQuantity: consumed != null ? formatAmount(consumed, ing.unitSymbol) : undefined };
-    });
-  };
+  /* ── Context for resolving {{tool:id}}/{{tech:id}} inline refs in step text ── */
   const stepTextTools = (recipe?.tools || []).map(t => ({ id: t.id, name: t.translated_name || t.name }));
   const stepTextTechniques = allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }));
-
-  /* ── Resolve a step's linked ingredients + their portion of the total ── */
-  /** Steps in the order they are cooked — the order "how much is left by
-   *  now" has to be counted in. */
-  const sortedRecipeSteps = [...(recipe?.steps || [])].sort((a, b) => a.stepNumber - b.stepNumber);
-
-  const stepIngredientList = (step: Step) => {
-    if (!recipe || !step.stepIngredients?.length) return [];
-    const stepIndex = Math.max(0, sortedRecipeSteps.findIndex(s => s.id === step.id));
-    return step.stepIngredients.map(ref => {
-      const ing = recipe.ingredients.find(i => i.sortOrder === ref.ingredientSortOrder);
-      if (!ing) return null;
-      const totals = { sortOrder: ing.sortOrder, quantity: ing.quantity, unitSymbol: ing.unitSymbol };
-      // What the recipe still has of this ingredient once the steps before
-      // this one have taken their share, and what is left after this one
-      // does too. A recipe that pours 500 of its 620 g of flour into step 4
-      // has 120 g for step 7, and kitchen mode is exactly where being told
-      // that (rather than "620 g", the amount in the jar at the start)
-      // decides whether the dish works.
-      const before = remainingBeforeStep(sortedRecipeSteps, stepIndex, totals);
-      const used = stepIngredientConsumption(ref, totals);
-      const after = before != null && used != null ? Math.max(0, before - used) : null;
-      if (ref.amountMode === 'absolute') {
-        return {
-          sortOrder: ing.sortOrder,
-          name: ing.ingredientName || ing.subRecipeTitle || t('shopping.ingredientFallback'),
-          quantity: ref.quantity != null ? scale(ref.quantity) : '',
-          unitSymbol: ref.unitSymbol || ing.unitSymbol || '',
-          portionPct: 100,
-          remainingAfter: after != null ? scale(after) : '',
-          totalUnitSymbol: ing.unitSymbol || '',
-        };
-      }
-      const portionQty = ing.quantity !== null ? ing.quantity * ref.portion : null;
-      return {
-        sortOrder: ing.sortOrder,
-        name: ing.ingredientName || ing.subRecipeTitle || t('shopping.ingredientFallback'),
-        quantity: scale(portionQty),
-        unitSymbol: ing.unitSymbol || '',
-        portionPct: Math.round(ref.portion * 100),
-        remainingAfter: after != null ? scale(after) : '',
-        totalUnitSymbol: ing.unitSymbol || '',
-      };
-    }).filter((x): x is NonNullable<typeof x> => x !== null);
-  };
 
   /* ── Tick one of a step's ingredients off (cooking mode) ───────── */
   const toggleStepIngredientChecked = (key: string) => {
@@ -3011,18 +2914,14 @@ const RecipeDetail: React.FC = () => {
     </button>
   );
 
-  const recipeSlug = (recipe.translated_title || recipe.title || 'recipe')
-    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const recipeSlug = slugForFilename(recipe.translated_title || recipe.title);
 
+  /* Through lib/fileExport.ts: the Blob + <a download> this used to be is a
+     silent no-op on Android, where there is no download manager to catch
+     it. Errors land in the same console.error the handlers always had. */
   const downloadTextFile = (contents: string, filename: string, mime: string) => {
-    const url = URL.createObjectURL(new Blob([contents], { type: mime }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    exportFile({ fileName: filename, mimeType: mime, data: contents })
+      .catch(err => console.error('Recipe export failed:', err));
   };
 
   const handleExportRecipe = async () => {
@@ -3103,17 +3002,21 @@ const RecipeDetail: React.FC = () => {
               <span className="material-symbols-outlined text-[18px]">link</span>
               {t('share.menuItem')}
             </button>
-            {/* Hidden rather than disabled on Android, where window.print()
-                exists but silently does nothing — see lib/print.ts. */}
-            {canPrint() && (
-              <button
-                onClick={() => { setShowExportMenu(false); printPage(recipe?.translated_title || recipe?.title); }}
-                className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
-              >
-                <span className="material-symbols-outlined text-[18px]">print</span>
-                {t('print.printRecipe')}
-              </button>
-            )}
+            {/* A page of its own rather than this one printed: the report
+                (pages/RecipeReport.tsx) lays the whole recipe out for paper
+                and prints on every platform, Android included. */}
+            <button
+              onClick={() => {
+                setShowExportMenu(false);
+                const query = new URLSearchParams({ servings: String(servings) });
+                if (shownLang) query.set('lang', shownLang);
+                navigate(`/recipe/${id}/report?${query.toString()}`);
+              }}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[18px]">print</span>
+              {t('print.report.menuItem')}
+            </button>
             <button
               onClick={handleExportRecipe}
               className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
@@ -3249,6 +3152,7 @@ const RecipeDetail: React.FC = () => {
   return (
     <AppLayout headerActions={headerActions}>
       {cookidooModal}
+      {exportSheet}
 
       {/* ── Printed header ──────────────────────────────────────
           The hero below is white text laid over a photo, which prints as

@@ -16,6 +16,11 @@
 //
 // Local-only, outside the sync snapshot: a week's plan is personal and
 // short-lived, unlike the library content Folder Sync carries.
+//
+// Two kinds of menu share these tables (db/migrations/043_event_menus.sql):
+// the weekly plan (kind 'week', items placed by day_of_week) and the event
+// menu for one meal (kind 'event', items placed by course_id + sort_order,
+// with the event's date kept in week_start).
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne } from '../db/local';
@@ -29,13 +34,26 @@ export interface MenuItem {
   mealType: string;
   servings: number;
   notes: string | null;
+  courseId: string | null;
+  sortOrder: number;
 }
+
+export interface MenuCourse {
+  id: string;
+  name: string;
+}
+
+export type MenuKind = 'week' | 'event';
 
 export interface MenuDetail extends Record<string, unknown> {
   id: string;
   name: string;
   week_start: string;
   notes: string | null;
+  kind: MenuKind;
+  meal_type: string | null;
+  guests: number | null;
+  courses: MenuCourse[];
   items: MenuItem[];
 }
 
@@ -43,21 +61,36 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
+/** The courses column as the server's JSONB hands it over: an array, never
+ *  the stored text, and never anything malformed. */
+function parseCourses(raw: unknown): MenuCourse[] {
+  let value = raw;
+  if (typeof raw === 'string') {
+    try { value = JSON.parse(raw); } catch { return []; }
+  }
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((c): c is MenuCourse => !!c && typeof c.id === 'string' && typeof c.name === 'string')
+    .map((c) => ({ id: c.id, name: c.name }));
+}
+
 /** Summaries for the Planner's menu switcher — snake_case with an
  *  item_count, matching GET /api/menus. */
 export async function listMenus(): Promise<Array<Record<string, unknown>>> {
-  return query(
+  const rows = await query<Record<string, unknown>>(
     `SELECT m.*, COUNT(mi.id) AS item_count
        FROM menus m
        LEFT JOIN menu_items mi ON mi.menu_id = m.id
       GROUP BY m.id
       ORDER BY m.week_start DESC`,
   );
+  return rows.map((row) => ({ ...row, kind: row.kind === 'event' ? 'event' : 'week', courses: parseCourses(row.courses) }));
 }
 
 export async function getMenu(id: string): Promise<MenuDetail | null> {
   const menu = await queryOne<{
     id: string; name: string; week_start: string; notes: string | null;
+    kind: string | null; meal_type: string | null; guests: number | null; courses: string | null;
     created_at: string; updated_at: string;
   }>('SELECT * FROM menus WHERE id=$1', [id]);
   if (!menu) return null;
@@ -65,18 +98,23 @@ export async function getMenu(id: string): Promise<MenuDetail | null> {
   const items = await query<{
     id: string; recipe_id: string; recipe_title: string | null;
     day_of_week: number; meal_type: string; servings: number; notes: string | null;
+    course_id: string | null; sort_order: number | null;
   }>(
     `SELECT mi.id, mi.recipe_id, r.title AS recipe_title, mi.day_of_week,
-            mi.meal_type, mi.servings, mi.notes
+            mi.meal_type, mi.servings, mi.notes, mi.course_id, mi.sort_order
        FROM menu_items mi
        LEFT JOIN recipes r ON r.id = mi.recipe_id
       WHERE mi.menu_id = $1
-      ORDER BY mi.day_of_week, mi.meal_type`,
+      ORDER BY mi.day_of_week, mi.sort_order, mi.meal_type`,
     [id],
   );
 
   return {
     ...menu,
+    kind: menu.kind === 'event' ? 'event' : 'week',
+    meal_type: menu.meal_type ?? null,
+    guests: menu.guests ?? null,
+    courses: parseCourses(menu.courses),
     items: items.map((i) => ({
       id: i.id,
       recipeId: i.recipe_id,
@@ -85,28 +123,87 @@ export async function getMenu(id: string): Promise<MenuDetail | null> {
       mealType: i.meal_type,
       servings: i.servings,
       notes: i.notes,
+      courseId: i.course_id ?? null,
+      sortOrder: i.sort_order ?? 0,
     })),
   };
 }
 
-export async function createMenu(input: { name: string; weekStart: string; notes?: string | null }): Promise<{ id: string; name: string; weekStart: string }> {
+export interface CreateMenuInput {
+  name: string;
+  weekStart: string;
+  notes?: string | null;
+  kind?: MenuKind;
+  mealType?: string | null;
+  guests?: number | null;
+  courses?: MenuCourse[];
+}
+
+export async function createMenu(input: CreateMenuInput): Promise<{ id: string; name: string; weekStart: string; kind: MenuKind }> {
   const id = newId();
-  await query('INSERT INTO menus (id, name, week_start, notes) VALUES ($1,$2,$3,$4)', [
-    id, input.name, input.weekStart, input.notes ?? null,
-  ]);
-  return { id, name: input.name, weekStart: input.weekStart };
+  const kind: MenuKind = input.kind === 'event' ? 'event' : 'week';
+  await query(
+    `INSERT INTO menus (id, name, week_start, notes, kind, meal_type, guests, courses)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [id, input.name, input.weekStart, input.notes ?? null, kind,
+     input.mealType ?? null, input.guests ?? null, JSON.stringify(parseCourses(input.courses ?? []))],
+  );
+  return { id, name: input.name, weekStart: input.weekStart, kind };
+}
+
+export interface UpdateMenuInput {
+  name?: string;
+  weekStart?: string;
+  notes?: string | null;
+  mealType?: string | null;
+  guests?: number | null;
+  courses?: MenuCourse[];
+}
+
+/** PATCH /api/menus/:id — only the fields sent are written, like the
+ *  server's version. False when there is no such menu. */
+export async function updateMenu(id: string, input: UpdateMenuInput): Promise<boolean> {
+  const existing = await queryOne<{ id: string }>('SELECT id FROM menus WHERE id=$1', [id]);
+  if (!existing) return false;
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  const set = (column: string, value: unknown) => {
+    params.push(value);
+    sets.push(`${column}=$${params.length}`);
+  };
+  if (typeof input.name === 'string' && input.name.trim()) set('name', input.name.trim());
+  if (typeof input.weekStart === 'string' && input.weekStart) set('week_start', input.weekStart);
+  if (input.notes !== undefined) set('notes', input.notes);
+  if (input.mealType !== undefined) set('meal_type', input.mealType);
+  if (input.guests !== undefined) set('guests', input.guests);
+  if (input.courses !== undefined) set('courses', JSON.stringify(parseCourses(input.courses)));
+  if (sets.length === 0) return true;
+  params.push(id);
+  await query(`UPDATE menus SET ${sets.join(', ')}, updated_at=CURRENT_TIMESTAMP WHERE id=$${params.length}`, params);
+  return true;
 }
 
 export async function addMenuItem(menuId: string, input: {
-  recipeId: string; dayOfWeek: number; mealType?: string; servings?: number; notes?: string | null;
+  recipeId: string; dayOfWeek?: number; mealType?: string; servings?: number; notes?: string | null;
+  courseId?: string | null; sortOrder?: number;
 }): Promise<{ id: string } | null> {
   const menu = await queryOne<{ id: string }>('SELECT id FROM menus WHERE id=$1', [menuId]);
   if (!menu) return null;
   const id = newId();
+  const courseId = input.courseId ?? null;
+  // A dish added without a position goes to the end of its course. "IS"
+  // so a null course (a weekly plan's items) compares equal to itself.
+  const sortOrder = typeof input.sortOrder === 'number'
+    ? input.sortOrder
+    : Number((await queryOne<{ next: number }>(
+        'SELECT COALESCE(MAX(sort_order) + 1, 0) AS next FROM menu_items WHERE menu_id=$1 AND course_id IS $2',
+        [menuId, courseId],
+      ))?.next ?? 0);
   await query(
-    `INSERT INTO menu_items (id, menu_id, recipe_id, day_of_week, meal_type, servings, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [id, menuId, input.recipeId, input.dayOfWeek, input.mealType ?? 'dinner', input.servings ?? 4, input.notes ?? null],
+    `INSERT INTO menu_items (id, menu_id, recipe_id, day_of_week, meal_type, servings, notes, course_id, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [id, menuId, input.recipeId, input.dayOfWeek ?? 0, input.mealType ?? 'dinner', input.servings ?? 4,
+     input.notes ?? null, courseId, sortOrder],
   );
   await query("UPDATE menus SET updated_at=CURRENT_TIMESTAMP WHERE id=$1", [menuId]);
   return { id };
@@ -117,6 +214,7 @@ export async function addMenuItem(menuId: string, input: {
  *  not clobber the servings someone set. */
 export async function updateMenuItem(menuId: string, itemId: string, input: {
   dayOfWeek?: number; mealType?: string; servings?: number;
+  courseId?: string; sortOrder?: number; notes?: string | null;
 }): Promise<boolean> {
   const existing = await queryOne<{ id: string }>(
     'SELECT id FROM menu_items WHERE id=$1 AND menu_id=$2', [itemId, menuId],
@@ -126,10 +224,18 @@ export async function updateMenuItem(menuId: string, itemId: string, input: {
     `UPDATE menu_items
         SET day_of_week = COALESCE($1, day_of_week),
             meal_type   = COALESCE($2, meal_type),
-            servings    = COALESCE($3, servings)
-      WHERE id=$4 AND menu_id=$5`,
-    [input.dayOfWeek ?? null, input.mealType ?? null, input.servings ?? null, itemId, menuId],
+            servings    = COALESCE($3, servings),
+            course_id   = COALESCE($4, course_id),
+            sort_order  = COALESCE($5, sort_order)
+      WHERE id=$6 AND menu_id=$7`,
+    [input.dayOfWeek ?? null, input.mealType ?? null, input.servings ?? null,
+     input.courseId ?? null, input.sortOrder ?? null, itemId, menuId],
   );
+  // Notes on their own: null is a real value here ("clear the note"),
+  // which COALESCE cannot tell apart from "not sent".
+  if (input.notes !== undefined) {
+    await query('UPDATE menu_items SET notes=$1 WHERE id=$2 AND menu_id=$3', [input.notes, itemId, menuId]);
+  }
   await query("UPDATE menus SET updated_at=CURRENT_TIMESTAMP WHERE id=$1", [menuId]);
   return true;
 }

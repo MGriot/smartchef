@@ -332,6 +332,137 @@ describe('standalone menus', () => {
   });
 });
 
+// The second kind of menu: one meal, by course — db/migrations/043_event_menus.sql.
+describe('standalone event menus', () => {
+  type EventDetail = {
+    kind: string; meal_type: string | null; guests: number | null;
+    courses: Array<{ id: string; name: string }>;
+    items: Array<{ id: string; recipeId: string; courseId: string | null; sortOrder: number; servings: number; notes: string | null }>;
+  };
+
+  async function createEvent(dispatchLocal: (path: string, init?: RequestInit) => Promise<unknown>) {
+    return ((await dispatchLocal('/api/menus', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Cena di Natale',
+        weekStart: '2026-12-24',
+        kind: 'event',
+        mealType: 'dinner',
+        guests: 8,
+        courses: [{ id: 'starter', name: 'Antipasti' }, { id: 'main', name: 'Secondi' }],
+      }),
+    })) as { data: { id: string } }).data;
+  }
+
+  it('creates an event menu with its meal, guests and courses', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    const { dispatchLocal } = await import('./localRouter');
+    const menu = await createEvent(dispatchLocal);
+
+    const detail = (await dispatchLocal(`/api/menus/${menu.id}`))!.data as EventDetail;
+    // courses comes back as an array, not the JSON text SQLite stores.
+    expect(detail).toMatchObject({ kind: 'event', meal_type: 'dinner', guests: 8 });
+    expect(detail.courses).toEqual([{ id: 'starter', name: 'Antipasti' }, { id: 'main', name: 'Secondi' }]);
+
+    const summary = ((await dispatchLocal('/api/menus'))!.data as Array<{ id: string; kind: string; courses: unknown }>)
+      .find((m) => m.id === menu.id);
+    expect(summary?.kind).toBe('event');
+    expect(Array.isArray(summary?.courses)).toBe(true);
+  });
+
+  it('treats menus created before event menus existed as weekly plans', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    const { dispatchLocal } = await import('./localRouter');
+    const week = (await dispatchLocal('/api/menus', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Week 1', weekStart: '2026-09-07' }),
+    }))!.data as { id: string };
+    const detail = (await dispatchLocal(`/api/menus/${week.id}`))!.data as EventDetail;
+    expect(detail.kind).toBe('week');
+    expect(detail.courses).toEqual([]);
+  });
+
+  it('places dishes in courses, appending to the end of each course', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    const { mainId, otherId, subId } = await seed();
+    const { dispatchLocal } = await import('./localRouter');
+    const menu = await createEvent(dispatchLocal);
+
+    // No dayOfWeek at all: an event dish has a course, not a weekday.
+    for (const [recipeId, courseId] of [[otherId, 'starter'], [subId, 'starter'], [mainId, 'main']] as const) {
+      const added = await dispatchLocal(`/api/menus/${menu.id}/items`, {
+        method: 'POST',
+        body: JSON.stringify({ recipeId, courseId, servings: 8 }),
+      });
+      expect(added?.status).toBe(201);
+    }
+
+    const detail = (await dispatchLocal(`/api/menus/${menu.id}`))!.data as EventDetail;
+    const starters = detail.items.filter((i) => i.courseId === 'starter');
+    expect(starters.map((i) => [i.recipeId, i.sortOrder])).toEqual([[otherId, 0], [subId, 1]]);
+    // A course's count starts again at 0 rather than continuing the menu's.
+    expect(detail.items.find((i) => i.courseId === 'main')?.sortOrder).toBe(0);
+  });
+
+  it('moves a dish to another course and edits its note without touching the rest', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    const { mainId } = await seed();
+    const { dispatchLocal } = await import('./localRouter');
+    const menu = await createEvent(dispatchLocal);
+    const { id: itemId } = (await dispatchLocal(`/api/menus/${menu.id}/items`, {
+      method: 'POST',
+      body: JSON.stringify({ recipeId: mainId, courseId: 'starter', servings: 8, notes: 'with basil' }),
+    }))!.data as { id: string };
+
+    await dispatchLocal(`/api/menus/${menu.id}/items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ courseId: 'main', sortOrder: 3 }),
+    });
+    let item = ((await dispatchLocal(`/api/menus/${menu.id}`))!.data as EventDetail).items[0];
+    expect(item).toMatchObject({ courseId: 'main', sortOrder: 3, servings: 8, notes: 'with basil' });
+
+    // null clears the note — not the same as leaving it out.
+    await dispatchLocal(`/api/menus/${menu.id}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify({ notes: null }) });
+    item = ((await dispatchLocal(`/api/menus/${menu.id}`))!.data as EventDetail).items[0];
+    expect(item.notes).toBeNull();
+    expect(item.courseId).toBe('main');
+  });
+
+  it('renames and reorders courses and changes guests through PATCH', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    const { dispatchLocal } = await import('./localRouter');
+    const menu = await createEvent(dispatchLocal);
+
+    const res = await dispatchLocal(`/api/menus/${menu.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ guests: 10, courses: [{ id: 'main', name: 'Secondi di pesce' }, { id: 'starter', name: 'Antipasti' }] }),
+    });
+    expect(res?.status).toBe(200);
+    const detail = (await dispatchLocal(`/api/menus/${menu.id}`))!.data as EventDetail & { name: string };
+    expect(detail.guests).toBe(10);
+    expect(detail.courses.map((c) => c.name)).toEqual(['Secondi di pesce', 'Antipasti']);
+    // Fields that were not sent are left as they were.
+    expect(detail.name).toBe('Cena di Natale');
+    expect(detail.meal_type).toBe('dinner');
+
+    expect((await dispatchLocal('/api/menus/no-such-menu', { method: 'PATCH', body: '{}' }))?.status).toBe(404);
+  });
+
+  it('feeds the shopping list exactly like a weekly plan', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    const { mainId, otherId } = await seed();
+    const { dispatchLocal } = await import('./localRouter');
+    const menu = await createEvent(dispatchLocal);
+    await dispatchLocal(`/api/menus/${menu.id}/items`, { method: 'POST', body: JSON.stringify({ recipeId: otherId, courseId: 'starter', servings: 4 }) });
+    await dispatchLocal(`/api/menus/${menu.id}/items`, { method: 'POST', body: JSON.stringify({ recipeId: mainId, courseId: 'main', servings: 4 }) });
+
+    const res = await dispatchLocal('/api/shopping/generate', { method: 'POST', body: JSON.stringify({ menuId: menu.id }) });
+    expect(res?.status).toBe(201);
+    const list = res!.data as { items: Array<{ ingredientName?: string; totalQuantity?: number }> };
+    expect(list.items.find((i) => i.ingredientName === 'Tomato')?.totalQuantity).toBe(300);
+  });
+});
+
 describe('standalone collections and cook history', () => {
   it('routes /api/collections and /api/cook-log locally', async () => {
     await (await import('../db/local')).initLocalSchema();

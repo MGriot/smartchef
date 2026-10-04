@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildTidyProposals, type TidyIngredient, type TidySuggestion } from './ingredientTidy';
+import {
+  buildTidyProposals, changeFor, defaultSelection, isNutritionCorrection, proposalKinds, selectionKey,
+  type TidyIngredient, type TidySuggestion,
+} from './ingredientTidy';
 
 const s = (key: string, name: string, extra: Partial<TidySuggestion> = {}): TidySuggestion => ({
   key, name, parent: null, parentId: null, translations: [], ...extra,
@@ -50,5 +53,87 @@ describe('buildTidyProposals', () => {
 
   it('skips rows with nothing to change', () => {
     expect(buildTidyProposals(catalog, [s('apple', 'Apple', { translations: [{ lang: 'it', text: 'Mela' }] })])).toEqual([]);
+  });
+});
+
+describe('buildTidyProposals — corrections and the other aspects', () => {
+  const sugar: TidyIngredient = {
+    id: 'sugar', name: 'Sugar', category_id: 'cat-bakery',
+    // "Farina" is flour: a wrong translation the naming pass used to keep.
+    translations: [{ lang: 'it', text: 'Farina' }, { lang: 'fr', text: 'Sucre' }],
+    tags: [{ id: 'tag-gluten' }, { id: 'tag-sweet' }],
+    calories_kcal: 387, protein_g: null, carbs_g: 10, fat_g: 0,
+    synonyms: ['Granulated Sugar'],
+  };
+
+  const suggestion: TidySuggestion = {
+    key: 'sugar', name: 'Sugar', parent: null, parentId: null,
+    translations: [{ lang: 'it', text: 'Zucchero' }, { lang: 'fr', text: 'Sucre en poudre' }, { lang: 'es', text: 'Azúcar' }],
+    // fr differs but was not flagged wrong: a wording choice, not an error.
+    wrongTranslations: ['it'],
+    categoryId: 'cat-pantry',
+    tagIds: ['tag-sweet', 'tag-vegan'],
+    wrongTagIds: ['tag-gluten'],
+    nutrition: { caloriesKcal: 400, proteinG: 0, carbsG: 100, fatG: 0, sodiumMg: null },
+    synonyms: ['granulated sugar', 'Table Sugar', 'Sugar'],
+  };
+
+  const [p] = buildTidyProposals([sugar], [suggestion]);
+
+  it('replaces only the translations flagged wrong, and fills the missing ones', () => {
+    expect(p.fixTranslations).toEqual([{ lang: 'it', from: 'Farina', to: 'Zucchero' }]);
+    expect(p.addTranslations).toEqual([{ lang: 'es', text: 'Azúcar' }]);
+  });
+
+  it('moves the category and adds and removes tags', () => {
+    expect(p.category).toEqual({ id: 'cat-pantry', fromId: 'cat-bakery' });
+    expect(p.addTagIds).toEqual(['tag-vegan']);
+    expect(p.removeTagIds).toEqual(['tag-gluten']);
+  });
+
+  it('fills missing nutrition and corrects only values that are clearly off', () => {
+    // 387 → 400 kcal is rounding, not an error; 10 → 100 g carbs is.
+    expect(p.nutrition).toEqual([
+      { key: 'proteinG', from: null, to: 0 },
+      { key: 'carbsG', from: 10, to: 100 },
+    ]);
+  });
+
+  it('adds only synonyms that are new, case-insensitively, and never the name itself', () => {
+    expect(p.addSynonyms).toEqual(['Table Sugar']);
+  });
+
+  it('leaves everything out that was not asked for', () => {
+    const [onlyNames] = buildTidyProposals([sugar], [{ key: 'sugar', name: 'Caster Sugar' }]);
+    expect(proposalKinds(onlyNames)).toEqual(['name']);
+  });
+
+  it('pre-selects everything except removing tags, and builds the write from what is ticked', () => {
+    const selected = defaultSelection([p]);
+    expect(selected.has(selectionKey('sugar', 'removeTags'))).toBe(false);
+    expect(changeFor(p, selected)).toEqual({
+      translations: [{ lang: 'es', text: 'Azúcar' }, { lang: 'it', text: 'Zucchero' }],
+      categoryId: 'cat-pantry',
+      addTagIds: ['tag-vegan'],
+      nutrition: { proteinG: 0, carbsG: 100 },
+      addSynonyms: ['Table Sugar'],
+    });
+
+    selected.delete(selectionKey('sugar', 'nutrition'));
+    selected.add(selectionKey('sugar', 'removeTags'));
+    const body = changeFor(p, selected)!;
+    expect(body.nutrition).toBeUndefined();
+    expect(body.removeTagIds).toEqual(['tag-gluten']);
+
+    expect(changeFor(p, new Set())).toBeNull();
+  });
+});
+
+describe('isNutritionCorrection', () => {
+  it('ignores near-zero noise and small relative differences', () => {
+    expect(isNutritionCorrection('fatG', 0.2, 1)).toBe(false);
+    expect(isNutritionCorrection('caloriesKcal', 360, 384)).toBe(false);
+    expect(isNutritionCorrection('caloriesKcal', 50, 380)).toBe(true);
+    expect(isNutritionCorrection('sodiumMg', 5, 40)).toBe(false);
   });
 });

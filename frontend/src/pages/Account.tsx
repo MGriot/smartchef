@@ -33,6 +33,7 @@ import { RemoteAccessNotice } from '../components/RemoteAccessNotice';
 import { checkTokenShape } from '../lib/sync/tokenShape';
 import { ExportSetupFileDialog, ImportSetupFileDialog } from '../components/SetupFileDialog';
 import type { AppliedSetup } from '../lib/setupFileTransfer';
+import { useFileExport } from '../hooks/useFileExport';
 
 // How each verdict reads. Only 'writable' is a success; the amber group is
 // "this works for reading and will never upload", which is precisely the
@@ -1654,6 +1655,7 @@ function BackupCard() {
   const [error, setError] = useState<string | null>(null);
   const [lastSummary, setLastSummary] = useState<SyncSummary | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const { exportFile, sheet: exportSheet } = useFileExport();
 
   const handleExport = async () => {
     setExporting(true);
@@ -1662,15 +1664,11 @@ function BackupCard() {
       const res = await apiFetch('/api/backup/export', { timeoutMs: 120_000 });
       const json = await res.json();
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('account.backup.exportFailed'));
-      const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `smartchef-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await exportFile({
+        fileName: `smartchef-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        mimeType: 'application/json',
+        data: JSON.stringify(json.data, null, 2),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : t('account.backup.exportFailed'));
     } finally {
@@ -1709,6 +1707,7 @@ function BackupCard() {
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+      {exportSheet}
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.backup.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">

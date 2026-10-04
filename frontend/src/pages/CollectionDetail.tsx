@@ -7,6 +7,8 @@ import Autocomplete from '../components/Autocomplete';
 import CoverImage from '../components/CoverImage';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
+import { useFileExport } from '../hooks/useFileExport';
+import { slugForFilename } from '../lib/fileExport';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
 
@@ -41,6 +43,7 @@ interface RecipeOption {
 
 export default function CollectionDetail() {
   const { t } = useTranslation();
+  const { exportFile, sheet: exportSheet } = useFileExport();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const contentLang = useStore((s) => s.contentLang);
@@ -134,16 +137,11 @@ export default function CollectionDetail() {
       const res = await apiFetch(`/api/share/collections/${id}/export`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('collections.exportFailed'));
-      const slug = collection.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-      const blob = new Blob([JSON.stringify(json.data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${slug}.smartchef.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await exportFile({
+        fileName: `${slugForFilename(collection.name, 'collection')}.smartchef.json`,
+        mimeType: 'application/json',
+        data: JSON.stringify(json.data, null, 2),
+      });
     } catch (err) {
       console.error('Collection export failed:', err);
     }
@@ -175,6 +173,7 @@ export default function CollectionDetail() {
 
   return (
     <AppLayout>
+      {exportSheet}
       <div className="px-8 lg:px-12 py-10 max-w-[1400px] mx-auto">
         <div className="flex justify-between items-start mb-10">
           <div>

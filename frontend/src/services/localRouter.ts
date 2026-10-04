@@ -227,6 +227,21 @@ async function dispatchIngredients(segments: string[], method: string, sp: URLSe
       return { status: 502, error: err instanceof Error ? err.message : 'AI naming failed' };
     }
   }
+  // "Tidy with AI": naming plus category, tags, nutrition and synonyms,
+  // each aspect only when asked for — see aiTasks.local.ts.
+  if (first === 'ai-tidy' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (items.length === 0) return { status: 400, error: i18n.t('errors.nothingToName') };
+    const a = body.aspects ?? {};
+    const aspects = { naming: !!a.naming, classification: !!a.classification, nutrition: !!a.nutrition, synonyms: !!a.synonyms };
+    if (!Object.values(aspects).some(Boolean)) return { status: 400, error: i18n.t('errors.nothingToName') };
+    try {
+      return { status: 200, data: await ingredients.suggestIngredientTidy(items, aspects) };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI tidy failed' };
+    }
+  }
   if (second === 'naming' && method === 'POST') {
     await ingredients.applyIngredientNaming(first, parseBody(init) ?? {});
     return { status: 200, data: { success: true } };
@@ -482,6 +497,10 @@ async function dispatchMenus(segments: string[], method: string, init?: RequestI
       return menu ? { status: 200, data: menu } : { status: 404, error: i18n.t('errors.menuNotFound') };
     }
     if (method === 'DELETE') { await menus.deleteMenu(menuId); return { status: 200, data: { success: true } }; }
+    if (method === 'PATCH') {
+      const ok = await menus.updateMenu(menuId, parseBody(init) ?? {});
+      return ok ? { status: 200, data: { success: true } } : { status: 404, error: i18n.t('errors.menuNotFound') };
+    }
     return NOT_HANDLED;
   }
 
@@ -492,7 +511,8 @@ async function dispatchMenus(segments: string[], method: string, init?: RequestI
   if (sub === 'items') {
     if (!itemId && method === 'POST') {
       const body = parseBody(init) ?? {};
-      if (!body.recipeId || typeof body.dayOfWeek !== 'number') {
+      // An event menu's dishes have no weekday — they sit in a course.
+      if (!body.recipeId || (typeof body.dayOfWeek !== 'number' && typeof body.courseId !== 'string')) {
         return { status: 400, error: i18n.t('errors.menuItemFieldsRequired') };
       }
       const created = await menus.addMenuItem(menuId, body);

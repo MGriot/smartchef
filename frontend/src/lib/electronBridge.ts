@@ -16,11 +16,27 @@ export interface ElectronFsStat {
   ctimeMs: number;
 }
 
+export interface ElectronSaveOptions {
+  /** The dialog's title bar. Defaults to the Setup File's wording. */
+  title?: string;
+  filters?: { name: string; extensions: string[] }[];
+}
+
+export interface ElectronPrintToPdfOptions {
+  pageSize?: 'A4' | 'Letter';
+  /** printToPDF's footer HTML — `<span class="pageNumber">` and
+   *  `<span class="totalPages">` are filled in per page. */
+  footerTemplate?: string;
+  dialogTitle?: string;
+}
+
 declare global {
   interface Window {
     smartchefElectron?: {
       pickSyncFolder: () => Promise<string | null>;
-      saveFile: (suggestedName: string, contents: string) => Promise<string | null>;
+      saveFile: (suggestedName: string, contents: string | Uint8Array, options?: ElectronSaveOptions) => Promise<string | null>;
+      /** Absent from a preload older than the recipe report. */
+      printToPdf?: (suggestedName: string, options?: ElectronPrintToPdfOptions) => Promise<string | null>;
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
       geocode: (q: string, limit?: number, shape?: boolean) => Promise<GeocodeResult[]>;
@@ -66,11 +82,32 @@ export async function pickSyncFolder(): Promise<string | null> {
  *  Only present in builds shipped after the Setup File landed — an older
  *  preload has no `saveFile`, and calling through would reject with an
  *  opaque "no handler registered" from IPC, so it is checked explicitly. */
-export async function saveFileViaDialog(suggestedName: string, contents: string): Promise<string | null> {
+export async function saveFileViaDialog(
+  suggestedName: string,
+  contents: string | Uint8Array,
+  options?: ElectronSaveOptions,
+): Promise<string | null> {
   if (!window.smartchefElectron?.saveFile) {
     throw new Error('saveFileViaDialog() is only available in the Electron app');
   }
-  return window.smartchefElectron.saveFile(suggestedName, contents);
+  return window.smartchefElectron.saveFile(suggestedName, contents, options);
+}
+
+/** Renders the page on screen with its print stylesheet into a PDF and
+ *  saves it through the native save dialog. Resolves to the path written,
+ *  or null if the user cancelled. Same "older preload" guard as above. */
+export async function printToPdfViaDialog(
+  suggestedName: string,
+  options?: ElectronPrintToPdfOptions,
+): Promise<string | null> {
+  if (!window.smartchefElectron?.printToPdf) {
+    throw new Error('printToPdfViaDialog() is only available in the Electron app');
+  }
+  return window.smartchefElectron.printToPdf(suggestedName, options);
+}
+
+export function canPrintToPdf(): boolean {
+  return typeof window !== 'undefined' && !!window.smartchefElectron?.printToPdf;
 }
 
 /** Local Storage's absolute base directory on this device — where the live

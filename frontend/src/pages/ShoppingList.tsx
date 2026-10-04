@@ -7,6 +7,8 @@ import Autocomplete from '../components/Autocomplete';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { canPrint, printPage } from '../lib/print';
+import { useFileExport } from '../hooks/useFileExport';
+import { slugForFilename } from '../lib/fileExport';
 import { pickIngredientName } from '../lib/ingredientDisplay';
 
 interface MenuSummary {
@@ -134,6 +136,7 @@ export default function ShoppingList() {
   // missing offline route read as "the button does nothing" instead of as
   // an error. Anything that stops a list being generated says so here.
   const [error, setError] = useState<string | null>(null);
+  const { exportFile, sheet: exportSheet } = useFileExport();
 
   const fetchMenus = async () => {
     try {
@@ -267,6 +270,31 @@ export default function ShoppingList() {
     } catch (err) { console.error('Delete failed:', err); }
   };
 
+  /* Fetched and handed over through lib/fileExport.ts rather than linked:
+     a plain <a href="/api/…"> only ever worked against a server, so in
+     standalone mode (and on Android, where nothing catches a download) the
+     button led nowhere. The server answers with the Markdown itself, the
+     local router with { markdown } as JSON. */
+  const handleExportList = async () => {
+    if (!activeList) return;
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/shopping/${activeList.id}/export`);
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      const markdown = isJson ? (await res.json()).data?.markdown : await res.text();
+      if (typeof markdown !== 'string') throw new Error('Export returned no list');
+      await exportFile({
+        fileName: `${slugForFilename(activeList.name, 'shopping-list')}.md`,
+        mimeType: 'text/markdown',
+        data: markdown,
+      });
+    } catch (err) {
+      console.error('Shopping list export failed:', err);
+      setError(t('errors.exportFailed'));
+    }
+  };
+
   const progress = useMemo(() => {
     if (!activeList) return { checked: 0, total: 0 };
     return { checked: activeList.items.filter(i => i.isChecked).length, total: activeList.items.length };
@@ -286,6 +314,7 @@ export default function ShoppingList() {
 
   return (
     <AppLayout>
+      {exportSheet}
       <div className="px-8 lg:px-12 py-10 max-w-6xl mx-auto">
         {!activeList ? (
           <>
@@ -419,16 +448,16 @@ export default function ShoppingList() {
                 {t('common.back')}
               </button>
               <div className="flex items-center gap-3">
-                <a
-                  href={`/api/shopping/${activeList.id}/export`}
+                <button
+                  onClick={handleExportList}
                   className="flex items-center gap-1.5 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-full text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                 >
                   <span className="material-symbols-outlined text-sm">download</span>
                   {t('shopping.export')}
-                </a>
+                </button>
                 {canPrint() && (
                   <button
-                    onClick={() => printPage(activeList.name)}
+                    onClick={() => { printPage(activeList.name).catch(err => console.error('Print failed:', err)); }}
                     className="flex items-center gap-1.5 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-full text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                   >
                     <span className="material-symbols-outlined text-sm">print</span>
@@ -442,6 +471,11 @@ export default function ShoppingList() {
               </div>
             </div>
 
+            {error && (
+              <p className="no-print mb-4 px-5 py-3 bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900/50 rounded-2xl text-sm font-medium text-red-600 dark:text-red-400">
+                {error}
+              </p>
+            )}
             <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight mb-4">{activeList.name}</h1>
             <p className="print-only text-xs mb-4">
               {t('print.printedFrom')} · {progress.total - progress.checked}/{progress.total}

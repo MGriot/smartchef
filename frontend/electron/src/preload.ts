@@ -17,11 +17,16 @@ require('./rt/electron-rt');
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('smartchefElectron', {
   pickSyncFolder: () => ipcRenderer.invoke('smartchef-pick-sync-folder'),
-  // Native save dialog for the encrypted Setup File — see the
-  // `smartchef-save-file` handler in electron/src/index.ts for why the
-  // renderer's own blob-download trick isn't used here.
-  saveFile: (suggestedName: string, contents: string) =>
-    ipcRenderer.invoke('smartchef-save-file', suggestedName, contents),
+  // Native save dialog for the encrypted Setup File and every other export
+  // (frontend/src/lib/fileExport.ts) — see the `smartchef-save-file`
+  // handler in electron/src/index.ts for why the renderer's own
+  // blob-download trick isn't used here. A Uint8Array crosses as-is.
+  saveFile: (suggestedName: string, contents: string | Uint8Array, options?: { title?: string; filters?: { name: string; extensions: string[] }[] }) =>
+    ipcRenderer.invoke('smartchef-save-file', suggestedName, contents, options),
+  // Renders the page on screen to a PDF and saves it through the same
+  // dialog — the recipe report's "Save PDF" (frontend/src/lib/print.ts).
+  printToPdf: (suggestedName: string, options?: { pageSize?: 'A4' | 'Letter'; footerTemplate?: string; dialogTitle?: string }) =>
+    ipcRenderer.invoke('smartchef-print-to-pdf', suggestedName, options),
   // Local Storage (wayfinder ticket 03/05, standalone-storage-sync map) —
   // distinct from the sync folder above: this is where the live SQLite db
   // and content-addressed images actually live, not the (future) Hidden

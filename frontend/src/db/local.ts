@@ -708,11 +708,18 @@ CREATE TABLE IF NOT EXISTS collection_recipes (
 -- Weekly menus (the Planner). Local-only for the same reason as shopping
 -- lists below: a week's plan is personal and short-lived, and the sync
 -- snapshot carries library content, not scheduling.
+-- kind/meal_type/guests/courses and menu_items.course_id/sort_order are
+-- the event menu (one meal, by course) — db/migrations/043_event_menus.sql.
+-- Backfilled onto pre-existing local DBs via addColumnIfMissing() below.
 CREATE TABLE IF NOT EXISTS menus (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   week_start  TEXT NOT NULL,
   notes       TEXT,
+  kind        TEXT NOT NULL DEFAULT 'week',
+  meal_type   TEXT,
+  guests      INTEGER,
+  courses     TEXT NOT NULL DEFAULT '[]',
   created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -724,7 +731,9 @@ CREATE TABLE IF NOT EXISTS menu_items (
   day_of_week  INTEGER NOT NULL,
   meal_type    TEXT NOT NULL DEFAULT 'dinner',
   servings     INTEGER NOT NULL DEFAULT 4,
-  notes        TEXT
+  notes        TEXT,
+  course_id    TEXT,
+  sort_order   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_menu_items_menu ON menu_items(menu_id);
 
@@ -1081,6 +1090,13 @@ export async function initLocalSchema(): Promise<void> {
     // syncReconcile.local.ts classifyRepairFailure().
     await addColumnIfMissing(db, 'sync_repair', 'permanent', 'INTEGER NOT NULL DEFAULT 0');
     await addColumnIfMissing(db, 'sync_repair', 'first_seen_at', 'TEXT');
+    // Event menus — see the menus table above.
+    await addColumnIfMissing(db, 'menus', 'kind', "TEXT NOT NULL DEFAULT 'week'");
+    await addColumnIfMissing(db, 'menus', 'meal_type', 'TEXT');
+    await addColumnIfMissing(db, 'menus', 'guests', 'INTEGER');
+    await addColumnIfMissing(db, 'menus', 'courses', "TEXT NOT NULL DEFAULT '[]'");
+    await addColumnIfMissing(db, 'menu_items', 'course_id', 'TEXT');
+    await addColumnIfMissing(db, 'menu_items', 'sort_order', 'INTEGER NOT NULL DEFAULT 0');
     await dropDanglingForeignKeys(db);
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {

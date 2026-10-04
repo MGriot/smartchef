@@ -1,7 +1,7 @@
 import type { CapacitorElectronConfig } from '@capacitor-community/electron';
 import { getCapacitorElectronConfig, setupElectronDeepLinking } from '@capacitor-community/electron';
 import type { MenuItemConstructorOptions } from 'electron';
-import { app, dialog, ipcMain, MenuItem } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, MenuItem } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import electronIsDev from 'electron-is-dev';
@@ -120,23 +120,71 @@ ipcMain.handle('smartchef-pick-sync-folder', async () => {
   return result.filePaths[0];
 });
 
-// SmartChef: native "save this file somewhere" dialog, for the encrypted
-// Setup File (frontend/src/lib/setupConfigFile.ts). Deliberately a real
-// dialog rather than the renderer's Blob + <a download> trick that
-// BackupCard uses: the app is served from a custom protocol here, and the
-// same trick is a silent no-op on Android (no DownloadListener is
-// registered on the WebView), so one shared code path was never on offer
-// anyway. Returns the chosen path, or null if the user cancelled.
-ipcMain.handle('smartchef-save-file', async (_event, suggestedName: string, contents: string) => {
-  const win = myCapacitorApp.getMainWindow();
+// SmartChef: native "save this file somewhere" dialog — the Setup File
+// (frontend/src/lib/setupConfigFile.ts) and every other export the app
+// offers (frontend/src/lib/fileExport.ts). Deliberately a real dialog
+// rather than the renderer's Blob + <a download> trick: the app is served
+// from a custom protocol here, and the same trick is a silent no-op on
+// Android (no DownloadListener is registered on the WebView), so one shared
+// code path was never on offer anyway. Text is written as UTF-8, a
+// Uint8Array as raw bytes. The title defaults to the Setup File's, which
+// predates the options argument. Returns the chosen path, or null if the
+// user cancelled.
+interface SaveFileOptions {
+  title?: string;
+  filters?: Electron.FileFilter[];
+}
+
+async function saveViaDialog(
+  sender: Electron.WebContents,
+  suggestedName: string,
+  contents: string | Uint8Array,
+  options: SaveFileOptions = {},
+): Promise<string | null> {
+  const win = BrowserWindow.fromWebContents(sender) ?? myCapacitorApp.getMainWindow();
   const result = await dialog.showSaveDialog(win, {
-    title: 'Save your SmartChef setup file',
+    title: options.title || 'Save your SmartChef setup file',
     defaultPath: path.join(app.getPath('documents'), suggestedName),
+    filters: options.filters,
     properties: ['createDirectory', 'showOverwriteConfirmation'],
   });
   if (result.canceled || !result.filePath) return null;
-  await fs.promises.writeFile(result.filePath, contents, 'utf8');
+  if (typeof contents === 'string') await fs.promises.writeFile(result.filePath, contents, 'utf8');
+  else await fs.promises.writeFile(result.filePath, Buffer.from(contents));
   return result.filePath;
+}
+
+ipcMain.handle('smartchef-save-file', async (event, suggestedName: string, contents: string | Uint8Array, options?: SaveFileOptions) => {
+  return saveViaDialog(event.sender, suggestedName, contents, options);
+});
+
+// SmartChef: "Save as PDF" straight from the page on screen — the recipe
+// report (frontend/src/pages/RecipeReport.tsx) — without going through the
+// OS print dialog, where saving a PDF means picking a virtual printer.
+// printToPDF() renders with the page's print stylesheet exactly like
+// window.print() does, and adds what CSS cannot here: Chromium 114 has no
+// @page margin boxes, so the page numbers come from the footer template.
+// Margins are in inches (printToPDF's unit since Electron 21), the extra
+// bottom room is where that footer goes.
+interface PrintToPdfOptions {
+  pageSize?: 'A4' | 'Letter';
+  footerTemplate?: string;
+  dialogTitle?: string;
+}
+
+ipcMain.handle('smartchef-print-to-pdf', async (event, suggestedName: string, options: PrintToPdfOptions = {}) => {
+  const pdf = await event.sender.printToPDF({
+    pageSize: options.pageSize || 'A4',
+    printBackground: true,
+    displayHeaderFooter: !!options.footerTemplate,
+    headerTemplate: '<span></span>',
+    footerTemplate: options.footerTemplate || '<span></span>',
+    margins: { top: 0.55, bottom: 0.7, left: 0.55, right: 0.55 },
+  });
+  return saveViaDialog(event.sender, suggestedName, new Uint8Array(pdf), {
+    title: options.dialogTitle,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
 });
 
 // Local Storage's base directory (wayfinder ticket 03, standalone-storage-

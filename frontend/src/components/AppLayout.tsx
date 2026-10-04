@@ -96,7 +96,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
       : location.pathname === to;
 
   return (
-    <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-outfit">
+    <div className="app-shell min-h-screen bg-[#fafaf5] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-outfit">
       {/* The horizontal padding has to be classes rather than the inline
           style it used to be, because an inline style can't have breakpoints
           — and a flat 2rem per side costs 64px of a 360px phone screen. The

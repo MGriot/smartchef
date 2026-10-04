@@ -1029,6 +1029,8 @@ export default function LibraryIngredients() {
         open={showTidy}
         onClose={() => setShowTidy(false)}
         ingredients={ingredients}
+        categories={categories}
+        tags={allTags}
         onApplied={fetchData}
       />
 
