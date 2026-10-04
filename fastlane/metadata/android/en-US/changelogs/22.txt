@@ -1,0 +1,5 @@
+Print any recipe as a full report, or save it as a PDF, now on Android too. Exports now save to a folder you pick or open the share sheet.
+
+The Planner can also build the menu for one meal, course by course, and print it as a menu card.
+
+The AI tidy for ingredients now also fixes wrong translations, categories, tags, nutrition and synonyms.

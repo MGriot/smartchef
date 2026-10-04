@@ -1,0 +1,5 @@
+Stampa qualsiasi ricetta come report completo o salvala in PDF, ora anche su Android. Le esportazioni si salvano in una cartella a scelta o si condividono.
+
+Il Pianificatore crea anche il menu di un singolo pasto, portata per portata, da stampare come un menu.
+
+Il riordino IA degli ingredienti ora corregge anche traduzioni sbagliate, categorie, tag, valori nutrizionali e sinonimi.
