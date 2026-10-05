@@ -1,0 +1,7 @@
+Ogni ricetta in galleria ha ora un menu con tutte le azioni: aggiungi alla lista della spesa, a una collezione o a un menu del pianificatore, segna come cucinata, condividi, esporta, elimina.
+
+"Aggiungi alla collezione" può anche aggiungere la ricetta a un piano settimanale o a un menu evento.
+
+L'import con IA collega strumenti e tecniche ai passaggi e imposta la regione della ricetta.
+
+Corretto il menu del telefono che lasciava vedere la pagina e il pulsante flottante che richiedeva un secondo tocco.

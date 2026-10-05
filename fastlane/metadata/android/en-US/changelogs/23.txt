@@ -1,0 +1,7 @@
+Every recipe card in the gallery now has a menu with all the recipe actions: add to the shopping list, a collection or a planner menu, mark as cooked, share, export, delete.
+
+Add to collection can also add a recipe to a weekly plan or an event menu.
+
+AI import now links tools and techniques to the steps and sets the recipe's region.
+
+Fixed the phone menu showing the page through it, and the floating button needing a second tap.
