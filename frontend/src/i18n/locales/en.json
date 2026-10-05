@@ -1120,16 +1120,17 @@
       "removeMeal": "Remove meal",
       "deleteMeal": "Remove {{name}} from this menu",
       "confirmDeleteMeal_one": "Remove {{name}} and its {{count}} dish?",
-      "confirmDeleteMeal_other": "Remove {{name}} and its {{count}} dishes?"
+      "confirmDeleteMeal_other": "Remove {{name}} and its {{count}} dishes?",
+      "changeMeal": "Change {{name}} to another meal"
     },
-    "noMealOption": "No particular meal (just a menu)",
-    "mealHint": "Leave it open for a plain menu, or name a meal — you can then add lunch, dinner and more to the same menu.",
     "weekBadge": "Weekly plan",
     "menuBadge": "Menu",
     "groupWeeks": "Weekly plans",
     "groupWeeksHint": "Monday to Sunday",
     "groupEvents": "Day & meal menus",
-    "groupEventsHint": "one occasion, by course"
+    "groupEventsHint": "one occasion, by course",
+    "meals": "Meals",
+    "mealsHint": "Optional. Pick none for a plain menu, one for a single meal, or several (lunch, dinner…) for a day menu with a section for each. Unticking a meal removes its dishes."
   },
   "share": {
     "menuItem": "Share by link",

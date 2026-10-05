@@ -4,13 +4,30 @@ import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../../lib/api';
 import { canPrint, printPage } from '../../lib/print';
 import {
-  defaultCourses, groupDishesByCourse, mealsOf, MEAL_ORDER, moveCourseWithinMeal, moveDish, newCourseId,
-  type EventMealType,
+  currentMeals, groupDishesByCourse, mealsOf, MEAL_ORDER, moveCourseWithinMeal, moveDish, newCourseId, planMealChange,
+  type EventMealType, type MealPlan,
 } from '../../lib/eventMenu';
 import Autocomplete from '../Autocomplete';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../Modal';
 import { Field } from '../Form';
 import type { MenuCourse, MenuDetail, MenuItem, RecipeOption } from './types';
+
+type Send = (path: string, method: string, body?: unknown) => Promise<void>;
+
+/** Writes a MealPlan: dishes of removed meals go, swapped meals' dishes are
+ *  re-labelled, then the menu's courses and meal are saved. Shared by the
+ *  menu page and the details form. */
+export async function applyMealPlan(send: Send, menuId: string, items: MenuItem[], plan: MealPlan): Promise<void> {
+  for (const item of items.filter((i) => i.courseId && plan.removeCourseIds.includes(i.courseId))) {
+    await send(`/api/menus/${menuId}/items/${item.id}`, 'DELETE');
+  }
+  for (const r of plan.retag) {
+    for (const item of items.filter((i) => i.courseId && r.courseIds.includes(i.courseId))) {
+      await send(`/api/menus/${menuId}/items/${item.id}`, 'PATCH', { mealType: r.to });
+    }
+  }
+  await send(`/api/menus/${menuId}`, 'PATCH', { courses: plan.courses, mealType: plan.mealType });
+}
 
 /** The colour each meal wears on its heading, matching the weekly plan's badges. */
 export const MEAL_BADGE: Record<EventMealType, string> = {
@@ -152,50 +169,27 @@ export default function EventMenu({
 
   /* ── Meals ───────────────────────────────────────────────────── */
   const mealName = (m: EventMealType) => t(`planner.mealTypes.${m}`);
-  // A menu with no meal named is just "a menu": every meal is on offer, and
-  // naming the first one labels what is already there instead of adding more.
-  const unnamed = !multi && !menu.meal_type;
-  const takenMeals: EventMealType[] = multi ? meals.map((m) => m.mealType) : unnamed ? [] : [singleMeal];
-  const availableMeals = MEAL_ORDER.filter((m) => !takenMeals.includes(m));
+  // Meals are opt-in: a menu with no meal named is a plain menu and shows
+  // none of this. Naming a meal (Edit details) unlocks adding more here.
+  const haveMeals = currentMeals(courses, menu.meal_type as EventMealType | null);
+  const availableMeals = MEAL_ORDER.filter((m) => !haveMeals.includes(m));
+  const unlocked = haveMeals.length > 0;
 
-  /** Adds a meal to the day. The first time, the courses already there are
-   *  the menu's original meal, so they are tagged with it before the new
-   *  meal's courses join them. */
-  const addMeal = (meal: EventMealType) => {
-    if (unnamed) {
-      run(async () => {
-        await saveCourses(courses.map((c) => ({ ...c, mealType: meal })));
-        await send(`/api/menus/${menu.id}`, 'PATCH', { mealType: meal });
-        for (const item of items) await send(`/api/menus/${menu.id}/items/${item.id}`, 'PATCH', { mealType: meal });
-      });
-      return;
+  /** Turns the menu's meals into `desired` (add, swap or remove one). */
+  const changeMeals = (desired: EventMealType[]) => {
+    const plan = planMealChange(courses, menu.meal_type as EventMealType | null, desired, (key) => t(`planner.event.defaultCourses.${key}`));
+    const lost = items.filter((i) => i.courseId && plan.removeCourseIds.includes(i.courseId)).length;
+    if (lost > 0) {
+      const gone = haveMeals.filter((m) => !desired.includes(m)).map(mealName).join(', ');
+      if (!window.confirm(t('planner.event.confirmDeleteMeal', { name: gone, count: lost }))) return;
     }
-    const base = multi ? courses : courses.map((c) => ({ ...c, mealType: singleMeal }));
-    const fresh = defaultCourses((key) => t(`planner.event.defaultCourses.${key}`), meal);
-    run(() => saveCourses([...base, ...fresh]));
+    run(() => applyMealPlan(send, menu.id, items, plan));
   };
 
-  const deleteMeal = (meal: EventMealType) => {
-    const own = courses.filter((c) => c.mealType === meal);
-    const dishCount = items.filter((i) => own.some((c) => c.id === i.courseId)).length;
-    if (dishCount > 0 && !window.confirm(t('planner.event.confirmDeleteMeal', { name: mealName(meal), count: dishCount }))) return;
-    const rest = courses.filter((c) => c.mealType !== meal);
-    const remaining = mealsOf(rest);
-    run(async () => {
-      for (const item of items.filter((i) => own.some((c) => c.id === i.courseId))) {
-        await send(`/api/menus/${menu.id}/items/${item.id}`, 'DELETE');
-      }
-      // Down to one meal: the menu is a plain single-meal menu again.
-      if (remaining.length <= 1) {
-        await send(`/api/menus/${menu.id}`, 'PATCH', {
-          courses: rest.map(({ id, name }) => ({ id, name })),
-          ...(remaining[0] ? { mealType: remaining[0].mealType } : {}),
-        });
-      } else {
-        await saveCourses(rest);
-      }
-    });
-  };
+  const addMeal = (meal: EventMealType) => changeMeals([...haveMeals, meal]);
+  const removeMeal = (meal: EventMealType) => changeMeals(haveMeals.filter((m) => m !== meal));
+  /** Swaps a meal for another one, keeping its courses and dishes. */
+  const swapMeal = (from: EventMealType, to: EventMealType) => changeMeals(haveMeals.map((m) => (m === from ? to : m)));
 
   /* ── Dishes ──────────────────────────────────────────────────── */
   const openAddDish = (courseId: string) =>
@@ -333,10 +327,24 @@ export default function EventMenu({
             <div key={course?.id ?? '__other'}>
             {startsMeal && meal && (
               <div className="flex items-center gap-3 mt-2 mb-3">
-                <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest ${MEAL_BADGE[meal]}`}>{mealName(meal)}</span>
+                {/* The badge is a picker: choosing another meal swaps this one
+                    for it, dishes and all. */}
+                <label className={`relative inline-flex items-center rounded-full ${MEAL_BADGE[meal]}`}>
+                  <select
+                    value={meal}
+                    onChange={(e) => swapMeal(meal, e.target.value as EventMealType)}
+                    disabled={busy}
+                    aria-label={t('planner.event.changeMeal', { name: mealName(meal) })}
+                    className="appearance-none bg-transparent pl-3 pr-7 py-1 text-xs font-black uppercase tracking-widest cursor-pointer focus:outline-none"
+                  >
+                    <option value={meal}>{mealName(meal)}</option>
+                    {availableMeals.map((m) => <option key={m} value={m}>{mealName(m)}</option>)}
+                  </select>
+                  <span className="material-symbols-outlined text-[16px] absolute right-1.5 pointer-events-none">expand_more</span>
+                </label>
                 <span className="flex-1 border-t border-zinc-200 dark:border-zinc-700" aria-hidden="true" />
                 <button
-                  onClick={() => deleteMeal(meal)}
+                  onClick={() => removeMeal(meal)}
                   disabled={busy}
                   className="flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-red-500 disabled:opacity-40"
                   aria-label={t('planner.event.deleteMeal', { name: mealName(meal) })}
@@ -437,7 +445,7 @@ export default function EventMenu({
         })}
 
         {/* ── Add a meal ───────────────────────────────────────── */}
-        {availableMeals.length > 0 && (
+        {unlocked && availableMeals.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 px-1">
             <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500 mr-1">{t('planner.event.addMeal')}</span>
             {availableMeals.map((m) => (

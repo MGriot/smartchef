@@ -1,0 +1,1 @@
+Meals in a day menu are now opt-in: pick none for a plain menu, one for a single meal, or several. You can change a meal, add more or remove one at any time.

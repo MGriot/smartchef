@@ -1120,16 +1120,17 @@
       "removeMeal": "Retirer le repas",
       "deleteMeal": "Retirer {{name}} de ce menu",
       "confirmDeleteMeal_one": "Retirer {{name}} et son {{count}} plat ?",
-      "confirmDeleteMeal_other": "Retirer {{name}} et ses {{count}} plats ?"
+      "confirmDeleteMeal_other": "Retirer {{name}} et ses {{count}} plats ?",
+      "changeMeal": "Changer {{name}} pour un autre repas"
     },
-    "noMealOption": "Aucun repas en particulier (un simple menu)",
-    "mealHint": "Laissez vide pour un menu simple, ou indiquez un repas : vous pourrez ensuite ajouter déjeuner, dîner et plus au même menu.",
     "weekBadge": "Plan hebdomadaire",
     "menuBadge": "Menu",
     "groupWeeks": "Plans hebdomadaires",
     "groupWeeksHint": "du lundi au dimanche",
     "groupEvents": "Menus de journée et de repas",
-    "groupEventsHint": "une seule occasion, par plat"
+    "groupEventsHint": "une seule occasion, par plat",
+    "meals": "Repas",
+    "mealsHint": "Facultatif. Aucun pour un menu simple, un pour un seul repas, ou plusieurs (déjeuner, dîner…) pour un menu de journée avec une section pour chacun. Décocher un repas supprime ses plats."
   },
   "share": {
     "menuItem": "Partager par lien",

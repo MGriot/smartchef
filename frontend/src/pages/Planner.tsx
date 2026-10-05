@@ -11,12 +11,12 @@ import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
-import EventMenu, { parseMenuDate, MEAL_BADGE } from '../components/planner/EventMenu';
+import EventMenu, { parseMenuDate, MEAL_BADGE, applyMealPlan } from '../components/planner/EventMenu';
 import {
   MEAL_TYPES, menuKind,
   type MealType, type MenuDetail, type MenuItem, type MenuKind, type MenuSummary, type RecipeOption,
 } from '../components/planner/types';
-import { defaultCourses, mealsOf } from '../lib/eventMenu';
+import { currentMeals, defaultCourses, mealsOf, planMealChange, type EventMealType } from '../lib/eventMenu';
 
 /** The create/edit form for a menu's own details — both kinds share it,
  *  an event menu just has more of them. */
@@ -25,8 +25,9 @@ interface DetailsForm {
   name: string;
   /** The week's Monday, or the event's day. */
   date: string;
-  /** '' = no particular meal: the menu is just a menu. */
-  mealType: MealType | '';
+  /** The meals an event menu covers. None = a plain menu; one = that meal;
+   *  several = a day menu with a section per meal. */
+  meals: MealType[];
   guests: number;
   notes: string;
 }
@@ -315,8 +316,8 @@ export default function Planner() {
   const chooseKind = (kind: MenuKind) => setDetailsModal({
     mode: 'create',
     form: kind === 'week'
-      ? { kind, name: '', date: todayMonday(), mealType: 'dinner', guests: 4, notes: '' }
-      : { kind, name: '', date: localDay(new Date()), mealType: 'dinner', guests: 4, notes: '' },
+      ? { kind, name: '', date: todayMonday(), meals: [], guests: 4, notes: '' }
+      : { kind, name: '', date: localDay(new Date()), meals: [], guests: 4, notes: '' },
   });
 
   const openEditDetails = () => {
@@ -328,7 +329,7 @@ export default function Planner() {
         kind: menuKind(menu),
         name: menu.name,
         date: Number.isNaN(date.getTime()) ? menu.week_start : localDay(date),
-        mealType: menu.meal_type ?? '',
+        meals: currentMeals(menu.courses ?? [], menu.meal_type),
         guests: menu.guests ?? 4,
         notes: menu.notes ?? '',
       },
@@ -342,8 +343,10 @@ export default function Planner() {
     setSavingDetails(true);
     try {
       const event = form.kind === 'event'
-        ? { mealType: form.mealType || null, guests: form.guests, notes: form.notes.trim() || null }
+        ? { guests: form.guests, notes: form.notes.trim() || null }
         : {};
+      const nameFor = (key: Parameters<typeof defaultCourses>[0] extends (k: infer K) => string ? K : never) =>
+        t(`planner.event.defaultCourses.${key}`);
       if (detailsModal.mode === 'create') {
         const res = await apiFetch('/api/menus', {
           method: 'POST',
@@ -353,11 +356,18 @@ export default function Planner() {
             weekStart: form.date,
             kind: form.kind,
             ...event,
-            ...(form.kind === 'event' && !form.mealType ? { mealType: undefined } : {}),
             // The classic courses, named in the language the menu is being
             // written in — the user's to rename, reorder or drop.
             ...(form.kind === 'event'
-              ? { courses: defaultCourses((key) => t(`planner.event.defaultCourses.${key}`)), notes: form.notes.trim() || undefined }
+              ? (() => {
+                  // The classic courses once per meal chosen (or once, plain).
+                  const plan = planMealChange(defaultCourses(nameFor), null, form.meals, nameFor);
+                  return {
+                    courses: plan.courses,
+                    notes: form.notes.trim() || undefined,
+                    ...(plan.mealType ? { mealType: plan.mealType } : {}),
+                  };
+                })()
               : {}),
           }),
         });
@@ -370,6 +380,22 @@ export default function Planner() {
           window.alert(t('planner.createFailed', { error: JSON.stringify(json.error || json) }));
         }
       } else if (menu) {
+        if (form.kind === 'event') {
+          // Meals added, swapped or removed in the form: same rules as on the menu page.
+          const plan = planMealChange(menu.courses ?? [], menu.meal_type, form.meals, nameFor);
+          const lost = (menu.items ?? []).filter(i => i.courseId && plan.removeCourseIds.includes(i.courseId)).length;
+          if (lost > 0) {
+            const gone = currentMeals(menu.courses ?? [], menu.meal_type).filter(m => !form.meals.includes(m)).map(m => t(`planner.mealTypes.${m}`)).join(', ');
+            if (!window.confirm(t('planner.event.confirmDeleteMeal', { name: gone, count: lost }))) return;
+          }
+          await applyMealPlan(async (path, method, body) => {
+            const r = await apiFetch(path, {
+              method,
+              ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+            });
+            if (!r.ok) throw new Error(t('planner.saveFailed', { error: path }));
+          }, menu.id, menu.items ?? [], plan);
+        }
         const res = await apiFetch(`/api/menus/${menu.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -737,25 +763,37 @@ export default function Planner() {
               </Field>
               {form.kind === 'event' && (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field label={t('planner.meal')} hint={t('planner.mealHint')}>
-                      <select
-                        value={form.mealType}
-                        onChange={e => update({ mealType: e.target.value as MealType | '' })}
-                        className="sc-field cursor-pointer"
-                      >
-                        <option value="">{t('planner.noMealOption')}</option>
-                        {MEAL_TYPES.map(mt => <option key={mt} value={mt}>{t(`planner.mealTypes.${mt}`)}</option>)}
-                      </select>
-                    </Field>
-                    <Field label={t('planner.guests')}>
-                      <input
-                        type="number" min={1} max={500} required value={form.guests}
-                        onChange={e => update({ guests: Math.max(1, parseInt(e.target.value) || 1) })}
-                        className="sc-field"
-                      />
-                    </Field>
-                  </div>
+                  <Field label={t('planner.meals')} hint={t('planner.mealsHint')}>
+                    <div className="flex flex-wrap gap-2">
+                      {MEAL_TYPES.map(mt => {
+                        const on = form.meals.includes(mt);
+                        // A day menu cannot lose its last meal in one go.
+                        const locked = on && form.meals.length === 1 && detailsModal.mode === 'edit' && (menu ? currentMeals(menu.courses ?? [], menu.meal_type).length > 1 : false);
+                        return (
+                          <button
+                            key={mt}
+                            type="button"
+                            aria-pressed={on}
+                            disabled={locked}
+                            onClick={() => update({ meals: on ? form.meals.filter(m => m !== mt) : [...form.meals, mt] })}
+                            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors disabled:opacity-50 ${
+                              on ? `${MEAL_BADGE[mt]} border-transparent` : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-primary'
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[16px]">{on ? 'check' : 'add'}</span>
+                            {t(`planner.mealTypes.${mt}`)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Field>
+                  <Field label={t('planner.guests')}>
+                    <input
+                      type="number" min={1} max={500} required value={form.guests}
+                      onChange={e => update({ guests: Math.max(1, parseInt(e.target.value) || 1) })}
+                      className="sc-field"
+                    />
+                  </Field>
                   <Field label={t('planner.eventNotes')}>
                     <textarea
                       rows={2} value={form.notes}

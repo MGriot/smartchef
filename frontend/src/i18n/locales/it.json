@@ -1120,16 +1120,17 @@
       "removeMeal": "Rimuovi pasto",
       "deleteMeal": "Rimuovi {{name}} da questo menù",
       "confirmDeleteMeal_one": "Rimuovere {{name}} e il suo {{count}} piatto?",
-      "confirmDeleteMeal_other": "Rimuovere {{name}} e i suoi {{count}} piatti?"
+      "confirmDeleteMeal_other": "Rimuovere {{name}} e i suoi {{count}} piatti?",
+      "changeMeal": "Cambia {{name}} con un altro pasto"
     },
-    "noMealOption": "Nessun pasto in particolare (un semplice menù)",
-    "mealHint": "Lascialo vuoto per un menù semplice, oppure indica un pasto: potrai aggiungere pranzo, cena e altro allo stesso menù.",
     "weekBadge": "Piano settimanale",
     "menuBadge": "Menù",
     "groupWeeks": "Piani settimanali",
     "groupWeeksHint": "da lunedì a domenica",
     "groupEvents": "Menù di giornata e di pasto",
-    "groupEventsHint": "una sola occasione, per portata"
+    "groupEventsHint": "una sola occasione, per portata",
+    "meals": "Pasti",
+    "mealsHint": "Facoltativo. Nessuno per un menù semplice, uno per un singolo pasto, o più (pranzo, cena…) per un menù di giornata con una sezione per ciascuno. Togliere un pasto ne elimina i piatti."
   },
   "share": {
     "menuItem": "Condividi con un link",

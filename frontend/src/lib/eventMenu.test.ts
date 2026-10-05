@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultCourses, groupDishesByCourse, mealsOf, moveCourse, moveCourseWithinMeal, moveDish, newCourseId, type EventCourse } from './eventMenu';
+import { currentMeals, defaultCourses, groupDishesByCourse, mealsOf, moveCourse, moveCourseWithinMeal, moveDish, newCourseId, planMealChange, type EventCourse } from './eventMenu';
 
 const courses: EventCourse[] = [
   { id: 'starter', name: 'Antipasti' },
@@ -99,5 +99,60 @@ describe('meals of a day menu', () => {
     const ids = defaultCourses((k) => k, 'lunch').map((c) => c.id);
     expect(ids[0]).toBe('lunch-starter');
     expect(new Set([...ids, ...defaultCourses((k) => k, 'dinner').map((c) => c.id)]).size).toBe(10);
+  });
+});
+
+describe('planMealChange', () => {
+  const name = (k: string) => k;
+  const plain: EventCourse[] = [{ id: 'starter', name: 'S' }, { id: 'main', name: 'M' }];
+
+  it('naming a meal on a plain menu labels what is there, keeping it untagged', () => {
+    const plan = planMealChange(plain, null, ['dinner'], name);
+    expect(plan.mealType).toBe('dinner');
+    expect(plan.courses).toEqual(plain);
+    expect(plan.removeCourseIds).toEqual([]);
+  });
+
+  it('a second meal tags every course and brings its own', () => {
+    const plan = planMealChange(plain, 'dinner', ['lunch', 'dinner'], name);
+    expect(plan.courses.filter((c) => c.mealType === 'dinner').map((c) => c.id)).toEqual(['starter', 'main']);
+    expect(plan.courses.filter((c) => c.mealType === 'lunch')).toHaveLength(5);
+    expect(plan.mealType).toBe('lunch');
+    expect(plan.removeCourseIds).toEqual([]);
+  });
+
+  it('swaps a meal for another keeping its courses', () => {
+    const plan = planMealChange(plain, 'dinner', ['lunch'], name);
+    expect(plan.courses).toEqual(plain);
+    expect(plan.mealType).toBe('lunch');
+    expect(plan.removeCourseIds).toEqual([]);
+    expect(plan.retag).toEqual([{ courseIds: ['starter', 'main'], to: 'lunch' }]);
+  });
+
+  it('removing one of two meals drops its courses and returns to a single meal', () => {
+    const both = planMealChange(plain, 'dinner', ['lunch', 'dinner'], name).courses;
+    const plan = planMealChange(both, 'lunch', ['dinner'], name);
+    expect(plan.removeCourseIds).toHaveLength(5);
+    expect(plan.courses).toEqual(plain);
+    expect(plan.mealType).toBe('dinner');
+  });
+
+  it('clearing the only meal makes the menu plain again, courses kept', () => {
+    const plan = planMealChange(plain, 'dinner', [], name);
+    expect(plan.mealType).toBeNull();
+    expect(plan.courses).toEqual(plain);
+  });
+
+  it('never reuses a course id after a swap', () => {
+    const both = planMealChange(plain, 'dinner', ['dinner', 'lunch'], name).courses;
+    const swapped = planMealChange(both, 'dinner', ['breakfast', 'lunch'], name).courses;
+    const again = planMealChange(swapped, 'breakfast', ['breakfast', 'lunch', 'dinner'], name).courses;
+    expect(new Set(again.map((c) => c.id)).size).toBe(again.length);
+  });
+
+  it('currentMeals reads tagged courses, else the menu meal', () => {
+    expect(currentMeals(plain, null)).toEqual([]);
+    expect(currentMeals(plain, 'lunch')).toEqual(['lunch']);
+    expect(currentMeals([{ id: 'a', name: 'A', mealType: 'snack' }, { id: 'b', name: 'B', mealType: 'breakfast' }], null)).toEqual(['breakfast', 'snack']);
   });
 });

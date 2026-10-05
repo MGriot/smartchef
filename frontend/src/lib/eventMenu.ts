@@ -136,3 +136,80 @@ export function moveCourseWithinMeal(courses: EventCourse[], courseId: string, d
   if (!neighbour) return courses;
   return courses.map((c) => (c.id === courseId ? neighbour : c.id === neighbour.id ? course : c));
 }
+
+export interface MealPlan {
+  /** The menu's courses after the change. */
+  courses: EventCourse[];
+  /** The menu's own meal: the only one, the first of several, or none. */
+  mealType: EventMealType | null;
+  /** Courses of meals that were removed; their dishes go with them. */
+  removeCourseIds: string[];
+  /** Courses whose meal was swapped for another, keeping their dishes. */
+  retag: Array<{ courseIds: string[]; to: EventMealType }>;
+}
+
+/**
+ * What it takes to turn a menu's meals into `desired`: the one place that
+ * adds, swaps and removes meals, so the menu page and the details form agree.
+ *
+ * - A menu with no meal is a plain menu; naming a meal gives it to the
+ *   courses already there, further meals get fresh courses.
+ * - A meal that goes while another comes is a swap (Lunch -> Brunch keeps
+ *   its dishes); only a meal that goes with nothing to take its place is
+ *   removed, dishes and all.
+ * - With one meal or none the courses carry no meal (the menu's own meal_type
+ *   is it); with several each course names its meal.
+ */
+export function planMealChange(
+  courses: EventCourse[],
+  menuMeal: EventMealType | null | undefined,
+  desired: EventMealType[],
+  nameFor: (key: (typeof DEFAULT_COURSE_KEYS)[number]) => string,
+): MealPlan {
+  const want = MEAL_ORDER.filter((m) => desired.includes(m));
+  const tagged = mealsOf(courses).length > 0
+    ? courses
+    : menuMeal ? courses.map((c) => ({ ...c, mealType: menuMeal })) : courses;
+  const current = mealsOf(tagged).map((m) => m.mealType);
+  // Un-naming a menu's only meal makes it plain; nothing is deleted.
+  const toRemove = want.length === 0 && current.length === 1 ? [] : current.filter((m) => !want.includes(m));
+  const toAdd = want.filter((m) => !current.includes(m));
+
+  let work: EventCourse[] = tagged.map((c) => ({ ...c }));
+  const retag: MealPlan['retag'] = [];
+  const removeCourseIds: string[] = [];
+
+  if (current.length === 0 && toAdd.length > 0) {
+    const first = toAdd.shift()!;
+    retag.push({ courseIds: work.map((c) => c.id), to: first });
+    work = work.map((c) => ({ ...c, mealType: first }));
+  }
+  while (toRemove.length > 0 && toAdd.length > 0) {
+    const from = toRemove.shift()!;
+    const to = toAdd.shift()!;
+    retag.push({ courseIds: work.filter((c) => c.mealType === from).map((c) => c.id), to });
+    work = work.map((c) => (c.mealType === from ? { ...c, mealType: to } : c));
+  }
+  for (const from of toRemove) {
+    removeCourseIds.push(...work.filter((c) => c.mealType === from).map((c) => c.id));
+    work = work.filter((c) => c.mealType !== from);
+  }
+  for (const meal of toAdd) {
+    const taken = new Set(work.map((c) => c.id));
+    for (const fresh of defaultCourses(nameFor, meal)) {
+      let id = fresh.id;
+      for (let n = 2; taken.has(id); n++) id = `${fresh.id}-${n}`;
+      taken.add(id);
+      work.push({ ...fresh, id });
+    }
+  }
+
+  if (want.length <= 1) work = work.map(({ mealType: _meal, ...rest }) => rest);
+  return { courses: work, mealType: want[0] ?? null, removeCourseIds, retag };
+}
+
+/** The meals a menu currently has, in serving order. */
+export function currentMeals(courses: EventCourse[], menuMeal: EventMealType | null | undefined): EventMealType[] {
+  const fromCourses = mealsOf(courses).map((m) => m.mealType);
+  return fromCourses.length > 0 ? fromCourses : menuMeal ? [menuMeal] : [];
+}
