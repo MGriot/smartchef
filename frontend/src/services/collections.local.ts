@@ -125,6 +125,20 @@ export async function addRecipeToCollection(collectionId: string, recipeId: stri
   return true;
 }
 
+/** The collections one recipe belongs to — backs the checkboxes of the
+ *  "add to collection" picker. It answered 501 offline, so every box started
+ *  unticked however many collections the recipe was already in. */
+export async function listCollectionsForRecipe(recipeId: string): Promise<Array<{ id: string; name: string }>> {
+  return query<{ id: string; name: string }>(
+    `SELECT c.id, c.name
+       FROM collection_recipes cr
+       JOIN collections c ON c.id = cr.collection_id
+      WHERE cr.recipe_id = $1 AND c.deleted_at IS NULL
+      ORDER BY c.sort_order, c.name`,
+    [recipeId],
+  );
+}
+
 export async function removeRecipeFromCollection(collectionId: string, recipeId: string): Promise<void> {
   await query('DELETE FROM collection_recipes WHERE collection_id=$1 AND recipe_id=$2', [collectionId, recipeId]);
 }

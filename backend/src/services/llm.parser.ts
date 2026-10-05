@@ -52,6 +52,7 @@ Il JSON deve avere questa struttura:
   "difficulty": "easy | medium | hard | expert | null",
   "tags": ["string"],
   "tools": ["string"],
+  "regions": [{ "country": "string | null", "place": "string | null" }],
   "storageInstructions": "string | null",
   "tips": "string | null",
   "ingredients": [
@@ -73,6 +74,7 @@ Il JSON deve avere questa struttura:
       "description": "string",
       "durationMin": "number | null",
       "techniques": ["string"],
+      "tools": ["string"],
       "ingredients": [
         {
           "name": "string",
@@ -94,6 +96,8 @@ Regole:
 - groupName (negli ingredienti) è un'intestazione breve e opzionale sotto cui questo ingrediente è raggruppato, es. "Per il condimento" — impostalo SOLO quando la ricetta originale raggruppa visivamente gli ingredienti in sezioni etichettate; altrimenti lascialo null. Non inventare raggruppamenti assenti nella fonte
 - isOptional (negli ingredienti) è true quando la ricetta presenta quell'ingrediente come facoltativo o a piacere (es. "facoltativo", "se gradito", "optional", "per guarnire", "q.b. a piacere"); altrimenti false. Non dedurlo dal fatto che una quantità sia vaga
 - techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step, con nomi brevi e IN INGLESE (es. "Sauté", "Braise"), stesso criterio di "tools"
+- tools (negli step) è l'elenco degli strumenti che QUEL passaggio usa, con gli stessi nomi IN INGLESE usati nell'elenco "tools" principale (che deve contenerli tutti). Solo strumenti realmente usati in quel passaggio
+- regions è l'origine geografica del piatto: un oggetto per luogo, con country = codice paese ISO 3166-1 alpha-2 maiuscolo (es. "IT", "FR") oppure null, e place = regione o città più specifica (es. "Toscana", "Napoli") oppure null. Compila SOLO se la fonte indica l'origine o il piatto è chiaramente tipico di un luogo; altrimenti lascia l'array vuoto. Non inventare
 - ingredients (negli step) è l'elenco degli ingredienti che QUEL passaggio usa. Il campo name deve essere copiato ESATTAMENTE come compare nella lista "ingredients" principale, altrimenti il collegamento viene scartato. Metti quantity/unit SOLO quando il passaggio usa una parte dichiarata dell'ingrediente (es. "metà dello zucchero" su 100 g -> quantity 50, unit "g"); se il passaggio usa semplicemente l'ingrediente, lascia quantity e unit a null. Non elencare ingredienti che quel passaggio non nomina né usa, e non inventarne di assenti dalla lista principale
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
@@ -798,6 +802,15 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
       : "medium",
     tags: Array.isArray(parsed.tags) ? parsed.tags : [],
     tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t: unknown) => typeof t === "string") : [],
+    regions: Array.isArray(parsed.regions)
+      ? parsed.regions
+          .filter((r: any) => r && typeof r === "object")
+          .map((r: any) => ({
+            country: typeof r.country === "string" && r.country.trim() ? r.country.trim().toUpperCase() : null,
+            place: typeof r.place === "string" && r.place.trim() ? r.place.trim() : null,
+          }))
+          .filter((r: { country: string | null; place: string | null }) => r.country || r.place)
+      : [],
     storageInstructions: typeof parsed.storageInstructions === "string" ? parsed.storageInstructions : null,
     tips: typeof parsed.tips === "string" ? parsed.tips : null,
     ingredients: Array.isArray(parsed.ingredients)
@@ -823,6 +836,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
           description: step.description ?? "",
           durationMin: typeof step.durationMin === "number" ? step.durationMin : undefined,
           techniques: Array.isArray(step.techniques) ? step.techniques.filter((t: unknown) => typeof t === "string") : [],
+          tools: Array.isArray(step.tools) ? step.tools.filter((t: unknown) => typeof t === "string") : [],
           // Which of the recipe's ingredients this step uses. Kept as the
           // model's own names and resolved against the ingredient list by
           // the client (lib/stepRefs.ts's matchStepIngredients) rather than

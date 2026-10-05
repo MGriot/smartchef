@@ -450,7 +450,10 @@
     "difficultyExpert": "Experto",
     "stillDownloading": "Aún se está descargando tu biblioteca",
     "stillDownloadingMore": "Aparecerán más recetas aquí a medida que lleguen.",
-    "stillDownloadingFirst": "Tus recetas aparecerán aquí a medida que lleguen: mientras tanto puedes seguir usando la app."
+    "stillDownloadingFirst": "Tus recetas aparecerán aquí a medida que lleguen: mientras tanto puedes seguir usando la app.",
+    "recipeActions": "Acciones de la receta",
+    "markedCooked": "Marcada como cocinada",
+    "addedToShoppingList": "Añadida a la lista de la compra"
   },
   "collections": {
     "newCollection": "Nueva colección",
@@ -595,6 +598,10 @@
     "exportRecipe": "Exportar Receta",
     "addToCollection": "Añadir a la Colección",
     "noCollectionsYetCreateOne": "Ninguna colección aún — crea una desde la Galería.",
+    "addToMenu": "Añadir a un menú",
+    "noMenusYet": "Ningún menú aún — crea uno en el Planificador.",
+    "addedToMenu": "Añadida al menú",
+    "addToMenuFailed": "No se pudo añadir al menú",
     "viewLanguage": "Idioma de la receta",
     "originalLanguage": "original",
     "shownInOriginal": "Mostrado en {{shownLang}} (original — todavía no hay traducción a {{targetLang}})",

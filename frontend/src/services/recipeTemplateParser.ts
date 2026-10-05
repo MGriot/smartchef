@@ -40,6 +40,8 @@ export interface TemplateParseStep {
   // — the text template has no per-step technique field, so the local
   // parser never sets this.
   techniques?: string[];
+  /** Which of the recipe's tools this step uses, by English name. AI path only. */
+  tools?: string[];
   /** Which of the recipe's ingredients this step uses, by the name the
    *  model copied out of the ingredient list, optionally with how much of
    *  it this step takes. Resolved against the real ingredient rows at save
@@ -65,6 +67,9 @@ export interface TemplateParseResult {
   difficulty?: string;
   tags: string[];
   tools: string[];
+  /** Where the dish comes from: an ISO 3166-1 alpha-2 country and/or a
+   *  free-text place. AI path only; resolved by lib/importLinking.ts. */
+  regions?: Array<{ country: string | null; place: string | null }>;
   storageInstructions?: string | null;
   tips?: string | null;
   ingredients: TemplateParseIngredient[];

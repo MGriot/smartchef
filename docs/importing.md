@@ -52,6 +52,16 @@ anything acts on it, so a plausible-sounding invention is rejected rather
 than trusted; a match found only this way is badged **AI match** in the
 Review Matches step instead of being auto-selected unmarked.
 
+**Steps and regions.** The AI path also asks which tools and techniques each
+step uses, and where the dish comes from. Each step is linked to its
+ingredients, tools and techniques, and the first mention of each in the step
+text becomes a clickable reference, exactly as if you had written it in the
+editor. Tools a step uses are added to the recipe's tool list as well. The
+origin (a country and/or a region or city such as "Toscana") is set as the
+recipe's regions — places are located on the map when a geocoder is
+reachable — so an imported recipe shows up in the Atlas instead of under
+"unmapped". Nothing is invented: a recipe with no stated origin gets none.
+
 ---
 
 ## 🥫 Pantry — what can I cook right now?

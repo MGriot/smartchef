@@ -48,7 +48,7 @@ cd frontend
 npm install
 npm run electron:build
 ```
-Produces an NSIS installer at `frontend/electron/dist/SmartChef Setup 1.1.0.exe`.
+Produces an NSIS installer at `frontend/electron/dist/SmartChef Setup X.Y.Z.exe`.
 
 **Android**:
 ```bash

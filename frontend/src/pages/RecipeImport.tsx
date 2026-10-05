@@ -30,6 +30,8 @@ interface IngredientNaming {
 import { repairIngredientAmount } from '../lib/ingredientAmount';
 import { checkMediaForProvider } from '../lib/llmMedia';
 import { matchStepIngredients, linkIngredientsInText } from '../lib/stepRefs';
+import { linkEntitiesInText, resolveRegions } from '../lib/importLinking';
+import { isAreaResult } from '../lib/geocodeTypes';
 
 interface MatchedIngredient {
   ingredientId: string;
@@ -387,8 +389,12 @@ export default function RecipeImport() {
     // that actually produced "quantity: 1, notes: '/2'" for "½ carota" in
     // this library — gets fixed here rather than needing the model to
     // behave. See lib/ingredientAmount.ts.
+    // A tool a step uses belongs in the recipe's tool list too, so the
+    // review matches it and the recipe-level link exists: the union.
+    const allTools = [...new Set([...rawDraft.tools, ...rawDraft.steps.flatMap((s) => s.tools ?? [])])];
     const d: TemplateParseResult = {
       ...rawDraft,
+      tools: allTools,
       ingredients: rawDraft.ingredients.map((ing) => {
         const repaired = repairIngredientAmount(ing);
         return {
@@ -656,6 +662,7 @@ export default function RecipeImport() {
       }
 
       const matchedTools: MatchedTool[] = [];
+      const toolIdByName = new Map<string, string>();
       for (let i = 0; i < draft.tools.length; i++) {
         const name = draft.tools[i];
         const resolution = toolRes[i];
@@ -675,6 +682,7 @@ export default function RecipeImport() {
           isNew = true;
         }
         matchedTools.push({ toolId, toolName: resolution?.choice === 'existing' ? resolution.name : newRowName(resolution, name), isNew });
+        toolIdByName.set(name, toolId);
       }
 
       const techniqueIdByName = new Map<string, string>();
@@ -696,6 +704,23 @@ export default function RecipeImport() {
         }
         techniqueIdByName.set(name, techniqueId);
       }
+
+      // For turning a step's prose into {{tool:…}} / {{tech:…}} references:
+      // each entity with every wording it may appear under.
+      const toolLinkTargets = matchedTools.map((m, i) => ({ id: m.toolId, names: [draft.tools[i], m.toolName] }));
+      const techLinkTargets = techniqueNames.map((n, i) => ({
+        id: techniqueIdByName.get(n) as string,
+        names: [n, techniqueRes[i]?.choice === 'existing' ? techniqueRes[i].name : newRowName(techniqueRes[i], n)],
+      })).filter((x) => !!x.id);
+
+      // Where the dish comes from. Geocoding is best-effort and mirrors what
+      // RegionPicker does when a place is typed in by hand.
+      const { regions, regionCoords } = await resolveRegions(draft.regions, async (q) => {
+        const res = await apiFetch(`/api/geocode?q=${encodeURIComponent(q)}&shape=1`);
+        if (!res.ok) return null;
+        const hit = (await res.json()).data;
+        return hit ? { lat: hit.lat, lng: hit.lng, ...(isAreaResult(hit) ? { shape: hit.shape } : {}) } : null;
+      }, contentLang || 'en');
 
       // The ingredient rows as the steps will see them: same order as the
       // `ingredients` array built below, so a step's sortOrder means the
@@ -754,17 +779,24 @@ export default function RecipeImport() {
         // the prose becomes an inline {{ing:N}} reference.
         steps: draft.steps.map((s) => {
           const stepIngredients = matchStepIngredients(s.ingredients, draftIngredientsForSteps);
+          const stepToolIds = [...new Set((s.tools ?? []).map((n) => toolIdByName.get(n)).filter((id): id is string => !!id))];
+          const stepTechIds = [...new Set((s.techniques ?? []).map((n) => techniqueIdByName.get(n)).filter((id): id is string => !!id))];
+          let description = linkIngredientsInText(s.description, stepIngredients, draftIngredientsForSteps);
+          description = linkEntitiesInText(description, 'tool', toolLinkTargets.filter((x) => stepToolIds.includes(x.id)));
+          description = linkEntitiesInText(description, 'tech', techLinkTargets.filter((x) => stepTechIds.includes(x.id)));
           return {
             stepNumber: s.stepNumber,
             title: s.title || undefined,
-            description: linkIngredientsInText(s.description, stepIngredients, draftIngredientsForSteps),
+            description,
             durationMin: s.durationMin || undefined,
-            toolIds: [],
-            techniqueIds: (s.techniques ?? []).map((n) => techniqueIdByName.get(n)).filter((id): id is string => !!id),
+            toolIds: stepToolIds,
+            techniqueIds: stepTechIds,
             stepIngredients,
           };
         }),
         toolIds: matchedTools.map((t) => t.toolId),
+        regions,
+        regionCoords,
       };
       const res = await apiFetch('/api/recipes', {
         method: 'POST',

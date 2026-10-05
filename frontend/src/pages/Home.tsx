@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import RegionPicker from '../components/RegionPicker';
 import CoverImage from '../components/CoverImage';
+import RecipeCardMenu from '../components/RecipeCardMenu';
 import { useStore } from '../store/app.store';
 import { useIsWideViewport } from '../hooks/useMediaQuery';
 import { apiFetch } from '../lib/api';
@@ -38,6 +39,7 @@ interface Recipe {
   times_cooked: number;
   creator_name?: string | null;
   creator_avatar_url?: string | null;
+  servings?: number | null;
 }
 
 interface CatalogTag {
@@ -662,8 +664,23 @@ const Home: React.FC = () => {
                 const selected = selectedIds.has(recipe.id);
 
                 return (
-                  <Link
+                  // The card is a wrapper with the link inside, not the link
+                  // itself: a button (the "…" menu) may not nest in an <a>.
+                  <div
                     key={recipe.id}
+                    className={`group relative bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px] ${selected ? 'ring-4 ring-primary' : ''}`}
+                  >
+                  {!selectMode && (
+                    <RecipeCardMenu
+                      recipeId={recipe.id}
+                      title={recipe.translated_title || recipe.title}
+                      servings={recipe.servings ?? undefined}
+                      lang={contentLang}
+                      dense={dense}
+                      onDeleted={(rid) => setRecipes((prev) => prev.filter((r) => r.id !== rid))}
+                    />
+                  )}
+                  <Link
                     to={`/recipe/${recipe.id}`}
                     onClick={(e) => {
                       if (selectMode) {
@@ -671,7 +688,7 @@ const Home: React.FC = () => {
                         toggleSelected(recipe.id);
                       }
                     }}
-                    className={`group relative bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px] ${selected ? 'ring-4 ring-primary' : ''}`}
+                    className="block"
                   >
                     {selectMode && (
                       <div className="absolute top-4 right-4 z-10 w-7 h-7 rounded-full bg-white dark:bg-zinc-900 shadow-md flex items-center justify-center">
@@ -691,7 +708,7 @@ const Home: React.FC = () => {
 
                       {/* Tag/Matrioska badges */}
                       {badges.length > 0 && (
-                        <div className="absolute top-4 left-4 right-4 flex flex-wrap gap-1.5">
+                        <div className={`absolute top-4 left-4 flex flex-wrap gap-1.5 ${selectMode ? 'right-4' : dense ? 'right-11' : 'right-14'}`}>
                           {badges.map((badge, i) => (
                             <span
                               key={i}
@@ -761,6 +778,7 @@ const Home: React.FC = () => {
                       </div>
                     </div>
                   </Link>
+                  </div>
                 );
               })}
             </div>

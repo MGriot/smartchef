@@ -57,6 +57,7 @@ cleaning
 clear
 close
 cloud
+cloud_done
 cloud_download
 cloud_off
 code
@@ -79,6 +80,7 @@ css
 cut
 cycle
 dark_mode
+data_object
 database
 database_off
 dataset
@@ -212,6 +214,7 @@ model_training
 money
 more
 more_horiz
+more_vert
 move
 move_down
 moving

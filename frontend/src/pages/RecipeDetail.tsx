@@ -1,6 +1,8 @@
 import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import AddToCollectionPicker from '../components/AddToCollectionPicker';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { useStore } from '../store/app.store';
@@ -246,6 +248,12 @@ const BAR_BUTTON = 'w-11 h-11 justify-center rounded-full hover:bg-zinc-100 dark
 const popoverPlacement = (inBar: boolean) =>
   inBar ? 'fixed left-4 right-4 mx-auto max-w-sm z-50' : 'absolute right-0 top-8 z-50 w-64';
 const POPOVER_ABOVE_BAR: React.CSSProperties = { bottom: 'calc(5.5rem + env(safe-area-inset-bottom))' };
+// FloatingActionBar closes (opacity 0, pointer-events none) on every tap
+// inside it, which includes the tap that opens a popover — so a popover
+// rendered inside the bar was hidden the instant it appeared and only came
+// back when the bar was reopened. From the bar, hang it off <body> instead.
+const popoverLayer = (inBar: boolean, node: React.ReactNode) =>
+  inBar ? createPortal(node, document.body) : node;
 
 // Was a private helper here that stopped at hours, which is how a 15-day
 // maceration came out as "360h". Now lib/duration.ts, shared with every
@@ -424,9 +432,7 @@ const RecipeDetail: React.FC = () => {
   }, []);
   const [cookidooExport, setCookidooExport] = useState<CookidooExport | null>(null);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
-  const [allCollections, setAllCollections] = useState<{ id: string; name: string }[]>([]);
-  const [memberCollectionIds, setMemberCollectionIds] = useState<Set<string>>(new Set());
-  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [inAnyCollection, setInAnyCollection] = useState(false);
   const [cookSequence, setCookSequence] = useState<CookSequenceSection[] | null>(null);
   const [nutrition, setNutrition] = useState<RecipeNutritionResult | null>(null);
   const [downloaded, setDownloaded] = useState(false);
@@ -474,43 +480,6 @@ const RecipeDetail: React.FC = () => {
   const [viewLang, setViewLang] = useState<string | null>(null);
   useEffect(() => { setViewLang(null); }, [id]);
   const shownLang = viewLang ?? contentLang;
-
-  const openCollectionPicker = async () => {
-    setShowCollectionPicker(true);
-    setLoadingCollections(true);
-    try {
-      const [allRes, memberRes] = await Promise.all([
-        apiFetch('/api/collections'),
-        apiFetch(`/api/recipes/${id}/collections`),
-      ]);
-      const allJson = await allRes.json();
-      const memberJson = await memberRes.json();
-      setAllCollections((allJson.data || []).map((c: any) => ({ id: c.id, name: c.name })));
-      setMemberCollectionIds(new Set((memberJson.data || []).map((c: any) => c.id)));
-    } catch (err) {
-      console.error('Failed to load collections:', err);
-    } finally {
-      setLoadingCollections(false);
-    }
-  };
-
-  const toggleCollectionMembership = async (collectionId: string) => {
-    const isMember = memberCollectionIds.has(collectionId);
-    setMemberCollectionIds(prev => {
-      const next = new Set(prev);
-      isMember ? next.delete(collectionId) : next.add(collectionId);
-      return next;
-    });
-    if (isMember) {
-      await apiFetch(`/api/collections/${collectionId}/recipes/${id}`, { method: 'DELETE' });
-    } else {
-      await apiFetch(`/api/collections/${collectionId}/recipes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipeId: id }),
-      });
-    }
-  };
 
   // In view mode, library suggestion names (ingredients/tools/techniques)
   // should track the app's UI language (contentLang) — that's the language
@@ -2991,7 +2960,7 @@ const RecipeDetail: React.FC = () => {
       >
         <span className="material-symbols-outlined text-[20px]">ios_share</span>
       </button>
-      {showExportMenu && (
+      {showExportMenu && popoverLayer(inBar, (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
           <div className={`${popoverPlacement(inBar)} bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-2`} style={inBar ? POPOVER_ABOVE_BAR : undefined}>
@@ -3031,7 +3000,7 @@ const RecipeDetail: React.FC = () => {
             </button>
           </div>
         </>
-      )}
+      ))}
     </div>
   );
 
@@ -3097,40 +3066,21 @@ const RecipeDetail: React.FC = () => {
   const collectionHeaderButton = (inBar: boolean) => (
     <div className="relative">
       <button
-        onClick={() => showCollectionPicker ? setShowCollectionPicker(false) : openCollectionPicker()}
-        className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 transition-colors ${memberCollectionIds.size > 0 ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
+        onClick={() => setShowCollectionPicker(v => !v)}
+        className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 transition-colors ${inAnyCollection ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
         aria-label={t('recipeDetail.addToCollection')}
         title={t('recipeDetail.addToCollection')}
       >
         <span className="material-symbols-outlined text-[20px]">collections_bookmark</span>
       </button>
-      {showCollectionPicker && (
+      {showCollectionPicker && popoverLayer(inBar, (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowCollectionPicker(false)} />
-          <div className={`${popoverPlacement(inBar)} bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-3`} style={inBar ? POPOVER_ABOVE_BAR : undefined}>
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest px-2 pb-2">{t('recipeDetail.addToCollection')}</p>
-            {loadingCollections ? (
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 px-2 py-2">{t('common.loading')}</p>
-            ) : allCollections.length === 0 ? (
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 px-2 py-2">{t('recipeDetail.noCollectionsYetCreateOne')}</p>
-            ) : (
-              <div className="max-h-56 overflow-y-auto space-y-0.5">
-                {allCollections.map(c => (
-                  <label key={c.id} className="flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-900 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={memberCollectionIds.has(c.id)}
-                      onChange={() => toggleCollectionMembership(c.id)}
-                      className="accent-primary w-4 h-4"
-                    />
-                    <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">{c.name}</span>
-                  </label>
-                ))}
-              </div>
-            )}
+          <div className={`${popoverPlacement(inBar)} bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-3 max-h-[70vh] overflow-y-auto`} style={inBar ? POPOVER_ABOVE_BAR : undefined}>
+            <AddToCollectionPicker recipeId={id!} servings={servings} onMembershipChange={setInAnyCollection} />
           </div>
         </>
-      )}
+      ))}
     </div>
   );
 
@@ -3150,7 +3100,7 @@ const RecipeDetail: React.FC = () => {
   const headerActions = renderActions(false);
 
   return (
-    <AppLayout headerActions={headerActions}>
+    <AppLayout headerActions={headerActions} hideCreateButton>
       {cookidooModal}
       {exportSheet}
 

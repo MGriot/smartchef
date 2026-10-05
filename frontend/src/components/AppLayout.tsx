@@ -16,6 +16,8 @@ interface AppLayoutProps {
   sidebarExtra?: React.ReactNode;
   /** Extra content rendered in the header's right-hand action area, before the language switcher. */
   headerActions?: React.ReactNode;
+  /** Hides the header's "Create recipe" button (it makes no sense inside a recipe). */
+  hideCreateButton?: boolean;
 }
 
 // Ordered by what you're doing, not by when each page was built.
@@ -66,7 +68,7 @@ function LibraryLink({ to, icon, label, active }: { to: string; icon: string; la
 // Bundled locally (not a remote fetch) so it always renders offline/native.
 const DEFAULT_AVATAR = '/chef.svg';
 
-export default function AppLayout({ children, librarySection, sidebarExtra, headerActions }: AppLayoutProps) {
+export default function AppLayout({ children, librarySection, sidebarExtra, headerActions, hideCreateButton }: AppLayoutProps) {
   const { t } = useTranslation();
   // The picker reflects the CONTENT language now, not i18n.language: those
   // two can legitimately differ once a user adds a language with no UI bundle.
@@ -82,6 +84,16 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
+
+  // The page behind the scrim must not scroll under the user's finger.
+  useEffect(() => {
+    if (!mobileMenuOpen || window.innerWidth >= 1024) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileMenuOpen]);
 
   const { languages } = useLanguages();
 
@@ -110,7 +122,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           scrolled content can't show through there. The spacer after it
           reserves the same height in the flow — see --app-header-h. */}
       <header
-        className="min-h-[65px] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 fixed inset-x-0 top-0 lg:sticky z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))]"
+        className="min-h-[var(--app-header-h)] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 fixed inset-x-0 top-0 lg:sticky z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))]"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="flex items-center gap-3 lg:gap-6 xl:gap-10 min-w-0">
@@ -149,14 +161,16 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           {headerActions && <div className="hidden lg:flex items-center gap-3 xl:gap-4">{headerActions}</div>}
           {/* Icon-only until xl, where the label fits without squeezing the
               nav. `title` carries the same text for a hover or long-press. */}
-          <Link
-            to="/recipe/new"
-            title={t('nav.createRecipe')}
-            className="hidden sm:flex items-center gap-1.5 px-3 xl:px-4 py-2 bg-primary text-white rounded-full font-bold text-xs shadow-sm shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95 whitespace-nowrap"
-          >
-            <span className="material-symbols-outlined text-[16px]">add</span>
-            <span className="hidden xl:inline">{t('nav.createRecipe')}</span>
-          </Link>
+          {!hideCreateButton && (
+            <Link
+              to="/recipe/new"
+              title={t('nav.createRecipe')}
+              className="hidden sm:flex items-center gap-1.5 px-3 xl:px-4 py-2 bg-primary text-white rounded-full font-bold text-xs shadow-sm shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95 whitespace-nowrap"
+            >
+              <span className="material-symbols-outlined text-[16px]">add</span>
+              <span className="hidden xl:inline">{t('nav.createRecipe')}</span>
+            </Link>
+          )}
           <select
             value={contentLang}
             onChange={(e) => handleLanguageChange(e.target.value)}
@@ -184,7 +198,14 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
       {/* Below `lg` the header is fixed, so the menu has to be too — in the
           flow it would open wherever the page happens to be scrolled to. */}
       {mobileMenuOpen && (
-        <nav className="xl:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm max-lg:fixed max-lg:inset-x-0 max-lg:z-40 max-lg:top-[var(--app-header-h)] max-lg:max-h-[calc(100dvh-var(--app-header-h))] max-lg:overflow-y-auto">
+        <div
+          className="lg:hidden fixed inset-x-0 bottom-0 top-[var(--app-header-h)] z-30 bg-black/40"
+          onClick={() => setMobileMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      {mobileMenuOpen && (
+        <nav className="xl:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm max-lg:fixed max-lg:inset-x-0 max-lg:z-40 max-lg:top-[var(--app-header-h)] max-lg:max-h-[calc(100dvh-var(--app-header-h))] max-lg:overflow-y-auto max-lg:rounded-b-2xl">
           {/* The header shows the picker at every width now — on a phone it
               was only here, and went unfound. Kept as the labelled version. */}
           <label className="sm:hidden flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-zinc-500 dark:text-zinc-400">

@@ -162,6 +162,9 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
       return { status: 502, error: err instanceof Error ? err.message : 'Translation failed' };
     }
   }
+  if (sub === 'collections' && method === 'GET') {
+    return { status: 200, data: await collections.listCollectionsForRecipe(id) };
+  }
   if (sub === 'nutrition' || sub === 'translate' || sub === 'collections') {
     return { status: 501, error: i18n.t('errors.notAvailableOffline', { feature: sub }) };
   }
