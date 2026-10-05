@@ -86,8 +86,7 @@ export default function AddToCollectionPicker({
         const list: MenuCourse[] = Array.isArray(json.data?.courses) ? json.data.courses : [];
         setCourses(list);
         setCourseId(list[0]?.id ?? '');
-        if (list[0]?.mealType) setMealType(list[0].mealType);
-        else if (json.data?.meal_type) setMealType(json.data.meal_type);
+        setMealType(list[0]?.mealType ?? json.data?.meal_type ?? 'dinner');
         if (json.data?.guests) setCount(json.data.guests);
       } catch (err) {
         console.error('Failed to load menu courses:', err);
@@ -189,9 +188,13 @@ export default function AddToCollectionPicker({
                     {days.map((label, i) => <option key={i} value={i}>{label}</option>)}
                   </select>
                 )}
-                <select value={mealType} onChange={(e) => setMealType(e.target.value as MealType)} className={FIELD}>
-                  {MEAL_TYPES.map((mt) => <option key={mt} value={mt}>{t(`planner.mealTypes.${mt}`)}</option>)}
-                </select>
+                {/* An event menu's meal is fixed by the menu and its course
+                    (shown in the course list); only a weekly plan asks. */}
+                {kind === 'week' && (
+                  <select value={mealType} onChange={(e) => setMealType(e.target.value as MealType)} className={FIELD}>
+                    {MEAL_TYPES.map((mt) => <option key={mt} value={mt}>{t(`planner.mealTypes.${mt}`)}</option>)}
+                  </select>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <input
