@@ -1074,8 +1074,8 @@
     "kindQuestion": "Cosa vuoi pianificare?",
     "kindWeek": "Piano settimanale",
     "kindWeekHint": "Da lunedì a domenica: una ricetta per ogni pasto di ogni giorno.",
-    "kindEvent": "Menù per un pasto",
-    "kindEventHint": "Un solo pasto — una cena, una festa — portata per portata, come il menù di un ristorante da stampare.",
+    "kindEvent": "Menù per una giornata o un pasto",
+    "kindEventHint": "Una sola occasione — una cena, una festa, un’intera giornata — portata per portata, come un menù di ristorante da stampare. Indica un pasto, oppure aggiungi pranzo, cena e altro allo stesso menù.",
     "eventDate": "Data",
     "guests": "Ospiti",
     "eventNamePlaceholder": "es. Cena di Natale",
@@ -1115,8 +1115,21 @@
       "forGuests_other": "Per {{count}} ospiti",
       "menuNutrition": "Valori nutrizionali dell'intero menù",
       "perGuest": "≈{{kcal}} kcal a persona",
-      "saveFailed": "Impossibile aggiornare il menù."
-    }
+      "saveFailed": "Impossibile aggiornare il menù.",
+      "addMeal": "Aggiungi un pasto",
+      "removeMeal": "Rimuovi pasto",
+      "deleteMeal": "Rimuovi {{name}} da questo menù",
+      "confirmDeleteMeal_one": "Rimuovere {{name}} e il suo {{count}} piatto?",
+      "confirmDeleteMeal_other": "Rimuovere {{name}} e i suoi {{count}} piatti?"
+    },
+    "noMealOption": "Nessun pasto in particolare (un semplice menù)",
+    "mealHint": "Lascialo vuoto per un menù semplice, oppure indica un pasto: potrai aggiungere pranzo, cena e altro allo stesso menù.",
+    "weekBadge": "Piano settimanale",
+    "menuBadge": "Menù",
+    "groupWeeks": "Piani settimanali",
+    "groupWeeksHint": "da lunedì a domenica",
+    "groupEvents": "Menù di giornata e di pasto",
+    "groupEventsHint": "una sola occasione, per portata"
   },
   "share": {
     "menuItem": "Condividi con un link",

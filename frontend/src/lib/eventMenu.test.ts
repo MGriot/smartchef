@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultCourses, groupDishesByCourse, moveCourse, moveDish, newCourseId, type EventCourse } from './eventMenu';
+import { defaultCourses, groupDishesByCourse, mealsOf, moveCourse, moveCourseWithinMeal, moveDish, newCourseId, type EventCourse } from './eventMenu';
 
 const courses: EventCourse[] = [
   { id: 'starter', name: 'Antipasti' },
@@ -73,5 +73,31 @@ describe('moveCourse', () => {
   it('moves a course one place and leaves the list alone at the ends', () => {
     expect(moveCourse(courses, 'main', -1).map((c) => c.id)).toEqual(['main', 'starter']);
     expect(moveCourse(courses, 'starter', -1)).toBe(courses);
+  });
+});
+
+describe('meals of a day menu', () => {
+  const courses = [
+    { id: 'lunch-main', name: 'Main', mealType: 'lunch' as const },
+    { id: 'dinner-starter', name: 'Starter', mealType: 'dinner' as const },
+    { id: 'dinner-main', name: 'Main', mealType: 'dinner' as const },
+  ];
+
+  it('lists meals in serving order, none for a plain menu', () => {
+    expect(mealsOf(courses).map((m) => m.mealType)).toEqual(['lunch', 'dinner']);
+    expect(mealsOf([{ id: 'a', name: 'A' }])).toEqual([]);
+  });
+
+  it('moves a course only among those of its own meal', () => {
+    const moved = moveCourseWithinMeal(courses, 'dinner-main', -1).map((c) => c.id);
+    expect(moved).toEqual(['lunch-main', 'dinner-main', 'dinner-starter']);
+    // already first of its meal: unchanged, even though a lunch course precedes it
+    expect(moveCourseWithinMeal(courses, 'dinner-starter', -1)).toBe(courses);
+  });
+
+  it('gives a second meal its own course ids', () => {
+    const ids = defaultCourses((k) => k, 'lunch').map((c) => c.id);
+    expect(ids[0]).toBe('lunch-starter');
+    expect(new Set([...ids, ...defaultCourses((k) => k, 'dinner').map((c) => c.id)]).size).toBe(10);
   });
 });

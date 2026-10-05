@@ -11,12 +11,12 @@ import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
-import EventMenu, { parseMenuDate } from '../components/planner/EventMenu';
+import EventMenu, { parseMenuDate, MEAL_BADGE } from '../components/planner/EventMenu';
 import {
   MEAL_TYPES, menuKind,
   type MealType, type MenuDetail, type MenuItem, type MenuKind, type MenuSummary, type RecipeOption,
 } from '../components/planner/types';
-import { defaultCourses } from '../lib/eventMenu';
+import { defaultCourses, mealsOf } from '../lib/eventMenu';
 
 /** The create/edit form for a menu's own details — both kinds share it,
  *  an event menu just has more of them. */
@@ -25,7 +25,8 @@ interface DetailsForm {
   name: string;
   /** The week's Monday, or the event's day. */
   date: string;
-  mealType: MealType;
+  /** '' = no particular meal: the menu is just a menu. */
+  mealType: MealType | '';
   guests: number;
   notes: string;
 }
@@ -145,6 +146,89 @@ function todayMonday(): string {
   return localDay(d);
 }
 
+/** The list of menus, split by what they are so a week, a day and a single
+ *  meal can be told apart at a glance: a heading per kind, and on each row
+ *  an icon, the name, the meals it covers and the date in their own columns. */
+function MenuSwitcher({
+  menus, selectedId, onSelect, className = '',
+}: {
+  menus: MenuSummary[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  className?: string;
+}) {
+  const { t, i18n } = useTranslation();
+  const weeks = menus.filter((m) => menuKind(m) === 'week');
+  const events = menus.filter((m) => menuKind(m) === 'event');
+
+  const row = (m: MenuSummary) => {
+    const event = menuKind(m) === 'event';
+    const date = parseMenuDate(m.week_start);
+    const dateLabel = Number.isNaN(date.getTime())
+      ? ''
+      : date.toLocaleDateString(i18n.language, event
+        ? { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }
+        : { day: 'numeric', month: 'short', year: 'numeric' });
+    // The meals an event menu covers: one badge each, or the menu's own.
+    const covered = event
+      ? (() => {
+          const fromCourses = mealsOf(m.courses ?? []).map((x) => x.mealType);
+          return fromCourses.length > 0 ? fromCourses : m.meal_type ? [m.meal_type] : [];
+        })()
+      : [];
+    const selected = m.id === selectedId;
+    return (
+      <button
+        key={m.id}
+        type="button"
+        onClick={() => onSelect(m.id)}
+        aria-current={selected ? 'true' : undefined}
+        className={`w-full grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-left px-3 py-2.5 rounded-xl border transition-colors ${
+          selected
+            ? 'border-primary bg-primary/5'
+            : 'border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800'
+        }`}
+      >
+        <span className={`w-9 h-9 rounded-lg flex items-center justify-center ${selected ? 'bg-primary text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'}`}>
+          <span className="material-symbols-outlined text-[20px]">{event ? 'restaurant_menu' : 'calendar_view_week'}</span>
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">{m.name}</span>
+          <span className="flex flex-wrap items-center gap-1 mt-0.5">
+            {event
+              ? covered.map((meal) => (
+                  <span key={meal} className={`px-1.5 py-px rounded text-[9px] font-black uppercase ${MEAL_BADGE[meal]}`}>
+                    {t(`planner.mealTypes.${meal}`)}
+                  </span>
+                ))
+              : <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">{t('planner.weekBadge')}</span>}
+            {event && covered.length === 0 && (
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">{t('planner.menuBadge')}</span>
+            )}
+          </span>
+        </span>
+        <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 tabular-nums whitespace-nowrap text-right">{dateLabel}</span>
+      </button>
+    );
+  };
+
+  const group = (title: string, hint: string, list: MenuSummary[]) => list.length > 0 && (
+    <div>
+      <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
+        {title} <span className="font-semibold normal-case tracking-normal">· {hint}</span>
+      </p>
+      <div className="space-y-0.5">{list.map(row)}</div>
+    </div>
+  );
+
+  return (
+    <div className={`bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-100 dark:border-zinc-800 p-3 shadow-[0_1px_8px_rgba(0,0,0,0.04)] max-h-72 overflow-y-auto space-y-3 ${className}`}>
+      {group(t('planner.groupWeeks'), t('planner.groupWeeksHint'), weeks)}
+      {group(t('planner.groupEvents'), t('planner.groupEventsHint'), events)}
+    </div>
+  );
+}
+
 export default function Planner() {
   const { t, i18n } = useTranslation();
   const DAYS = useMemo(() => weekDays(i18n.language), [i18n.language]);
@@ -244,7 +328,7 @@ export default function Planner() {
         kind: menuKind(menu),
         name: menu.name,
         date: Number.isNaN(date.getTime()) ? menu.week_start : localDay(date),
-        mealType: menu.meal_type ?? 'dinner',
+        mealType: menu.meal_type ?? '',
         guests: menu.guests ?? 4,
         notes: menu.notes ?? '',
       },
@@ -258,7 +342,7 @@ export default function Planner() {
     setSavingDetails(true);
     try {
       const event = form.kind === 'event'
-        ? { mealType: form.mealType, guests: form.guests, notes: form.notes.trim() || null }
+        ? { mealType: form.mealType || null, guests: form.guests, notes: form.notes.trim() || null }
         : {};
       if (detailsModal.mode === 'create') {
         const res = await apiFetch('/api/menus', {
@@ -269,6 +353,7 @@ export default function Planner() {
             weekStart: form.date,
             kind: form.kind,
             ...event,
+            ...(form.kind === 'event' && !form.mealType ? { mealType: undefined } : {}),
             // The classic courses, named in the language the menu is being
             // written in — the user's to rename, reorder or drop.
             ...(form.kind === 'event'
@@ -430,44 +515,24 @@ export default function Planner() {
             <p className="text-zinc-500 dark:text-zinc-400 max-w-md">{t('planner.subtitle')}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            {menus.length > 0 && (
+            {menu && (
               <>
-                <select
-                  value={selectedMenuId || ''}
-                  onChange={e => setSelectedMenuId(e.target.value)}
-                  className="px-4 py-3 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 text-sm font-bold focus:ring-2 focus:ring-primary/20 max-w-full"
-                >
-                  {menus.map(m => {
-                    const date = parseMenuDate(m.week_start).toLocaleDateString(i18n.language);
-                    return (
-                      <option key={m.id} value={m.id}>
-                        {menuKind(m) === 'event'
-                          ? t('planner.eventOption', { name: m.name, meal: m.meal_type ? t(`planner.mealTypes.${m.meal_type}`) : '', date })
-                          : t('planner.weekOption', { name: m.name, date })}
-                      </option>
-                    );
-                  })}
-                </select>
-                {menu && (
-                  <>
-                    {menuKind(menu) === 'week' && (
-                      <button
-                        onClick={openEditDetails}
-                        className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-primary flex items-center justify-center transition-colors"
-                        aria-label={t('planner.editDetails')}
-                      >
-                        <span className="material-symbols-outlined text-lg">edit</span>
-                      </button>
-                    )}
-                    <button
-                      onClick={handleDeleteMenu}
-                      className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
-                      aria-label={t('planner.deleteMenu')}
-                    >
-                      <span className="material-symbols-outlined text-lg">delete</span>
-                    </button>
-                  </>
+                {menuKind(menu) === 'week' && (
+                  <button
+                    onClick={openEditDetails}
+                    className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-primary flex items-center justify-center transition-colors"
+                    aria-label={t('planner.editDetails')}
+                  >
+                    <span className="material-symbols-outlined text-lg">edit</span>
+                  </button>
                 )}
+                <button
+                  onClick={handleDeleteMenu}
+                  className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition-colors"
+                  aria-label={t('planner.deleteMenu')}
+                >
+                  <span className="material-symbols-outlined text-lg">delete</span>
+                </button>
               </>
             )}
             <button
@@ -479,6 +544,15 @@ export default function Planner() {
             </button>
           </div>
         </div>
+
+        {menus.length > 0 && (
+          <MenuSwitcher
+            menus={menus}
+            selectedId={selectedMenuId}
+            onSelect={setSelectedMenuId}
+            className="mb-8 no-print"
+          />
+        )}
 
         {loadingMenus ? (
           <div className="flex justify-center py-20">
@@ -664,12 +738,13 @@ export default function Planner() {
               {form.kind === 'event' && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label={t('planner.meal')}>
+                    <Field label={t('planner.meal')} hint={t('planner.mealHint')}>
                       <select
                         value={form.mealType}
-                        onChange={e => update({ mealType: e.target.value as MealType })}
+                        onChange={e => update({ mealType: e.target.value as MealType | '' })}
                         className="sc-field cursor-pointer"
                       >
+                        <option value="">{t('planner.noMealOption')}</option>
                         {MEAL_TYPES.map(mt => <option key={mt} value={mt}>{t(`planner.mealTypes.${mt}`)}</option>)}
                       </select>
                     </Field>

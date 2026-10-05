@@ -12,9 +12,17 @@
 //   - the sort_order writes that moving a dish up or down comes down to.
 // ════════════════════════════════════════════════════════════════════════
 
+export type EventMealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+/** Serving order of a day's meals. */
+export const MEAL_ORDER: EventMealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
+
 export interface EventCourse {
   id: string;
   name: string;
+  /** The meal of a day menu this course belongs to; absent while the menu
+   *  is just one meal. */
+  mealType?: EventMealType;
 }
 
 export interface EventDish {
@@ -28,8 +36,15 @@ export interface EventDish {
  *  and are the user's to rename. */
 export const DEFAULT_COURSE_KEYS = ['starter', 'first', 'main', 'side', 'dessert'] as const;
 
-export function defaultCourses(nameFor: (key: (typeof DEFAULT_COURSE_KEYS)[number]) => string): EventCourse[] {
-  return DEFAULT_COURSE_KEYS.map((key) => ({ id: key, name: nameFor(key) }));
+export function defaultCourses(
+  nameFor: (key: (typeof DEFAULT_COURSE_KEYS)[number]) => string,
+  mealType?: EventMealType,
+): EventCourse[] {
+  // Course ids only have to be unique within one menu, so a second meal's
+  // "main" must not collide with the first's.
+  return DEFAULT_COURSE_KEYS.map((key) => (mealType
+    ? { id: `${mealType}-${key}`, name: nameFor(key), mealType }
+    : { id: key, name: nameFor(key) }));
 }
 
 /** An id for a course the user adds. Only has to be unique within one
@@ -91,4 +106,33 @@ export function moveCourse(courses: EventCourse[], courseId: string, direction: 
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
   return next;
+}
+
+export interface MealGroup<C extends EventCourse = EventCourse> {
+  mealType: EventMealType;
+  courses: C[];
+}
+
+/** The meals of a day menu, in serving order, each with its courses in
+ *  their stored order. Empty for a menu that is one plain meal (no course
+ *  names a meal) — the caller then shows the courses directly. */
+export function mealsOf<C extends EventCourse>(courses: C[]): Array<MealGroup<C>> {
+  const present = new Set(courses.map((c) => c.mealType).filter((m): m is EventMealType => !!m));
+  return MEAL_ORDER.filter((m) => present.has(m)).map((mealType) => ({
+    mealType,
+    courses: courses.filter((c) => c.mealType === mealType),
+  }));
+}
+
+/** A course list with one course moved a step up or down among the courses
+ *  of its own meal — the neighbour in the whole list may belong to another
+ *  meal, which a plain moveCourse() would swap it with. */
+export function moveCourseWithinMeal(courses: EventCourse[], courseId: string, direction: -1 | 1): EventCourse[] {
+  const course = courses.find((c) => c.id === courseId);
+  if (!course) return courses;
+  const siblings = courses.filter((c) => c.mealType === course.mealType);
+  const from = siblings.findIndex((c) => c.id === courseId);
+  const neighbour = siblings[from + direction];
+  if (!neighbour) return courses;
+  return courses.map((c) => (c.id === courseId ? neighbour : c.id === neighbour.id ? course : c));
 }

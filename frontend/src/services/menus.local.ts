@@ -41,6 +41,7 @@ export interface MenuItem {
 export interface MenuCourse {
   id: string;
   name: string;
+  mealType?: 'breakfast' | 'lunch' | 'dinner' | 'snack';
 }
 
 export type MenuKind = 'week' | 'event';
@@ -63,6 +64,8 @@ function newId(): string {
 
 /** The courses column as the server's JSONB hands it over: an array, never
  *  the stored text, and never anything malformed. */
+const MEAL_TYPE_SET = new Set(['breakfast', 'lunch', 'dinner', 'snack']);
+
 function parseCourses(raw: unknown): MenuCourse[] {
   let value = raw;
   if (typeof raw === 'string') {
@@ -71,7 +74,9 @@ function parseCourses(raw: unknown): MenuCourse[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter((c): c is MenuCourse => !!c && typeof c.id === 'string' && typeof c.name === 'string')
-    .map((c) => ({ id: c.id, name: c.name }));
+    .map((c) => (MEAL_TYPE_SET.has(c.mealType as string)
+      ? { id: c.id, name: c.name, mealType: c.mealType }
+      : { id: c.id, name: c.name }));
 }
 
 /** Summaries for the Planner's menu switcher — snake_case with an

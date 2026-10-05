@@ -1074,8 +1074,8 @@
     "kindQuestion": "¿Qué quieres planificar?",
     "kindWeek": "Plan semanal",
     "kindWeekHint": "De lunes a domingo: una receta para cada comida de cada día.",
-    "kindEvent": "Menú para una comida",
-    "kindEventHint": "Una sola comida — una cena, una fiesta — plato a plato, como un menú de restaurante para imprimir.",
+    "kindEvent": "Menú para un día o una comida",
+    "kindEventHint": "Una sola ocasión — una cena, una fiesta, un día entero — plato a plato, como un menú de restaurante para imprimir. Indica una comida, o añade almuerzo, cena y más al mismo menú.",
     "eventDate": "Fecha",
     "guests": "Comensales",
     "eventNamePlaceholder": "p. ej. Cena de Navidad",
@@ -1115,8 +1115,21 @@
       "forGuests_other": "Para {{count}} comensales",
       "menuNutrition": "Valores nutricionales de todo el menú",
       "perGuest": "≈{{kcal}} kcal por comensal",
-      "saveFailed": "No se pudo actualizar el menú."
-    }
+      "saveFailed": "No se pudo actualizar el menú.",
+      "addMeal": "Añadir una comida",
+      "removeMeal": "Quitar comida",
+      "deleteMeal": "Quitar {{name}} de este menú",
+      "confirmDeleteMeal_one": "¿Quitar {{name}} y su {{count}} plato?",
+      "confirmDeleteMeal_other": "¿Quitar {{name}} y sus {{count}} platos?"
+    },
+    "noMealOption": "Ninguna comida en particular (un simple menú)",
+    "mealHint": "Déjalo vacío para un menú simple, o indica una comida: después podrás añadir almuerzo, cena y más al mismo menú.",
+    "weekBadge": "Plan semanal",
+    "menuBadge": "Menú",
+    "groupWeeks": "Planes semanales",
+    "groupWeeksHint": "de lunes a domingo",
+    "groupEvents": "Menús de día y de comida",
+    "groupEventsHint": "una sola ocasión, por plato"
   },
   "share": {
     "menuItem": "Compartir con un enlace",

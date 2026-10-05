@@ -1,0 +1,3 @@
+A menu for a day can now hold several meals: add lunch, dinner and more to the same menu, each with its own courses.
+
+The Planner's menu list is grouped into weekly plans and day or meal menus, with clear badges and dates.

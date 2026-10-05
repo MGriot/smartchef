@@ -1,0 +1,3 @@
+Un menù di giornata può ora contenere più pasti: aggiungi pranzo, cena e altro allo stesso menù, ciascuno con le sue portate.
+
+L'elenco dei menù del Pianificatore è raggruppato in piani settimanali e menù di giornata o di pasto, con etichette e date chiare.

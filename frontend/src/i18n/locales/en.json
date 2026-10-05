@@ -1074,8 +1074,8 @@
     "kindQuestion": "What are you planning?",
     "kindWeek": "Weekly plan",
     "kindWeekHint": "Monday to Sunday: a recipe for each meal of each day.",
-    "kindEvent": "Menu for a meal",
-    "kindEventHint": "One meal — a dinner, a party — course by course, like a restaurant menu you can print.",
+    "kindEvent": "Menu for a day or a meal",
+    "kindEventHint": "One occasion — a dinner, a party, a whole day — course by course, like a restaurant menu you can print. Name a meal, or add lunch, dinner and more to the same menu.",
     "eventDate": "Date",
     "guests": "Guests",
     "eventNamePlaceholder": "e.g. Christmas dinner",
@@ -1115,8 +1115,21 @@
       "forGuests_other": "For {{count}} guests",
       "menuNutrition": "Nutrition for the whole menu",
       "perGuest": "≈{{kcal}} kcal per guest",
-      "saveFailed": "Could not update the menu."
-    }
+      "saveFailed": "Could not update the menu.",
+      "addMeal": "Add a meal",
+      "removeMeal": "Remove meal",
+      "deleteMeal": "Remove {{name}} from this menu",
+      "confirmDeleteMeal_one": "Remove {{name}} and its {{count}} dish?",
+      "confirmDeleteMeal_other": "Remove {{name}} and its {{count}} dishes?"
+    },
+    "noMealOption": "No particular meal (just a menu)",
+    "mealHint": "Leave it open for a plain menu, or name a meal — you can then add lunch, dinner and more to the same menu.",
+    "weekBadge": "Weekly plan",
+    "menuBadge": "Menu",
+    "groupWeeks": "Weekly plans",
+    "groupWeeksHint": "Monday to Sunday",
+    "groupEvents": "Day & meal menus",
+    "groupEventsHint": "one occasion, by course"
   },
   "share": {
     "menuItem": "Share by link",

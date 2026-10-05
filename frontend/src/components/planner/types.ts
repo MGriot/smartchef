@@ -12,11 +12,16 @@ export type MenuKind = 'week' | 'event';
 export interface MenuCourse {
   id: string;
   name: string;
+  /** Which meal of a day menu this course belongs to. Absent on a menu
+   *  that is just one meal (its meal is the menu's own meal_type). */
+  mealType?: MealType;
 }
 
 export interface MenuSummary {
   id: string;
   name: string;
+  /** Present on the list too (the server's row, the local service's parse). */
+  courses?: MenuCourse[] | null;
   /** The week's Monday for a weekly plan, the event's date for an event menu. */
   week_start: string;
   item_count: string | number;

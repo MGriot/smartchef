@@ -36,6 +36,7 @@ cached
 cake
 calculate
 calendar_month
+calendar_view_week
 call
 call_merge
 cancel

@@ -3,11 +3,22 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../../lib/api';
 import { canPrint, printPage } from '../../lib/print';
-import { groupDishesByCourse, moveCourse, moveDish, newCourseId } from '../../lib/eventMenu';
+import {
+  defaultCourses, groupDishesByCourse, mealsOf, MEAL_ORDER, moveCourseWithinMeal, moveDish, newCourseId,
+  type EventMealType,
+} from '../../lib/eventMenu';
 import Autocomplete from '../Autocomplete';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../Modal';
 import { Field } from '../Form';
 import type { MenuCourse, MenuDetail, MenuItem, RecipeOption } from './types';
+
+/** The colour each meal wears on its heading, matching the weekly plan's badges. */
+export const MEAL_BADGE: Record<EventMealType, string> = {
+  breakfast: 'bg-amber-100 text-amber-700',
+  lunch: 'bg-sky-100 text-sky-700',
+  dinner: 'bg-primary/10 text-primary',
+  snack: 'bg-pink-100 text-pink-700',
+};
 
 const SHOW_NOTES_KEY = 'smartchef.planner.cardShowsNotes';
 
@@ -51,6 +62,22 @@ export default function EventMenu({
     [courses, items],
   );
   const guests = menu.guests ?? 4;
+
+  // A menu is either one plain meal (no course names a meal; its meal is the
+  // menu's own) or a day menu with several - each course then belongs to one.
+  const meals = useMemo(() => mealsOf(courses), [courses]);
+  const multi = meals.length > 0;
+  const singleMeal: EventMealType = (menu.meal_type as EventMealType | null) ?? 'dinner';
+  const mealOfCourse = (courseId: string): EventMealType =>
+    courses.find((c) => c.id === courseId)?.mealType ?? singleMeal;
+  const orderedGroups = useMemo(() => {
+    if (!multi) return groups;
+    const byId = new Map(groups.filter((g) => g.course).map((g) => [g.course!.id, g]));
+    return [
+      ...meals.flatMap((m) => m.courses.map((c) => byId.get(c.id)!).filter(Boolean)),
+      ...groups.filter((g) => !g.course),
+    ];
+  }, [groups, meals, multi]);
 
   const titleFor = (item: MenuItem) => {
     const r = recipes.find((x) => x.id === item.recipeId);
@@ -123,6 +150,53 @@ export default function EventMenu({
     });
   };
 
+  /* ── Meals ───────────────────────────────────────────────────── */
+  const mealName = (m: EventMealType) => t(`planner.mealTypes.${m}`);
+  // A menu with no meal named is just "a menu": every meal is on offer, and
+  // naming the first one labels what is already there instead of adding more.
+  const unnamed = !multi && !menu.meal_type;
+  const takenMeals: EventMealType[] = multi ? meals.map((m) => m.mealType) : unnamed ? [] : [singleMeal];
+  const availableMeals = MEAL_ORDER.filter((m) => !takenMeals.includes(m));
+
+  /** Adds a meal to the day. The first time, the courses already there are
+   *  the menu's original meal, so they are tagged with it before the new
+   *  meal's courses join them. */
+  const addMeal = (meal: EventMealType) => {
+    if (unnamed) {
+      run(async () => {
+        await saveCourses(courses.map((c) => ({ ...c, mealType: meal })));
+        await send(`/api/menus/${menu.id}`, 'PATCH', { mealType: meal });
+        for (const item of items) await send(`/api/menus/${menu.id}/items/${item.id}`, 'PATCH', { mealType: meal });
+      });
+      return;
+    }
+    const base = multi ? courses : courses.map((c) => ({ ...c, mealType: singleMeal }));
+    const fresh = defaultCourses((key) => t(`planner.event.defaultCourses.${key}`), meal);
+    run(() => saveCourses([...base, ...fresh]));
+  };
+
+  const deleteMeal = (meal: EventMealType) => {
+    const own = courses.filter((c) => c.mealType === meal);
+    const dishCount = items.filter((i) => own.some((c) => c.id === i.courseId)).length;
+    if (dishCount > 0 && !window.confirm(t('planner.event.confirmDeleteMeal', { name: mealName(meal), count: dishCount }))) return;
+    const rest = courses.filter((c) => c.mealType !== meal);
+    const remaining = mealsOf(rest);
+    run(async () => {
+      for (const item of items.filter((i) => own.some((c) => c.id === i.courseId))) {
+        await send(`/api/menus/${menu.id}/items/${item.id}`, 'DELETE');
+      }
+      // Down to one meal: the menu is a plain single-meal menu again.
+      if (remaining.length <= 1) {
+        await send(`/api/menus/${menu.id}`, 'PATCH', {
+          courses: rest.map(({ id, name }) => ({ id, name })),
+          ...(remaining[0] ? { mealType: remaining[0].mealType } : {}),
+        });
+      } else {
+        await saveCourses(rest);
+      }
+    });
+  };
+
   /* ── Dishes ──────────────────────────────────────────────────── */
   const openAddDish = (courseId: string) =>
     setDish({ mode: 'add', recipeId: '', courseId, servings: guests, notes: '' });
@@ -143,7 +217,7 @@ export default function EventMenu({
       if (form.mode === 'add') {
         await send(`/api/menus/${menu.id}/items`, 'POST', {
           recipeId: form.recipeId, courseId: form.courseId, servings: form.servings,
-          mealType: menu.meal_type ?? 'dinner', ...(notes ? { notes } : {}),
+          mealType: mealOfCourse(form.courseId), ...(notes ? { notes } : {}),
         });
       } else if (form.itemId) {
         const current = items.find((i) => i.id === form.itemId);
@@ -153,7 +227,7 @@ export default function EventMenu({
           ? items.filter((i) => i.courseId === form.courseId).reduce((max, i) => Math.max(max, (i.sortOrder ?? 0) + 1), 0)
           : undefined;
         await send(`/api/menus/${menu.id}/items/${form.itemId}`, 'PATCH', {
-          courseId: form.courseId, servings: form.servings, notes,
+          courseId: form.courseId, servings: form.servings, notes, mealType: mealOfCourse(form.courseId),
           ...(sortOrder !== undefined ? { sortOrder } : {}),
         });
       }
@@ -188,7 +262,9 @@ export default function EventMenu({
   const dateLabel = Number.isNaN(date.getTime())
     ? ''
     : date.toLocaleDateString(i18n.language, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const mealLabel = menu.meal_type ? t(`planner.mealTypes.${menu.meal_type}`) : '';
+  const mealLabel = multi
+    ? meals.map((m) => mealName(m.mealType)).join(' + ')
+    : menu.meal_type ? mealName(menu.meal_type as EventMealType) : '';
   const iconButton = 'w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:text-zinc-400 transition-colors';
 
   return (
@@ -246,11 +322,31 @@ export default function EventMenu({
         </div>
 
         {/* ── Courses ──────────────────────────────────────────── */}
-        {groups.map((group, groupIdx) => {
+        {orderedGroups.map((group, groupIdx) => {
           const course = group.course;
           const isRenaming = course && renaming?.id === course.id;
+          const meal = course?.mealType;
+          const startsMeal = multi && !!meal && orderedGroups[groupIdx - 1]?.course?.mealType !== meal;
+          const siblings = meal ? meals.find((m) => m.mealType === meal)?.courses ?? [] : courses;
+          const posInMeal = course ? siblings.findIndex((c) => c.id === course.id) : -1;
           return (
-            <div key={course?.id ?? '__other'} className="bg-white dark:bg-zinc-900 rounded-3xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
+            <div key={course?.id ?? '__other'}>
+            {startsMeal && meal && (
+              <div className="flex items-center gap-3 mt-2 mb-3">
+                <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest ${MEAL_BADGE[meal]}`}>{mealName(meal)}</span>
+                <span className="flex-1 border-t border-zinc-200 dark:border-zinc-700" aria-hidden="true" />
+                <button
+                  onClick={() => deleteMeal(meal)}
+                  disabled={busy}
+                  className="flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-red-500 disabled:opacity-40"
+                  aria-label={t('planner.event.deleteMeal', { name: mealName(meal) })}
+                >
+                  <span className="material-symbols-outlined text-[16px]">delete</span>
+                  {t('planner.event.removeMeal')}
+                </button>
+              </div>
+            )}
+            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-5 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
               <div className="flex items-center gap-2 mb-3">
                 {isRenaming ? (
                   <form
@@ -274,10 +370,10 @@ export default function EventMenu({
                 )}
                 {course && !isRenaming && (
                   <div className="flex items-center">
-                    <button onClick={() => run(() => saveCourses(moveCourse(courses, course.id, -1)))} disabled={busy || groupIdx === 0} className={iconButton} aria-label={t('planner.event.moveCourseUp', { name: course.name })}>
+                    <button onClick={() => run(() => saveCourses(moveCourseWithinMeal(courses, course.id, -1)))} disabled={busy || posInMeal <= 0} className={iconButton} aria-label={t('planner.event.moveCourseUp', { name: course.name })}>
                       <span className="material-symbols-outlined text-[18px]">arrow_upward</span>
                     </button>
-                    <button onClick={() => run(() => saveCourses(moveCourse(courses, course.id, 1)))} disabled={busy || groupIdx >= courses.length - 1} className={iconButton} aria-label={t('planner.event.moveCourseDown', { name: course.name })}>
+                    <button onClick={() => run(() => saveCourses(moveCourseWithinMeal(courses, course.id, 1)))} disabled={busy || posInMeal >= siblings.length - 1} className={iconButton} aria-label={t('planner.event.moveCourseDown', { name: course.name })}>
                       <span className="material-symbols-outlined text-[18px]">arrow_downward</span>
                     </button>
                     <button onClick={() => setRenaming({ id: course.id, name: course.name })} disabled={busy} className={iconButton} aria-label={t('planner.event.renameCourse')}>
@@ -336,8 +432,27 @@ export default function EventMenu({
                 </button>
               )}
             </div>
+            </div>
           );
         })}
+
+        {/* ── Add a meal ───────────────────────────────────────── */}
+        {availableMeals.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 px-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500 mr-1">{t('planner.event.addMeal')}</span>
+            {availableMeals.map((m) => (
+              <button
+                key={m}
+                onClick={() => addMeal(m)}
+                disabled={busy}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold disabled:opacity-40 hover:opacity-80 transition-opacity ${MEAL_BADGE[m]}`}
+              >
+                <span className="material-symbols-outlined text-[16px]">add</span>
+                {mealName(m)}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* ── Add a course ─────────────────────────────────────── */}
         {newCourse === null ? (
@@ -375,8 +490,11 @@ export default function EventMenu({
         <h1 className="menu-card-title">{menu.name}</h1>
         {menu.notes && <p className="menu-card-intro">{menu.notes}</p>}
         <div className="menu-card-rule" aria-hidden="true" />
-        {groups.filter((g) => g.dishes.length > 0).map((group) => (
+        {orderedGroups.filter((g) => g.dishes.length > 0).map((group, i, shown) => (
           <section key={group.course?.id ?? '__other'} className="menu-card-course">
+            {multi && group.course?.mealType && shown[i - 1]?.course?.mealType !== group.course.mealType && (
+              <h2 className="menu-card-kicker">{mealName(group.course.mealType)}</h2>
+            )}
             <h2 className="menu-card-course-name">{group.course ? group.course.name : t('planner.event.otherDishes')}</h2>
             {group.dishes.map((item) => (
               <div key={item.id} className="menu-card-dish">
@@ -426,7 +544,13 @@ export default function EventMenu({
             <div className="grid grid-cols-2 gap-4">
               <Field label={t('planner.event.course')}>
                 <select value={dish.courseId} onChange={(e) => setDish({ ...dish, courseId: e.target.value })} className="sc-field cursor-pointer">
-                  {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {multi
+                    ? meals.map((m) => (
+                        <optgroup key={m.mealType} label={mealName(m.mealType)}>
+                          {m.courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </optgroup>
+                      ))
+                    : courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </Field>
               <Field label={t('planner.servings')}>

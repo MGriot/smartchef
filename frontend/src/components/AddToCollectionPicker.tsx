@@ -86,7 +86,8 @@ export default function AddToCollectionPicker({
         const list: MenuCourse[] = Array.isArray(json.data?.courses) ? json.data.courses : [];
         setCourses(list);
         setCourseId(list[0]?.id ?? '');
-        if (json.data?.meal_type) setMealType(json.data.meal_type);
+        if (list[0]?.mealType) setMealType(list[0].mealType);
+        else if (json.data?.meal_type) setMealType(json.data.meal_type);
         if (json.data?.guests) setCount(json.data.guests);
       } catch (err) {
         console.error('Failed to load menu courses:', err);
@@ -166,8 +167,22 @@ export default function AddToCollectionPicker({
               </select>
               <div className="flex gap-2">
                 {kind === 'event' ? (
-                  <select value={courseId} onChange={(e) => setCourseId(e.target.value)} className={FIELD} aria-label={t('planner.event.course')}>
-                    {courses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <select
+                    value={courseId}
+                    onChange={(e) => {
+                      setCourseId(e.target.value);
+                      // A day menu's course belongs to one meal.
+                      const meal = courses.find((c) => c.id === e.target.value)?.mealType;
+                      if (meal) setMealType(meal);
+                    }}
+                    className={FIELD}
+                    aria-label={t('planner.event.course')}
+                  >
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.mealType ? `${t(`planner.mealTypes.${c.mealType}`)} · ${c.name}` : c.name}
+                      </option>
+                    ))}
                   </select>
                 ) : (
                   <select value={day} onChange={(e) => setDay(Number(e.target.value))} className={FIELD}>

@@ -12,7 +12,9 @@ const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"] as const;
 const coursesSchema = z.array(z.object({
   id: z.string().min(1).max(64),
   name: z.string().max(120),
-})).max(30);
+  // Which meal of a day menu the course belongs to. Absent = the menu's one meal.
+  mealType: z.enum(MEAL_TYPES).optional(),
+})).max(60);
 
 // GET /menus
 menuRouter.get("/", async (req: Request, res: Response) => {
