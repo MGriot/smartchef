@@ -44,6 +44,10 @@ import { apiFetch, isNative } from '../lib/api';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { buildCookidooExport, type CookidooExport } from '../lib/cookidooExport';
+import RecipeAiReviewDialog from '../components/RecipeAiReviewDialog';
+import { applyCheckChanges, type CheckChange, type CheckResult } from '../lib/recipeCheck';
+import { resolveRegions } from '../lib/importLinking';
+import { isAreaResult } from '../lib/geocodeTypes';
 
 /* ═══════════════════════════════════════════════════════════════════════
    TYPES
@@ -452,6 +456,11 @@ const RecipeDetail: React.FC = () => {
   const [allTechniques, setAllTechniques] = useState<{ id: string; name: string; icon: string | null; translated_name?: string | null; synonyms?: string[] }[]>([]);
   const [allRecipes, setAllRecipes] = useState<{ id: string; title: string; translated_title?: string | null }[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; translated_name?: string | null }[]>([]);
+  // "Check with AI": the dialog, the request in flight and what came back.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<CheckResult | null>(null);
   const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
   // Which ingredient/step cards are folded down to a one-line summary, and
   // whether the two editors are folded whole. A long recipe is ~20 cards of
@@ -1476,6 +1485,59 @@ const RecipeDetail: React.FC = () => {
         enterRawTextMode();
       }
     };
+    /** "Check with AI": sends the draft as it is right now (unsaved edits
+     *  included) and opens the review. Nothing changes until the user ticks
+     *  and applies — see lib/recipeCheck.ts for why the answer can be trusted. */
+    const runAiCheck = async () => {
+      if (rawTextMode && !applyRawText()) return;
+      setAiOpen(true);
+      setAiLoading(true);
+      setAiError(null);
+      setAiResult(null);
+      try {
+        let tagNames: string[] = [];
+        try {
+          const tagRes = await apiFetch('/api/tags');
+          tagNames = ((await tagRes.json()).data || []).map((tg: { name: string }) => tg.name);
+        } catch { /* the check works without the tag catalog */ }
+        const res = await apiFetch('/api/recipes/ai-check', {
+          method: 'POST',
+          body: JSON.stringify({
+            draft: {
+              title: draft.title, description: draft.description, tips: draft.tips,
+              storage_instructions: draft.storage_instructions, source_url: draft.source_url,
+              servings: draft.servings, prep_time_min: draft.prep_time_min, cook_time_min: draft.cook_time_min,
+              rest_time_min: draft.rest_time_min, yield_amount: draft.yield_amount, yield_unit_id: draft.yield_unit_id,
+              tags: draft.tags, regions: draft.regions, ingredients: draft.ingredients, steps: draft.steps,
+            },
+            catalog: { tools: allTools, techniques: allTechniques, units: allUnits, tagNames },
+          }),
+          timeoutMs: 300_000,
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || t('recipeDetail.aiCheck.failed'));
+        setAiResult(json.data as CheckResult);
+      } catch (err) {
+        setAiError(err instanceof Error ? err.message : t('recipeDetail.aiCheck.failed'));
+      } finally {
+        setAiLoading(false);
+      }
+    };
+
+    const applyAiChanges = async (changes: CheckChange[]) => {
+      const places = changes.flatMap((c) => (c.type === 'region' ? [{ country: c.country, place: c.place }] : []));
+      const resolved = places.length
+        ? await resolveRegions(places, async (q) => {
+            const res = await apiFetch(`/api/geocode?q=${encodeURIComponent(q)}&shape=1`);
+            if (!res.ok) return null;
+            const hit = (await res.json()).data;
+            return hit ? { lat: hit.lat, lng: hit.lng, ...(isAreaResult(hit) ? { shape: hit.shape } : {}) } : null;
+          }, contentLang || 'en')
+        : undefined;
+      setDraft(prev => applyCheckChanges(prev as any, changes, resolved, { tools: allTools, techniques: allTechniques }) as Partial<Recipe>);
+      setAiOpen(false);
+    };
+
     const updateStep = (idx: number, field: string, value: unknown) =>
       setDraft(prev => ({
         ...prev,
@@ -1796,6 +1858,15 @@ const RecipeDetail: React.FC = () => {
           <h2 className="hidden md:block text-lg font-headline font-bold text-zinc-800 dark:text-zinc-200 truncate">{t('recipeDetail.editRecipe')}</h2>
           <div className="flex items-center gap-1 sm:gap-3 shrink-0">
             <button
+              onClick={runAiCheck}
+              disabled={saving || aiLoading}
+              title={t('recipeDetail.aiCheck.button')}
+              className="flex items-center gap-2 px-2 sm:px-4 py-2 text-primary hover:bg-primary/10 rounded-full font-bold text-sm transition-all disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-sm">auto_awesome</span>
+              <span className="hidden sm:inline">{t('recipeDetail.aiCheck.button')}</span>
+            </button>
+            <button
               onClick={toggleRawText}
               disabled={saving}
               title={rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
@@ -1824,6 +1895,15 @@ const RecipeDetail: React.FC = () => {
             </button>
           </div>
         </header>
+
+        <RecipeAiReviewDialog
+          open={aiOpen}
+          onClose={() => setAiOpen(false)}
+          loading={aiLoading}
+          error={aiError}
+          result={aiResult}
+          onApply={applyAiChanges}
+        />
 
         {rawTextMode ? (
           <main className="max-w-4xl mx-auto px-6 py-10 space-y-4">

@@ -37,6 +37,7 @@ import {
   type ReportOptions, type ReportRecipeInput, type ReportSection,
 } from '../lib/recipeReport';
 import RenderStepText from '../components/RenderStepText';
+import { SmartChefWatermark } from '../components/SmartChefLogo';
 import { SOURCE_TYPE_META } from '../components/RecipeSourcesEditor';
 
 type ToggleKey = 'includeCover' | 'includeStepPhotos' | 'includeComponents' | 'includeNutrition';
@@ -537,6 +538,9 @@ export default function RecipeReport() {
               <span>{printedOn}</span>
               <span className="text-right">{t('print.report.servingsNote', { count: servings ?? 1 })}</span>
             </p>
+            <div className="mt-3 flex justify-center">
+              <SmartChefWatermark />
+            </div>
           </div>
         )}
       </div>

@@ -488,6 +488,40 @@
   },
   "recipeDetail": {
     "editRecipe": "Edit Recipe",
+    "aiCheck": {
+      "button": "AI",
+      "title": "Check recipe with AI",
+      "subtitle": "Only what the recipe already says is used. Each change shows the words that justify it; nothing is saved until you press Save.",
+      "checking": "Reading the recipe…",
+      "nothingToChange": "Nothing to fix or complete: everything the recipe states is already filled in.",
+      "apply": "Apply {{count}} selected",
+      "failed": "The AI check failed.",
+      "step": "Step {{n}}",
+      "stepDuration": "Step {{n}} time: {{before}} → {{after}}",
+      "ingredients": "Ingredients",
+      "tools": "Tools",
+      "techniques": "Techniques",
+      "notes": "Notes",
+      "unmatched": "Not in your library, so skipped: {{names}}",
+      "group": {
+        "ingredients": "Ingredient quantities",
+        "steps": "Steps",
+        "fields": "Portions, times and yield",
+        "tags": "Tags",
+        "regions": "Regions"
+      },
+      "field": {
+        "servings": "Servings",
+        "prep_time_min": "Prep time (min)",
+        "cook_time_min": "Cook time (min)",
+        "rest_time_min": "Rest time (min)",
+        "yield": "Yield"
+      },
+      "kind": {
+        "fix": "fix",
+        "fill": "fill"
+      }
+    },
     "saving": "Saving…",
     "saveRecipe": "Save Recipe",
     "switchToRawText": "Raw text",

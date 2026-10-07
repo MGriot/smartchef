@@ -49,6 +49,7 @@ Il JSON deve avere questa struttura:
   "prepTimeMin": "number | null",
   "cookTimeMin": "number | null",
   "restTimeMin": "number | null",
+  "yield": "{ amount: number, unit: string } | null",
   "difficulty": "easy | medium | hard | expert | null",
   "tags": ["string"],
   "tools": ["string"],
@@ -92,6 +93,7 @@ Il JSON deve avere questa struttura:
 Regole:
 - restTimeMin è il tempo di attesa/riposo (lievitazione, marinatura, raffreddamento) separato dal tempo di preparazione attiva
 - tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari, con nomi brevi, generici e IN INGLESE (es. "Oven", "Stand Mixer", "Blender"), qualunque sia la lingua della ricetta
+- yield è la quantità finita prodotta (es. "12 biscotti" -> amount 12, unit "pezzi"; "1 litro" -> amount 1, unit "litri"). Compila SOLO se la ricetta la dichiara esplicitamente; altrimenti null. Non confonderla con servings (le porzioni)
 - storageInstructions è come conservare gli avanzi ("Come conservare"), tips sono consigli generali distinti dalla description — entrambi null se non menzionati
 - groupName (negli ingredienti) è un'intestazione breve e opzionale sotto cui questo ingrediente è raggruppato, es. "Per il condimento" — impostalo SOLO quando la ricetta originale raggruppa visivamente gli ingredienti in sezioni etichettate; altrimenti lascialo null. Non inventare raggruppamenti assenti nella fonte
 - isOptional (negli ingredienti) è true quando la ricetta presenta quell'ingrediente come facoltativo o a piacere (es. "facoltativo", "se gradito", "optional", "per guarnire", "q.b. a piacere"); altrimenti false. Non dedurlo dal fatto che una quantità sia vaga
@@ -102,6 +104,7 @@ Regole:
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
+- NON INVENTARE MAI DATI: servings, tempi, yield, tag, regions, quantità e durate degli step vanno riportati SOLO se compaiono nel contenuto (anche in forma equivalente: "1 ora" = 60 minuti). Non stimarli e non usare conoscenza culinaria generica per riempirli: se non sono dichiarati, null
 - Se non riesci a estrarre un campo, usa null
 - Aggiungi warnings per informazioni ambigue o mancanti
 - imageUrl: usa SOLO un URL che compare letteralmente nel contenuto (incluso quello proposto come "Immagine di copertina della pagina"), mai inventato. Deve mostrare il piatto finito: scarta loghi, avatar, banner pubblicitari e icone. null se non ce n'è uno adatto
@@ -774,6 +777,14 @@ function repairTruncatedJson(raw: string): string {
 /**
  * Parsa la risposta JSON dell'LLM con fallback
  */
+/** The parser's `yield`: a positive amount with a unit wording, or nothing. */
+function parseYield(raw: unknown): { amount: number; unit: string } | undefined {
+  const r = raw as { amount?: unknown; unit?: unknown } | null;
+  const amount = typeof r?.amount === 'number' ? r.amount : NaN;
+  const unit = typeof r?.unit === 'string' ? r.unit.trim() : '';
+  return Number.isFinite(amount) && amount > 0 && unit ? { amount, unit } : undefined;
+}
+
 function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
   // Cerca il JSON nella risposta (l'LLM potrebbe aggiungere testo)
   const jsonMatch = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
@@ -797,6 +808,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
     prepTimeMin: typeof parsed.prepTimeMin === "number" ? parsed.prepTimeMin : undefined,
     cookTimeMin: typeof parsed.cookTimeMin === "number" ? parsed.cookTimeMin : undefined,
     restTimeMin: typeof parsed.restTimeMin === "number" ? parsed.restTimeMin : undefined,
+    yield: parseYield(parsed.yield),
     difficulty: ["easy", "medium", "hard", "expert"].includes(parsed.difficulty)
       ? parsed.difficulty
       : "medium",

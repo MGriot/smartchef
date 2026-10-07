@@ -291,6 +291,8 @@ export interface LLMParseResult {
   prepTimeMin?: number;
   cookTimeMin?: number;
   restTimeMin?: number;
+  /** Finished quantity, only when the source states one. */
+  yield?: { amount: number; unit: string };
   difficulty?: DifficultyLevel;
   tags: string[];
   tools: string[];

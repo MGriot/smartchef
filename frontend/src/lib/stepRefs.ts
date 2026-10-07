@@ -246,7 +246,7 @@ export interface ImportedIngredient {
  *  "le uova" for "Uova", or a trailing note in brackets. Accents are folded
  *  because a model transcribing an Italian recipe is not reliable about
  *  them and an unmatched ingredient is silently dropped. */
-function normalizeName(name: string): string {
+export function normalizeName(name: string): string {
   return name
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase()

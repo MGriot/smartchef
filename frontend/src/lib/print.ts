@@ -80,6 +80,13 @@ function pageSizeFor(locale: string): 'A4' | 'Letter' {
   return /^en-(US|CA)$/i.test(locale) || /^es-(US|MX)$/i.test(locale) ? 'Letter' : 'A4';
 }
 
+/** The app icon, inline: the footer template is its own document, so neither
+ *  page CSS nor bundled asset URLs reach it. */
+const FOOTER_MARK_SVG =
+  `<svg width="11" height="11" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#006C49"/>` +
+  `<rect x="15" y="32" width="34" height="19" rx="3" fill="#fff"/><rect x="13" y="30" width="38" height="5" rx="2.5" fill="#fff"/>` +
+  `<path d="M24 26 L22 18 L26 22 L28 14 L32 22 L36 14 L38 22 L42 18 L40 26" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 /** Renders the current page with its print stylesheet into a PDF and opens
  *  a save dialog for it. Resolves to the path written, or null if the user
  *  cancelled. `footerLabel` is printed at the foot of every page beside the
@@ -95,8 +102,9 @@ export async function savePageAsPdf(
   // document, so it carries its own inline style; the page's CSS never
   // reaches it.
   const footerTemplate =
-    `<div style="width:100%;font-size:8px;color:#666;padding:0 14mm;display:flex;justify-content:space-between;font-family:sans-serif">` +
-    `<span>${label}</span><span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`;
+    `<div style="width:100%;font-size:8px;color:#666;padding:0 14mm;display:flex;justify-content:space-between;align-items:center;font-family:sans-serif">` +
+    `<span style="display:inline-flex;align-items:center;gap:4px;opacity:.5">${FOOTER_MARK_SVG}${label}</span>` +
+    `<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`;
   return printToPdfViaDialog(`${name}.pdf`, {
     pageSize: pageSizeFor(typeof navigator !== 'undefined' ? navigator.language : 'en'),
     footerTemplate,

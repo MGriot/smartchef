@@ -64,6 +64,8 @@ export interface TemplateParseResult {
   prepTimeMin?: number;
   cookTimeMin?: number;
   restTimeMin?: number;
+  /** Finished quantity, when the recipe states one ("makes 12 cookies"). AI path only. */
+  yield?: { amount: number; unit: string };
   difficulty?: string;
   tags: string[];
   tools: string[];

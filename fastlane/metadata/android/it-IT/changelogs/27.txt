@@ -1,0 +1,1 @@
+Nuovo pulsante AI nell'editor: controlla l'intera ricetta e propone correzioni a quantità degli ingredienti, collegamenti nei passaggi, tempi, porzioni, resa, tag e regioni, usando solo ciò che la ricetta già dice, da rivedere prima di applicare. L'import AI legge anche la resa. Le ricette stampate hanno una filigrana SmartChef e i menù stampati un logo raffinato.

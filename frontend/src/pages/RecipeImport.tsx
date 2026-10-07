@@ -604,6 +604,7 @@ export default function RecipeImport() {
       const unitsRes = await apiFetch('/api/units');
       const unitsJson = await unitsRes.json();
       const units: Unit[] = unitsJson.data || [];
+      const yieldUnitId = draft.yield ? matchUnitId(draft.yield.unit, units) : undefined;
 
       const matchedIngredients: MatchedIngredient[] = [];
       // Two rows resolving to the same new name ("Egg" twice) become one
@@ -742,6 +743,9 @@ export default function RecipeImport() {
         prepTimeMin: draft.prepTimeMin || undefined,
         cookTimeMin: draft.cookTimeMin || undefined,
         restTimeMin: draft.restTimeMin || undefined,
+        // Only when the recipe states a finished quantity AND its unit is one
+        // the library knows; an unknown unit leaves the yield unset.
+        ...(yieldUnitId && draft.yield ? { yieldAmount: draft.yield.amount, yieldUnitId } : {}),
         tags: draft.tags || [],
         // Only the structured-data path knows a cover image (schema.org
         // publishes one); the LLM path leaves it undefined.

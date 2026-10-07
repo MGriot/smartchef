@@ -488,6 +488,40 @@
   },
   "recipeDetail": {
     "editRecipe": "Modifier la recette",
+    "aiCheck": {
+      "button": "IA",
+      "title": "Vérifier la recette avec l'IA",
+      "subtitle": "Seul ce que la recette dit déjà est utilisé. Chaque modification montre les mots qui la justifient ; rien n'est enregistré avant d'appuyer sur Enregistrer.",
+      "checking": "Lecture de la recette…",
+      "nothingToChange": "Rien à corriger ni à compléter : tout ce que la recette indique est déjà rempli.",
+      "apply": "Appliquer {{count}} sélectionnées",
+      "failed": "La vérification par l'IA a échoué.",
+      "step": "Étape {{n}}",
+      "stepDuration": "Durée de l'étape {{n}} : {{before}} → {{after}}",
+      "ingredients": "Ingrédients",
+      "tools": "Ustensiles",
+      "techniques": "Techniques",
+      "notes": "Notes",
+      "unmatched": "Absents de votre bibliothèque, ignorés : {{names}}",
+      "group": {
+        "ingredients": "Quantités des ingrédients",
+        "steps": "Étapes",
+        "fields": "Portions, durées et rendement",
+        "tags": "Étiquettes",
+        "regions": "Régions"
+      },
+      "field": {
+        "servings": "Portions",
+        "prep_time_min": "Préparation (min)",
+        "cook_time_min": "Cuisson (min)",
+        "rest_time_min": "Repos (min)",
+        "yield": "Rendement"
+      },
+      "kind": {
+        "fix": "correction",
+        "fill": "à compléter"
+      }
+    },
     "saving": "En cours d'enregistrement…",
     "saveRecipe": "Enregistrer la recette",
     "switchToRawText": "Texte brut",

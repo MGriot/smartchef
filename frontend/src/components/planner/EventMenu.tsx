@@ -7,6 +7,7 @@ import {
   currentMeals, groupDishesByCourse, mealsOf, MEAL_ORDER, moveCourseWithinMeal, moveDish, newCourseId, planMealChange,
   type EventMealType, type MealPlan,
 } from '../../lib/eventMenu';
+import { SmartChefMenuMark } from '../SmartChefLogo';
 import Autocomplete from '../Autocomplete';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../Modal';
 import { Field } from '../Form';
@@ -494,6 +495,7 @@ export default function EventMenu({
 
       {/* ── The printed menu card ──────────────────────────────── */}
       <div className="print-only menu-card">
+        <SmartChefMenuMark className="menu-card-logo" />
         {(mealLabel || dateLabel) && <p className="menu-card-kicker">{[mealLabel, dateLabel].filter(Boolean).join(' · ')}</p>}
         <h1 className="menu-card-title">{menu.name}</h1>
         {menu.notes && <p className="menu-card-intro">{menu.notes}</p>}

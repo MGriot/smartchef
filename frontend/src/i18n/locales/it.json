@@ -488,6 +488,40 @@
   },
   "recipeDetail": {
     "editRecipe": "Modifica Ricetta",
+    "aiCheck": {
+      "button": "AI",
+      "title": "Controlla la ricetta con l'AI",
+      "subtitle": "Usa solo ciò che la ricetta già dice. Ogni modifica mostra le parole che la giustificano; niente viene salvato finché non premi Salva.",
+      "checking": "Lettura della ricetta…",
+      "nothingToChange": "Niente da correggere o completare: tutto ciò che la ricetta dichiara è già compilato.",
+      "apply": "Applica {{count}} selezionate",
+      "failed": "Il controllo AI non è riuscito.",
+      "step": "Passaggio {{n}}",
+      "stepDuration": "Tempo del passaggio {{n}}: {{before}} → {{after}}",
+      "ingredients": "Ingredienti",
+      "tools": "Strumenti",
+      "techniques": "Tecniche",
+      "notes": "Note",
+      "unmatched": "Non presenti nella tua libreria, ignorati: {{names}}",
+      "group": {
+        "ingredients": "Quantità degli ingredienti",
+        "steps": "Passaggi",
+        "fields": "Porzioni, tempi e resa",
+        "tags": "Tag",
+        "regions": "Regioni"
+      },
+      "field": {
+        "servings": "Porzioni",
+        "prep_time_min": "Preparazione (min)",
+        "cook_time_min": "Cottura (min)",
+        "rest_time_min": "Riposo (min)",
+        "yield": "Resa"
+      },
+      "kind": {
+        "fix": "correzione",
+        "fill": "da compilare"
+      }
+    },
     "saving": "Salvataggio…",
     "saveRecipe": "Salva Ricetta",
     "switchToRawText": "Testo grezzo",

@@ -65,6 +65,19 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     if (items.length === 0) return { status: 400, error: i18n.t('errors.pantryEmpty') };
     return { status: 200, data: await pantry.filterByPantry(items, body.minMatchRatio ?? 1, sp.get('lang') ?? undefined) };
   }
+  // The editor's "Check with AI": audits the unsaved draft it posts and
+  // answers with evidence-backed changes — see lib/recipeCheck.ts.
+  if (id === 'ai-check') {
+    if (method !== 'POST') return NOT_HANDLED;
+    const body = parseBody(init) ?? {};
+    if (!body.draft || !body.catalog) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    try {
+      const { checkRecipeWithAi } = await import('./recipeCheck.local');
+      return { status: 200, data: await checkRecipeWithAi(body.draft, body.catalog) };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI check failed' };
+    }
+  }
   if (id === 'parse') {
     if (method !== 'POST') return NOT_HANDLED;
     const body = parseBody(init) ?? {};

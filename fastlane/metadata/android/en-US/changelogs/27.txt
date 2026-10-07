@@ -1,0 +1,1 @@
+New AI button in the recipe editor: it checks the whole recipe and proposes fixes for ingredient quantities, step links, times, portions, yield, tags and regions, using only what the recipe already says, for you to review. AI import now reads the yield. Printed recipes carry a SmartChef watermark and printed menus a refined logo.

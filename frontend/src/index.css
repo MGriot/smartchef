@@ -574,6 +574,10 @@
     font-family: Manrope, system-ui, sans-serif;
   }
 
+  .menu-card-logo {
+    margin: 0 auto 8mm;
+  }
+
   .menu-card-kicker {
     font-size: 9pt;
     font-weight: 700;
