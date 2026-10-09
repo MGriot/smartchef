@@ -270,17 +270,17 @@ export default function StepEditor({
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <button type="button" onClick={() => setPopover(popover === 'ingredient' ? null : 'ingredient')}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'ingredient' ? 'bg-primary text-white' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}>
+          className={`flex items-center gap-1 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'ingredient' ? 'bg-primary text-white' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}>
           <span className="material-symbols-outlined text-sm">restaurant</span> {t('editors.ingredient')}
         </button>
         <button type="button" onClick={() => setPopover(popover === 'tool' ? null : 'tool')}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'tool' ? 'bg-tool text-white' : 'bg-tool/10 text-tool hover:bg-tool/20'}`}>
+          className={`flex items-center gap-1 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'tool' ? 'bg-tool text-white' : 'bg-tool/10 text-tool hover:bg-tool/20'}`}>
           <span className="material-symbols-outlined text-sm">construction</span> {t('editors.tool')}
         </button>
         <button type="button" onClick={() => setPopover(popover === 'technique' ? null : 'technique')}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'technique' ? 'bg-technique text-white' : 'bg-technique/10 text-technique hover:bg-technique/20'}`}>
+          className={`flex items-center gap-1 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${popover === 'technique' ? 'bg-technique text-white' : 'bg-technique/10 text-technique hover:bg-technique/20'}`}>
           <span className="material-symbols-outlined text-sm">whatshot</span> {t('editors.technique')}
         </button>
       </div>

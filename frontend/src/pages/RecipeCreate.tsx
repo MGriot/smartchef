@@ -910,7 +910,7 @@ const RecipeCreate: React.FC = () => {
               <select
                 value={draft.difficulty || 'medium'}
                 onChange={e => updateDraft('difficulty', e.target.value)}
-                className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
+                className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl pl-4 pr-9 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
               >
                 {['easy','medium','hard','expert'].map(d => (
                   <option key={d} value={d}>{t(difficultyKey[d])}</option>

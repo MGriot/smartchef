@@ -1,0 +1,1 @@
+Cooking mode and the recipe editor no longer overflow on phones: step text, ingredient amounts, buttons, step tabs and the difficulty menu now fit the screen.

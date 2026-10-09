@@ -1,0 +1,1 @@
+La modalità cucina e l'editor di ricette non escono più dallo schermo sui telefoni: testo dei passaggi, quantità, pulsanti, schede dei passaggi e menu della difficoltà ora si adattano.
