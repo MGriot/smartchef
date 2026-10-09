@@ -1,0 +1,1 @@
+Corretto l'editor ricette sui telefoni: i pulsanti del tipo di ingrediente sono in una griglia con elimina a lato, i titoli lunghi vanno a capo, le quantità degli ingredienti di un passaggio stanno sotto il nome e le sezioni seguono lo stesso ordine della pagina ricetta.

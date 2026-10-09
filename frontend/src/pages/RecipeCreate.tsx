@@ -794,9 +794,9 @@ const RecipeCreate: React.FC = () => {
         {/* Title & description */}
         <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
           <label className="block mb-6">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
               <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold block">{t('recipeDetail.recipeTitle')}</span>
-              <span className="flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium">
+              <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium">
                 {t('recipeDetail.writtenIn')}
                 <select
                   value={draft.language_code || 'en'}
@@ -808,10 +808,13 @@ const RecipeCreate: React.FC = () => {
                 <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
               </span>
             </div>
-            <input
-              type="text" value={draft.title || ''}
-              onChange={e => updateDraft('title', e.target.value)}
-              className="w-full text-3xl font-headline font-bold border-none bg-transparent focus:ring-0 p-0 placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
+            {/* A textarea so a long title wraps instead of being clipped. */}
+            <AutoTextarea
+              rows={1}
+              value={draft.title || ''}
+              onChange={e => updateDraft('title', e.target.value.replace(/\n/g, ' '))}
+              onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
+              className="w-full text-2xl sm:text-3xl leading-tight font-headline font-bold border-none bg-transparent focus:ring-0 p-0 resize-none overflow-hidden placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
               placeholder={t('recipeDetail.enterTitlePlaceholder')}
             />
           </label>
@@ -1086,22 +1089,20 @@ const RecipeCreate: React.FC = () => {
                     a line with the "Ingredient" label and ran straight through it,
                     and delete was an absolutely-positioned button lying on top of
                     the name field, invisible until hover. */}
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="grid grid-cols-2 gap-1.5 flex-1 min-w-0 max-w-xs">
                     {(['ingredient', 'recipe'] as const).map((type) => (
                       <button
                         key={type}
                         type="button"
                         onClick={() => setEntryType(idx, type)}
-                        className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase transition-colors ${
-                          getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
+                        className={`px-3 py-1.5 rounded-full text-[9px] font-bold uppercase whitespace-nowrap text-center transition-colors ${
+                          getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
                         }`}
                       >
                         {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
                       </button>
                     ))}
-                  </div>
-                  <div className="flex items-center gap-2">
                     {/* Same control as the recipe editor's — see the note
                         there for why `is_optional` needed one at all. */}
                     <button
@@ -1109,7 +1110,7 @@ const RecipeCreate: React.FC = () => {
                       onClick={() => updateIngredient(idx, 'isOptional', !ing.isOptional)}
                       aria-pressed={!!ing.isOptional}
                       title={t('recipeDetail.optionalHint')}
-                      className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                      className={`px-3 py-1.5 rounded-full text-[9px] font-bold uppercase whitespace-nowrap text-center transition-colors ${
                         ing.isOptional
                           ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400'
                           : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
@@ -1121,18 +1122,18 @@ const RecipeCreate: React.FC = () => {
                       type="button"
                       onClick={() => toggleIngredientCollapsed(idx)}
                       title={t('recipeDetail.collapseRow')}
-                      className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-600 dark:hover:text-zinc-300"
+                      className="py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 flex items-center justify-center transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
                     >
                       <span className="material-symbols-outlined text-[18px]">unfold_less</span>
                     </button>
-                    <button
-                      onClick={() => removeIngredient(idx)}
-                      title={t('common.delete')}
-                      className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">delete</span>
-                    </button>
                   </div>
+                  <button
+                    onClick={() => removeIngredient(idx)}
+                    title={t('common.delete')}
+                    className="w-10 h-10 shrink-0 ml-auto rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">delete</span>
+                  </button>
                 </div>
                 <div className="grid grid-cols-12 gap-3">
                   <div className="col-span-12 @lg:col-span-6">
@@ -1547,11 +1548,11 @@ const RecipeCreate: React.FC = () => {
                         const ref = (step.stepIngredients || []).find(si => si.ingredientSortOrder === ing.sortOrder);
                         const isUsed = !!ref;
                         return (
-                          <div key={ing.sortOrder} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${isUsed ? 'bg-primary/5 border-primary/20' : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'}`}>
+                          <div key={ing.sortOrder} className={`flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 rounded-lg border transition-all ${isUsed ? 'bg-primary/5 border-primary/20' : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'}`}>
                             <button
                               type="button"
                               onClick={() => toggleStepIngredient(idx, ing.sortOrder)}
-                              className={`text-xs font-bold flex-1 text-left ${isUsed ? 'text-primary' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
+                              className={`text-xs font-bold basis-full min-w-0 break-words text-left ${isUsed ? 'text-primary' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
                             >
                               {ing.ingredientName || ing.subRecipeTitle || t('recipeDetail.unnamedIngredient')}
                               {ing.quantity ? ` (${formatEditorAmount(ing.quantity, ing.unitSymbol)} ${t('recipeDetail.totalLower')})` : ''}
@@ -1568,7 +1569,7 @@ const RecipeCreate: React.FC = () => {
                               })()}
                             </button>
                             {isUsed && (
-                              <>
+                              <div className="basis-full flex items-center gap-2 min-w-0">
                                 <div className="flex bg-white dark:bg-zinc-900 rounded-lg p-0.5 border border-zinc-100 dark:border-zinc-800 shrink-0">
                                   <button
                                     type="button"
@@ -1587,16 +1588,16 @@ const RecipeCreate: React.FC = () => {
                                       type="range" min="0.05" max="1" step="0.05"
                                       value={ref!.portion}
                                       onChange={e => updateStepIngredientPortion(idx, ing.sortOrder, parseFloat(e.target.value))}
-                                      className="w-24 accent-primary"
+                                      className="flex-1 min-w-0 accent-primary"
                                     />
-                                    <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 w-10 text-right">{Math.round(ref!.portion * 100)}%</span>
+                                    <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 w-10 text-right shrink-0">{Math.round(ref!.portion * 100)}%</span>
                                   </>
                                 ) : (
                                   <>
                                     <input
                                       type="number" step="any" value={ref!.quantity ?? ''}
                                       onChange={e => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', e.target.value ? parseFloat(e.target.value) : null)}
-                                      className="w-14 border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
+                                      className="flex-1 min-w-0 max-w-[6rem] border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
                                     />
                                     <select
                                       value={ref!.unitId || ''}
@@ -1612,7 +1613,7 @@ const RecipeCreate: React.FC = () => {
                                     </select>
                                   </>
                                 )}
-                              </>
+                              </div>
                             )}
                           </div>
                         );

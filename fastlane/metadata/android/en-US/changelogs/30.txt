@@ -1,0 +1,1 @@
+Fixed the recipe editor on phones: the ingredient type buttons sit in a tidy grid with delete beside them, long titles wrap, a step's ingredient amounts sit under the name, and sections now follow the same order as the recipe page.

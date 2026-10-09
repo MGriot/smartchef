@@ -1926,13 +1926,13 @@ const RecipeDetail: React.FC = () => {
               five screens below the fold, behind eight metadata cards - and
               ~890px of the window was empty gutter either side of them. */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
-            <div className="xl:col-span-8 space-y-8 min-w-0">
+            <div className="contents xl:block xl:col-span-8 xl:space-y-8 min-w-0">
               {/* Title & description */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-2 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <label className="block mb-6">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
                     <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold block">{t('recipeDetail.recipeTitle')}</span>
-                    <span className="flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium">
+                    <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 font-medium">
                       {t('recipeDetail.writtenIn')}
                       <select
                         value={draft.language_code || recipe.language_code || 'en'}
@@ -1944,10 +1944,13 @@ const RecipeDetail: React.FC = () => {
                       <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
                     </span>
                   </div>
-                  <input
-                    type="text" value={draft.title || ''}
-                    onChange={e => updateDraft('title', e.target.value)}
-                    className="w-full text-3xl font-headline font-bold border-none bg-transparent focus:ring-0 p-0 placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
+                  {/* A textarea so a long title wraps instead of being clipped. */}
+                  <AutoTextarea
+                    rows={1}
+                    value={draft.title || ''}
+                    onChange={e => updateDraft('title', e.target.value.replace(/\n/g, ' '))}
+                    onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
+                    className="w-full text-2xl sm:text-3xl leading-tight font-headline font-bold border-none bg-transparent focus:ring-0 p-0 resize-none overflow-hidden placeholder:text-zinc-300 dark:placeholder:text-zinc-600"
                     placeholder={t('recipeDetail.enterTitlePlaceholder')}
                   />
                 </label>
@@ -1960,28 +1963,10 @@ const RecipeDetail: React.FC = () => {
                     placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
                   />
                 </label>
-                <label className="block mb-6">
-                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>
-                  <AutoTextarea
-                    value={draft.storage_instructions || ''}
-                    onChange={e => updateDraft('storage_instructions', e.target.value || null)}
-                    className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[110px] max-h-[40vh] overflow-y-auto"
-                    placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
-                  />
-                </label>
-                <label className="block mb-6">
-                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.tips')}</span>
-                  <AutoTextarea
-                    value={draft.tips || ''}
-                    onChange={e => updateDraft('tips', e.target.value || null)}
-                    className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[110px] max-h-[40vh] overflow-y-auto"
-                    placeholder={t('recipeDetail.tipsPlaceholder')}
-                  />
-                </label>
               </div>
 
               {/* Ingredients Editor */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-7 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <div className="flex items-center justify-between gap-3 mb-6">
                   <h3 className="font-headline font-bold text-xl">
                     {t('recipeDetail.ingredients')}
@@ -2062,22 +2047,21 @@ const RecipeDetail: React.FC = () => {
                           a line with the "Ingredient" label and ran straight through it,
                           and delete was an absolutely-positioned button lying on top of
                           the name field, invisible until hover. */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                        <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="grid grid-cols-2 gap-1.5 flex-1 min-w-0 max-w-xs">
                           {(['ingredient', 'recipe'] as const).map((type) => (
                             <button
                               key={type}
                               type="button"
                               onClick={() => setEntryType(idx, type)}
-                              className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase whitespace-nowrap transition-colors ${
-                                getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
+                              className={`px-3 py-1.5 rounded-full text-[9px] font-bold uppercase whitespace-nowrap text-center transition-colors ${
+                                getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
                               }`}
                             >
                               {type === 'ingredient' ? t('recipeDetail.entryTypeIngredient') : t('recipeDetail.entryTypeRecipe')}
                             </button>
                           ))}
-                        </div>
-                        <div className="flex items-center gap-2 ml-auto">
+                          {/* optional + collapse fill the grid's second row */}
                           {/* `is_optional` has been on the row, in the
                               matrioska engine and in the pantry matcher
                               from the start — "optional ingredients never
@@ -2092,7 +2076,7 @@ const RecipeDetail: React.FC = () => {
                             onClick={() => updateIngredient(idx, 'isOptional', !ing.isOptional)}
                             aria-pressed={!!ing.isOptional}
                             title={t('recipeDetail.optionalHint')}
-                            className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase whitespace-nowrap transition-colors ${
+                            className={`px-3 py-1.5 rounded-full text-[9px] font-bold uppercase whitespace-nowrap text-center transition-colors ${
                               ing.isOptional
                                 ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400'
                                 : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
@@ -2104,18 +2088,18 @@ const RecipeDetail: React.FC = () => {
                             type="button"
                             onClick={() => toggleIngredientCollapsed(idx)}
                             title={t('recipeDetail.collapseRow')}
-                            className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-600 dark:hover:text-zinc-300"
+                            className="py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 flex items-center justify-center transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
                           >
                             <span className="material-symbols-outlined text-[18px]">unfold_less</span>
                           </button>
-                          <button
-                            onClick={() => removeIngredient(idx)}
-                            title={t('common.delete')}
-                            className="w-8 h-8 shrink-0 rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
-                          >
-                            <span className="material-symbols-outlined text-[18px]">delete</span>
-                          </button>
                         </div>
+                        <button
+                          onClick={() => removeIngredient(idx)}
+                          title={t('common.delete')}
+                          className="w-10 h-10 shrink-0 ml-auto rounded-full text-zinc-300 dark:text-zinc-600 flex items-center justify-center transition-colors hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-500"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">delete</span>
+                        </button>
                       </div>
                       <div className="grid grid-cols-12 gap-3">
                         <div className="col-span-12 @lg:col-span-6">
@@ -2333,7 +2317,7 @@ const RecipeDetail: React.FC = () => {
               </div>
 
               {/* Steps editor */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-4 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-9 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-4 sm:p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <div className="flex items-center justify-between gap-3 mb-6">
                   <h3 className="font-headline font-bold text-xl">
                     {t('recipeDetail.steps')}
@@ -2563,11 +2547,13 @@ const RecipeDetail: React.FC = () => {
                               const ref = (step.stepIngredients || []).find(si => si.ingredientSortOrder === ing.sortOrder);
                               const isUsed = !!ref;
                               return (
-                                <div key={ing.sortOrder} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${isUsed ? 'bg-primary/5 border-primary/20' : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'}`}>
+                                <div key={ing.sortOrder} className={`flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 rounded-lg border transition-all ${isUsed ? 'bg-primary/5 border-primary/20' : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'}`}>
+                                  {/* Name on its own line, controls underneath: sharing one line
+                                      squeezed the name to a letter per row on a phone. */}
                                   <button
                                     type="button"
                                     onClick={() => toggleStepIngredient(idx, ing.sortOrder)}
-                                    className={`text-xs font-bold flex-1 min-w-0 break-words text-left ${isUsed ? 'text-primary' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
+                                    className={`text-xs font-bold basis-full min-w-0 break-words text-left ${isUsed ? 'text-primary' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'}`}
                                   >
                                     {ing.ingredientName || ing.subRecipeTitle || t('recipeDetail.unnamedIngredient')}
                                     {ing.quantity ? ` (${formatEditorAmount(ing.quantity, ing.unitSymbol)} ${t('recipeDetail.totalLower')})` : ''}
@@ -2589,7 +2575,7 @@ const RecipeDetail: React.FC = () => {
                                     })()}
                                   </button>
                                   {isUsed && (
-                                    <>
+                                    <div className="basis-full flex items-center gap-2 min-w-0">
                                       <div className="flex bg-white dark:bg-zinc-900 rounded-lg p-0.5 border border-zinc-100 dark:border-zinc-800 shrink-0">
                                         <button
                                           type="button"
@@ -2608,16 +2594,16 @@ const RecipeDetail: React.FC = () => {
                                             type="range" min="0.05" max="1" step="0.05"
                                             value={ref!.portion}
                                             onChange={e => updateStepIngredientPortion(idx, ing.sortOrder, parseFloat(e.target.value))}
-                                            className="w-24 accent-primary"
+                                            className="flex-1 min-w-0 accent-primary"
                                           />
-                                          <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 w-10 text-right">{Math.round(ref!.portion * 100)}%</span>
+                                          <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 w-10 text-right shrink-0">{Math.round(ref!.portion * 100)}%</span>
                                         </>
                                       ) : (
                                         <>
                                           <input
                                             type="number" step="any" value={ref!.quantity ?? ''}
                                             onChange={e => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', e.target.value ? parseFloat(e.target.value) : null)}
-                                            className="w-14 border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
+                                            className="flex-1 min-w-0 max-w-[6rem] border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
                                           />
                                           <select
                                             value={ref!.unitId || ''}
@@ -2633,7 +2619,7 @@ const RecipeDetail: React.FC = () => {
                                           </select>
                                         </>
                                       )}
-                                    </>
+                                    </div>
                                   )}
                                 </div>
                               );
@@ -2658,6 +2644,28 @@ const RecipeDetail: React.FC = () => {
                 </>
                 )}
               </div>
+
+              {/* Storage & tips - after the method, as on the recipe page. */}
+              <div className="order-10 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-8 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+                <label className="block mb-6">
+                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>
+                  <AutoTextarea
+                    value={draft.storage_instructions || ''}
+                    onChange={e => updateDraft('storage_instructions', e.target.value || null)}
+                    className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[110px] max-h-[40vh] overflow-y-auto"
+                    placeholder={t('recipeDetail.storageInstructionsPlaceholder')}
+                  />
+                </label>
+                <label className="block mb-6">
+                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.tips')}</span>
+                  <AutoTextarea
+                    value={draft.tips || ''}
+                    onChange={e => updateDraft('tips', e.target.value || null)}
+                    className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[110px] max-h-[40vh] overflow-y-auto"
+                    placeholder={t('recipeDetail.tipsPlaceholder')}
+                  />
+                </label>
+              </div>
             </div>
 
             {/* Plain column, not a sticky scroll pane. Capping the rail at
@@ -2667,10 +2675,10 @@ const RecipeDetail: React.FC = () => {
                 that moved. The rail is taller than the viewport anyway (cover,
                 numbers, yield, tags, regions, tools, sources, translations),
                 so pinning it only ever meant part of it was unreachable. */}
-            <aside className="xl:col-span-4 space-y-6 min-w-0">
+            <aside className="contents xl:block xl:col-span-4 xl:space-y-6 min-w-0">
               {/* Cover image - metadata, so it belongs in the rail rather than
                   at the bottom of the text card. */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-1 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.coverImage')}</span>
                 <ImageUrlInput
                   value={draft.cover_image_url || ''}
@@ -2681,7 +2689,7 @@ const RecipeDetail: React.FC = () => {
               {/* Numbers - servings/times were four separate full-width tiles and
                   difficulty and the rating sat in a card whose left third was empty
                   below them. One card, 2x2. */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-3 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { label: t('recipeDetail.servings'), field: 'servings' },
@@ -2720,7 +2728,7 @@ const RecipeDetail: React.FC = () => {
               </div>
 
               {/* Yield (optional — enables weight/volume amounts when this recipe is used as a sub-recipe ingredient) */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-6 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <h3 className="font-headline font-bold text-lg mb-2">{t('recipeDetail.yield')}</h3>
                 <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{t('recipeDetail.yieldHint')}</p>
                 <div className="flex gap-3">
@@ -2742,13 +2750,13 @@ const RecipeDetail: React.FC = () => {
               </div>
 
               {/* Tags */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-4 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.tags')}</h3>
                 <TagPicker value={draft.tags || []} onChange={tags => updateDraft('tags', tags)} />
               </div>
 
               {/* Regions */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-5 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <h3 className="font-headline font-bold text-lg mb-2">{t('recipeDetail.regions')}</h3>
                 <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-4">{t('recipeDetail.regionsHint')}</p>
                 <RegionPicker
@@ -2767,7 +2775,7 @@ const RecipeDetail: React.FC = () => {
               {/* Kitchen tools - the picker used to render all of allTools (24 chips,
                   four rows, ~200px) just to show the one that was selected. What's
                   picked is on top now; the rest of the library is one click away. */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-8 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.kitchenTools')}</h3>
                 <div className="flex flex-wrap gap-2">
                   {(draft.tools || []).map(tool => {
@@ -2834,7 +2842,7 @@ const RecipeDetail: React.FC = () => {
               </div>
 
               {/* Sources & References */}
-              <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+              <div className="order-11 xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
                 <h3 className="font-headline font-bold text-lg mb-4">{t('recipeDetail.sourcesReferences')}</h3>
                 <RecipeSourcesEditor
                   sources={draft.sources || []}
@@ -2843,7 +2851,7 @@ const RecipeDetail: React.FC = () => {
               </div>
 
               {/* Translations */}
-              <div id="translations-section" className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] scroll-mt-24">
+              <div id="translations-section" className="order-[12] xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] scroll-mt-24">
                 <details>
                 <summary className="cursor-pointer font-headline font-bold text-lg select-none">{t('recipeDetail.translations')}</summary>
                 <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2 mb-6">{t('recipeDetail.translationsHint')}</p>
