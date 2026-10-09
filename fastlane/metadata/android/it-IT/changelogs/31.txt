@@ -1,0 +1,1 @@
+Nell'editor ricette sui telefoni, Salva, controllo AI, testo grezzo ed Elimina ora stanno nello stesso pulsante in basso a destra della pagina ricetta.

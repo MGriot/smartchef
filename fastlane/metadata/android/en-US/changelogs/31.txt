@@ -1,0 +1,1 @@
+In the recipe editor on phones, Save, AI check, raw text and Delete now live in the same bottom-right button as on the recipe page.

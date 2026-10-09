@@ -1841,6 +1841,68 @@ const RecipeDetail: React.FC = () => {
       }
     };
 
+    // One set of actions, two homes: labelled in the header from `lg` up, the
+    // floating bottom-right fan below it - the same split the recipe view uses.
+    const editActions = (inBar: boolean) => {
+      const base = inBar ? BAR_BUTTON : 'px-4 py-2 rounded-full';
+      const label = (text: string) => (inBar ? null : <span>{text}</span>);
+      const saveBtn = (
+          <button
+            key="save"
+            onClick={handleSaveClick}
+            disabled={saving}
+            title={t('recipeDetail.saveRecipe')}
+            aria-label={t('recipeDetail.saveRecipe')}
+            className={`${inBar ? BAR_BUTTON : 'px-5 py-2 rounded-full'} flex items-center gap-2 bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-all disabled:opacity-50`}
+          >
+            <span className="material-symbols-outlined text-[20px]">{saving ? 'sync' : 'save'}</span>
+            {label(saving ? t('recipeDetail.saving') : t('recipeDetail.saveRecipe'))}
+          </button>
+      );
+      const aiBtn = (
+          <button
+            key="ai"
+            onClick={runAiCheck}
+            disabled={saving || aiLoading}
+            title={t('recipeDetail.aiCheck.button')}
+            aria-label={t('recipeDetail.aiCheck.button')}
+            className={`${base} flex items-center gap-2 text-primary hover:bg-primary/10 font-bold text-sm transition-all disabled:opacity-50`}
+          >
+            <span className="material-symbols-outlined text-[20px]">auto_awesome</span>
+            {label(t('recipeDetail.aiCheck.button'))}
+          </button>
+      );
+      const rawBtn = (
+          <button
+            key="raw"
+            onClick={toggleRawText}
+            disabled={saving}
+            title={rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
+            aria-label={rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
+            className={`${base} flex items-center gap-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 font-bold text-sm transition-all disabled:opacity-50`}
+          >
+            <span className="material-symbols-outlined text-[20px]">{rawTextMode ? 'edit_note' : 'code'}</span>
+            {label(rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText'))}
+          </button>
+      );
+      const deleteBtn = (
+          <button
+            key="delete"
+            onClick={handleDelete}
+            disabled={saving}
+            title={t('common.delete')}
+            aria-label={t('common.delete')}
+            className={`${base} flex items-center gap-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 font-bold text-sm transition-all disabled:opacity-50`}
+          >
+            <span className="material-symbols-outlined text-[20px]">delete</span>
+            {label(t('common.delete'))}
+          </button>
+      );
+      // The fan seats the first action straight up from its button, so the
+      // primary one leads there; the header keeps Save at the right edge.
+      return inBar ? [saveBtn, aiBtn, rawBtn, deleteBtn] : [aiBtn, rawBtn, deleteBtn, saveBtn];
+    };
+
     return (
       <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 font-body">
         {/* Header */}
@@ -1856,43 +1918,8 @@ const RecipeDetail: React.FC = () => {
             <span className="hidden sm:inline text-sm font-bold">{t('common.cancel')}</span>
           </button>
           <h2 className="hidden md:block text-lg font-headline font-bold text-zinc-800 dark:text-zinc-200 truncate">{t('recipeDetail.editRecipe')}</h2>
-          <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-            <button
-              onClick={runAiCheck}
-              disabled={saving || aiLoading}
-              title={t('recipeDetail.aiCheck.button')}
-              className="flex items-center gap-2 px-2 sm:px-4 py-2 text-primary hover:bg-primary/10 rounded-full font-bold text-sm transition-all disabled:opacity-50"
-            >
-              <span className="material-symbols-outlined text-sm">auto_awesome</span>
-              <span className="hidden sm:inline">{t('recipeDetail.aiCheck.button')}</span>
-            </button>
-            <button
-              onClick={toggleRawText}
-              disabled={saving}
-              title={rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}
-              className="flex items-center gap-2 px-2 sm:px-4 py-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full font-bold text-sm transition-all disabled:opacity-50"
-            >
-              <span className="material-symbols-outlined text-sm">{rawTextMode ? 'edit_note' : 'code'}</span>
-              <span className="hidden sm:inline">{rawTextMode ? t('recipeDetail.switchToForm') : t('recipeDetail.switchToRawText')}</span>
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={saving}
-              title={t('common.delete')}
-              className="flex items-center gap-2 px-2 sm:px-4 py-2 text-red-500 hover:bg-red-50 rounded-full font-bold text-sm transition-all disabled:opacity-50"
-            >
-              <span className="material-symbols-outlined text-sm">delete</span>
-              <span className="hidden sm:inline">{t('common.delete')}</span>
-            </button>
-            <button
-              onClick={handleSaveClick}
-              disabled={saving}
-              title={t('recipeDetail.saveRecipe')}
-              className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-primary text-white rounded-full font-bold text-sm hover:bg-primary/90 transition-all disabled:opacity-50"
-            >
-              <span className="material-symbols-outlined text-sm">{saving ? 'sync' : 'save'}</span>
-              <span className="hidden sm:inline">{saving ? t('recipeDetail.saving') : t('recipeDetail.saveRecipe')}</span>
-            </button>
+          <div className="hidden lg:flex items-center gap-3 shrink-0">
+            {editActions(false)}
           </div>
         </header>
 
@@ -2888,6 +2915,10 @@ const RecipeDetail: React.FC = () => {
           </div>
         </main>
         )}
+
+        {/* Room for the floating action button, so the last card scrolls clear of it. */}
+        <div className="lg:hidden" style={{ height: FLOATING_ACTION_BAR_CLEARANCE }} aria-hidden="true" />
+        <FloatingActionBar label={t('recipeDetail.actionsLabel')}>{editActions(true)}</FloatingActionBar>
       </div>
     );
   }
