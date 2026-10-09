@@ -2062,14 +2062,14 @@ const RecipeDetail: React.FC = () => {
                           a line with the "Ingredient" label and ran straight through it,
                           and delete was an absolutely-positioned button lying on top of
                           the name field, invisible until hover. */}
-                      <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                         <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-full p-0.5">
                           {(['ingredient', 'recipe'] as const).map((type) => (
                             <button
                               key={type}
                               type="button"
                               onClick={() => setEntryType(idx, type)}
-                              className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                              className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase whitespace-nowrap transition-colors ${
                                 getEntryType(idx, ing) === type ? 'bg-primary text-white' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
                               }`}
                             >
@@ -2077,7 +2077,7 @@ const RecipeDetail: React.FC = () => {
                             </button>
                           ))}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 ml-auto">
                           {/* `is_optional` has been on the row, in the
                               matrioska engine and in the pantry matcher
                               from the start — "optional ingredients never
@@ -2092,7 +2092,7 @@ const RecipeDetail: React.FC = () => {
                             onClick={() => updateIngredient(idx, 'isOptional', !ing.isOptional)}
                             aria-pressed={!!ing.isOptional}
                             title={t('recipeDetail.optionalHint')}
-                            className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase transition-colors ${
+                            className={`px-3 py-1 rounded-full text-[9px] font-bold uppercase whitespace-nowrap transition-colors ${
                               ing.isOptional
                                 ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400'
                                 : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400'
@@ -2490,8 +2490,15 @@ const RecipeDetail: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="mt-4">
-                        <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.techniquesForThisStep')}</label>
+                      <details
+                        className="mt-4 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white/60 dark:bg-zinc-900/60 px-3 py-2"
+                        // Same pattern as the step's ingredient picker: opened
+                        // once on mount when the step already has techniques.
+                        ref={el => { if (el && !el.dataset.init) { el.dataset.init = '1'; el.open = (step.techniqueIds || []).length > 0; } }}
+                      >
+                        <summary className="cursor-pointer text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 select-none">
+                          {t('recipeDetail.techniquesForThisStep')} — {(step.techniqueIds || []).length}
+                        </summary>
                         {allTechniques.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mt-1">
                             {allTechniques.map(tech => {
@@ -2538,7 +2545,7 @@ const RecipeDetail: React.FC = () => {
                             {t('recipeDetail.addTechnique')}
                           </button>
                         </div>
-                      </div>
+                      </details>
 
                       {(draft.ingredients || []).length > 0 && (
                         <details

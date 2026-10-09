@@ -1,0 +1,1 @@
+Corretti i pulsanti elimina e comprimi delle schede ingrediente che uscivano dalla scheda sui telefoni; le tecniche di ogni passaggio ora stanno in un menu a comparsa comprimibile.

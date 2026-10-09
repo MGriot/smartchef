@@ -1,0 +1,1 @@
+Fixed the ingredient card's delete and collapse buttons running off the card on phones, and each step's techniques now sit in a collapsible dropdown.
