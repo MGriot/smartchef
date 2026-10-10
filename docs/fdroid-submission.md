@@ -85,7 +85,7 @@ A recipe can be used as an ingredient of another one. A lasagne is pasta, ragù 
 
 ## Extra details for reviewers
 
-* Application ID: `com.smartchef.app`, current release v1.11.1 (versionCode 33), tagged `v1.11.1`.
+* Application ID: `com.smartchef.app`, current release v1.11.2 (versionCode 34), tagged `v1.11.2`.
 * Build recipe: [`fdroid/metadata/com.smartchef.app.yml`](../fdroid/metadata/com.smartchef.app.yml). The APK is a Capacitor shell around a Vite build, so Node (checksum-verified) is installed in `sudo:` and the web build runs in `build:`.
 * Fastlane metadata (title, descriptions, screenshots, changelogs in en-US and it-IT) is in `fastlane/metadata/android/`.
 * Anti-feature: `NonFreeNet`. The optional cloud language models are off by default; the default is a local Ollama.

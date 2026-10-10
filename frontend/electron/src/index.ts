@@ -288,28 +288,63 @@ ipcMain.handle('smartchef-geocode', async (_e, q: string, limit?: number, shape?
 // not streamed; Electron's IPC structured-clones Uint8Array directly (no
 // base64 needed, unlike the Capacitor plugin bridge's JSON-only channel
 // Android's equivalent, GitHttpPlugin.java, has to use).
+// Network-level failures that a second try often clears: a dropped or reset
+// connection, a DNS hiccup, an idle socket the other side closed. Node's
+// fetch reports all of them as the same unhelpful "TypeError: fetch failed";
+// the real reason is on `cause`.
+const TRANSIENT_NET_CODES = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH',
+  'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+]);
+
+function netErrorDetail(err: unknown): { code: string; text: string } {
+  const cause = (err as { cause?: { code?: string; message?: string } } | null)?.cause;
+  const code = cause?.code ?? '';
+  const text = [code, cause?.message].filter(Boolean).join(': ') || (err instanceof Error ? err.message : String(err));
+  return { code, text };
+}
+
 ipcMain.handle('smartchef-http-request', async (_e, req: { url: string; method: string; headers: Record<string, string>; body?: Uint8Array; timeoutMs?: number }) => {
-  const init: RequestInit & { duplex?: 'half' } = {
-    method: req.method,
-    headers: req.headers,
-  };
-  if (req.body) {
-    init.body = Buffer.from(req.body);
-    init.duplex = 'half'; // required by Node's fetch whenever a body is present, even a non-streamed one
+  // Retried only when the caller set a timeout, which is the LLM and
+  // page-fetch callers (lib/nativeHttp.ts). Git transport sets none and is
+  // never retried here: a push whose connection died mid-flight is not
+  // something to send twice blindly.
+  const attempts = req.timeoutMs ? 3 : 1;
+  for (let attempt = 1; ; attempt++) {
+    const init: RequestInit & { duplex?: 'half' } = {
+      method: req.method,
+      headers: req.headers,
+    };
+    if (req.body) {
+      init.body = Buffer.from(req.body);
+      init.duplex = 'half'; // required by Node's fetch whenever a body is present, even a non-streamed one
+    }
+    // Optional, and unset for git transport — a clone/push has always run
+    // unbounded here and a ceiling on it would be a behaviour change. The
+    // LLM callers (lib/nativeHttp.ts) do pass one: without it a wedged
+    // provider request has no way back at all, since the renderer cannot
+    // abort an in-flight ipcRenderer.invoke().
+    if (req.timeoutMs) {
+      init.signal = AbortSignal.timeout(req.timeoutMs);
+    }
+    try {
+      const response = await fetch(req.url, init);
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, key) => { headers[key] = value; });
+      const body = new Uint8Array(await response.arrayBuffer());
+      return { url: response.url, statusCode: response.status, statusMessage: response.statusText, headers, body };
+    } catch (err) {
+      const { code, text } = netErrorDetail(err);
+      const timedOut = (err as { name?: string } | null)?.name === 'TimeoutError';
+      if (attempt < attempts && !timedOut && TRANSIENT_NET_CODES.has(code)) {
+        await new Promise((r) => setTimeout(r, attempt * 1500));
+        continue;
+      }
+      let host = req.url;
+      try { host = new URL(req.url).host; } catch { /* keep the raw url */ }
+      throw new Error(timedOut ? `Request to ${host} timed out` : `Could not reach ${host} (${text})`);
+    }
   }
-  // Optional, and unset for git transport — a clone/push has always run
-  // unbounded here and a ceiling on it would be a behaviour change. The
-  // LLM callers (lib/nativeHttp.ts) do pass one: without it a wedged
-  // provider request has no way back at all, since the renderer cannot
-  // abort an in-flight ipcRenderer.invoke().
-  if (req.timeoutMs) {
-    init.signal = AbortSignal.timeout(req.timeoutMs);
-  }
-  const response = await fetch(req.url, init);
-  const headers: Record<string, string> = {};
-  response.headers.forEach((value, key) => { headers[key] = value; });
-  const body = new Uint8Array(await response.arrayBuffer());
-  return { url: response.url, statusCode: response.status, statusMessage: response.statusText, headers, body };
 });
 
 // Filesystem primitives for gitfs.ts's isomorphic-git adapter (see
