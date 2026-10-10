@@ -17,7 +17,7 @@ import { extractPdfText } from '../services/migration/pdfText';
 import { readImageText, ocrLanguageFor, OCR_MODEL_MB, type OcrProgress } from '../services/migration/ocr';
 import { proposeMatches, ProposedMatches } from '../services/matchSuggestions';
 import { matchUnitId, type MatchSuggestion } from '../lib/fuzzyMatch';
-import { defaultResolution, mergeSuggestions, newRowName, type Resolution } from '../lib/importMatching';
+import { defaultResolution, mergeSuggestions, newRowName, removeAt, shiftIndexKeys, shiftIndexSet, type Resolution } from '../lib/importMatching';
 
 /** What POST /api/ingredients/ai-name answers per item. */
 interface IngredientNaming {
@@ -475,8 +475,11 @@ export default function RecipeImport() {
    *  created. Best effort and silent on failure (no provider reachable,
    *  or server mode, which has no such route): the rows then just keep the
    *  recipe's own wording as the suggested name. */
-  const requestNaming = async (d: TemplateParseResult, indices: number[]) => {
-    const todo = indices.filter((i) => !naming[i] && !namingPending.has(i) && d.ingredients[i]?.name?.trim());
+  const requestNaming = async (d: TemplateParseResult, indices: number[], retry = false) => {
+    // `retry` re-asks for rows whose request was cancelled by a removal:
+    // they are pending by definition, and the state this closure sees is
+    // from before the removal, so the usual guards would skip them.
+    const todo = indices.filter((i) => (retry || (!naming[i] && !namingPending.has(i))) && d.ingredients[i]?.name?.trim());
     if (!todo.length) return;
     const generation = namingGeneration.current;
     setNamingPending((prev) => new Set([...prev, ...todo]));
@@ -502,6 +505,47 @@ export default function RecipeImport() {
         });
       }
     }
+  };
+
+  // Dropping a review row. Everything the save reads is addressed by index
+  // (the parallel resolution arrays) or by name (steps, suggestions), so
+  // the index-keyed pieces move together and the name-keyed ones need
+  // nothing: a step that mentioned a removed tool or ingredient just stops
+  // linking to it at save time.
+  const removeIngredient = (index: number) => {
+    if (!draft) return;
+    const nextDraft = { ...draft, ingredients: removeAt(draft.ingredients, index) };
+    const nextPending = shiftIndexSet(namingPending, index);
+    // An in-flight naming request carries pre-removal indices; discard it
+    // and ask again for the rows still waiting, under their new indices.
+    namingGeneration.current++;
+    setSearchQuery(null);
+    setDraft(nextDraft);
+    setIngredientRes((prev) => removeAt(prev, index));
+    setNaming((prev) => shiftIndexKeys(prev, index));
+    setNamingPending(new Set());
+    if (nextPending.size) void requestNaming(nextDraft, [...nextPending], true);
+  };
+
+  const removeTool = (index: number) => {
+    if (!draft) return;
+    setSearchQuery(null);
+    setDraft({ ...draft, tools: removeAt(draft.tools, index) });
+    setToolRes((prev) => removeAt(prev, index));
+  };
+
+  const removeTechnique = (index: number) => {
+    setSearchQuery(null);
+    setTechniqueNames((prev) => removeAt(prev, index));
+    setTechniqueRes((prev) => removeAt(prev, index));
+  };
+
+  const removeStep = (index: number) => {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      steps: removeAt(draft.steps, index).map((s, i) => ({ ...s, stepNumber: i + 1 })),
+    });
   };
 
   /** Re-scores everything in a different language. Every resolution is
@@ -1045,6 +1089,18 @@ export default function RecipeImport() {
     }
   };
 
+  const removeButton = (onClick: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      title={t('common.delete')}
+      aria-label={t('common.delete')}
+      className="shrink-0 -mt-1 -mr-1 p-1 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+    >
+      <span className="material-symbols-outlined text-lg">delete</span>
+    </button>
+  );
+
   const renderResolutionRow = (
     kind: 'ingredient' | 'tool' | 'technique',
     index: number,
@@ -1052,6 +1108,7 @@ export default function RecipeImport() {
     sugs: MatchSuggestion[],
     resolution: Resolution | undefined,
     setResolution: (r: Resolution) => void,
+    onRemove?: () => void,
     extra?: React.ReactNode
   ) => {
     const isSearching = searchQuery?.kind === kind && searchQuery.index === index;
@@ -1061,7 +1118,10 @@ export default function RecipeImport() {
     const namingBusy = kind === 'ingredient' && namingPending.has(index);
     return (
       <div key={`${kind}-${index}`} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 bg-zinc-50/50 dark:bg-zinc-900/50">
-        <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mb-2">{name}</p>
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 min-w-0 break-words">{name}</p>
+          {onRemove && removeButton(onRemove)}
+        </div>
         <div className="space-y-1.5">
           {sugs.map((s) => (
             <label key={s.id} className="flex items-center gap-2 text-xs cursor-pointer">
@@ -1723,7 +1783,8 @@ export default function RecipeImport() {
                                  'ingredient', i, ing.name,
                                  suggestions?.ingredients[ing.name] || [],
                                  ingredientRes[i],
-                                 (r) => setIngredientRes((prev) => prev.map((p, idx) => (idx === i ? r : p)))
+                                 (r) => setIngredientRes((prev) => prev.map((p, idx) => (idx === i ? r : p))),
+                                 () => removeIngredient(i)
                                )
                              )}
                            </div>
@@ -1739,7 +1800,8 @@ export default function RecipeImport() {
                                  'tool', i, name,
                                  suggestions?.tools[name] || [],
                                  toolRes[i],
-                                 (r) => setToolRes((prev) => prev.map((p, idx) => (idx === i ? r : p)))
+                                 (r) => setToolRes((prev) => prev.map((p, idx) => (idx === i ? r : p))),
+                                 () => removeTool(i)
                                )
                              )}
                            </div>
@@ -1755,9 +1817,27 @@ export default function RecipeImport() {
                                  'technique', i, name,
                                  suggestions?.techniques[name] || [],
                                  techniqueRes[i],
-                                 (r) => setTechniqueRes((prev) => prev.map((p, idx) => (idx === i ? r : p)))
+                                 (r) => setTechniqueRes((prev) => prev.map((p, idx) => (idx === i ? r : p))),
+                                 () => removeTechnique(i)
                                )
                              )}
+                           </div>
+                         </>
+                       )}
+
+                       {draft.steps.length > 0 && (
+                         <>
+                           <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">{t('import.stepsCount', { count: draft.steps.length })}</p>
+                           <div className="space-y-3 mb-6">
+                             {draft.steps.map((step, i) => (
+                               <div key={`step-${i}`} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 bg-zinc-50/50 dark:bg-zinc-900/50 flex items-start justify-between gap-2">
+                                 <div className="min-w-0">
+                                   <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 break-words">{step.stepNumber}. {step.title || step.description.slice(0, 80)}</p>
+                                   {step.title && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-2">{step.description}</p>}
+                                 </div>
+                                 {removeButton(() => removeStep(i))}
+                               </div>
+                             ))}
                            </div>
                          </>
                        )}

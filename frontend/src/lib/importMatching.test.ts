@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeSuggestions, defaultResolution } from './importMatching';
+import { mergeSuggestions, defaultResolution, removeAt, shiftIndexKeys, shiftIndexSet } from './importMatching';
 import type { MatchSuggestion } from './fuzzyMatch';
 
 const s = (id: string, name: string, score: number): MatchSuggestion => ({ id, name, score });
@@ -78,5 +78,24 @@ describe('defaultResolution', () => {
   it('pre-selects a catalog-claimed match, since it scores 1.0', () => {
     const merged = mergeSuggestions([], [s('b', 'Stand Mixer', 1)]);
     expect(defaultResolution(merged)).toEqual({ choice: 'existing', id: 'b', name: 'Stand Mixer' });
+  });
+});
+
+describe('removing a review row', () => {
+  it('removeAt drops one entry without mutating the input', () => {
+    const src = ['a', 'b', 'c'];
+    expect(removeAt(src, 1)).toEqual(['a', 'c']);
+    expect(removeAt(src, 0)).toEqual(['b', 'c']);
+    expect(removeAt(src, 2)).toEqual(['a', 'b']);
+    expect(src).toEqual(['a', 'b', 'c']);
+  });
+
+  it('shiftIndexKeys keeps rows below, drops the removed one, moves rows above down', () => {
+    expect(shiftIndexKeys({ 0: 'a', 1: 'b', 3: 'd' }, 1)).toEqual({ 0: 'a', 2: 'd' });
+    expect(shiftIndexKeys({ 0: 'a' }, 2)).toEqual({ 0: 'a' });
+  });
+
+  it('shiftIndexSet does the same for a set of indices', () => {
+    expect([...shiftIndexSet(new Set([0, 2, 4]), 2)].sort()).toEqual([0, 3]);
   });
 });

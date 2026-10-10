@@ -788,6 +788,7 @@
     "newToolCreated": "Nuevo utensilio creado",
     "matchedToExistingTool": "Coincide con un utensilio existente",
     "techniquesCount": "Técnicas ({{count}})",
+    "stepsCount": "Pasos ({{count}})",
     "reviewMatches": "Revisar coincidencias",
     "untitledRecipe": "Receta sin título",
     "findingMatches": "Buscando ingredientes, utensilios y técnicas coincidentes…",

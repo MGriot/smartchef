@@ -88,3 +88,31 @@ export function mergeSuggestions(
 
   return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, limit);
 }
+
+/** The review card keeps ingredients, tools and techniques as parallel
+ *  arrays (the parsed names, their resolutions) plus a few maps keyed by
+ *  row index. Dropping a row has to move all of them together, or every
+ *  row after it silently inherits its neighbour's choice. */
+export function removeAt<T>(items: readonly T[], index: number): T[] {
+  return items.filter((_, i) => i !== index);
+}
+
+/** Drops `removed` from an index-keyed record and moves the keys above it down by one. */
+export function shiftIndexKeys<T>(record: Record<number, T>, removed: number): Record<number, T> {
+  const out: Record<number, T> = {};
+  for (const [k, v] of Object.entries(record)) {
+    const i = Number(k);
+    if (i === removed) continue;
+    out[i > removed ? i - 1 : i] = v;
+  }
+  return out;
+}
+
+export function shiftIndexSet(set: ReadonlySet<number>, removed: number): Set<number> {
+  const out = new Set<number>();
+  for (const i of set) {
+    if (i === removed) continue;
+    out.add(i > removed ? i - 1 : i);
+  }
+  return out;
+}

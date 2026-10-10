@@ -788,6 +788,7 @@
     "newToolCreated": "New tool created",
     "matchedToExistingTool": "Matched to existing tool",
     "techniquesCount": "Techniques ({{count}})",
+    "stepsCount": "Steps ({{count}})",
     "reviewMatches": "Review Matches",
     "untitledRecipe": "Untitled recipe",
     "findingMatches": "Finding matching ingredients, tools, and techniques…",
