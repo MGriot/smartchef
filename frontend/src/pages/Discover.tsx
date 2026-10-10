@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
@@ -8,7 +8,7 @@ import { getSetting } from '../lib/settingsRegistry';
 import { subscribeSettings } from '../lib/settingsCache';
 import { loadDiscover, type DiscoverResult } from '../services/feeds';
 
-const PAGE_SIZE = 40;
+const PAGE_SIZE = 25;
 
 /** Recipe titles from the sites the user follows, like an RSS reader. A title
  *  opens the original page in the browser; "Import" sends the page through the
@@ -21,32 +21,47 @@ export default function Discover() {
   const [loading, setLoading] = useState(true);
   const [only, setOnly] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [shown, setShown] = useState(PAGE_SIZE);
+  const [page, setPage] = useState(0);
 
   // A source added or removed in Settings (or arriving by sync) shows up here.
   useEffect(() => subscribeSettings(() => setSources(getSetting<FeedSource[]>(DISCOVER_SOURCES))), []);
 
+  // Only the sources in view are fetched: a chip loads that one site, "All"
+  // loads them a few at a time. A stale response (the user switched chips
+  // meanwhile) is dropped by the token check.
+  const loadToken = useRef(0);
   const load = useCallback(async (force: boolean) => {
+    const token = ++loadToken.current;
+    const scope = only ? sources.filter((s) => s.id === only) : sources;
     setLoading(true);
     try {
-      setResult(await loadDiscover(sources, force));
+      const final = await loadDiscover(scope, force, (partial) => {
+        if (token === loadToken.current) setResult(partial);
+      });
+      if (token === loadToken.current) setResult(final);
     } finally {
-      setLoading(false);
+      if (token === loadToken.current) setLoading(false);
     }
-  }, [sources]);
+  }, [sources, only]);
 
   useEffect(() => { void load(false); }, [load]);
+  // A new filter or search starts again from the first page.
+  useEffect(() => { setPage(0); }, [only, query]);
 
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (result?.items ?? []).filter((i) => (!only || i.sourceId === only) && (!q || i.title.toLowerCase().includes(q)));
   }, [result, only, query]);
 
+  const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const current = Math.min(page, pageCount - 1);
+  const pageItems = items.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
+
   const failed = sources.filter((s) => result?.errors[s.id]);
 
   return (
     <AppLayout>
-      <div className="p-6 sm:p-12 max-w-4xl mx-auto">
+      <div className="p-6 sm:p-12 max-w-7xl mx-auto">
         <div className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-black text-zinc-900 dark:text-zinc-100">{t('discover.title')}</h1>
@@ -74,7 +89,7 @@ export default function Discover() {
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-[20px]">search</span>
               <input
                 value={query}
-                onChange={(e) => { setQuery(e.target.value); setShown(PAGE_SIZE); }}
+                onChange={(e) => setQuery(e.target.value)}
                 placeholder={t('discover.search')}
                 className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pl-10 pr-4 py-2.5 text-sm font-medium text-zinc-900 dark:text-zinc-100 outline-none focus:border-primary"
               />
@@ -85,7 +100,7 @@ export default function Discover() {
                 <button
                   key={s.id ?? 'all'}
                   type="button"
-                  onClick={() => { setOnly(s.id); setShown(PAGE_SIZE); }}
+                  onClick={() => setOnly(s.id)}
                   className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-black transition-colors ${
                     only === s.id
                       ? 'bg-primary text-white'
@@ -114,30 +129,63 @@ export default function Discover() {
               <p className="py-12 text-center text-zinc-500 dark:text-zinc-400 font-medium">{t('discover.empty')}</p>
             )}
 
-            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {items.slice(0, shown).map((item) => (
-                <li key={`${item.sourceId}:${item.link}`} className="flex items-center gap-4 py-3">
-                  {item.image ? (
-                    <img src={item.image} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-16 w-16 shrink-0 rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" />
-                  ) : (
-                    <span className="h-16 w-16 shrink-0 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-300 dark:text-zinc-600">
-                      <span className="material-symbols-outlined">restaurant</span>
-                    </span>
-                  )}
-                  <div className="min-w-0 flex-1">
+            {/* A list of rows on a phone, a grid of cards like the gallery from md up. */}
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800 md:divide-y-0 md:grid md:grid-cols-2 xl:grid-cols-3 md:gap-7">
+              {pageItems.map((item) => (
+                <li
+                  key={`${item.sourceId}:${item.link}`}
+                  className="group flex items-center gap-4 py-3 md:py-0 md:flex-col md:items-stretch md:gap-0 md:bg-white md:dark:bg-zinc-900 md:rounded-3xl md:overflow-hidden md:shadow-[0_2px_16px_rgba(0,0,0,0.05)] md:hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] md:transition-all md:duration-300 md:hover:-translate-y-1"
+                >
+                  <a
+                    href={item.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    className="shrink-0 md:block md:w-full md:aspect-[4/3] md:overflow-hidden"
+                  >
+                    {item.image ? (
+                      <img src={item.image} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-16 w-16 rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800 md:h-full md:w-full md:rounded-none md:transition-transform md:duration-500 md:group-hover:scale-105" />
+                    ) : (
+                      <span className="h-16 w-16 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-300 dark:text-zinc-600 md:h-full md:w-full md:rounded-none">
+                        <span className="material-symbols-outlined md:text-[48px]">restaurant</span>
+                      </span>
+                    )}
+                  </a>
+                  <div className="min-w-0 flex-1 md:flex md:flex-col md:p-6">
                     <a
                       href={item.link}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="block font-bold text-zinc-900 dark:text-zinc-100 hover:text-primary leading-snug break-words"
+                      className="block font-bold text-zinc-900 dark:text-zinc-100 hover:text-primary leading-snug break-words md:font-headline md:text-xl md:line-clamp-3"
                     >
                       {item.title}
                     </a>
-                    <p className="mt-0.5 text-xs font-medium text-zinc-400 dark:text-zinc-500">
+                    <p className="mt-0.5 text-xs font-medium text-zinc-400 dark:text-zinc-500 md:mt-2 md:text-sm">
                       {item.sourceName}{item.published ? ` · ${formatRelativeTime(item.published, { days: true })}` : ''}
                     </p>
+                    <div className="hidden md:flex items-center gap-2 mt-5 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/import?url=${encodeURIComponent(item.link)}`)}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black text-primary bg-primary/5 hover:bg-primary/10"
+                      >
+                        <span className="material-symbols-outlined text-[20px]">download</span>
+                        {t('discover.importToGallery')}
+                      </button>
+                      <a
+                        href={item.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={t('discover.openInBrowser')}
+                        aria-label={t('discover.openInBrowser')}
+                        className="rounded-xl p-2.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        <span className="material-symbols-outlined text-[22px]">open_in_new</span>
+                      </a>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1 md:hidden">
                     <button
                       type="button"
                       onClick={() => navigate(`/import?url=${encodeURIComponent(item.link)}`)}
@@ -163,14 +211,30 @@ export default function Discover() {
               ))}
             </ul>
 
-            {items.length > shown && (
-              <button
-                type="button"
-                onClick={() => setShown((n) => n + PAGE_SIZE)}
-                className="mt-4 w-full rounded-2xl border border-zinc-200 dark:border-zinc-700 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-              >
-                {t('discover.showMore')}
-              </button>
+            {pageCount > 1 && (
+              <nav className="mt-6 flex items-center justify-between gap-3" aria-label={t('discover.pagination')}>
+                <button
+                  type="button"
+                  disabled={current === 0}
+                  onClick={() => { setPage(current - 1); window.scrollTo({ top: 0 }); }}
+                  className="flex items-center gap-1 rounded-2xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+                  {t('discover.previous')}
+                </button>
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                  {t('discover.pageOf', { page: current + 1, total: pageCount })}
+                </span>
+                <button
+                  type="button"
+                  disabled={current >= pageCount - 1}
+                  onClick={() => { setPage(current + 1); window.scrollTo({ top: 0 }); }}
+                  className="flex items-center gap-1 rounded-2xl border border-zinc-200 dark:border-zinc-700 px-4 py-2.5 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  {t('discover.next')}
+                  <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                </button>
+              </nav>
             )}
           </>
         )}

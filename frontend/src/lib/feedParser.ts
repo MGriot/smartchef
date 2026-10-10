@@ -83,12 +83,20 @@ function dateOf(block: string): string | null {
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
 
-/** Newest first when the feed carries dates; feed order otherwise. */
-export function parseFeed(xml: string, limit = 60): ParsedFeed {
-  const blocks = [...xml.matchAll(/<(item|entry)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gi)].map((m) => m[0]);
-  const head = xml.slice(0, blocks.length ? xml.indexOf(blocks[0]) : xml.length);
+/** Newest first when the feed carries dates; feed order otherwise.
+ *
+ *  Only the first `limit` entries are read. A feed is one big document (SBS
+ *  Food's is 500 entries, 670 KB) and feeds list newest first, so scanning the
+ *  rest would only cost time and memory for titles nobody pages to. */
+export function parseFeed(xml: string, limit = 50): ParsedFeed {
+  const re = /<(item|entry)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gi;
   const items: FeedItem[] = [];
-  for (const b of blocks) {
+  let headEnd = xml.length;
+  let scanned = 0;
+  for (let m = re.exec(xml); m && scanned < limit * 2 && items.length < limit; m = re.exec(xml)) {
+    if (scanned === 0) headEnd = m.index;
+    scanned++;
+    const b = m[0];
     const title = plain(tagText(b, 'title'));
     const link = linkOf(b);
     if (!title || !link) continue;
@@ -96,7 +104,7 @@ export function parseFeed(xml: string, limit = 60): ParsedFeed {
   }
   const dated = items.some((i) => i.published);
   if (dated) items.sort((a, b) => (b.published ?? '').localeCompare(a.published ?? ''));
-  return { title: plain(tagText(head, 'title')) || null, items: items.slice(0, limit) };
+  return { title: plain(tagText(xml.slice(0, headEnd), 'title')) || null, items };
 }
 
 /** True when the text is a feed (has items/entries, or a feed/channel root). */

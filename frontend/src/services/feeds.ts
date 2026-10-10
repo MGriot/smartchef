@@ -61,18 +61,35 @@ async function loadOne(source: FeedSource, force: boolean): Promise<{ items: Fee
   }
 }
 
-/** Loads every source in parallel; each settles on its own. */
-export async function loadDiscover(sources: FeedSource[], force = false): Promise<DiscoverResult> {
-  const settled = await Promise.all(sources.map((s) => loadOne(s, force)));
+/** At most this many feeds are in flight at once: each response is parsed and
+ *  decoded on the UI thread, and on Android every byte crosses the plugin bridge. */
+const CONCURRENCY = 3;
+
+const byNewest = (a: DiscoverItem, b: DiscoverItem) => (b.published ?? '').localeCompare(a.published ?? '');
+
+/** Loads the given sources a few at a time, handing the merged list so far to
+ *  `onUpdate` after each one, so the first page appears without waiting for
+ *  the slowest site. Each source keeps only its newest entries (see parseFeed). */
+export async function loadDiscover(
+  sources: FeedSource[],
+  force = false,
+  onUpdate?: (partial: DiscoverResult) => void,
+): Promise<DiscoverResult> {
   const items: DiscoverItem[] = [];
   const errors: Record<string, string> = {};
-  sources.forEach((s, i) => {
-    const r = settled[i];
-    if (r.error && r.items.length === 0) errors[s.id] = r.error;
-    for (const it of r.items) items.push({ ...it, sourceId: s.id, sourceName: s.name });
-  });
-  items.sort((a, b) => (b.published ?? '').localeCompare(a.published ?? ''));
-  return { items, errors };
+  const snapshot = (): DiscoverResult => ({ items: [...items].sort(byNewest), errors: { ...errors } });
+  let next = 0;
+  const worker = async () => {
+    while (next < sources.length) {
+      const s = sources[next++];
+      const r = await loadOne(s, force);
+      if (r.error && r.items.length === 0) errors[s.id] = r.error;
+      for (const it of r.items) items.push({ ...it, sourceId: s.id, sourceName: s.name });
+      onUpdate?.(snapshot());
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, sources.length) }, worker));
+  return snapshot();
 }
 
 /** Accepts a feed URL or a site's address: if the address is a page, the

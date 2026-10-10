@@ -29,7 +29,7 @@ interface IngredientNaming {
 }
 import { repairIngredientAmount } from '../lib/ingredientAmount';
 import { checkMediaForProvider } from '../lib/llmMedia';
-import { matchStepIngredients, linkIngredientsInText } from '../lib/stepRefs';
+import { matchStepIngredients, linkIngredientsInText, normalizeName } from '../lib/stepRefs';
 import { linkEntitiesInText, resolveRegions } from '../lib/importLinking';
 import { isAreaResult } from '../lib/geocodeTypes';
 
@@ -703,7 +703,7 @@ export default function RecipeImport() {
           isNew = true;
         }
         matchedTools.push({ toolId, toolName: resolution?.choice === 'existing' ? resolution.name : newRowName(resolution, name), isNew });
-        toolIdByName.set(name, toolId);
+        toolIdByName.set(normalizeName(name), toolId);
       }
 
       const techniqueIdByName = new Map<string, string>();
@@ -723,16 +723,32 @@ export default function RecipeImport() {
           if (!createRes.ok) throw new Error(typeof createJson.error === 'string' ? createJson.error : t('import.couldNotCreate', { name }));
           techniqueId = createJson.data.id;
         }
-        techniqueIdByName.set(name, techniqueId);
+        techniqueIdByName.set(normalizeName(name), techniqueId);
       }
 
       // For turning a step's prose into {{tool:…}} / {{tech:…}} references:
       // each entity with every wording it may appear under.
-      const toolLinkTargets = matchedTools.map((m, i) => ({ id: m.toolId, names: [draft.tools[i], m.toolName] }));
-      const techLinkTargets = techniqueNames.map((n, i) => ({
-        id: techniqueIdByName.get(n) as string,
-        names: [n, techniqueRes[i]?.choice === 'existing' ? techniqueRes[i].name : newRowName(techniqueRes[i], n)],
-      })).filter((x) => !!x.id);
+      //
+      // The model names tools and techniques in English while the prose is in
+      // the recipe's language, so an existing entity is also linked under every
+      // name the library knows it by (translation and synonyms).
+      const libraryNames = async (path: string): Promise<Map<string, string[]>> => {
+        try {
+          const rows: Array<{ id: string; name: string; translated_name?: string | null; synonyms?: string[] | null }> = (await (await apiFetch(path)).json()).data ?? [];
+          return new Map(rows.map((r) => [r.id, [r.name, r.translated_name, ...(r.synonyms ?? [])].filter((n): n is string => !!n)]));
+        } catch {
+          return new Map();
+        }
+      };
+      const [libTools, libTechniques] = await Promise.all([libraryNames('/api/tools'), libraryNames('/api/techniques')]);
+      const toolLinkTargets = matchedTools.map((m, i) => ({ id: m.toolId, names: [draft.tools[i], m.toolName, ...(libTools.get(m.toolId) ?? [])] }));
+      const techLinkTargets = techniqueNames.map((n, i) => {
+        const id = techniqueIdByName.get(normalizeName(n)) as string;
+        return {
+          id,
+          names: [n, techniqueRes[i]?.choice === 'existing' ? techniqueRes[i].name : newRowName(techniqueRes[i], n), ...(libTechniques.get(id) ?? [])],
+        };
+      }).filter((x) => !!x.id);
 
       // Where the dish comes from. Geocoding is best-effort and mirrors what
       // RegionPicker does when a place is typed in by hand.
@@ -803,8 +819,8 @@ export default function RecipeImport() {
         // the prose becomes an inline {{ing:N}} reference.
         steps: draft.steps.map((s) => {
           const stepIngredients = matchStepIngredients(s.ingredients, draftIngredientsForSteps);
-          const stepToolIds = [...new Set((s.tools ?? []).map((n) => toolIdByName.get(n)).filter((id): id is string => !!id))];
-          const stepTechIds = [...new Set((s.techniques ?? []).map((n) => techniqueIdByName.get(n)).filter((id): id is string => !!id))];
+          const stepToolIds = [...new Set((s.tools ?? []).map((n) => toolIdByName.get(normalizeName(n))).filter((id): id is string => !!id))];
+          const stepTechIds = [...new Set((s.techniques ?? []).map((n) => techniqueIdByName.get(normalizeName(n))).filter((id): id is string => !!id))];
           let description = linkIngredientsInText(s.description, stepIngredients, draftIngredientsForSteps);
           description = linkEntitiesInText(description, 'tool', toolLinkTargets.filter((x) => stepToolIds.includes(x.id)));
           description = linkEntitiesInText(description, 'tech', techLinkTargets.filter((x) => stepTechIds.includes(x.id)));

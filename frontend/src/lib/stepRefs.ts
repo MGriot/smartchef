@@ -35,6 +35,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { parseAmount } from './ingredientAmount';
+import { findMention } from './nameMatch';
 
 export type StepRefType = 'ing' | 'tool' | 'tech';
 
@@ -326,10 +327,8 @@ export function linkIngredientsInText(
     // anything already referenced.
     if (name.length < 3) continue;
     if (new RegExp(String.raw`\{\{ing:${ref.ingredientSortOrder}[|}]`).test(out)) continue;
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(String.raw`(^|[^\p{L}\p{N}])` + `(${escaped})` + String.raw`(?![\p{L}\p{N}])`, 'iu');
-    if (!re.test(out)) continue;
-    out = out.replace(re, (_m, before: string) => `${before}${buildRef('ing', ref.ingredientSortOrder)}`);
+    const hit = findMention(out, [name], 'noun');
+    if (hit) out = out.slice(0, hit.start) + buildRef('ing', ref.ingredientSortOrder) + out.slice(hit.end);
   }
   return out;
 }

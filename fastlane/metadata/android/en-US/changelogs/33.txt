@@ -1,0 +1,1 @@
+Discover shows 25 recipes per page in a gallery-style grid on large screens. Recipe import now links ingredients, tools and techniques in the steps much more reliably.

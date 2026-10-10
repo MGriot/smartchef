@@ -9,6 +9,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { buildRef } from './stepRefs';
+import { findMention } from './nameMatch';
 import { isCountryCode, countryDisplayName } from './countries';
 
 export interface LinkTarget {
@@ -31,16 +32,8 @@ export function linkEntitiesInText(text: string, type: 'tool' | 'tech', targets:
   for (const target of targets) {
     const already = new RegExp(String.raw`\{\{${type}:${target.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[|}]`);
     if (already.test(out)) continue;
-    // Longest first, so "stand mixer" wins over "mixer".
-    const names = [...new Set(target.names.map((n) => n.trim()).filter((n) => n.length >= 3))]
-      .sort((a, b) => b.length - a.length);
-    for (const name of names) {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(String.raw`(^|[^\p{L}\p{N}{}:|])` + `(${escaped})` + String.raw`(?![\p{L}\p{N}])`, 'iu');
-      if (!re.test(out)) continue;
-      out = out.replace(re, (_m, before: string) => `${before}${buildRef(type, target.id)}`);
-      break;
-    }
+    const hit = findMention(out, target.names.filter((n) => typeof n === 'string'), type === 'tech' ? 'verb' : 'noun');
+    if (hit) out = out.slice(0, hit.start) + buildRef(type, target.id) + out.slice(hit.end);
   }
   return out;
 }

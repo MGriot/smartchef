@@ -34,6 +34,15 @@ describe('parseFeed', () => {
   });
 });
 
+describe('parseFeed bounds', () => {
+  it('reads only the newest entries of a very long feed', () => {
+    const entries = Array.from({ length: 500 }, (_, i) => `<item><title>T${i}</title><link>https://x.test/${i}</link><pubDate>Fri, 09 Oct 2026 10:00:00 GMT</pubDate></item>`).join('');
+    const f = parseFeed(`<rss><channel><title>Big</title>${entries}</channel></rss>`);
+    expect(f.items).toHaveLength(50);
+    expect(f.title).toBe('Big');
+  });
+});
+
 describe('feed detection', () => {
   it('tells a feed from a page and finds advertised feeds', () => {
     expect(looksLikeFeed(rss)).toBe(true);

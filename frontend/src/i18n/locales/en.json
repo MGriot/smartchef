@@ -1979,7 +1979,10 @@
     "someFailed": "Could not load: {{names}}.",
     "importToGallery": "Import to gallery",
     "openInBrowser": "Open in browser",
-    "showMore": "Show more",
-    "import": "Import"
+    "import": "Import",
+    "pagination": "Pagination",
+    "previous": "Previous",
+    "next": "Next",
+    "pageOf": "Page {{page}} of {{total}}"
   }
 }

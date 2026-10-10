@@ -1979,7 +1979,10 @@
     "someFailed": "Chargement impossible : {{names}}.",
     "importToGallery": "Importer dans la galerie",
     "openInBrowser": "Ouvrir dans le navigateur",
-    "showMore": "Afficher plus",
-    "import": "Importer"
+    "import": "Importer",
+    "pagination": "Pagination",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "pageOf": "Page {{page}} sur {{total}}"
   }
 }
