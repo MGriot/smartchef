@@ -1,7 +1,7 @@
 import type { CapacitorElectronConfig } from '@capacitor-community/electron';
 import { getCapacitorElectronConfig, setupElectronDeepLinking } from '@capacitor-community/electron';
 import type { MenuItemConstructorOptions } from 'electron';
-import { app, BrowserWindow, dialog, ipcMain, MenuItem } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, MenuItem, net } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import electronIsDev from 'electron-is-dev';
@@ -289,13 +289,16 @@ ipcMain.handle('smartchef-geocode', async (_e, q: string, limit?: number, shape?
 // base64 needed, unlike the Capacitor plugin bridge's JSON-only channel
 // Android's equivalent, GitHttpPlugin.java, has to use).
 // Network-level failures that a second try often clears: a dropped or reset
-// connection, a DNS hiccup, an idle socket the other side closed. Node's
-// fetch reports all of them as the same unhelpful "TypeError: fetch failed";
-// the real reason is on `cause`.
+// connection, a DNS hiccup, an idle socket the other side closed. Electron's
+// net.fetch (Chromium's network stack, so it has happy-eyeballs and honours
+// the OS proxy, unlike Node's undici fetch which timed out dialling a dead
+// IPv6 address) reports them as "net::ERR_*" in the error message.
 const TRANSIENT_NET_CODES = new Set([
   'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH',
   'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
 ]);
+
+const TRANSIENT_NET_RE = /net::ERR_(CONNECTION_(RESET|TIMED_OUT|CLOSED)|TIMED_OUT|NAME_NOT_RESOLVED|NETWORK_CHANGED|INTERNET_DISCONNECTED|EMPTY_RESPONSE)/;
 
 function netErrorDetail(err: unknown): { code: string; text: string } {
   const cause = (err as { cause?: { code?: string; message?: string } } | null)?.cause;
@@ -328,7 +331,7 @@ ipcMain.handle('smartchef-http-request', async (_e, req: { url: string; method: 
       init.signal = AbortSignal.timeout(req.timeoutMs);
     }
     try {
-      const response = await fetch(req.url, init);
+      const response = await net.fetch(req.url, init);
       const headers: Record<string, string> = {};
       response.headers.forEach((value, key) => { headers[key] = value; });
       const body = new Uint8Array(await response.arrayBuffer());
@@ -336,7 +339,7 @@ ipcMain.handle('smartchef-http-request', async (_e, req: { url: string; method: 
     } catch (err) {
       const { code, text } = netErrorDetail(err);
       const timedOut = (err as { name?: string } | null)?.name === 'TimeoutError';
-      if (attempt < attempts && !timedOut && TRANSIENT_NET_CODES.has(code)) {
+      if (attempt < attempts && !timedOut && (TRANSIENT_NET_CODES.has(code) || TRANSIENT_NET_RE.test(text))) {
         await new Promise((r) => setTimeout(r, attempt * 1500));
         continue;
       }
