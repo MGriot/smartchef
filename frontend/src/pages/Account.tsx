@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
+import DiscoverSourcesCard from '../components/DiscoverSourcesCard';
 import { useStore } from '../store/app.store';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
@@ -2701,6 +2702,7 @@ export default function Account() {
         <div className="xl:col-span-5 space-y-6 sm:space-y-8 min-w-0">
           <AppearanceCard />
           <LanguagesCard />
+          <DiscoverSourcesCard />
           <LlmProviderCard />
           <BackupCard />
           {standalone && <AllProfilesCard />}

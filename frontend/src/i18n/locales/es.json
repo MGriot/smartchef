@@ -15,7 +15,8 @@
     "search": "Buscar",
     "createRecipe": "Crear Receta",
     "atlas": "Atlas",
-    "pantry": "Despensa"
+    "pantry": "Despensa",
+    "discover": "Descubrir"
   },
   "atlas": {
     "title": "Atlas",
@@ -497,13 +498,14 @@
       "apply": "Aplicar {{count}} seleccionados",
       "failed": "La revisión con IA falló.",
       "step": "Paso {{n}}",
-      "stepDuration": "Tiempo del paso {{n}}: {{before}} → {{after}}",
+      "stepDuration": "Tiempo del paso {{n}}",
       "ingredients": "Ingredientes",
       "tools": "Utensilios",
       "techniques": "Técnicas",
       "notes": "Notas",
       "unmatched": "No están en tu biblioteca, omitidos: {{names}}",
       "group": {
+        "text": "Ortografía",
         "ingredients": "Cantidades de ingredientes",
         "steps": "Pasos",
         "fields": "Raciones, tiempos y rendimiento",
@@ -520,6 +522,18 @@
       "kind": {
         "fix": "corrección",
         "fill": "completar"
+      },
+      "quantity": "cantidad",
+      "selectAll": "Seleccionar todo",
+      "selectNone": "Quitar selección",
+      "target": {
+        "title": "Título",
+        "description": "Descripción",
+        "tips": "Consejos",
+        "storage": "Conservación",
+        "ingredientName": "Nombre del ingrediente {{n}}",
+        "stepTitle": "Título del paso {{n}}",
+        "stepText": "Texto del paso {{n}}"
       }
     },
     "saving": "Guardando…",
@@ -1709,6 +1723,19 @@
       "profile": "Perfil",
       "category": "Categoría",
       "unit": "Unidad"
+    },
+    "discoverSources": {
+      "heading": "Fuentes de Descubrir",
+      "subtitle": "Los sitios cuyos títulos aparecen en Descubrir. Compartidos entre tus dispositivos.",
+      "add": "Añadir",
+      "placeholder": "Dirección del sitio o del feed (p. ej. ejemplo.es)",
+      "adding": "Comprobando…",
+      "remove": "Quitar",
+      "reset": "Restaurar la lista predeterminada",
+      "none": "Sin fuentes. Añade una abajo.",
+      "noFeed": "Ese sitio no publica un feed que la app pueda leer.",
+      "failed": "No se pudo acceder a esa dirección.",
+      "duplicate": "Ya está en la lista."
     }
   },
   "connect": {
@@ -1938,5 +1965,21 @@
     "hour_other": "{{count}} horas",
     "minute_one": "{{count}} minuto",
     "minute_other": "{{count}} minutos"
+  },
+  "discover": {
+    "title": "Descubrir",
+    "subtitle": "Títulos de recetas de los sitios que sigues. Ábrelos en el navegador o impórtalos a tu galería.",
+    "refresh": "Actualizar",
+    "search": "Buscar en los títulos…",
+    "all": "Todos",
+    "loading": "Cargando feeds…",
+    "empty": "No hay títulos que mostrar.",
+    "noSources": "Todavía no sigues ningún sitio.",
+    "manageSources": "Añadir sitios en los ajustes",
+    "someFailed": "No se pudo cargar: {{names}}.",
+    "importToGallery": "Importar a la galería",
+    "openInBrowser": "Abrir en el navegador",
+    "showMore": "Mostrar más",
+    "import": "Importar"
   }
 }

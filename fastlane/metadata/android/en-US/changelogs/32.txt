@@ -1,0 +1,1 @@
+The AI check now only fixes typos and clear quantity slips, and shows every change as a red/green diff. New Discover page lists recipe titles from sites you follow, with one-tap import.

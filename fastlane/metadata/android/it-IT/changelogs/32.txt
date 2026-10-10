@@ -1,0 +1,1 @@
+Il controllo AI ora corregge solo refusi ed errori evidenti nelle quantità e mostra ogni modifica come diff rosso/verde. Nuova pagina Scopri con i titoli delle ricette dai siti che segui e importazione con un tocco.

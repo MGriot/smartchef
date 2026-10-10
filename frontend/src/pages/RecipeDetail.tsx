@@ -1534,7 +1534,7 @@ const RecipeDetail: React.FC = () => {
             return hit ? { lat: hit.lat, lng: hit.lng, ...(isAreaResult(hit) ? { shape: hit.shape } : {}) } : null;
           }, contentLang || 'en')
         : undefined;
-      setDraft(prev => applyCheckChanges(prev as any, changes, resolved, { tools: allTools, techniques: allTechniques }) as Partial<Recipe>);
+      setDraft(prev => applyCheckChanges(prev as any, changes, resolved) as Partial<Recipe>);
       setAiOpen(false);
     };
 

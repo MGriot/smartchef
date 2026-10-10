@@ -34,6 +34,7 @@ const SyncHistory = lazy(() => import("./pages/SyncHistory"));
 const Downloads = lazy(() => import("./pages/Downloads"));
 const Atlas = lazy(() => import("./pages/Atlas"));
 const Pantry = lazy(() => import("./pages/Pantry"));
+const Discover = lazy(() => import("./pages/Discover"));
 
 import { useStore } from "./store/app.store";
 import { apiFetch, isNative, getServerUrl, cacheAccountOffline, isDeviceOnboarded, markDeviceOnboarded, resetDeviceStorageChoice } from './lib/api';
@@ -358,6 +359,7 @@ export default function App() {
         <Route path="/downloads" element={<Downloads />} />
         <Route path="/atlas" element={<Atlas />} />
         <Route path="/pantry" element={<Pantry />} />
+        <Route path="/discover" element={<Discover />} />
       </Routes>
       </Suspense>
     </BrowserRouter>

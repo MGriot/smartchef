@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import AppLayout from '../components/AppLayout';
@@ -523,6 +523,26 @@ export default function RecipeImport() {
       setRematching(false);
     }
   };
+
+  // Arriving from Discover with ?url=… : fill the address and start straight
+  // away, so "Import to gallery" on a title is one click, not three.
+  const [searchParams] = useSearchParams();
+  const prefillUrl = useRef(searchParams.get('url'));
+  const [autoStart, setAutoStart] = useState(false);
+  useEffect(() => {
+    const url = prefillUrl.current;
+    if (!url) return;
+    prefillUrl.current = null;
+    setSourceType('url');
+    setInputVal(url);
+    setAutoStart(true);
+  }, []);
+  useEffect(() => {
+    if (!autoStart) return;
+    setAutoStart(false);
+    void handleStartImport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
 
   const handleStartImport = async () => {
     setError(null);

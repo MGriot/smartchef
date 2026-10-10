@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  interpretCheckResponse, applyCheckChanges, numberSupportedBy, plainStepText,
+  interpretCheckResponse, applyCheckChanges, numberSupportedBy, plainStepText, isTypoFix, isDigitSlip,
   type CheckCatalog, type CheckDraft,
 } from './recipeCheck';
 
@@ -70,41 +70,38 @@ describe('interpretCheckResponse — never invents', () => {
     expect(fields).toEqual([['servings', 6, 'fix'], ['cook_time_min', 60, 'fill']]);
   });
 
-  it('links a step to tools and ingredients its own text mentions, and ignores the rest', () => {
+  it('never rewrites a step: no links or tokens come out of a check', () => {
     const r = interpretCheckResponse({
-      steps: [{ i: 0, ingredients: [{ name: 'Farina' }, { name: 'Zucchero' }], tools: ['Whisk', 'Oven', 'Blowtorch'], techniques: ['Fold'] }],
+      steps: [{ i: 0, ingredients: [{ name: 'Farina' }], tools: ['Whisk'], techniques: ['Fold'] }],
     }, draft(), catalog);
-    const links: any = r.changes.find((c) => c.type === 'stepLinks');
-    expect(links.toolIds).toEqual(['T1']); // Oven is not mentioned in step 1; Fold is not either
-    expect(links.techniqueIds).toEqual([]);
-    expect(links.stepIngredients.map((s: any) => s.ingredientSortOrder).sort()).toEqual([0, 1]);
-    expect(links.description).toContain('{{tool:T1}}');
-    expect(links.description).toContain('{{ing:0');
-    expect(r.unmatched).toContain('Blowtorch');
+    expect(r.changes).toEqual([]);
   });
 
-  it('never gives an ingredient used in several steps 100% in each', () => {
+  it('ignores an amount that is only a share of the ingredient', () => {
     const d = draft();
-    d.steps![1].description = 'Aggiungi la farina rimasta e cuoci nel forno per 1 ora.';
-    const r = interpretCheckResponse({
-      steps: [{ i: 0, ingredients: [{ name: 'Farina' }] }, { i: 1, ingredients: [{ name: 'Farina' }] }],
-    }, d, catalog);
-    const rows = r.changes.filter((c: any) => c.type === 'stepLinks').flatMap((c: any) => c.stepIngredients);
-    expect(rows).toHaveLength(0);
+    d.steps![1].description = 'Aggiungi metà della farina, 100 g.';
+    d.steps![0].description = 'Mescola 200 g di farina.';
+    const half = interpretCheckResponse({ ingredients: [{ i: 0, quantity: 100, unit: 'g', evidence: 'metà della farina, 100 g' }] }, d, catalog);
+    expect(half.changes).toEqual([]);
   });
 
-  it('keeps an amount for a step only when it is quoted', () => {
-    const quoted = interpretCheckResponse({
-      steps: [{ i: 0, ingredients: [{ name: 'Farina', quantity: 200, unit: 'g' }], evidence: 'mescola 200 g di farina' }],
-    }, draft(), catalog);
-    const ref: any = (quoted.changes.find((c) => c.type === 'stepLinks') as any).stepIngredients[0];
-    expect(ref).toMatchObject({ amountMode: 'absolute', quantity: 200, unitSymbol: 'g' });
+  it('ignores an ingredient whose amount is split across several steps', () => {
+    const d = draft();
+    d.steps![1].description = 'Aggiungi la farina, 50 g.';
+    const r = interpretCheckResponse({ ingredients: [{ i: 0, quantity: 200, unit: 'g', evidence: 'mescola 200 g di farina' }] }, d, catalog);
+    expect(r.changes).toEqual([]);
+  });
 
-    const invented = interpretCheckResponse({
-      steps: [{ i: 0, ingredients: [{ name: 'Farina', quantity: 500, unit: 'g' }], evidence: 'mescola 200 g di farina' }],
-    }, draft(), catalog);
-    const ref2: any = (invented.changes.find((c) => c.type === 'stepLinks') as any).stepIngredients[0];
-    expect(ref2.amountMode).toBe('fraction');
+  it('only corrects an existing amount that looks like a slip of the pen', () => {
+    const d = draft();
+    d.ingredients![0].quantity = 150;
+    const r = interpretCheckResponse({ ingredients: [{ i: 0, quantity: 200, unit: 'g', evidence: 'mescola 200 g di farina' }] }, d, catalog);
+    expect(r.changes).toEqual([]);
+  });
+
+  it('does not change the unit of a row that already has one', () => {
+    const r = interpretCheckResponse({ ingredients: [{ i: 0, quantity: 200, unit: 'pz', evidence: 'mescola 200 g di farina' }] }, draft(), catalog);
+    expect(r.changes).toEqual([]);
   });
 
   it('skips a yield whose unit is not in the library', () => {
@@ -121,20 +118,70 @@ describe('interpretCheckResponse — never invents', () => {
   });
 });
 
+describe('typo fixes', () => {
+  const typoDraft = (): CheckDraft => {
+    const d = draft();
+    d.steps![0].description = 'Con la {{tool:T1}} mescola la farina con lo zuchero.';
+    return d;
+  };
+
+  it('accepts a small spelling fix inside a step and leaves the tokens alone', () => {
+    const d = typoDraft();
+    const r = interpretCheckResponse({ typos: [{ target: 'stepText', i: 0, before: 'zuchero', after: 'zucchero' }] }, d, catalog);
+    expect(r.changes).toHaveLength(1);
+    expect(r.changes[0]).toMatchObject({ type: 'textFix', from: 'zuchero', to: 'zucchero' });
+    expect((r.changes[0] as any).before).toContain('farina con lo zuchero');
+    const next: any = applyCheckChanges(d, r.changes);
+    expect(next.steps[0].description).toBe('Con la {{tool:T1}} mescola la farina con lo zucchero.');
+    expect(d.steps![0].description).toContain('zuchero'); // input untouched
+  });
+
+  it('rejects rewording, number changes, and words that are not in the text', () => {
+    const d = typoDraft();
+    const bad = (before: string, after: string) =>
+      interpretCheckResponse({ typos: [{ target: 'stepText', i: 0, before, after }] }, d, catalog).changes;
+    expect(bad('mescola la farina', 'amalgama la farina')).toEqual([]);
+    expect(bad('zuchero', 'zucchero e sale')).toEqual([]);
+    expect(bad('frusta', 'frustra')).toEqual([]); // not present as written
+    const withNumber = typoDraft();
+    withNumber.title = 'Torta 20 minuti';
+    expect(interpretCheckResponse({ typos: [{ target: 'title', i: null, before: 'Torta 20', after: 'Torta 30' }] }, withNumber, catalog).changes).toEqual([]);
+  });
+
+  it('rejects a phrase that occurs twice, so the fix cannot land in the wrong place', () => {
+    const d = typoDraft();
+    d.steps![0].description = 'Aggiungi zuchero e poi altro zuchero.';
+    expect(interpretCheckResponse({ typos: [{ target: 'stepText', i: 0, before: 'zuchero', after: 'zucchero' }] }, d, catalog).changes).toEqual([]);
+  });
+
+  it('isTypoFix tells a typo from a rewrite', () => {
+    expect(isTypoFix('zuchero', 'zucchero')).toBe(true);
+    expect(isTypoFix('thecake', 'the cake')).toBe(true);
+    expect(isTypoFix('mix', 'combine')).toBe(false);
+    expect(isTypoFix('200 g', '300 g')).toBe(false);
+  });
+});
+
+describe('isDigitSlip', () => {
+  it('accepts dropped, doubled, swapped digits and decimal slides', () => {
+    expect(isDigitSlip(20, 200)).toBe(true);
+    expect(isDigitSlip(250, 520)).toBe(true);
+    expect(isDigitSlip(1.5, 15)).toBe(true);
+    expect(isDigitSlip(150, 200)).toBe(false);
+  });
+});
+
 describe('applyCheckChanges', () => {
-  it('applies only the chosen changes and mirrors tools into the recipe list', () => {
+  it('applies only the chosen changes', () => {
     const d = draft();
     const r = interpretCheckResponse({
       ingredients: [{ i: 0, quantity: 200, unit: 'g', evidence: 'mescola 200 g di farina' }],
-      steps: [{ i: 0, tools: ['Whisk'] }],
       servings: { value: 6, evidence: 'Serve 6 persone' },
     }, d, catalog);
     const chosen = r.changes.filter((c) => c.type !== 'field');
-    const next: any = applyCheckChanges({ ...d, tools: [] } as CheckDraft, chosen, undefined, catalog);
+    const next: any = applyCheckChanges({ ...d, tools: [] } as CheckDraft, chosen);
     expect(next.ingredients[0].quantity).toBe(200);
     expect(next.servings).toBe(4);
-    expect(next.steps[0].toolIds).toEqual(['T1']);
-    expect(next.tools.map((t: any) => t.id)).toEqual(['T1']);
     expect(d.ingredients![0].quantity).toBe(20); // input untouched
   });
 });

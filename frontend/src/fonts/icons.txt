@@ -228,6 +228,7 @@ notifications_active
 numbers
 nutrition
 opacity
+open_in_new
 orders
 outbox
 output

@@ -8,22 +8,21 @@
 //   - the quote must really occur in the recipe's own text;
 //   - the number proposed must really occur in the quote (an hour counts
 //     for 60 minutes, a kilo for 1000 g);
-//   - ingredients, tools and techniques are resolved against rows that
-//     already exist, and a step is only linked to one its own text mentions.
+//   - a spelling fix must be a small edit of words really in the text, and may
+//     not touch a digit; an ingredient amount is only corrected when it looks
+//     like a slip of the pen and the recipe never uses it in portions.
 //
+// Step prose is never rewritten beyond typo fixes: no links or tokens added.
 // What survives is a list of discrete changes the user goes through and ticks;
 // nothing touches the draft until applyCheckChanges() is called with the
 // ones they kept. Pure functions throughout, so the "never invent" rules are
 // testable without a model or a page.
 // ════════════════════════════════════════════════════════════════════════
 
-import {
-  STEP_REF_RE, normalizeName, linkIngredientsInText, syncIngredientRefAmount, parseRefParams,
-  type StepIngredientRefLike,
-} from './stepRefs';
-import { linkEntitiesInText } from './importLinking';
+import { STEP_REF_RE, normalizeName, parseRefParams, type StepIngredientRefLike } from './stepRefs';
 import { matchUnitId } from './fuzzyMatch';
 import { isCountryCode } from './countries';
+import { editDistance } from './wordDiff';
 
 // ── Shapes ──────────────────────────────────────────────────────────────
 
@@ -85,7 +84,9 @@ export interface CheckDraft {
   techniques?: CheckNamedEntity[];
 }
 
-export type CheckGroup = 'ingredients' | 'steps' | 'fields' | 'tags' | 'regions';
+export type CheckGroup = 'text' | 'ingredients' | 'steps' | 'fields' | 'tags' | 'regions';
+
+export type TextTarget = 'title' | 'description' | 'tips' | 'storage' | 'ingredientName' | 'stepTitle' | 'stepText';
 
 interface ChangeBase {
   id: string;
@@ -97,16 +98,15 @@ interface ChangeBase {
 }
 
 export type CheckChange =
+  | (ChangeBase & {
+      type: 'textFix'; target: TextTarget; index: number | null;
+      /** The few words as written, and as corrected. */
+      from: string; to: string;
+      /** The same words with a little of their surroundings, for the red/green diff. */
+      before: string; after: string;
+    })
   | (ChangeBase & { type: 'ingredientQty'; index: number; label: string; quantity: number; unitId: string | null; unitSymbol: string | null; before: string; after: string })
   | (ChangeBase & { type: 'stepDuration'; index: number; durationMin: number; before: string; after: string })
-  | (ChangeBase & {
-      type: 'stepLinks'; index: number;
-      description: string;
-      stepIngredients: CheckDraftStep['stepIngredients'];
-      toolIds: string[]; techniqueIds: string[];
-      /** Entities the step gains, by display name, for the review list. */
-      added: { ingredients: string[]; tools: string[]; techniques: string[] };
-    })
   | (ChangeBase & { type: 'field'; field: 'servings' | 'prep_time_min' | 'cook_time_min' | 'rest_time_min'; value: number; before: string; after: string })
   | (ChangeBase & { type: 'yield'; amount: number; unitId: string; unitSymbol: string; before: string; after: string })
   | (ChangeBase & { type: 'tag'; name: string })
@@ -123,7 +123,6 @@ export interface CheckResult {
 // ── Reading the recipe ──────────────────────────────────────────────────
 
 const labelOf = (e: CheckNamedEntity) => e.translated_name || e.name;
-const entityNames = (e: CheckNamedEntity) => [e.name, e.translated_name, ...(e.synonyms ?? [])].filter((n): n is string => !!n && n.trim().length >= 3);
 const ingredientLabel = (i: CheckDraftIngredient) => i.ingredientName || i.subRecipeTitle || '';
 
 /** A step's prose with every {{…}} token replaced by the words it renders as,
@@ -186,11 +185,6 @@ function evidenceHolds(evidence: unknown, corpus: string): evidence is string {
   return q.length >= 3 && corpus.includes(q);
 }
 
-const mentions = (haystack: string, name: string) => {
-  const n = normText(name);
-  return n.length >= 3 && ` ${haystack} `.includes(` ${n} `);
-};
-
 // ── What the model is shown ─────────────────────────────────────────────
 
 export function buildCheckRequest(draft: CheckDraft, cat: CheckCatalog) {
@@ -232,25 +226,22 @@ export function buildCheckSystemPrompt(cat: CheckCatalog): string {
   const list = (names: string[]) => (names.length ? names.map((n) => `"${n}"`).join(', ') : '(none)');
   return `You audit ONE recipe from a recipe-management app. You receive its fields, its ingredient list (each with an index "i"), and its steps (each with an index "i" and plain text).
 
-ABSOLUTE RULE — NEVER INVENT DATA. Use only what the recipe itself literally says. Do not use cooking knowledge to supply typical quantities, times, servings, yields, tags or places. If the recipe does not state it, return null / leave it out. A smaller correct answer is always better than a larger guessed one.
+ABSOLUTE RULE — NEVER INVENT DATA. Use only what the recipe itself literally says. Do not use cooking knowledge to supply typical quantities, times, servings, yields, tags or places. If the recipe does not state it, return null / leave it out. A smaller correct answer is always better than a larger guessed one. If you are unsure, return nothing.
 
-Every proposal MUST carry "evidence": a quote copied CHARACTER FOR CHARACTER from the recipe (title, description, tips, storage, an ingredient line, a step text or title), at most 25 words, that states the fact. Proposals without an exact quote are discarded automatically. Every number you propose must appear in its quote.
+Every proposal (except "typos") MUST carry "evidence": a quote copied CHARACTER FOR CHARACTER from the recipe (title, description, tips, storage, an ingredient line, a step text or title), at most 25 words, that states the fact. Proposals without an exact quote are discarded automatically. Every number you propose must appear in its quote.
 
 Do this, in order:
-1. "ingredients": fix an ingredient's quantity/unit ONLY when the recipe states a different or missing amount for it elsewhere (typically a step saying "add 200 g of flour" while the list says 20 or nothing). {"i", "quantity": number, "unit": string|null, "evidence"}. Do not touch rows that are already consistent. Never change the amount of an ingredient the recipe states only once.
-2. "steps": for each step, list what it uses, read from ITS OWN text:
-   - "ingredients": [{"name": EXACT name from the ingredient list, "quantity": number|null, "unit": string|null}] — quantity/unit only when the step text states an amount of that ingredient (e.g. "add half the sugar" with 100 g in the list gives 50). null otherwise.
-   - "tools": names of kitchen tools the step text mentions, "techniques": cooking techniques the step text mentions. Prefer names from these existing lists: tools ${list(cat.tools.map(labelOf))}; techniques ${list(cat.techniques.map(labelOf))}. A name not in the lists is simply ignored.
-   - "durationMin": minutes, ONLY when the step text states a duration ("cook 20 minutes", "rest 1 hour" → 60).
-   - "evidence": the quote supporting durationMin or the quantities (may be null if neither is given).
-3. "servings", "prepTimeMin", "cookTimeMin", "restTimeMin": each {"value": number, "evidence": string} or null. Only when the recipe states it ("serves 4", "bake 30 minutes"). Do not add up or estimate.
-4. "yield": {"amount": number, "unit": string, "evidence": string} or null — the finished quantity, only when stated ("makes 12 cookies", "about 1 litre").
-5. "tags": [{"name": string, "evidence": string}] — only attributes the recipe states or plainly names (e.g. the title says "vegan", an ingredient list shows no meat only if the text says vegetarian). Prefer existing tags: ${list(cat.tagNames)}. Max 6.
-6. "regions": [{"country": ISO 3166-1 alpha-2 or null, "place": string|null, "evidence": string}] — only a place the recipe's text, title or source URL names as the dish's origin ("alla romana", "Sicilian", a .it recipe-site domain is NOT enough).
-7. "warnings": short notes on inconsistencies you noticed but could not resolve from the text (e.g. an ingredient never used in any step). Write them in the recipe's language.
+1. "typos": spelling and typing mistakes only (misspelt words, doubled letters, missing accents or apostrophes, a missing or extra space, wrong capital letter). {"target": "title"|"description"|"tips"|"storage"|"ingredientName"|"stepTitle"|"stepText", "i": ingredient/step index or null, "before": the mistaken words copied exactly (1 to 4 words), "after": the same words corrected}. NEVER reword, rephrase, translate, change a number or unit, change style, or fix grammar that is merely informal. Keep the author's language and voice. The text stays exactly as it is apart from the mistaken word itself.
+2. "ingredients": correct an ingredient's quantity ONLY when it is plainly a slip of the pen: the recipe states the whole amount of that very ingredient elsewhere (e.g. a step says "add 200 g of flour" while the list says 20 or nothing). {"i", "quantity": number, "unit": string|null, "evidence"}. Never use a partial amount ("half the sugar", "the rest of the butter", an amount used in just one stage). Do not change the unit of a row that already has one. Do not touch rows that are consistent.
+3. "steps": [{"i", "durationMin": number, "evidence": string}] — minutes, ONLY when the step text states a duration ("cook 20 minutes", "rest 1 hour" → 60).
+4. "servings", "prepTimeMin", "cookTimeMin", "restTimeMin": each {"value": number, "evidence": string} or null. Only when the recipe states it ("serves 4", "bake 30 minutes"). Do not add up or estimate.
+5. "yield": {"amount": number, "unit": string, "evidence": string} or null — the finished quantity, only when stated ("makes 12 cookies", "about 1 litre").
+6. "tags": [{"name": string, "evidence": string}] — only attributes the recipe states or plainly names (e.g. the title says "vegan", an ingredient list shows no meat only if the text says vegetarian). Prefer existing tags: ${list(cat.tagNames)}. Max 6.
+7. "regions": [{"country": ISO 3166-1 alpha-2 or null, "place": string|null, "evidence": string}] — only a place the recipe's text, title or source URL names as the dish's origin ("alla romana", "Sicilian", a .it recipe-site domain is NOT enough).
+8. "warnings": short notes on inconsistencies you noticed but could not resolve from the text (e.g. an ingredient never used in any step). Write them in the recipe's language.
 
 Respond EXCLUSIVELY with JSON:
-{"ingredients":[],"steps":[],"servings":null,"prepTimeMin":null,"cookTimeMin":null,"restTimeMin":null,"yield":null,"tags":[],"regions":[],"warnings":[]}`;
+{"typos":[],"ingredients":[],"steps":[],"servings":null,"prepTimeMin":null,"cookTimeMin":null,"restTimeMin":null,"yield":null,"tags":[],"regions":[],"warnings":[]}`;
 }
 
 // ── What comes back ─────────────────────────────────────────────────────
@@ -260,18 +251,6 @@ const num = (v: unknown): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
-
-function findEntity(name: string, entities: CheckNamedEntity[]): CheckNamedEntity | undefined {
-  const key = normText(name);
-  if (!key) return undefined;
-  const exact = entities.find((e) => entityNames(e).some((n) => normText(n) === key));
-  if (exact) return exact;
-  if (key.length < 4) return undefined;
-  return entities.find((e) => entityNames(e).some((n) => {
-    const k = normText(n);
-    return k.length >= 4 && (k.includes(key) || key.includes(k));
-  }));
-}
 
 /** An ingredient counts as mentioned when its whole name, or any word of it
  *  long enough to be meaningful, is in the step's text. */
@@ -299,6 +278,42 @@ function resolveUnit(text: string | null | undefined, units: CheckUnit[]): Check
 const fmt = (qty: number | null | undefined, unit?: string | null) =>
   qty == null ? '—' : `${qty % 1 === 0 ? qty : Number(qty.toFixed(2))}${unit ? ` ${unit}` : ''}`;
 
+const TEXT_TARGETS: TextTarget[] = ['title', 'description', 'tips', 'storage', 'ingredientName', 'stepTitle', 'stepText'];
+
+/** Words that mark an amount as a share of the whole, in the app's languages. */
+const PARTIAL_WORDS = new Set([
+  'half', 'third', 'quarter', 'rest', 'remaining', 'remainder', 'portion', 'some',
+  'mezzo', 'mezza', 'meta', 'terzo', 'quarto', 'resto', 'restante', 'rimanente', 'meta',
+  'mitad', 'tercio', 'cuarto', 'resto', 'restante',
+  'moitie', 'tiers', 'reste', 'restant',
+]);
+
+const digitsOf = (s: string) => s.match(/\d+(?:[.,]\d+)?/g) ?? [];
+
+/** A spelling fix: the same few words with a couple of letters changed. It may
+ *  not touch a number, add or drop a word's worth of text, or reword. */
+export function isTypoFix(from: string, to: string): boolean {
+  if (!from.trim() || !to.trim() || from === to) return false;
+  if (from.includes('{{') || to.includes('{{') || /[\r\n]/.test(from + to)) return false;
+  if (digitsOf(from).join('|') !== digitsOf(to).join('|')) return false;
+  const words = from.trim().split(/\s+/).length;
+  if (words > 4 || to.trim().split(/\s+/).length > words + 1) return false;
+  const a = from.replace(/\s+/g, '');
+  const b = to.replace(/\s+/g, '');
+  return editDistance(a, b) <= Math.min(3, 2 * words);
+}
+
+/** True when `next` could be `prev` mistyped: a digit dropped, doubled, swapped
+ *  or misplaced, or the decimal point slid. */
+export function isDigitSlip(prev: number, next: number): boolean {
+  if (prev === next) return false;
+  const ratio = next / prev;
+  if ([10, 100, 0.1, 0.01].some((r) => Math.abs(ratio - r) < 1e-9)) return true;
+  const a = String(prev).replace('.', '');
+  const b = String(next).replace('.', '');
+  return editDistance(a, b) <= 1 || [...a].sort().join('') === [...b].sort().join('');
+}
+
 /**
  * Turns the model's raw answer into changes the recipe can really support.
  * `parsed` is whatever JSON the model produced — nothing in it is trusted.
@@ -313,14 +328,61 @@ export function interpretCheckResponse(parsed: any, draft: CheckDraft, cat: Chec
   let seq = 0;
   const id = (p: string) => `${p}-${seq++}`;
 
-  // 1 ── Ingredient quantities
+  // 1 ── Typos: a few words swapped for the same words spelt right
+  const fieldText = (target: TextTarget, index: number | null): string | null => {
+    switch (target) {
+      case 'title': return draft.title ?? null;
+      case 'description': return draft.description ?? null;
+      case 'tips': return draft.tips ?? null;
+      case 'storage': return draft.storage_instructions ?? null;
+      case 'ingredientName': return index != null && ingredients[index] ? (ingredients[index].ingredientName || null) : null;
+      case 'stepTitle': return index != null ? steps[index]?.title ?? null : null;
+      case 'stepText': return index != null ? steps[index]?.description ?? null : null;
+    }
+  };
+  const seenFix = new Set<string>();
+  for (const row of (Array.isArray(parsed?.typos) ? parsed.typos : []).slice(0, 40)) {
+    const target = row?.target as TextTarget;
+    const index = Number.isInteger(row?.i) ? (row.i as number) : null;
+    const from = typeof row?.before === 'string' ? row.before : '';
+    const to = typeof row?.after === 'string' ? row.after : '';
+    if (!TEXT_TARGETS.includes(target) || !isTypoFix(from, to)) continue;
+    const raw = fieldText(target, index);
+    // The mistaken words must be in the field exactly once (and never inside a
+    // {{token}}), so the swap lands where the model meant it.
+    if (!raw || raw.split(from).length !== 2 || from.includes('{{')) continue;
+    const key = `${target}:${index}:${from}`;
+    if (seenFix.has(key)) continue;
+    seenFix.add(key);
+    // The diff is shown on what the cook reads: tokens resolved to their words.
+    const plain = target === 'stepText' ? plainStepText(raw, ingredients, cat) : raw;
+    const at = plain.indexOf(from);
+    if (at < 0) continue;
+    const start = Math.max(0, plain.lastIndexOf(' ', Math.max(0, at - 24)));
+    const endAt = at + from.length;
+    const stop = plain.indexOf(' ', Math.min(plain.length, endAt + 24));
+    const lead = (start > 0 ? '… ' : '') + plain.slice(start, at).trimStart();
+    const tail = plain.slice(endAt, stop < 0 ? plain.length : stop) + (stop < 0 ? '' : ' …');
+    changes.push({
+      id: id('typo'), group: 'text', type: 'textFix', kind: 'fix', target, index, from, to,
+      before: lead + from + tail, after: lead + to + tail, evidence: from,
+    });
+  }
+
+  // 2 ── Ingredient quantities: only a plain slip of the pen
+  const stepTexts = steps.map((s) => normText(plainStepText(`${s.title ?? ''} ${s.description}`, ingredients, cat)));
   for (const row of Array.isArray(parsed?.ingredients) ? parsed.ingredients : []) {
     const index = Number.isInteger(row?.i) ? row.i : -1;
     const ing = ingredients[index];
     const quantity = num(row?.quantity);
     if (!ing || quantity == null || !evidenceHolds(row.evidence, corpus) || !numberSupportedBy(quantity, row.evidence)) continue;
     // A quote about some other ingredient cannot justify this row's amount.
-    if (!ingredientMentioned(normText(row.evidence), ing)) continue;
+    const evidenceNorm = normText(row.evidence);
+    if (!ingredientMentioned(evidenceNorm, ing)) continue;
+    // "half the sugar", "the rest of the butter": a share, not the amount.
+    if (evidenceNorm.split(' ').some((w) => PARTIAL_WORDS.has(w))) continue;
+    // Stated with a number in several steps → it is split across them.
+    if (stepTexts.filter((t) => /\d/.test(t) && ingredientMentioned(t, ing)).length >= 2) continue;
 
     let unitId = ing.unitId;
     let unitSymbol = ing.unitSymbol ?? null;
@@ -328,10 +390,14 @@ export function interpretCheckResponse(parsed: any, draft: CheckDraft, cat: Chec
     if (unitText) {
       const unit = resolveUnit(unitText, cat.units);
       if (!unit) { unmatched.push(unitText); continue; }
+      // A row that already has a unit keeps it; only a missing unit is filled.
+      if (ing.unitId && unit.id !== ing.unitId) continue;
       unitId = unit.id;
       unitSymbol = unit.symbol;
     }
     if (ing.quantity === quantity && (ing.unitId ?? null) === (unitId ?? null)) continue;
+    // Correcting a number that was already there needs it to look like a slip.
+    if (ing.quantity != null && !isDigitSlip(ing.quantity, quantity)) continue;
     changes.push({
       id: id('ing'), group: 'ingredients', type: 'ingredientQty', index, label: ingredientLabel(ing),
       kind: ing.quantity == null ? 'fill' : 'fix',
@@ -341,113 +407,12 @@ export function interpretCheckResponse(parsed: any, draft: CheckDraft, cat: Chec
     });
   }
 
-  // 2 ── Steps: links to ingredients, tools and techniques, and the duration
-  const usage = new Map<number, number>();
-  steps.forEach((s) => (s.stepIngredients ?? []).forEach((r) => usage.set(r.ingredientSortOrder, (usage.get(r.ingredientSortOrder) ?? 0) + 1)));
-  const stepRows: any[] = Array.isArray(parsed?.steps) ? parsed.steps : [];
-  const proposed = stepRows.map((row) => {
+  // 2b ── Step durations (the step's prose itself is never touched here)
+  for (const row of Array.isArray(parsed?.steps) ? parsed.steps : []) {
     const index = Number.isInteger(row?.i) ? row.i : -1;
     const step = steps[index];
-    if (!step) return null;
-    const text = plainStepText(`${step.title ?? ''} ${step.description}`, ingredients, cat);
-    const textNorm = normText(text);
-    const uses = (Array.isArray(row.ingredients) ? row.ingredients : [])
-      .map((u: any) => ({ name: str(u?.name), quantity: num(u?.quantity), unit: str(u?.unit) }))
-      .filter((u: any) => u.name);
-    // Resolve by name against this recipe's own rows, never by position.
-    const hits = new Map<number, { quantity: number | null; unit: string | null }>();
-    for (const u of uses) {
-      const key = normalizeName(u.name);
-      if (!key) continue;
-      const hit =
-        ingredients.findIndex((x) => normalizeName(ingredientLabel(x)) === key) >= 0
-          ? ingredients.findIndex((x) => normalizeName(ingredientLabel(x)) === key)
-          : ingredients.findIndex((x) => { const k = normalizeName(ingredientLabel(x)); return k && (k.includes(key) || key.includes(k)); });
-      if (hit < 0 || !ingredientMentioned(textNorm, ingredients[hit])) continue;
-      // An amount for this step has to be quoted from the recipe.
-      const amountOk = u.quantity != null && evidenceHolds(row.evidence, corpus) && numberSupportedBy(u.quantity, row.evidence);
-      hits.set(hit, amountOk ? { quantity: u.quantity, unit: u.unit } : { quantity: null, unit: null });
-    }
-    return { index, row, step, text, textNorm, hits };
-  });
-
-  // Count how many steps will use each ingredient once the proposals land, so
-  // an ingredient used in several steps is not credited 100% in each.
-  for (const p of proposed) {
-    if (!p) continue;
-    const have = new Set((p.step.stepIngredients ?? []).map((r) => r.ingredientSortOrder));
-    for (const so of p.hits.keys()) if (!have.has(so)) usage.set(so, (usage.get(so) ?? 0) + 1);
-  }
-
-  for (const p of proposed) {
-    if (!p) continue;
-    const { index, row, step, textNorm } = p;
-    let description = step.description;
-    const stepIngredients = [...(step.stepIngredients ?? [])];
-    const added = { ingredients: [] as string[], tools: [] as string[], techniques: [] as string[] };
-
-    const newRefs: StepIngredientRefLike[] = [];
-    // Only ingredients this step is not already linked to are touched; what
-    // the author linked by hand stays exactly as written.
-    const fresh = [...p.hits.keys()].filter((so) => !stepIngredients.some((r) => r.ingredientSortOrder === so));
-    for (const [so, use] of p.hits) {
-      if (!fresh.includes(so)) continue;
-      const ing = ingredients[so];
-      let ref: StepIngredientRefLike | null = null;
-      if (use.quantity != null) {
-        const unit = resolveUnit(use.unit, cat.units);
-        ref = { ingredientSortOrder: so, amountMode: 'absolute', portion: 1, quantity: use.quantity, unitSymbol: unit?.symbol ?? ing.unitSymbol ?? null };
-        (ref as any).unitId = unit?.id ?? ing.unitId ?? null;
-      } else if ((usage.get(so) ?? 0) <= 1) {
-        ref = { ingredientSortOrder: so, amountMode: 'fraction', portion: 1 };
-      }
-      if (ref) { stepIngredients.push(ref as any); newRefs.push(ref); }
-      added.ingredients.push(ingredientLabel(ing));
-    }
-    // In-text tokens for what is newly linked; an ingredient shared by several
-    // steps is named without an amount rather than a made-up share.
-    description = linkIngredientsInText(
-      description,
-      fresh.map((so) => ({ ingredientSortOrder: so, portion: 1 })),
-      ingredients.map((i) => ({ name: ingredientLabel(i) })),
-    );
-    for (const ref of newRefs) {
-      if (ref.amountMode === 'absolute') description = syncIngredientRefAmount(description, ref.ingredientSortOrder, fmt(ref.quantity, ref.unitSymbol));
-    }
-    for (const so of fresh) {
-      if (newRefs.some((r) => r.ingredientSortOrder === so)) continue;
-      description = description.replace(new RegExp(String.raw`\{\{ing:${so}\}\}`, 'g'), `{{ing:${so}|q=}}`);
-    }
-
-    const link = (type: 'tool' | 'tech', names: unknown, pool: CheckNamedEntity[], have: string[]) => {
-      const out = [...have];
-      for (const raw of Array.isArray(names) ? names : []) {
-        const name = str(raw);
-        const entity = name ? findEntity(name, pool) : undefined;
-        // The step's own text has to mention it, under any name it answers to.
-        if (!entity || out.includes(entity.id) || !entityNames(entity).concat(name ? [name] : []).some((n) => mentions(textNorm, n))) {
-          if (name && !entity) unmatched.push(name);
-          continue;
-        }
-        out.push(entity.id);
-        (type === 'tool' ? added.tools : added.techniques).push(labelOf(entity));
-        description = linkEntitiesInText(description, type, [{ id: entity.id, names: [...entityNames(entity), name!] }]);
-      }
-      return out;
-    };
-    const toolIds = link('tool', row.tools, cat.tools, step.toolIds ?? []);
-    const techniqueIds = link('tech', row.techniques, cat.techniques, step.techniqueIds ?? []);
-
-    if (added.ingredients.length || added.tools.length || added.techniques.length) {
-      changes.push({
-        id: id('links'), group: 'steps', type: 'stepLinks', kind: 'fill', index, description,
-        stepIngredients: stepIngredients as CheckDraftStep['stepIngredients'], toolIds, techniqueIds, added,
-        evidence: step.title?.trim() || p.text.slice(0, 80),
-      });
-    }
-
-    const minutes = num(row.durationMin);
-    if (minutes != null && evidenceHolds(row.evidence, corpus) && numberSupportedBy(minutes, row.evidence) && step.durationMin !== minutes) {
+    const minutes = num(row?.durationMin);
+    if (step && minutes != null && evidenceHolds(row.evidence, corpus) && numberSupportedBy(minutes, row.evidence) && step.durationMin !== minutes) {
       changes.push({
         id: id('dur'), group: 'steps', type: 'stepDuration', index, durationMin: minutes,
         kind: step.durationMin ? 'fix' : 'fill',
@@ -527,7 +492,7 @@ export interface ResolvedRegionsInput {
 /** Returns a new draft with `changes` applied. Region changes are carried by
  *  `resolved` (their labels and coordinates need a geocoder, which is async
  *  and belongs to the page); everything else is derived from the change. */
-export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: CheckChange[], resolved?: ResolvedRegionsInput, catalog?: Pick<CheckCatalog, 'tools' | 'techniques'>): T {
+export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: CheckChange[], resolved?: ResolvedRegionsInput): T {
   const next: any = { ...draft };
   const steps: any[] = (draft.steps ?? []).map((s) => ({ ...s }));
   const ingredients: any[] = (draft.ingredients ?? []).map((i) => ({ ...i }));
@@ -535,39 +500,28 @@ export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: Check
 
   for (const c of changes) {
     switch (c.type) {
+      case 'textFix': {
+        const swap = (text: string | null | undefined) => (text && text.split(c.from).length === 2 ? text.replace(c.from, () => c.to) : text);
+        if (c.target === 'title') next.title = swap(next.title);
+        else if (c.target === 'description') next.description = swap(next.description);
+        else if (c.target === 'tips') next.tips = swap(next.tips);
+        else if (c.target === 'storage') next.storage_instructions = swap(next.storage_instructions);
+        else if (c.target === 'ingredientName' && c.index != null && ingredients[c.index]) ingredients[c.index].ingredientName = swap(ingredients[c.index].ingredientName);
+        else if (c.target === 'stepTitle' && c.index != null && steps[c.index]) steps[c.index].title = swap(steps[c.index].title);
+        else if (c.target === 'stepText' && c.index != null && steps[c.index]) steps[c.index].description = swap(steps[c.index].description);
+        break;
+      }
       case 'ingredientQty':
         if (ingredients[c.index]) ingredients[c.index] = { ...ingredients[c.index], quantity: c.quantity, quantityText: null, unitId: c.unitId, unitSymbol: c.unitSymbol };
         break;
       case 'stepDuration':
         if (steps[c.index]) steps[c.index].durationMin = c.durationMin;
         break;
-      case 'stepLinks':
-        if (steps[c.index]) {
-          steps[c.index].description = c.description;
-          steps[c.index].stepIngredients = c.stepIngredients;
-          steps[c.index].toolIds = c.toolIds;
-          steps[c.index].techniqueIds = c.techniqueIds;
-        }
-        break;
       case 'field': next[c.field] = c.value; break;
       case 'yield': next.yield_amount = c.amount; next.yield_unit_id = c.unitId; next.yield_unit_symbol = c.unitSymbol; break;
       case 'tag': if (!tags.some((t) => t.toLowerCase() === c.name.toLowerCase())) tags.push(c.name); break;
       case 'region': break;
     }
-  }
-
-  // The recipe-level tool and technique lists follow what the steps now use.
-  if (catalog) {
-    const used = (key: 'toolIds' | 'techniqueIds') => new Set(steps.flatMap((s) => s[key] ?? []));
-    const toolIds = used('toolIds');
-    const techIds = used('techniqueIds');
-    const merge = (list: CheckNamedEntity[] | undefined, ids: Set<string>, pool: CheckNamedEntity[]) => {
-      const out = [...(list ?? [])];
-      for (const id of ids) if (!out.some((e) => e.id === id)) { const e = pool.find((p) => p.id === id); if (e) out.push(e); }
-      return out;
-    };
-    next.tools = merge(draft.tools, toolIds, catalog.tools);
-    if (draft.techniques) next.techniques = merge(draft.techniques, techIds, catalog.techniques);
   }
 
   next.steps = steps;

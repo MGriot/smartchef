@@ -19,6 +19,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { hasCachedSetting, readCachedSetting } from './settingsCache';
+import { DEFAULT_FEED_SOURCES, DISCOVER_SOURCES, parseFeedSources } from './feedSources';
 
 type Parse = (raw: unknown) => unknown;
 
@@ -94,6 +95,8 @@ export const SYNCED_SETTINGS: SettingSpec[] = [
   // own value in Preferences keeps overriding it — see syncSettings.ts.
   { key: CONFLICT_POLICY_DEFAULT, fallback: 'newest', parse: oneOf(['newest', 'ask'], 'newest') },
   { key: SYNC_INTERVAL_DEFAULT, fallback: null, parse: syncInterval },
+  // The sites the Discover view lists recipe titles from.
+  { key: DISCOVER_SOURCES, fallback: DEFAULT_FEED_SOURCES, parse: parseFeedSources },
 ];
 
 export function specFor(key: string): SettingSpec | null {

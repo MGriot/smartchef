@@ -15,7 +15,8 @@
     "search": "Rechercher",
     "createRecipe": "Créer une Recette",
     "atlas": "Atlas",
-    "pantry": "Garde-manger"
+    "pantry": "Garde-manger",
+    "discover": "Découvrir"
   },
   "atlas": {
     "title": "Atlas",
@@ -497,13 +498,14 @@
       "apply": "Appliquer {{count}} sélectionnées",
       "failed": "La vérification par l'IA a échoué.",
       "step": "Étape {{n}}",
-      "stepDuration": "Durée de l'étape {{n}} : {{before}} → {{after}}",
+      "stepDuration": "Durée de l'étape {{n}}",
       "ingredients": "Ingrédients",
       "tools": "Ustensiles",
       "techniques": "Techniques",
       "notes": "Notes",
       "unmatched": "Absents de votre bibliothèque, ignorés : {{names}}",
       "group": {
+        "text": "Orthographe",
         "ingredients": "Quantités des ingrédients",
         "steps": "Étapes",
         "fields": "Portions, durées et rendement",
@@ -520,6 +522,18 @@
       "kind": {
         "fix": "correction",
         "fill": "à compléter"
+      },
+      "quantity": "quantité",
+      "selectAll": "Tout sélectionner",
+      "selectNone": "Tout désélectionner",
+      "target": {
+        "title": "Titre",
+        "description": "Description",
+        "tips": "Astuces",
+        "storage": "Conservation",
+        "ingredientName": "Nom de l'ingrédient {{n}}",
+        "stepTitle": "Titre de l'étape {{n}}",
+        "stepText": "Texte de l'étape {{n}}"
       }
     },
     "saving": "En cours d'enregistrement…",
@@ -1709,6 +1723,19 @@
       "profile": "Profil",
       "category": "Catégorie",
       "unit": "Unité"
+    },
+    "discoverSources": {
+      "heading": "Sources de Découvrir",
+      "subtitle": "Les sites dont les titres apparaissent dans Découvrir. Partagés entre vos appareils.",
+      "add": "Ajouter",
+      "placeholder": "Adresse du site ou du flux (ex. exemple.fr)",
+      "adding": "Vérification…",
+      "remove": "Retirer",
+      "reset": "Rétablir la liste par défaut",
+      "none": "Aucune source. Ajoutez-en une ci-dessous.",
+      "noFeed": "Ce site ne publie pas de flux lisible par l'application.",
+      "failed": "Impossible d'atteindre cette adresse.",
+      "duplicate": "Déjà dans la liste."
     }
   },
   "connect": {
@@ -1938,5 +1965,21 @@
     "hour_other": "{{count}} heures",
     "minute_one": "{{count}} minute",
     "minute_other": "{{count}} minutes"
+  },
+  "discover": {
+    "title": "Découvrir",
+    "subtitle": "Les derniers titres de recettes des sites que vous suivez. Ouvrez-les dans le navigateur ou importez-les dans votre galerie.",
+    "refresh": "Actualiser",
+    "search": "Rechercher dans les titres…",
+    "all": "Tous",
+    "loading": "Chargement des flux…",
+    "empty": "Aucun titre à afficher.",
+    "noSources": "Vous ne suivez encore aucun site.",
+    "manageSources": "Ajouter des sites dans les réglages",
+    "someFailed": "Chargement impossible : {{names}}.",
+    "importToGallery": "Importer dans la galerie",
+    "openInBrowser": "Ouvrir dans le navigateur",
+    "showMore": "Afficher plus",
+    "import": "Importer"
   }
 }

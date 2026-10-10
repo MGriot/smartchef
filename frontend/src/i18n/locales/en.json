@@ -15,7 +15,8 @@
     "search": "Search",
     "createRecipe": "Create Recipe",
     "atlas": "Atlas",
-    "pantry": "Pantry"
+    "pantry": "Pantry",
+    "discover": "Discover"
   },
   "atlas": {
     "title": "Atlas",
@@ -497,13 +498,14 @@
       "apply": "Apply {{count}} selected",
       "failed": "The AI check failed.",
       "step": "Step {{n}}",
-      "stepDuration": "Step {{n}} time: {{before}} → {{after}}",
+      "stepDuration": "Step {{n}} time",
       "ingredients": "Ingredients",
       "tools": "Tools",
       "techniques": "Techniques",
       "notes": "Notes",
       "unmatched": "Not in your library, so skipped: {{names}}",
       "group": {
+        "text": "Spelling",
         "ingredients": "Ingredient quantities",
         "steps": "Steps",
         "fields": "Portions, times and yield",
@@ -520,6 +522,18 @@
       "kind": {
         "fix": "fix",
         "fill": "fill"
+      },
+      "quantity": "quantity",
+      "selectAll": "Select all",
+      "selectNone": "Select none",
+      "target": {
+        "title": "Title",
+        "description": "Description",
+        "tips": "Tips",
+        "storage": "How to store",
+        "ingredientName": "Ingredient {{n}} name",
+        "stepTitle": "Step {{n}} title",
+        "stepText": "Step {{n}} text"
       }
     },
     "saving": "Saving…",
@@ -1709,6 +1723,19 @@
       "profile": "Profile",
       "category": "Category",
       "unit": "Unit"
+    },
+    "discoverSources": {
+      "heading": "Discover sources",
+      "subtitle": "The sites whose recipe titles appear in Discover. Shared across your devices.",
+      "add": "Add",
+      "placeholder": "Site or feed address (e.g. example.com)",
+      "adding": "Checking…",
+      "remove": "Remove",
+      "reset": "Restore the default list",
+      "none": "No sources. Add one below.",
+      "noFeed": "That site doesn't publish a feed the app can read.",
+      "failed": "Could not reach that address.",
+      "duplicate": "Already in the list."
     }
   },
   "connect": {
@@ -1938,5 +1965,21 @@
     "hour_other": "{{count}} hours",
     "minute_one": "{{count}} minute",
     "minute_other": "{{count}} minutes"
+  },
+  "discover": {
+    "title": "Discover",
+    "subtitle": "Fresh recipe titles from the sites you follow. Open one in your browser, or import it into your gallery.",
+    "refresh": "Refresh",
+    "search": "Search titles…",
+    "all": "All",
+    "loading": "Loading feeds…",
+    "empty": "No titles to show.",
+    "noSources": "You are not following any sites yet.",
+    "manageSources": "Add sites in Settings",
+    "someFailed": "Could not load: {{names}}.",
+    "importToGallery": "Import to gallery",
+    "openInBrowser": "Open in browser",
+    "showMore": "Show more",
+    "import": "Import"
   }
 }

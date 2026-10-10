@@ -15,7 +15,8 @@
     "search": "Cerca",
     "createRecipe": "Crea Ricetta",
     "atlas": "Atlante",
-    "pantry": "Dispensa"
+    "pantry": "Dispensa",
+    "discover": "Scopri"
   },
   "atlas": {
     "title": "Atlante",
@@ -497,13 +498,14 @@
       "apply": "Applica {{count}} selezionate",
       "failed": "Il controllo AI non è riuscito.",
       "step": "Passaggio {{n}}",
-      "stepDuration": "Tempo del passaggio {{n}}: {{before}} → {{after}}",
+      "stepDuration": "Tempo del passaggio {{n}}",
       "ingredients": "Ingredienti",
       "tools": "Strumenti",
       "techniques": "Tecniche",
       "notes": "Note",
       "unmatched": "Non presenti nella tua libreria, ignorati: {{names}}",
       "group": {
+        "text": "Ortografia",
         "ingredients": "Quantità degli ingredienti",
         "steps": "Passaggi",
         "fields": "Porzioni, tempi e resa",
@@ -520,6 +522,18 @@
       "kind": {
         "fix": "correzione",
         "fill": "da compilare"
+      },
+      "quantity": "quantità",
+      "selectAll": "Seleziona tutto",
+      "selectNone": "Deseleziona tutto",
+      "target": {
+        "title": "Titolo",
+        "description": "Descrizione",
+        "tips": "Consigli",
+        "storage": "Conservazione",
+        "ingredientName": "Nome ingrediente {{n}}",
+        "stepTitle": "Titolo passaggio {{n}}",
+        "stepText": "Testo passaggio {{n}}"
       }
     },
     "saving": "Salvataggio…",
@@ -1709,6 +1723,19 @@
       "profile": "Profilo",
       "category": "Categoria",
       "unit": "Unità"
+    },
+    "discoverSources": {
+      "heading": "Fonti di Scopri",
+      "subtitle": "I siti di cui compaiono i titoli in Scopri. Condivisi tra i tuoi dispositivi.",
+      "add": "Aggiungi",
+      "placeholder": "Indirizzo del sito o del feed (es. esempio.it)",
+      "adding": "Verifica…",
+      "remove": "Rimuovi",
+      "reset": "Ripristina l'elenco predefinito",
+      "none": "Nessuna fonte. Aggiungine una qui sotto.",
+      "noFeed": "Quel sito non pubblica un feed leggibile dall'app.",
+      "failed": "Impossibile raggiungere quell'indirizzo.",
+      "duplicate": "Già presente nell'elenco."
     }
   },
   "connect": {
@@ -1938,5 +1965,21 @@
     "hour_other": "{{count}} ore",
     "minute_one": "{{count}} minuto",
     "minute_other": "{{count}} minuti"
+  },
+  "discover": {
+    "title": "Scopri",
+    "subtitle": "Titoli di ricette dai siti che segui. Aprili nel browser oppure importali nella tua galleria.",
+    "refresh": "Aggiorna",
+    "search": "Cerca nei titoli…",
+    "all": "Tutti",
+    "loading": "Caricamento dei feed…",
+    "empty": "Nessun titolo da mostrare.",
+    "noSources": "Non segui ancora nessun sito.",
+    "manageSources": "Aggiungi siti nelle impostazioni",
+    "someFailed": "Impossibile caricare: {{names}}.",
+    "importToGallery": "Importa nella galleria",
+    "openInBrowser": "Apri nel browser",
+    "showMore": "Mostra altri",
+    "import": "Importa"
   }
 }
