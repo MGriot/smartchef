@@ -1,0 +1,1 @@
+Menù e piani settimanali si stampano da una pagina dedicata, con scelta tra A4 e Letter.

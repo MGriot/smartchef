@@ -21,6 +21,7 @@
 import { Capacitor } from '@capacitor/core';
 import { canPrintToPdf, printToPdfViaDialog } from './electronBridge';
 import { SmartChefPrint, hasNativePrint } from './printBridge';
+import { loadPaperSize, type PaperSize } from './paperSize';
 
 function isAndroidApp(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
@@ -74,12 +75,6 @@ export function canSavePdfDirectly(): boolean {
   return canPrintToPdf();
 }
 
-/** US readers get Letter, everyone else A4 — what their printer paper and
- *  their PDF viewer's default both expect. */
-function pageSizeFor(locale: string): 'A4' | 'Letter' {
-  return /^en-(US|CA)$/i.test(locale) || /^es-(US|MX)$/i.test(locale) ? 'Letter' : 'A4';
-}
-
 /** The app icon, inline: the footer template is its own document, so neither
  *  page CSS nor bundled asset URLs reach it. */
 const FOOTER_MARK_SVG =
@@ -94,7 +89,7 @@ const FOOTER_MARK_SVG =
  *  corner boxes), so this footer is the only way to number them. */
 export async function savePageAsPdf(
   documentTitle: string,
-  opts: { footerLabel?: string; dialogTitle?: string } = {},
+  opts: { footerLabel?: string; dialogTitle?: string; pageSize?: PaperSize; landscape?: boolean } = {},
 ): Promise<string | null> {
   const name = sanitizeFilename(documentTitle);
   const label = escapeHtml(opts.footerLabel ?? name);
@@ -106,7 +101,8 @@ export async function savePageAsPdf(
     `<span style="display:inline-flex;align-items:center;gap:4px;opacity:.5">${FOOTER_MARK_SVG}${label}</span>` +
     `<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>`;
   return printToPdfViaDialog(`${name}.pdf`, {
-    pageSize: pageSizeFor(typeof navigator !== 'undefined' ? navigator.language : 'en'),
+    pageSize: opts.pageSize ?? loadPaperSize(),
+    landscape: opts.landscape,
     footerTemplate,
     dialogTitle: opts.dialogTitle,
   });

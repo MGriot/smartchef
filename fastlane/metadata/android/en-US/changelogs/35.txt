@@ -1,0 +1,1 @@
+Menus and weekly plans print from their own page, with an A4 or Letter choice.

@@ -17,6 +17,13 @@ export type EventMealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 /** Serving order of a day's meals. */
 export const MEAL_ORDER: EventMealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
 
+/** A bare YYYY-MM-DD is a calendar day, not an instant: parsed by Date()
+ *  as UTC midnight, it shows as the day before in every timezone behind UTC. */
+export function parseMenuDate(value: string): Date {
+  const bare = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return bare ? new Date(Number(bare[1]), Number(bare[2]) - 1, Number(bare[3])) : new Date(value);
+}
+
 export interface EventCourse {
   id: string;
   name: string;

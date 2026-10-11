@@ -1087,6 +1087,7 @@
     "subtitle": "Planifica la semana día a día, o compón el menú de una sola comida.",
     "deleteMenu": "Eliminar menú",
     "newMenu": "Nuevo menú",
+    "printWeek": "Imprimir plan semanal",
     "emptyTitle": "Aún no hay menú",
     "emptyHint": "Planifica una semana día a día, o arma el menú de una comida — una cena, una fiesta — plato a plato. Los tiempos y las raciones salen directamente de las recetas.",
     "startPlanning": "Empezar a planificar",
@@ -1243,6 +1244,23 @@
     "source": "Fuente",
     "printedFrom": "Impreso desde SmartChef",
     "uncheckedOnly": "Imprimir solo los artículos sin marcar",
+    "paper": {
+      "label": "Papel",
+      "a4": "A4",
+      "letter": "Carta"
+    },
+    "menu": {
+      "pageTitle": "Imprimir menú",
+      "loadFailed": "No se pudo cargar este menú.",
+      "showNotes": "Notas de los platos"
+    },
+    "week": {
+      "pageTitle": "Imprimir plan semanal",
+      "loadFailed": "No se pudo cargar este plan.",
+      "weekOf": "Semana del {{date}}",
+      "empty": "Nada planificado esta semana.",
+      "showNotes": "Notas"
+    },
     "report": {
       "menuItem": "Imprimir / informe PDF",
       "pageTitle": "Informe de impresión",

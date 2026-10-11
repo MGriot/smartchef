@@ -524,6 +524,13 @@
   color: #18181b;
 }
 
+.recipe-report .report-step-text,
+.recipe-report .report-chef-note,
+.recipe-report p {
+  orphans: 3;
+  widows: 3;
+}
+
 .recipe-report .report-chef-note {
   border-left: 3px solid #d4d4d8;
   padding-left: 8px;
@@ -559,92 +566,242 @@
   }
 }
 
-/* ── Event menu card (components/planner/EventMenu.tsx) ─────────────────
+/* ── Event menu card (pages/MenuPrint.tsx) ──────────────────────────────────────────────
    The Planner's menu for one meal, printed the way a restaurant prints
    its menu: centred, one course after another, dish names large and the
-   notes under them small and italic. Print-only — the screen shows the
-   editor instead — so these rules only ever apply on paper. */
+   notes under them small and italic. Used by pages/MenuPrint.tsx, which
+   previews it on screen exactly as it prints. */
+
+.menu-card {
+  max-width: 150mm;
+  margin: 0 auto !important;
+  padding-top: 6mm;
+  text-align: center;
+  color: #18181b;
+  font-family: Manrope, system-ui, sans-serif;
+}
+
+.menu-card-logo {
+  display: block;
+  margin: 0 auto 8mm;
+}
+
+/* Tailwind's preflight makes every svg a block, which a text-align can't centre. */
+.menu-card-logo svg {
+  margin: 0 auto;
+}
+
+.menu-card-kicker {
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #71717a;
+}
+
+.menu-card-title {
+  margin-top: 3mm;
+  font-size: 26pt;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.menu-card-intro {
+  margin: 4mm auto 0;
+  max-width: 120mm;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 10.5pt;
+  font-style: italic;
+  color: #52525b;
+  white-space: pre-wrap;
+}
+
+.menu-card-rule {
+  width: 28mm;
+  margin: 8mm auto;
+  border-top: 0.75pt solid #a1a1aa;
+}
+
+.menu-card-course {
+  margin-bottom: 8mm;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.menu-card-course-name {
+  margin-bottom: 3mm;
+  font-size: 10pt;
+  font-weight: 800;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: #52525b;
+}
+
+.menu-card-dish + .menu-card-dish {
+  margin-top: 3mm;
+}
+
+.menu-card-dish-name {
+  font-size: 14pt;
+  font-weight: 600;
+}
+
+.menu-card-dish-note {
+  margin-top: 0.5mm;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 9.5pt;
+  font-style: italic;
+  color: #71717a;
+}
+
+.menu-card-footer {
+  font-size: 9pt;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #a1a1aa;
+}
+
+.menu-card-meal {
+  margin-bottom: 5mm;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.menu-card-course-name {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+/* ── Print views (pages/MenuPrint.tsx) ───────────────────────────────────
+   The sheet is previewed as a white page on a grey desk; printed, the desk,
+   the sheet's screen margins and its width limit go — @page's margin is the
+   margin on paper. */
 @media print {
-  .menu-card {
-    max-width: 150mm;
-    margin: 0 auto !important;
-    padding-top: 6mm;
-    text-align: center;
-    color: #18181b;
-    font-family: Manrope, system-ui, sans-serif;
+  .print-sheet {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
   }
+}
 
-  .menu-card-logo {
-    margin: 0 auto 8mm;
-  }
+/* ── Weekly plan grid ────────────────────────────────────────────────────
+   A column per day, a row per meal, on a landscape sheet. table-layout: fixed
+   keeps seven equal columns whatever the dish names; the header row repeats
+   on every sheet and a row is never cut in two. */
+.week-sheet {
+  color-scheme: light;
+  font-family: Inter, system-ui, sans-serif;
+}
 
-  .menu-card-kicker {
-    font-size: 9pt;
-    font-weight: 700;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: #71717a;
-  }
+.week-sheet-heading {
+  margin-bottom: 5mm;
+}
 
-  .menu-card-title {
-    margin-top: 3mm;
-    font-size: 26pt;
-    font-weight: 800;
-    line-height: 1.15;
-  }
+.week-sheet-title {
+  font-family: Manrope, system-ui, sans-serif;
+  font-size: 20pt;
+  font-weight: 800;
+  line-height: 1.15;
+}
 
-  .menu-card-intro {
-    margin: 4mm auto 0;
-    max-width: 120mm;
-    font-family: Inter, system-ui, sans-serif;
-    font-size: 10.5pt;
-    font-style: italic;
-    color: #52525b;
-    white-space: pre-wrap;
-  }
+.week-sheet-sub {
+  margin-top: 1mm;
+  font-size: 9.5pt;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #71717a;
+}
 
-  .menu-card-rule {
-    width: 28mm;
-    margin: 8mm auto;
-    border-top: 0.75pt solid #a1a1aa;
-  }
+.week-sheet-notes {
+  margin-top: 2mm;
+  font-size: 9.5pt;
+  font-style: italic;
+  color: #52525b;
+  white-space: pre-wrap;
+}
 
-  .menu-card-course {
-    margin-bottom: 8mm;
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
+.week-sheet-empty {
+  padding: 12mm 0;
+  text-align: center;
+  font-size: 10pt;
+  color: #71717a;
+}
 
-  .menu-card-course-name {
-    margin-bottom: 3mm;
-    font-size: 10pt;
-    font-weight: 800;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: #52525b;
-  }
+.week-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 9pt;
+}
 
-  .menu-card-dish + .menu-card-dish {
-    margin-top: 3mm;
-  }
+.week-table thead {
+  display: table-header-group;
+}
 
-  .menu-card-dish-name {
-    font-size: 14pt;
-    font-weight: 600;
-  }
+.week-table tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
 
-  .menu-card-dish-note {
-    margin-top: 0.5mm;
-    font-family: Inter, system-ui, sans-serif;
-    font-size: 9.5pt;
-    font-style: italic;
-    color: #71717a;
-  }
+.week-table th,
+.week-table td {
+  border: 0.75pt solid #d4d4d8;
+  padding: 2mm;
+  vertical-align: top;
+  text-align: left;
+}
 
-  .menu-card-footer {
-    font-size: 9pt;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: #a1a1aa;
-  }
+.week-table thead th {
+  background: #f4f4f5;
+  text-align: center;
+}
+
+.week-day-name {
+  display: block;
+  font-family: Manrope, system-ui, sans-serif;
+  font-size: 9.5pt;
+  font-weight: 800;
+}
+
+.week-day-date {
+  display: block;
+  font-size: 8pt;
+  color: #71717a;
+}
+
+.week-table .week-meal-col {
+  width: 25mm;
+  font-size: 7.5pt;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #52525b;
+  background: #fafafa;
+}
+
+.week-dish + .week-dish {
+  margin-top: 2mm;
+  padding-top: 2mm;
+  border-top: 0.5pt dotted #d4d4d8;
+}
+
+.week-dish-name {
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.week-dish-servings {
+  font-size: 7.5pt;
+  color: #71717a;
+}
+
+.week-dish-note {
+  margin-top: 0.5mm;
+  font-size: 8pt;
+  font-style: italic;
+  color: #71717a;
+  overflow-wrap: anywhere;
 }

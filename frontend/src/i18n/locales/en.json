@@ -1087,6 +1087,7 @@
     "subtitle": "Plan your week day by day, or put together the menu for a single meal.",
     "deleteMenu": "Delete menu",
     "newMenu": "New Menu",
+    "printWeek": "Print weekly plan",
     "emptyTitle": "No menu yet",
     "emptyHint": "Plan a week day by day, or build the menu for one meal — a dinner, a party — course by course. Prep times and portions come straight from the recipes.",
     "startPlanning": "Start Planning",
@@ -1243,6 +1244,23 @@
     "source": "Source",
     "printedFrom": "Printed from SmartChef",
     "uncheckedOnly": "Print only unchecked items",
+    "paper": {
+      "label": "Paper",
+      "a4": "A4",
+      "letter": "Letter"
+    },
+    "menu": {
+      "pageTitle": "Print menu",
+      "loadFailed": "Couldn't load this menu.",
+      "showNotes": "Dish notes"
+    },
+    "week": {
+      "pageTitle": "Print weekly plan",
+      "loadFailed": "Couldn't load this plan.",
+      "weekOf": "Week of {{date}}",
+      "empty": "Nothing planned this week.",
+      "showNotes": "Notes"
+    },
     "report": {
       "menuItem": "Print / PDF report",
       "pageTitle": "Print report",

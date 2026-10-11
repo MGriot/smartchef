@@ -26,6 +26,7 @@ const LibraryTags = lazy(() => import("./pages/LibraryTags"));
 const LibrarySeasonality = lazy(() => import("./pages/LibrarySeasonality"));
 const CollectionDetail = lazy(() => import("./pages/CollectionDetail"));
 const Planner = lazy(() => import("./pages/Planner"));
+const MenuPrint = lazy(() => import("./pages/MenuPrint"));
 const CookHistory = lazy(() => import("./pages/CookHistory"));
 const ShoppingList = lazy(() => import("./pages/ShoppingList"));
 const Account = lazy(() => import("./pages/Account"));
@@ -351,6 +352,7 @@ export default function App() {
         <Route path="/library/tags" element={<LibraryTags />} />
         <Route path="/library/seasonality" element={<LibrarySeasonality />} />
         <Route path="/planner" element={<Planner />} />
+        <Route path="/planner/menu/:id/print" element={<MenuPrint />} />
         <Route path="/history" element={<CookHistory />} />
         <Route path="/shopping" element={<ShoppingList />} />
         <Route path="/account" element={<Account />} />

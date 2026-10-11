@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('smartchefElectron', {
     ipcRenderer.invoke('smartchef-save-file', suggestedName, contents, options),
   // Renders the page on screen to a PDF and saves it through the same
   // dialog — the recipe report's "Save PDF" (frontend/src/lib/print.ts).
-  printToPdf: (suggestedName: string, options?: { pageSize?: 'A4' | 'Letter'; footerTemplate?: string; dialogTitle?: string }) =>
+  printToPdf: (suggestedName: string, options?: { pageSize?: 'A4' | 'Letter'; landscape?: boolean; footerTemplate?: string; dialogTitle?: string }) =>
     ipcRenderer.invoke('smartchef-print-to-pdf', suggestedName, options),
   // Local Storage (wayfinder ticket 03/05, standalone-storage-sync map) —
   // distinct from the sync folder above: this is where the live SQLite db

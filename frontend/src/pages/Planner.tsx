@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import {
   DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
   useDraggable, useDroppable, DragOverlay,
@@ -16,6 +17,8 @@ import {
   MEAL_TYPES, menuKind,
   type MealType, type MenuDetail, type MenuItem, type MenuKind, type MenuSummary, type RecipeOption,
 } from '../components/planner/types';
+import { canPrint } from '../lib/print';
+import { weekDays } from '../lib/weekPrint';
 import { currentMeals, defaultCourses, mealsOf, planMealChange, type EventMealType } from '../lib/eventMenu';
 
 /** The create/edit form for a menu's own details — both kinds share it,
@@ -40,17 +43,6 @@ interface MenuNutrition {
   byDay: Record<number, NutritionTotals>;
   weekly: NutritionTotals;
   unresolved: string[];
-}
-
-/** Monday-first weekday names in the app's language — 2024-01-01 was a
- *  Monday. Capitalised because Italian, French and Spanish write them
- *  lower-case, and here they are column headings. */
-function weekDays(lang: string): Array<{ idx: number; label: string }> {
-  const fmt = new Intl.DateTimeFormat(lang, { weekday: 'long' });
-  return Array.from({ length: 7 }, (_, idx) => {
-    const name = fmt.format(new Date(2024, 0, 1 + idx));
-    return { idx, label: name.charAt(0).toLocaleUpperCase(lang) + name.slice(1) };
-  });
 }
 
 /** A planned meal you can pick up.
@@ -230,8 +222,11 @@ function MenuSwitcher({
   );
 }
 
+const SELECTED_MENU_KEY = 'smartchef.planner.selectedMenu';
+
 export default function Planner() {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const DAYS = useMemo(() => weekDays(i18n.language), [i18n.language]);
   const contentLang = useStore((s) => s.contentLang);
   const [menus, setMenus] = useState<MenuSummary[]>([]);
@@ -260,7 +255,12 @@ export default function Planner() {
       const json = await res.json();
       const list: MenuSummary[] = json.data || [];
       setMenus(list);
-      if (!selectedMenuId && list.length > 0) setSelectedMenuId(list[0].id);
+      if (!selectedMenuId && list.length > 0) {
+        // Coming back from a print view lands on the menu that was open.
+        let remembered: string | null = null;
+        try { remembered = sessionStorage.getItem(SELECTED_MENU_KEY); } catch { /* ignore */ }
+        setSelectedMenuId(list.find((m) => m.id === remembered)?.id ?? list[0].id);
+      }
     } catch (err) {
       console.error('Failed to fetch menus:', err);
     } finally {
@@ -281,6 +281,9 @@ export default function Planner() {
   useEffect(() => { fetchMenus(); }, []);
 
   useEffect(() => {
+    if (selectedMenuId) {
+      try { sessionStorage.setItem(SELECTED_MENU_KEY, selectedMenuId); } catch { /* ignore */ }
+    }
     if (selectedMenuId) fetchMenuDetail(selectedMenuId);
     else setMenu(null);
   }, [selectedMenuId]);
@@ -533,8 +536,7 @@ export default function Planner() {
   return (
     <AppLayout>
       <div className="px-8 lg:px-12 py-10 max-w-6xl mx-auto">
-        {/* no-print: the only thing this page prints is an event menu's
-            card (components/planner/EventMenu.tsx). */}
+        {/* no-print: menus print from their own page (pages/MenuPrint.tsx). */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10 no-print">
           <div>
             <h1 className="text-5xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none mb-2">{t('planner.heading')}</h1>
@@ -543,6 +545,16 @@ export default function Planner() {
           <div className="flex flex-wrap items-center gap-3">
             {menu && (
               <>
+                {menuKind(menu) === 'week' && canPrint() && (
+                  <button
+                    onClick={() => navigate(`/planner/menu/${menu.id}/print`)}
+                    className="w-11 h-11 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-primary flex items-center justify-center transition-colors"
+                    aria-label={t('planner.printWeek')}
+                    title={t('planner.printWeek')}
+                  >
+                    <span className="material-symbols-outlined text-lg">print</span>
+                  </button>
+                )}
                 {menuKind(menu) === 'week' && (
                   <button
                     onClick={openEditDetails}

@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../../lib/api';
-import { canPrint, printPage } from '../../lib/print';
+import { canPrint } from '../../lib/print';
 import {
-  currentMeals, groupDishesByCourse, mealsOf, MEAL_ORDER, moveCourseWithinMeal, moveDish, newCourseId, planMealChange,
+  currentMeals, groupDishesByCourse, mealsOf, MEAL_ORDER, moveCourseWithinMeal, moveDish, newCourseId, parseMenuDate, planMealChange,
   type EventMealType, type MealPlan,
 } from '../../lib/eventMenu';
-import { SmartChefMenuMark } from '../SmartChefLogo';
 import Autocomplete from '../Autocomplete';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../Modal';
 import { Field } from '../Form';
@@ -38,14 +37,9 @@ export const MEAL_BADGE: Record<EventMealType, string> = {
   snack: 'bg-pink-100 text-pink-700',
 };
 
-const SHOW_NOTES_KEY = 'smartchef.planner.cardShowsNotes';
+export const SHOW_NOTES_KEY = 'smartchef.planner.cardShowsNotes';
 
-/** A bare YYYY-MM-DD is a calendar day, not an instant: parsed by Date()
- *  as UTC midnight, it shows as the day before in every timezone behind UTC. */
-export function parseMenuDate(value: string): Date {
-  const bare = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  return bare ? new Date(Number(bare[1]), Number(bare[2]) - 1, Number(bare[3])) : new Date(value);
-}
+export { parseMenuDate };
 
 type DishForm = {
   mode: 'add' | 'edit';
@@ -57,9 +51,9 @@ type DishForm = {
 };
 
 /** The event menu: one meal laid out by course, the way a restaurant prints
- *  its menu. Edited on screen course by course; printed as a menu card
- *  (the `print-only` block at the end) through lib/print.ts, which works on
- *  Android too. Everything is written straight to /api/menus — `onChanged`
+ *  its menu. Edited on screen course by course; printed as a menu card on
+ *  its own page (pages/MenuPrint.tsx), which works on Android too.
+ *  Everything is written straight to /api/menus — `onChanged`
  *  re-reads the menu afterwards, so the server stays the source of truth. */
 export default function EventMenu({
   menu,
@@ -73,6 +67,7 @@ export default function EventMenu({
   onEditDetails: () => void;
 }) {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const courses: MenuCourse[] = menu.courses ?? [];
   const items: MenuItem[] = menu.items ?? [];
   const groups = useMemo(
@@ -285,7 +280,7 @@ export default function EventMenu({
               </button>
               {canPrint() && (
                 <button
-                  onClick={() => { printPage(menu.name).catch((err) => console.error('Print failed:', err)); }}
+                  onClick={() => navigate(`/planner/menu/${menu.id}/print`)}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold text-white bg-primary hover:opacity-90 transition-opacity"
                 >
                   <span className="material-symbols-outlined text-sm">print</span>
@@ -491,31 +486,6 @@ export default function EventMenu({
             <button type="button" onClick={() => setNewCourse(null)} className="px-3 py-2.5 rounded-xl text-sm font-bold text-zinc-500">{t('common.cancel')}</button>
           </form>
         )}
-      </div>
-
-      {/* ── The printed menu card ──────────────────────────────── */}
-      <div className="print-only menu-card">
-        <SmartChefMenuMark className="menu-card-logo" />
-        {(mealLabel || dateLabel) && <p className="menu-card-kicker">{[mealLabel, dateLabel].filter(Boolean).join(' · ')}</p>}
-        <h1 className="menu-card-title">{menu.name}</h1>
-        {menu.notes && <p className="menu-card-intro">{menu.notes}</p>}
-        <div className="menu-card-rule" aria-hidden="true" />
-        {orderedGroups.filter((g) => g.dishes.length > 0).map((group, i, shown) => (
-          <section key={group.course?.id ?? '__other'} className="menu-card-course">
-            {multi && group.course?.mealType && shown[i - 1]?.course?.mealType !== group.course.mealType && (
-              <h2 className="menu-card-kicker">{mealName(group.course.mealType)}</h2>
-            )}
-            <h2 className="menu-card-course-name">{group.course ? group.course.name : t('planner.event.otherDishes')}</h2>
-            {group.dishes.map((item) => (
-              <div key={item.id} className="menu-card-dish">
-                <p className="menu-card-dish-name">{titleFor(item)}</p>
-                {showNotes && item.notes && <p className="menu-card-dish-note">{item.notes}</p>}
-              </div>
-            ))}
-          </section>
-        ))}
-        <div className="menu-card-rule" aria-hidden="true" />
-        <p className="menu-card-footer">{t('planner.event.forGuests', { count: guests })}</p>
       </div>
 
       {/* ── Add / edit a dish ──────────────────────────────────── */}

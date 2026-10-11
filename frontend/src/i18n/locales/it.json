@@ -1087,6 +1087,7 @@
     "subtitle": "Pianifica la settimana giorno per giorno, oppure componi il menù di un singolo pasto.",
     "deleteMenu": "Elimina menù",
     "newMenu": "Nuovo menù",
+    "printWeek": "Stampa piano settimanale",
     "emptyTitle": "Ancora nessun menù",
     "emptyHint": "Pianifica una settimana giorno per giorno, oppure costruisci il menù di un pasto — una cena, una festa — portata per portata. Tempi e porzioni arrivano direttamente dalle ricette.",
     "startPlanning": "Inizia a pianificare",
@@ -1243,6 +1244,23 @@
     "source": "Fonte",
     "printedFrom": "Stampato da SmartChef",
     "uncheckedOnly": "Stampa solo gli articoli non spuntati",
+    "paper": {
+      "label": "Carta",
+      "a4": "A4",
+      "letter": "Letter"
+    },
+    "menu": {
+      "pageTitle": "Stampa menù",
+      "loadFailed": "Impossibile caricare questo menù.",
+      "showNotes": "Note dei piatti"
+    },
+    "week": {
+      "pageTitle": "Stampa piano settimanale",
+      "loadFailed": "Impossibile caricare questo piano.",
+      "weekOf": "Settimana del {{date}}",
+      "empty": "Niente in programma questa settimana.",
+      "showNotes": "Note"
+    },
     "report": {
       "menuItem": "Stampa / report PDF",
       "pageTitle": "Report di stampa",

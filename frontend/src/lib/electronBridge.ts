@@ -24,6 +24,8 @@ export interface ElectronSaveOptions {
 
 export interface ElectronPrintToPdfOptions {
   pageSize?: 'A4' | 'Letter';
+  /** Rotates the page — the weekly plan prints as a landscape grid. */
+  landscape?: boolean;
   /** printToPDF's footer HTML — `<span class="pageNumber">` and
    *  `<span class="totalPages">` are filled in per page. */
   footerTemplate?: string;

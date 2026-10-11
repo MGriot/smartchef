@@ -168,6 +168,7 @@ ipcMain.handle('smartchef-save-file', async (event, suggestedName: string, conte
 // bottom room is where that footer goes.
 interface PrintToPdfOptions {
   pageSize?: 'A4' | 'Letter';
+  landscape?: boolean;
   footerTemplate?: string;
   dialogTitle?: string;
 }
@@ -175,6 +176,7 @@ interface PrintToPdfOptions {
 ipcMain.handle('smartchef-print-to-pdf', async (event, suggestedName: string, options: PrintToPdfOptions = {}) => {
   const pdf = await event.sender.printToPDF({
     pageSize: options.pageSize || 'A4',
+    landscape: !!options.landscape,
     printBackground: true,
     displayHeaderFooter: !!options.footerTemplate,
     headerTemplate: '<span></span>',

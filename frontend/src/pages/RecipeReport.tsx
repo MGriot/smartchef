@@ -24,10 +24,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Capacitor } from '@capacitor/core';
 import i18n from '../i18n';
 import { apiFetch } from '../lib/api';
-import { canPrint, canSavePdfDirectly, printPage, savePageAsPdf } from '../lib/print';
+import { printPage, savePageAsPdf } from '../lib/print';
+import { loadPaperSize, savePaperSize, sheetSize, usePageRule } from '../lib/paperSize';
 import { isLocalImagePath, resolveImageSrc } from '../lib/localImages';
 import { countryDisplayName, isCountryCode } from '../lib/countries';
 import type { MeasurementSystem } from '../lib/unitConvert';
@@ -36,6 +36,7 @@ import {
   type RecipeReportModel, type ReportInput, type ReportNamedInput, type ReportNutritionInput,
   type ReportOptions, type ReportRecipeInput, type ReportSection,
 } from '../lib/recipeReport';
+import PrintToolbar from '../components/PrintToolbar';
 import RenderStepText from '../components/RenderStepText';
 import { SmartChefWatermark } from '../components/SmartChefLogo';
 import { SOURCE_TYPE_META } from '../components/RecipeSourcesEditor';
@@ -64,8 +65,6 @@ function loadDisplaySystem(): MeasurementSystem {
     return 'metric';
   }
 }
-
-const isAndroidApp = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
 
 /** Every stored image value the sheet will show, so they can be resolved
  *  (local paths need an async step) before anything is printed. */
@@ -99,6 +98,8 @@ export default function RecipeReport() {
   });
   const [displaySystem, setDisplaySystem] = useState<MeasurementSystem>(loadDisplaySystem);
   const [toggles, setToggles] = useState<Toggles>(loadToggles);
+  const [paper, setPaper] = useState(loadPaperSize);
+  usePageRule(paper);
 
   const [resolvedImages, setResolvedImages] = useState<Map<string, string | null> | null>(null);
   const [settledImages, setSettledImages] = useState<Set<string>>(new Set());
@@ -112,6 +113,7 @@ export default function RecipeReport() {
   useEffect(() => {
     try { localStorage.setItem(OPTIONS_KEY, JSON.stringify(toggles)); } catch { /* ignore */ }
   }, [toggles]);
+  useEffect(() => { savePaperSize(paper); }, [paper]);
   useEffect(() => {
     try { localStorage.setItem('smartchef.displaySystem', displaySystem); } catch { /* ignore */ }
   }, [displaySystem]);
@@ -307,6 +309,7 @@ export default function RecipeReport() {
       const saved = await savePageAsPdf(model.title, {
         footerLabel: `${model.title} · SmartChef`,
         dialogTitle: t('print.report.savePdf'),
+        pageSize: paper,
       });
       if (saved) setSavedPdf(saved);
     } catch (err) {
@@ -321,7 +324,6 @@ export default function RecipeReport() {
   const hasStepPhotos = !!recipe && [recipe, ...subRecipes.values()].some(r => (r.steps || []).some(s => !!s.imageUrl));
   const hasComponents = !!recipe && (recipe.ingredients || []).some(i => !!i.subRecipeId);
 
-  const printLabel = isAndroidApp() ? t('print.report.printOrSavePdf') : t('print.report.print');
   const printedOn = t('print.report.printedOn', {
     date: new Date().toLocaleDateString(i18n.language, { year: 'numeric', month: 'long', day: 'numeric' }),
   });
@@ -329,126 +331,90 @@ export default function RecipeReport() {
   return (
     <div className="recipe-report-page min-h-screen bg-zinc-200 dark:bg-zinc-950">
       {/* ── Toolbar (screen only) ─────────────────────────────── */}
-      <div
-        className="no-print sticky top-0 z-30 bg-white/95 dark:bg-zinc-900/95 backdrop-blur border-b border-zinc-200 dark:border-zinc-800"
-        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      <PrintToolbar
+        title={t('print.report.pageTitle')}
+        onBack={() => (window.history.length > 1 ? navigate(-1) : navigate(`/recipe/${id}`))}
+        paper={paper}
+        onPaperChange={setPaper}
+        maxWidth={`${sheetSize(paper).width}mm`}
+        preparing={!ready && !!model}
+        disabled={!ready || busy !== null}
+        onPrint={handlePrint}
+        onSavePdf={handleSavePdf}
+        error={actionError}
+        savedTo={savedPdf}
       >
-        <div className="max-w-[210mm] mx-auto px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-3">
-          <button
-            onClick={() => (window.history.length > 1 ? navigate(-1) : navigate(`/recipe/${id}`))}
-            className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:text-primary transition-colors"
-            aria-label={t('common.back')}
-          >
-            <span className="material-symbols-outlined text-[20px]">arrow_back</span>
-            <span className="hidden sm:inline">{t('common.back')}</span>
-          </button>
-          <p className="text-sm font-black text-zinc-900 dark:text-zinc-100 mr-auto">{t('print.report.pageTitle')}</p>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">{t('recipeDetail.servings')}</span>
-            <div className="flex items-center rounded-xl border border-zinc-200 dark:border-zinc-700">
-              <button
-                onClick={() => setServings(s => Math.max(1, (s ?? 1) - 1))}
-                className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-primary"
-                aria-label="−"
-              >
-                <span className="material-symbols-outlined text-[18px]">remove</span>
-              </button>
-              <span className="w-7 text-center text-sm font-bold tabular-nums text-zinc-900 dark:text-zinc-100">{servings ?? '–'}</span>
-              <button
-                onClick={() => setServings(s => Math.min(99, (s ?? 1) + 1))}
-                className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-primary"
-                aria-label="+"
-              >
-                <span className="material-symbols-outlined text-[18px]">add</span>
-              </button>
-            </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 dark:text-zinc-500">{t('recipeDetail.servings')}</span>
+          <div className="flex items-center rounded-xl border border-zinc-200 dark:border-zinc-700">
+            <button
+              onClick={() => setServings(s => Math.max(1, (s ?? 1) - 1))}
+              className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-primary"
+              aria-label="−"
+            >
+              <span className="material-symbols-outlined text-[18px]">remove</span>
+            </button>
+            <span className="w-7 text-center text-sm font-bold tabular-nums text-zinc-900 dark:text-zinc-100">{servings ?? '–'}</span>
+            <button
+              onClick={() => setServings(s => Math.min(99, (s ?? 1) + 1))}
+              className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-primary"
+              aria-label="+"
+            >
+              <span className="material-symbols-outlined text-[18px]">add</span>
+            </button>
           </div>
-
-          <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5">
-            {(['metric', 'imperial'] as const).map(sys => (
-              <button
-                key={sys}
-                type="button"
-                onClick={() => setDisplaySystem(sys)}
-                className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition-colors ${
-                  displaySystem === sys
-                    ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                    : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'
-                }`}
-              >
-                {t(`converter.${sys}`)}
-              </button>
-            ))}
-          </div>
-
-          <div className="w-full flex flex-wrap items-center gap-2">
-            {([
-              ['includeCover', t('print.report.includeCover'), !!recipe?.cover_image_url],
-              ['includeStepPhotos', t('print.report.includeStepPhotos'), hasStepPhotos],
-              ['includeComponents', t('print.report.includeComponents'), hasComponents],
-              ['includeNutrition', t('print.report.includeNutrition'), !!nutrition],
-            ] as const).filter(([, , available]) => available).map(([key, label]) => (
-              <label
-                key={key}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer border transition-colors ${
-                  toggles[key]
-                    ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  className="accent-primary w-3.5 h-3.5"
-                  checked={toggles[key]}
-                  onChange={e => setToggle(key, e.target.checked)}
-                />
-                {label}
-              </label>
-            ))}
-
-            <div className="ml-auto flex items-center gap-2">
-              {!ready && model && (
-                <span className="text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">{t('print.report.preparing')}</span>
-              )}
-              {canSavePdfDirectly() && (
-                <button
-                  onClick={handleSavePdf}
-                  disabled={!ready || busy !== null}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-zinc-700 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
-                  {t('print.report.savePdf')}
-                </button>
-              )}
-              {canPrint() && (
-                <button
-                  onClick={handlePrint}
-                  disabled={!ready || busy !== null}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-primary hover:opacity-90 disabled:opacity-50 transition-opacity"
-                >
-                  <span className="material-symbols-outlined text-[18px]">print</span>
-                  {printLabel}
-                </button>
-              )}
-            </div>
-          </div>
-          {(actionError || savedPdf) && (
-            <p className={`w-full text-xs ${actionError ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'} break-all`}>
-              {actionError || t('print.report.savedTo', { location: savedPdf })}
-            </p>
-          )}
         </div>
-      </div>
+
+        <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5">
+          {(['metric', 'imperial'] as const).map(sys => (
+            <button
+              key={sys}
+              type="button"
+              onClick={() => setDisplaySystem(sys)}
+              className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition-colors ${
+                displaySystem === sys
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                  : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'
+              }`}
+            >
+              {t(`converter.${sys}`)}
+            </button>
+          ))}
+        </div>
+
+        {([
+          ['includeCover', t('print.report.includeCover'), !!recipe?.cover_image_url],
+          ['includeStepPhotos', t('print.report.includeStepPhotos'), hasStepPhotos],
+          ['includeComponents', t('print.report.includeComponents'), hasComponents],
+          ['includeNutrition', t('print.report.includeNutrition'), !!nutrition],
+        ] as const).filter(([, , available]) => available).map(([key, label]) => (
+          <label
+            key={key}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer border transition-colors ${
+              toggles[key]
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400'
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="accent-primary w-3.5 h-3.5"
+              checked={toggles[key]}
+              onChange={e => setToggle(key, e.target.checked)}
+            />
+            {label}
+          </label>
+        ))}
+      </PrintToolbar>
 
       {/* ── The sheet ─────────────────────────────────────────── */}
       <div className="recipe-report-sheet-wrap px-0 sm:px-4 py-0 sm:py-8">
         {loadError ? (
-          <p className="max-w-[210mm] mx-auto p-8 text-sm text-red-600">{loadError}</p>
+          <p className="mx-auto p-8 text-sm text-red-600" style={{ maxWidth: `${sheetSize(paper).width}mm` }}>{loadError}</p>
         ) : !model ? (
-          <p className="max-w-[210mm] mx-auto p-8 text-sm text-zinc-500 animate-pulse">{t('common.loading')}</p>
+          <p className="mx-auto p-8 text-sm text-zinc-500 animate-pulse" style={{ maxWidth: `${sheetSize(paper).width}mm` }}>{t('common.loading')}</p>
         ) : (
-          <div className="recipe-report max-w-[210mm] mx-auto bg-white text-zinc-900 shadow-xl sm:rounded-sm px-5 py-6 sm:px-[16mm] sm:py-[14mm]">
+          <div style={{ maxWidth: `${sheetSize(paper).width}mm` }} className="recipe-report mx-auto bg-white text-zinc-900 shadow-xl sm:rounded-sm px-5 py-6 sm:px-[16mm] sm:py-[14mm]">
             {/* Title block */}
             <div className="report-keep flex flex-col-reverse sm:flex-row gap-5 items-start">
               <div className="flex-1 min-w-0">
