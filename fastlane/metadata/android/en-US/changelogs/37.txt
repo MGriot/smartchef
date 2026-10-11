@@ -1,0 +1,1 @@
+Build fix: the Gradle wrapper now verifies its download checksum (F-Droid requirement). No changes to the app.

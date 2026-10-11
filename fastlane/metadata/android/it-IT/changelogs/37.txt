@@ -1,0 +1,1 @@
+Correzione di build: il Gradle wrapper ora verifica il checksum del download (richiesto da F-Droid). Nessuna modifica all'app.
