@@ -506,11 +506,12 @@
       "unmatched": "Non presenti nella tua libreria, ignorati: {{names}}",
       "group": {
         "text": "Ortografia",
-        "ingredients": "Quantità degli ingredienti",
+        "ingredients": "Ingredienti",
         "steps": "Passaggi",
         "fields": "Porzioni, tempi e resa",
         "tags": "Tag",
-        "regions": "Regioni"
+        "regions": "Regioni",
+        "links": "Collegamenti nei passaggi"
       },
       "field": {
         "servings": "Porzioni",
@@ -534,6 +535,26 @@
         "ingredientName": "Nome ingrediente {{n}}",
         "stepTitle": "Titolo passaggio {{n}}",
         "stepText": "Testo passaggio {{n}}"
+      },
+      "link": "Passaggio {{n}}: «{{from}}» → {{label}}",
+      "ingredientAdd": "Aggiungi ingrediente: {{name}}",
+      "ingredientRemove": "Rimuovi ingrediente: {{label}}",
+      "stepRewrite": "Riscrivi il passaggio {{n}}",
+      "stepRemove": "Rimuovi il passaggio {{n}}",
+      "estimated": "quantità stimata dall'AI",
+      "mismatch": {
+        "title": "Ingredienti e passaggi non coincidono",
+        "stepsSay": "I passaggi nominano, ma l'elenco non ha",
+        "listUnused": "Nell'elenco, ma mai usati nei passaggi",
+        "question": "Quale versione è quella giusta?",
+        "followSteps": "Segui i passaggi",
+        "followStepsHint": "Correggo l'elenco degli ingredienti",
+        "followIngredients": "Segui gli ingredienti",
+        "followIngredientsHint": "Riscrivo i passaggi che li contraddicono",
+        "ignore": "Ignora",
+        "resolving": "Preparo le correzioni…",
+        "nothing": "Nessuna correzione verificabile per questa scelta. Puoi modificare la ricetta a mano.",
+        "error": "Non sono riuscito a preparare le correzioni."
       }
     },
     "saving": "Salvataggio…",
@@ -1021,7 +1042,8 @@
     "noServer": "Nessun server configurato: collegati prima al tuo server SmartChef.",
     "mergeIntoSelf": "Non si può unire un elemento con sé stesso.",
     "toolNotFound": "Attrezzo non trovato",
-    "providerBusy": "{{provider}} è sovraccarico in questo momento (HTTP {{status}}) e lo era ancora dopo vari tentativi. Il problema è del fornitore: riprova tra qualche minuto."
+    "providerBusy": "{{provider}} è sovraccarico in questo momento (HTTP {{status}}) e lo era ancora dopo vari tentativi. Il problema è del fornitore: riprova tra qualche minuto.",
+    "llmReplyTruncated": "La risposta del modello è stata interrotta: gli ultimi passaggi potrebbero essere incompleti o senza collegamenti."
   },
   "shopping": {
     "otherAisle": "Altro",

@@ -316,6 +316,9 @@ export function linkIngredientsInText(
   text: string,
   refs: StepIngredientRefLike[],
   ingredients: ImportedIngredient[],
+  /** Extra wordings per ingredient (by sortOrder) the prose may use, such as
+   *  the words the model quoted from this very step. Tried with the name. */
+  extraNames?: Map<number, string[]>,
 ): string {
   if (!text || !refs.length) return text;
   let out = text;
@@ -327,7 +330,7 @@ export function linkIngredientsInText(
     // anything already referenced.
     if (name.length < 3) continue;
     if (new RegExp(String.raw`\{\{ing:${ref.ingredientSortOrder}[|}]`).test(out)) continue;
-    const hit = findMention(out, [name], 'noun');
+    const hit = findMention(out, [name, ...(extraNames?.get(ref.ingredientSortOrder) ?? [])], 'noun');
     if (hit) out = out.slice(0, hit.start) + buildRef('ing', ref.ingredientSortOrder) + out.slice(hit.end);
   }
   return out;

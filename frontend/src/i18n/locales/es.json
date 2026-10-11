@@ -506,11 +506,12 @@
       "unmatched": "No están en tu biblioteca, omitidos: {{names}}",
       "group": {
         "text": "Ortografía",
-        "ingredients": "Cantidades de ingredientes",
+        "ingredients": "Ingredientes",
         "steps": "Pasos",
         "fields": "Raciones, tiempos y rendimiento",
         "tags": "Etiquetas",
-        "regions": "Regiones"
+        "regions": "Regiones",
+        "links": "Enlaces en los pasos"
       },
       "field": {
         "servings": "Raciones",
@@ -534,6 +535,26 @@
         "ingredientName": "Nombre del ingrediente {{n}}",
         "stepTitle": "Título del paso {{n}}",
         "stepText": "Texto del paso {{n}}"
+      },
+      "link": "Paso {{n}}: «{{from}}» → {{label}}",
+      "ingredientAdd": "Añadir ingrediente: {{name}}",
+      "ingredientRemove": "Quitar ingrediente: {{label}}",
+      "stepRewrite": "Reescribir el paso {{n}}",
+      "stepRemove": "Quitar el paso {{n}}",
+      "estimated": "cantidad estimada por la IA",
+      "mismatch": {
+        "title": "Los ingredientes y los pasos no coinciden",
+        "stepsSay": "Citados en los pasos, ausentes de la lista",
+        "listUnused": "En la lista, nunca usados en los pasos",
+        "question": "¿Qué versión es la correcta?",
+        "followSteps": "Seguir los pasos",
+        "followStepsHint": "Corrijo la lista de ingredientes",
+        "followIngredients": "Seguir los ingredientes",
+        "followIngredientsHint": "Reescribo los pasos que los contradicen",
+        "ignore": "Ignorar",
+        "resolving": "Preparando las correcciones…",
+        "nothing": "No hay una corrección verificable para esta opción. Puedes editar la receta a mano.",
+        "error": "No se pudieron preparar las correcciones."
       }
     },
     "saving": "Guardando…",
@@ -1021,7 +1042,8 @@
     "noServer": "No hay ningún servidor configurado: conéctate primero a tu servidor SmartChef.",
     "mergeIntoSelf": "No se puede combinar un elemento consigo mismo.",
     "toolNotFound": "Utensilio no encontrado",
-    "providerBusy": "{{provider}} está saturado ahora mismo (HTTP {{status}}) y seguía así tras varios reintentos. Es un problema del proveedor: vuelve a intentarlo en unos minutos."
+    "providerBusy": "{{provider}} está saturado ahora mismo (HTTP {{status}}) y seguía así tras varios reintentos. Es un problema del proveedor: vuelve a intentarlo en unos minutos.",
+    "llmReplyTruncated": "La respuesta del modelo se cortó: los últimos pasos pueden estar incompletos o sin enlaces."
   },
   "shopping": {
     "otherAisle": "Otros",

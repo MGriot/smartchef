@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { linkEntitiesInText, resolveRegions } from './importLinking';
+import { linkEntitiesInText, resolveRegions, verifiedMentions, ingredientMentionNames, ingredientsNamedInText } from './importLinking';
 
 describe('linkEntitiesInText', () => {
-  it('links the first whole-word mention using any of the names', () => {
+  it('links every whole-word mention using any of the names', () => {
     const out = linkEntitiesInText('Preriscalda il forno e inforna nel forno.', 'tool', [
       { id: 't1', names: ['Oven', 'Forno'] },
     ]);
-    expect(out).toBe('Preriscalda il {{tool:t1}} e inforna nel forno.');
+    expect(out).toBe('Preriscalda il {{tool:t1}} e inforna nel {{tool:t1}}.');
   });
 
   it('prefers the longer name', () => {
@@ -47,5 +47,30 @@ describe('resolveRegions', () => {
     const r = await resolveRegions([{ country: null, place: 'Pinerolo' }], async () => { throw new Error('offline'); });
     expect(r.regions).toEqual(['Pinerolo']);
     expect(r.regionCoords).toEqual({});
+  });
+});
+
+describe('verifiedMentions', () => {
+  const desc = 'Mondate i cipollotti e rosolateli nel burro.';
+  it('keeps only quotes the step really contains', () => {
+    const out = verifiedMentions(desc, [
+      { kind: 'ingredient', name: 'Cipollotti', text: 'cipollotti' },
+      { kind: 'ingredient', name: 'Feta', text: 'feta' },
+    ], 'ingredient');
+    expect(out).toEqual([{ name: 'Cipollotti', texts: ['cipollotti'] }]);
+  });
+
+  it('resolves ingredient quotes to the row they belong to', () => {
+    const rows = [{ name: 'Cipolle rosse' }, { name: 'Cipollotti freschi' }, { name: 'Burro' }];
+    const map = ingredientMentionNames(desc, [{ kind: 'ingredient', name: 'Cipollotti freschi', text: 'cipollotti' }], rows);
+    expect(map.get(1)).toEqual(['cipollotti']);
+    expect(map.has(0)).toBe(false);
+  });
+});
+
+describe('ingredientsNamedInText', () => {
+  it('finds ingredients by their own name and skips the ones already taken', () => {
+    const rows = [{ name: 'Farina 00' }, { name: 'Burro' }, { name: 'Uova' }];
+    expect(ingredientsNamedInText('Impastate la farina con il burro.', rows, new Set([1]))).toEqual([0]);
   });
 });

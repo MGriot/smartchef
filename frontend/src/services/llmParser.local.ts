@@ -151,6 +151,13 @@ Il JSON deve avere questa struttura:
           "quantity": "number | null",
           "unit": "string | null"
         }
+      ],
+      "mentions": [
+        {
+          "kind": "ingredient | tool | technique",
+          "name": "string",
+          "text": "string"
+        }
       ]
     }
   ],
@@ -167,9 +174,10 @@ Regole:
 - groupName (negli ingredienti) è un'intestazione breve e opzionale sotto cui questo ingrediente è raggruppato, es. "Per il condimento" — impostalo SOLO quando la ricetta originale raggruppa visivamente gli ingredienti in sezioni etichettate; altrimenti lascialo null. Non inventare raggruppamenti assenti nella fonte
 - isOptional (negli ingredienti) è true quando la ricetta presenta quell'ingrediente come facoltativo o a piacere (es. "facoltativo", "se gradito", "optional", "per guarnire", "q.b. a piacere"); altrimenti false. Non dedurlo dal fatto che una quantità sia vaga
 - techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step, con nomi brevi e IN INGLESE (es. "Sauté", "Braise"), stesso criterio di "tools"
-- tools (negli step) è l'elenco degli strumenti che QUEL passaggio usa, con gli stessi nomi IN INGLESE usati nell'elenco "tools" principale (che deve contenerli tutti). Solo strumenti realmente usati in quel passaggio
+- tools (negli step) è l'elenco degli strumenti che QUEL passaggio usa, con gli stessi nomi IN INGLESE usati nell'elenco "tools" principale (che deve contenerli tutti). Elenca TUTTI gli strumenti realmente usati in quel passaggio, e solo quelli
 - regions è l'origine geografica del piatto: un oggetto per luogo, con country = codice paese ISO 3166-1 alpha-2 maiuscolo (es. "IT", "FR") oppure null, e place = regione o città più specifica (es. "Toscana", "Napoli") oppure null. Compila SOLO se la fonte indica l'origine o il piatto è chiaramente tipico di un luogo; altrimenti lascia l'array vuoto. Non inventare
-- ingredients (negli step) è l'elenco degli ingredienti che QUEL passaggio usa. Il campo name deve essere copiato ESATTAMENTE come compare nella lista "ingredients" principale, altrimenti il collegamento viene scartato. Metti quantity/unit SOLO quando il passaggio usa una parte dichiarata dell'ingrediente (es. "metà dello zucchero" su 100 g -> quantity 50, unit "g"); se il passaggio usa semplicemente l'ingrediente, lascia quantity e unit a null. Non elencare ingredienti che quel passaggio non nomina né usa, e non inventarne di assenti dalla lista principale
+- ingredients (negli step) è l'elenco degli ingredienti che QUEL passaggio usa. Il campo name deve essere copiato ESATTAMENTE come compare nella lista "ingredients" principale, altrimenti il collegamento viene scartato. Metti quantity/unit SOLO quando il passaggio usa una parte dichiarata dell'ingrediente (es. "metà dello zucchero" su 100 g -> quantity 50, unit "g"); se il passaggio usa semplicemente l'ingrediente, lascia quantity e unit a null. Elenca TUTTI gli ingredienti che quel passaggio nomina o usa, anche al plurale o con un nome più breve (es. "le uova" per "Uova", "il burro" per "Burro morbido") e nessun altro; non inventarne di assenti dalla lista principale
+- mentions (negli step) dice DOVE il testo di QUEL passaggio nomina ciascun ingrediente, strumento o tecnica elencati in quel passaggio: kind, name (lo stesso nome usato nell'elenco "ingredients", "tools" o "techniques" di quel passaggio) e text (le parole ESATTE come compaiono nel campo description di quel passaggio, copiate carattere per carattere, es. "cipollotti", "nel forno", "sbattere"). Una voce per ogni elemento elencato nel passaggio, sulla sua prima occorrenza nel testo; se il testo non lo nomina letteralmente (lo usa soltanto) non aggiungere la voce. Non inventare parole assenti dal testo
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
@@ -446,7 +454,10 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
     },
     {
       model,
-      max_tokens: 1500,
+      // A recipe with a dozen steps, each listing its ingredients, tools,
+      // techniques and quoted mentions, runs well past 1500 tokens; the cut-off
+      // tail steps then lost their links without a word.
+      max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
       // No temperature/top_p/top_k — current Claude models return HTTP 400
@@ -644,15 +655,32 @@ function parseYield(raw: unknown): { amount: number; unit: string } | undefined 
   return Number.isFinite(amount) && amount > 0 && unit ? { amount, unit } : undefined;
 }
 
+/** Where a step's prose literally names the ingredients, tools and techniques
+ *  the step uses: the model's own wording, kept only as a candidate that the
+ *  client verifies against the step text before turning it into a link. */
+function parseStepMentions(raw: unknown): Array<{ kind: 'ingredient' | 'tool' | 'technique'; name: string; text: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ kind: 'ingredient' | 'tool' | 'technique'; name: string; text: string }> = [];
+  for (const m of raw) {
+    const kind = m?.kind === 'ingredient' || m?.kind === 'tool' || m?.kind === 'technique' ? m.kind : null;
+    const name = typeof m?.name === 'string' ? m.name.trim() : '';
+    const text = typeof m?.text === 'string' ? m.text.trim() : '';
+    if (kind && name && text) out.push({ kind, name, text });
+  }
+  return out;
+}
+
 function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
   const jsonMatch = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
   if (!jsonMatch) throw new Error(i18n.t('errors.noJsonFromModel'));
 
   let parsed: any;
+  let truncated = false;
   try {
     parsed = JSON.parse(jsonMatch[0]);
   } catch {
     parsed = JSON.parse(repairTruncatedJson(jsonMatch[0]));
+    truncated = true;
   }
 
   return {
@@ -719,6 +747,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
                   unit: typeof u.unit === 'string' ? u.unit : null,
                 }))
             : [],
+          mentions: parseStepMentions(step.mentions),
         }))
       : [],
     sourceUrl: undefined,
@@ -729,7 +758,12 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
     // og:image when this comes back empty.
     imageUrl: absoluteImageUrl(typeof parsed.imageUrl === 'string' ? parsed.imageUrl : null, baseUrl) ?? undefined,
     confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-    warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+    warnings: [
+      ...(Array.isArray(parsed.warnings) ? parsed.warnings : []),
+      // A reply cut off mid-JSON is repaired by dropping its tail, so the last
+      // steps can be missing or lack their ingredient/tool/technique lists.
+      ...(truncated ? [i18n.t('errors.llmReplyTruncated')] : []),
+    ],
   };
 }
 

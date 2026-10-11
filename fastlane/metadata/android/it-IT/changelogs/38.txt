@@ -1,0 +1,1 @@
+Il controllo AI della ricetta collega più ingredienti, strumenti e tecniche, e chiede quale lato seguire quando ingredienti e passaggi non coincidono.

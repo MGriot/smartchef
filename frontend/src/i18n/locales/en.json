@@ -506,11 +506,12 @@
       "unmatched": "Not in your library, so skipped: {{names}}",
       "group": {
         "text": "Spelling",
-        "ingredients": "Ingredient quantities",
+        "ingredients": "Ingredients",
         "steps": "Steps",
         "fields": "Portions, times and yield",
         "tags": "Tags",
-        "regions": "Regions"
+        "regions": "Regions",
+        "links": "Links in the steps"
       },
       "field": {
         "servings": "Servings",
@@ -534,6 +535,26 @@
         "ingredientName": "Ingredient {{n}} name",
         "stepTitle": "Step {{n}} title",
         "stepText": "Step {{n}} text"
+      },
+      "link": "Step {{n}}: \"{{from}}\" → {{label}}",
+      "ingredientAdd": "Add ingredient: {{name}}",
+      "ingredientRemove": "Remove ingredient: {{label}}",
+      "stepRewrite": "Rewrite step {{n}}",
+      "stepRemove": "Remove step {{n}}",
+      "estimated": "amount estimated by AI",
+      "mismatch": {
+        "title": "Ingredients and steps do not match",
+        "stepsSay": "Named in the steps, missing from the list",
+        "listUnused": "In the list, never used in the steps",
+        "question": "Which version is right?",
+        "followSteps": "Follow the steps",
+        "followStepsHint": "I fix the ingredient list",
+        "followIngredients": "Follow the ingredients",
+        "followIngredientsHint": "I rewrite the steps that contradict them",
+        "ignore": "Ignore",
+        "resolving": "Preparing the fixes…",
+        "nothing": "No verifiable fix for this choice. You can edit the recipe by hand.",
+        "error": "Could not prepare the fixes."
       }
     },
     "saving": "Saving…",
@@ -1021,7 +1042,8 @@
     "noServer": "No server configured — connect to your SmartChef server first.",
     "mergeIntoSelf": "Cannot merge an item into itself.",
     "toolNotFound": "Tool not found",
-    "providerBusy": "{{provider}} is overloaded right now (HTTP {{status}}) and still was after several retries. This is on the provider's side — try again in a few minutes."
+    "providerBusy": "{{provider}} is overloaded right now (HTTP {{status}}) and still was after several retries. This is on the provider's side — try again in a few minutes.",
+    "llmReplyTruncated": "The model's reply was cut off: the last steps may be incomplete or missing their links."
   },
   "shopping": {
     "otherAisle": "Other",

@@ -72,8 +72,15 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     const body = parseBody(init) ?? {};
     if (!body.draft || !body.catalog) return { status: 400, error: i18n.t('errors.recipeRequired') };
     try {
-      const { checkRecipeWithAi } = await import('./recipeCheck.local');
-      return { status: 200, data: await checkRecipeWithAi(body.draft, body.catalog) };
+      const local = await import('./recipeCheck.local');
+      // Second step of a mismatch the first check found: the user chose which
+      // side to believe and the model repairs the other one.
+      if (sub === 'resolve') {
+        if (!body.mismatch || (body.side !== 'steps' && body.side !== 'ingredients')) return { status: 400, error: i18n.t('errors.recipeRequired') };
+        return { status: 200, data: await local.resolveMismatchWithAi(body.side, body.draft, body.catalog, body.mismatch) };
+      }
+      if (sub) return NOT_HANDLED;
+      return { status: 200, data: await local.checkRecipeWithAi(body.draft, body.catalog) };
     } catch (err) {
       return { status: 502, error: err instanceof Error ? err.message : 'AI check failed' };
     }

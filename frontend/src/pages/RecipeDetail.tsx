@@ -24,7 +24,7 @@ import RegionsMap from '../components/RegionsMap';
 import RenderStepText from '../components/RenderStepText';
 import AutoTextarea from '../components/AutoTextarea';
 import {
-  STEP_REF_RE, syncIngredientRefAmount, reindexIngredientRefs,
+  STEP_REF_RE, syncIngredientRefAmount, reindexIngredientRefs, normalizeName,
   stepIngredientConsumption, remainingBeforeStep,
 } from '../lib/stepRefs';
 import CookTimerBar from '../components/CookTimerBar';
@@ -45,7 +45,8 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { buildCookidooExport, type CookidooExport } from '../lib/cookidooExport';
 import RecipeAiReviewDialog from '../components/RecipeAiReviewDialog';
-import { applyCheckChanges, type CheckChange, type CheckResult } from '../lib/recipeCheck';
+import { applyCheckChanges, type CheckChange, type CheckResult, type ResolvedApplyInput } from '../lib/recipeCheck';
+import type { MismatchSide } from '../lib/recipeMismatchFix';
 import { resolveRegions } from '../lib/importLinking';
 import { isAreaResult } from '../lib/geocodeTypes';
 
@@ -1524,9 +1525,71 @@ const RecipeDetail: React.FC = () => {
       }
     };
 
+    /** The user chose which side of an ingredient/steps mismatch is right: a
+     *  second, smaller call makes the other side agree, and its verified
+     *  changes join the review instead of replacing it. Returns how many. */
+    const resolveAiMismatch = async (side: MismatchSide): Promise<number> => {
+      const mismatch = aiResult?.mismatch;
+      if (!mismatch) return 0;
+      const res = await apiFetch('/api/recipes/ai-check/resolve', {
+        method: 'POST',
+        body: JSON.stringify({
+          side,
+          mismatch,
+          draft: {
+            title: draft.title, servings: draft.servings, ingredients: draft.ingredients, steps: draft.steps,
+            tools: draft.tools, techniques: draft.techniques,
+          },
+          catalog: { tools: allTools, techniques: allTechniques, units: allUnits, tagNames: [] },
+        }),
+        timeoutMs: 300_000,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || t('recipeDetail.aiCheck.failed'));
+      const fix = json.data as { changes: CheckChange[]; unmatched: string[] };
+      setAiResult((prev) => prev && {
+        ...prev,
+        changes: [...prev.changes, ...fix.changes],
+        unmatched: [...new Set([...prev.unmatched, ...fix.unmatched])],
+        mismatch: null,
+      });
+      return fix.changes.length;
+    };
+
+    /** A row added by the mismatch fix needs a library ingredient to be saved:
+     *  the one it already names, or a new one (the editor's own default
+     *  category, translated like any ingredient created here). */
+    const resolveAddedIngredients = async (changes: CheckChange[]): Promise<ResolvedApplyInput['ingredients']> => {
+      const out: NonNullable<ResolvedApplyInput['ingredients']> = {};
+      for (const c of changes) {
+        if (c.type !== 'ingredientAdd') continue;
+        const key = normalizeName(c.name);
+        const found = allIngredients.find((i) => [i.name, i.translated_name, i.plural_name, ...(i.synonyms ?? [])].some((n) => !!n && normalizeName(n) === key));
+        if (found) { out[c.id] = { ingredientId: found.id, ingredientName: found.translated_name || found.name }; continue; }
+        const categoryId = categories[0]?.id;
+        if (!categoryId) continue;
+        try {
+          const res = await apiFetch('/api/ingredients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: c.name, categoryId, autoTranslate: true }),
+            timeoutMs: 650_000,
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.couldNotCreateIngredient'));
+          const created = { id: json.data.id as string, name: c.name };
+          setAllIngredients(prev => [...prev, created]);
+          out[c.id] = { ingredientId: created.id, ingredientName: created.name };
+        } catch (err) {
+          window.alert(err instanceof Error ? err.message : t('errors.couldNotCreateIngredient'));
+        }
+      }
+      return out;
+    };
+
     const applyAiChanges = async (changes: CheckChange[]) => {
       const places = changes.flatMap((c) => (c.type === 'region' ? [{ country: c.country, place: c.place }] : []));
-      const resolved = places.length
+      const geo = places.length
         ? await resolveRegions(places, async (q) => {
             const res = await apiFetch(`/api/geocode?q=${encodeURIComponent(q)}&shape=1`);
             if (!res.ok) return null;
@@ -1534,6 +1597,8 @@ const RecipeDetail: React.FC = () => {
             return hit ? { lat: hit.lat, lng: hit.lng, ...(isAreaResult(hit) ? { shape: hit.shape } : {}) } : null;
           }, contentLang || 'en')
         : undefined;
+      const ingredients = changes.some((c) => c.type === 'ingredientAdd') ? await resolveAddedIngredients(changes) : undefined;
+      const resolved: ResolvedApplyInput | undefined = geo || ingredients ? { ...geo, ingredients } : undefined;
       setDraft(prev => applyCheckChanges(prev as any, changes, resolved) as Partial<Recipe>);
       setAiOpen(false);
     };
@@ -1930,6 +1995,8 @@ const RecipeDetail: React.FC = () => {
           error={aiError}
           result={aiResult}
           onApply={applyAiChanges}
+          onResolveMismatch={resolveAiMismatch}
+          onDismissMismatch={() => setAiResult((prev) => prev && { ...prev, mismatch: null })}
         />
 
         {rawTextMode ? (

@@ -329,6 +329,9 @@ export interface LLMParseResult {
     // "Sautéing"), not UUIDs — resolved against the DB in
     // ingredient.matcher.ts the same way `tools` names are, see matchTools.
     techniques?: string[];
+    // Where the prose names each ingredient/tool/technique the step lists
+    // (the exact words, to be verified against the step's description by the client).
+    mentions?: Array<{ kind: 'ingredient' | 'tool' | 'technique'; name: string; text: string }>;
   }>;
   sourceUrl?: string;
   /** Cover image for the recipe, absolute http(s). On a URL import this is

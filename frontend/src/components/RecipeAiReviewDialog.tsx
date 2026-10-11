@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Modal, { ModalCancelButton, ModalSubmitButton } from './Modal';
 import type { CheckChange, CheckGroup, CheckResult } from '../lib/recipeCheck';
+import type { MismatchSide } from '../lib/recipeMismatchFix';
 import { diffWords } from '../lib/wordDiff';
 
-const GROUPS: CheckGroup[] = ['text', 'ingredients', 'steps', 'fields', 'tags', 'regions'];
+const GROUPS: CheckGroup[] = ['text', 'ingredients', 'steps', 'links', 'fields', 'tags', 'regions'];
 
 /** One side of a git-style diff: a `-`/`+` gutter, the line tinted red or
  *  green, and the exact words that changed painted stronger. */
@@ -27,8 +28,9 @@ function DiffLine({ side, before, after }: { side: 'del' | 'add'; before: string
  *  shows only the green line. */
 function diffOf(c: CheckChange): { before: string | null; after: string } | null {
   switch (c.type) {
-    case 'textFix': case 'ingredientQty': case 'stepDuration': case 'field': case 'yield':
+    case 'textFix': case 'ingredientQty': case 'stepDuration': case 'field': case 'yield': case 'stepRewrite':
       return { before: c.before === '—' ? null : c.before, after: c.after };
+    case 'ingredientAdd': return c.after ? { before: null, after: `${c.name} — ${c.after}` } : { before: null, after: c.name };
     default: return null;
   }
 }
@@ -36,7 +38,7 @@ function diffOf(c: CheckChange): { before: string | null; after: string } | null
 /** Review step of "Check with AI": every verified change with the recipe's
  *  own words that justify it, ticked by default, applied only on confirm. */
 export default function RecipeAiReviewDialog({
-  open, onClose, loading, error, result, onApply,
+  open, onClose, loading, error, result, onApply, onResolveMismatch, onDismissMismatch,
 }: {
   open: boolean;
   onClose: () => void;
@@ -44,13 +46,41 @@ export default function RecipeAiReviewDialog({
   error: string | null;
   result: CheckResult | null;
   onApply: (changes: CheckChange[]) => void;
+  /** The user chose which side of an ingredient/steps mismatch to believe.
+   *  Resolves with how many verified changes came back (0 = nothing to do). */
+  onResolveMismatch?: (side: MismatchSide) => Promise<number>;
+  onDismissMismatch?: () => void;
 }) {
   const { t } = useTranslation();
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [resolving, setResolving] = useState(false);
+  const [resolveNote, setResolveNote] = useState<string | null>(null);
+  // Changes the dialog has already offered. A new result ticks everything; a
+  // result that only gained changes (the mismatch fix) ticks just the new
+  // ones, so what the user unticked stays unticked.
+  const seen = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    setPicked(new Set(result?.changes.map((c) => c.id) ?? []));
+    const ids = result?.changes.map((c) => c.id) ?? [];
+    if (!result) { seen.current = new Set(); setPicked(new Set()); setResolveNote(null); return; }
+    const fresh = ids.filter((i) => !seen.current.has(i));
+    fresh.forEach((i) => seen.current.add(i));
+    setPicked((prev) => new Set([...[...prev].filter((i) => ids.includes(i)), ...fresh]));
   }, [result]);
+
+  const resolve = async (side: MismatchSide) => {
+    if (!onResolveMismatch) return;
+    setResolving(true);
+    setResolveNote(null);
+    try {
+      const count = await onResolveMismatch(side);
+      if (count === 0) setResolveNote(t('recipeDetail.aiCheck.mismatch.nothing'));
+    } catch (err) {
+      setResolveNote(err instanceof Error ? err.message : t('recipeDetail.aiCheck.mismatch.error'));
+    } finally {
+      setResolving(false);
+    }
+  };
 
   const grouped = useMemo(
     () => GROUPS.map((g) => ({ group: g, items: (result?.changes ?? []).filter((c) => c.group === g) })).filter((g) => g.items.length > 0),
@@ -82,11 +112,16 @@ export default function RecipeAiReviewDialog({
       case 'yield': return t('recipeDetail.aiCheck.field.yield');
       case 'tag': return c.name;
       case 'region': return c.label;
+      case 'link': return t('recipeDetail.aiCheck.link', { n: c.index + 1, from: c.from, label: c.label });
+      case 'ingredientAdd': return t('recipeDetail.aiCheck.ingredientAdd', { name: c.name });
+      case 'ingredientRemove': return t('recipeDetail.aiCheck.ingredientRemove', { label: c.label });
+      case 'stepRewrite': return t('recipeDetail.aiCheck.stepRewrite', { n: c.index + 1 });
+      case 'stepRemove': return t('recipeDetail.aiCheck.stepRemove', { n: c.index + 1 });
     }
   };
 
   const chosen = (result?.changes ?? []).filter((c) => picked.has(c.id));
-  const empty = !loading && !error && result !== null && result.changes.length === 0;
+  const empty = !loading && !error && result !== null && result.changes.length === 0 && !result.mismatch;
 
   return (
     <Modal
@@ -118,6 +153,55 @@ export default function RecipeAiReviewDialog({
       {empty && <p className="py-8 text-center text-zinc-500 dark:text-zinc-400">{t('recipeDetail.aiCheck.nothingToChange')}</p>}
 
       <div className="space-y-6">
+        {result?.mismatch && (
+          <section className="rounded-2xl border border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-950/30 px-4 py-4 space-y-3">
+            <h3 className="flex items-center gap-2 text-sm font-black text-amber-900 dark:text-amber-200">
+              <span aria-hidden className="material-symbols-outlined text-[18px]">difference</span>
+              {t('recipeDetail.aiCheck.mismatch.title')}
+            </h3>
+            {result.mismatch.summary && <p className="text-sm text-amber-900/90 dark:text-amber-100/90">{result.mismatch.summary}</p>}
+            <div className="grid gap-3 sm:grid-cols-2 text-sm">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">{t('recipeDetail.aiCheck.mismatch.stepsSay')}</p>
+                <ul className="mt-1 list-disc pl-5 space-y-0.5 text-zinc-700 dark:text-zinc-200">
+                  {result.mismatch.unlisted.map((u) => <li key={u.name}>{u.name}</li>)}
+                </ul>
+              </div>
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">{t('recipeDetail.aiCheck.mismatch.listUnused')}</p>
+                {result.mismatch.unused.length > 0 ? (
+                  <ul className="mt-1 list-disc pl-5 space-y-0.5 text-zinc-700 dark:text-zinc-200">
+                    {result.mismatch.unused.map((u) => <li key={u.index}>{u.label}</li>)}
+                  </ul>
+                ) : <p className="mt-1 text-zinc-500 dark:text-zinc-400">—</p>}
+              </div>
+            </div>
+            <p className="text-sm font-bold text-zinc-800 dark:text-zinc-100">{t('recipeDetail.aiCheck.mismatch.question')}</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={resolving} onClick={() => resolve('steps')}
+                className="flex-1 min-w-[12rem] rounded-xl bg-primary text-white px-4 py-2.5 text-left disabled:opacity-60">
+                <span className="block text-sm font-black">{t('recipeDetail.aiCheck.mismatch.followSteps')}</span>
+                <span className="block text-xs opacity-90">{t('recipeDetail.aiCheck.mismatch.followStepsHint')}</span>
+              </button>
+              <button type="button" disabled={resolving} onClick={() => resolve('ingredients')}
+                className="flex-1 min-w-[12rem] rounded-xl bg-primary text-white px-4 py-2.5 text-left disabled:opacity-60">
+                <span className="block text-sm font-black">{t('recipeDetail.aiCheck.mismatch.followIngredients')}</span>
+                <span className="block text-xs opacity-90">{t('recipeDetail.aiCheck.mismatch.followIngredientsHint')}</span>
+              </button>
+              <button type="button" disabled={resolving} onClick={() => onDismissMismatch?.()}
+                className="rounded-xl border border-zinc-300 dark:border-zinc-600 px-4 py-2.5 text-sm font-bold text-zinc-700 dark:text-zinc-200 disabled:opacity-60">
+                {t('recipeDetail.aiCheck.mismatch.ignore')}
+              </button>
+            </div>
+            {resolving && (
+              <p className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
+                {t('recipeDetail.aiCheck.mismatch.resolving')}
+              </p>
+            )}
+            {resolveNote && <p className="text-sm font-medium text-amber-900 dark:text-amber-200">{resolveNote}</p>}
+          </section>
+        )}
         {grouped.map(({ group, items }) => (
           <section key={group}>
             <div className="flex items-center justify-between mb-2">
@@ -143,6 +227,11 @@ export default function RecipeAiReviewDialog({
                         <span className="ml-2 align-middle text-[10px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500">
                           {t(`recipeDetail.aiCheck.kind.${c.kind}`)}
                         </span>
+                        {c.type === 'ingredientAdd' && c.estimated && (
+                          <span className="ml-1 align-middle text-[10px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                            {t('recipeDetail.aiCheck.estimated')}
+                          </span>
+                        )}
                       </span>
                       {(() => {
                         const d = diffOf(c);
@@ -153,7 +242,7 @@ export default function RecipeAiReviewDialog({
                           </span>
                         ) : null;
                       })()}
-                      {c.type !== 'textFix' && <span className="block mt-1 text-xs italic text-zinc-500 dark:text-zinc-400">“{c.evidence}”</span>}
+                      {c.type !== 'textFix' && c.evidence && <span className="block mt-1 text-xs italic text-zinc-500 dark:text-zinc-400">“{c.evidence}”</span>}
                     </span>
                   </label>
                 </li>

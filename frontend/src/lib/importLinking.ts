@@ -8,8 +8,9 @@
 // without the import page.
 // ════════════════════════════════════════════════════════════════════════
 
-import { buildRef } from './stepRefs';
+import { buildRef, normalizeName } from './stepRefs';
 import { findMention } from './nameMatch';
+import type { StepMention } from '../services/recipeTemplateParser';
 import { isCountryCode, countryDisplayName } from './countries';
 
 export interface LinkTarget {
@@ -32,10 +33,73 @@ export function linkEntitiesInText(text: string, type: 'tool' | 'tech', targets:
   for (const target of targets) {
     const already = new RegExp(String.raw`\{\{${type}:${target.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[|}]`);
     if (already.test(out)) continue;
-    const hit = findMention(out, target.names.filter((n) => typeof n === 'string'), type === 'tech' ? 'verb' : 'noun');
-    if (hit) out = out.slice(0, hit.start) + buildRef(type, target.id) + out.slice(hit.end);
+    const names = target.names.filter((n) => typeof n === 'string');
+    // A tool or technique prints as its bare name, so every mention is linked
+    // (unlike an ingredient, whose reference repeats an amount). A token is
+    // never matched again, so this ends; the cap is only a backstop.
+    for (let n = 0; n < 12; n++) {
+      const hit = findMention(out, names, type === 'tech' ? 'verb' : 'noun');
+      if (!hit) break;
+      out = out.slice(0, hit.start) + buildRef(type, target.id) + out.slice(hit.end);
+    }
   }
   return out;
+}
+
+/** What the model quoted from one step, per name it listed for that step.
+ *  Only wordings the step text really contains are kept — a quote the prose
+ *  does not hold is the model's guess, and it links nothing. */
+export function verifiedMentions(
+  description: string,
+  mentions: StepMention[] | undefined,
+  kind: StepMention['kind'],
+): Array<{ name: string; texts: string[] }> {
+  const byName = new Map<string, { name: string; texts: string[] }>();
+  for (const m of mentions ?? []) {
+    if (m.kind !== kind || !m.name || !m.text) continue;
+    if (!findMention(description, [m.text], kind === 'technique' ? 'verb' : 'noun')) continue;
+    const key = normalizeName(m.name);
+    const entry = byName.get(key) ?? { name: m.name, texts: [] };
+    if (!entry.texts.includes(m.text)) entry.texts.push(m.text);
+    byName.set(key, entry);
+  }
+  return [...byName.values()];
+}
+
+/** The verified quotes for ingredients, per ingredient row (by sortOrder),
+ *  resolved the way matchStepIngredients resolves the model's names. */
+export function ingredientMentionNames(
+  description: string,
+  mentions: StepMention[] | undefined,
+  ingredients: Array<{ name: string }>,
+): Map<number, string[]> {
+  const out = new Map<number, string[]>();
+  const keys = ingredients.map((ing) => normalizeName(ing.name));
+  for (const { name, texts } of verifiedMentions(description, mentions, 'ingredient')) {
+    const key = normalizeName(name);
+    if (!key) continue;
+    const at = keys.findIndex((k) => k === key) >= 0 ? keys.findIndex((k) => k === key) : keys.findIndex((k) => k && (k.includes(key) || key.includes(k)));
+    if (at >= 0) out.set(at, [...(out.get(at) ?? []), ...texts]);
+  }
+  return out;
+}
+
+/** Ingredients a step names that the model left out of that step's list: the
+ *  structured-data path has no list at all, and a model's list is not
+ *  exhaustive. Found by looking each ingredient's own name up in the prose, so
+ *  it is deterministic, and each hit becomes a plain "uses it" row. */
+export function ingredientsNamedInText(
+  description: string,
+  ingredients: Array<{ name: string }>,
+  skip: Set<number>,
+): number[] {
+  const hits: number[] = [];
+  ingredients.forEach((ing, i) => {
+    const name = ing.name?.trim();
+    if (!name || name.length < 3 || skip.has(i)) return;
+    if (findMention(description, [name], 'noun')) hits.push(i);
+  });
+  return hits;
 }
 
 export interface GeocodedPlace {

@@ -30,7 +30,7 @@ interface IngredientNaming {
 import { repairIngredientAmount } from '../lib/ingredientAmount';
 import { checkMediaForProvider } from '../lib/llmMedia';
 import { matchStepIngredients, linkIngredientsInText, normalizeName } from '../lib/stepRefs';
-import { linkEntitiesInText, resolveRegions } from '../lib/importLinking';
+import { linkEntitiesInText, resolveRegions, verifiedMentions, ingredientMentionNames, ingredientsNamedInText } from '../lib/importLinking';
 import { isAreaResult } from '../lib/geocodeTypes';
 
 interface MatchedIngredient {
@@ -862,12 +862,31 @@ export default function RecipeImport() {
         // (never the model's array index), and the first literal mention in
         // the prose becomes an inline {{ing:N}} reference.
         steps: draft.steps.map((s) => {
-          const stepIngredients = matchStepIngredients(s.ingredients, draftIngredientsForSteps);
-          const stepToolIds = [...new Set((s.tools ?? []).map((n) => toolIdByName.get(normalizeName(n))).filter((id): id is string => !!id))];
-          const stepTechIds = [...new Set((s.techniques ?? []).map((n) => techniqueIdByName.get(normalizeName(n))).filter((id): id is string => !!id))];
-          let description = linkIngredientsInText(s.description, stepIngredients, draftIngredientsForSteps);
-          description = linkEntitiesInText(description, 'tool', toolLinkTargets.filter((x) => stepToolIds.includes(x.id)));
-          description = linkEntitiesInText(description, 'tech', techLinkTargets.filter((x) => stepTechIds.includes(x.id)));
+          // What the model's lists say, plus what its quoted mentions prove: a
+          // name the prose really contains counts as used even when the model
+          // left it out of the step's list.
+          const quoted = (kind: 'ingredient' | 'tool' | 'technique') => verifiedMentions(s.description, s.mentions, kind).map((m) => ({ name: m.name }));
+          const modelUses = [...(s.ingredients ?? []), ...quoted('ingredient')];
+          let stepIngredients = matchStepIngredients(modelUses, draftIngredientsForSteps);
+          // A step with no list at all (structured-data pages never have one)
+          // is read the old-fashioned way: each ingredient's own name in the prose.
+          if (!(s.ingredients ?? []).length) {
+            const taken = new Set(stepIngredients.map((r) => r.ingredientSortOrder));
+            const named = ingredientsNamedInText(s.description, draftIngredientsForSteps, taken);
+            stepIngredients = [...stepIngredients, ...named.map((i) => ({ ingredientSortOrder: i, amountMode: 'fraction' as const, portion: 1 }))];
+          }
+          const stepToolIds = [...new Set([...(s.tools ?? []), ...quoted('tool').map((m) => m.name)].map((n) => toolIdByName.get(normalizeName(n))).filter((id): id is string => !!id))];
+          const stepTechIds = [...new Set([...(s.techniques ?? []), ...quoted('technique').map((m) => m.name)].map((n) => techniqueIdByName.get(normalizeName(n))).filter((id): id is string => !!id))];
+          // The words the model quoted for a tool or technique are extra
+          // wordings to look for, which is what lets an English-named entity
+          // with no Italian synonym still be found in Italian prose.
+          const withQuotes = (targets: typeof toolLinkTargets, kind: 'tool' | 'technique') => {
+            const byName = new Map(verifiedMentions(s.description, s.mentions, kind).map((m) => [normalizeName(m.name), m.texts]));
+            return targets.map((x) => ({ ...x, names: [...x.names, ...x.names.flatMap((n) => byName.get(normalizeName(n)) ?? [])] }));
+          };
+          let description = linkIngredientsInText(s.description, stepIngredients, draftIngredientsForSteps, ingredientMentionNames(s.description, s.mentions, draftIngredientsForSteps));
+          description = linkEntitiesInText(description, 'tool', withQuotes(toolLinkTargets.filter((x) => stepToolIds.includes(x.id)), 'tool'));
+          description = linkEntitiesInText(description, 'tech', withQuotes(techLinkTargets.filter((x) => stepTechIds.includes(x.id)), 'technique'));
           return {
             stepNumber: s.stepNumber,
             title: s.title || undefined,

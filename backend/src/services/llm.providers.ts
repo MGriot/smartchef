@@ -67,7 +67,7 @@ export async function callAnthropic(
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 1500,
+      max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: "user", content: userContent }],
       // No temperature/top_p/top_k — current Claude models return HTTP 400

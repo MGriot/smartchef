@@ -1146,16 +1146,53 @@ async function applyMergeChoices(sourceId: string, targetId: string, choices: Re
   if (stepsSide !== ingredientsSide) {
     const rows = await query<{ sort_order: number }>("SELECT sort_order FROM recipe_ingredients WHERE recipe_id=$1", [targetId]);
     const present = new Set(rows.map((r) => Number(r.sort_order)));
-    const steps = await query<{ id: string; step_ingredients: string | null }>(
-      "SELECT id, step_ingredients FROM recipe_steps WHERE recipe_id=$1", [targetId]
+
+    // The two lists can name different things at the same position (one
+    // recipe from raw ingredients, the other from a bought one). A step's
+    // {{ing:N}} then points at the WRONG ingredient, silently, which is worse
+    // than a missing one. When the lists disagree, the references are turned
+    // back into the words they read as, so the step keeps saying what its own
+    // recipe said, and the AI check can link them again and raise the
+    // mismatch for the user to settle.
+    const { STEP_REF_RE, parseRefParams, normalizeName } = await import('../lib/stepRefs');
+    const namesOf = async (entity: Record<string, unknown>): Promise<string[]> => {
+      const out: string[] = [];
+      for (const r of (entity.ingredients as Array<Record<string, unknown>>) ?? []) {
+        const row = r.ingredient_id
+          ? await queryOne<{ name: string }>("SELECT name FROM ingredients WHERE id=$1", [r.ingredient_id as string])
+          : r.sub_recipe_id ? await queryOne<{ name: string }>("SELECT title AS name FROM recipes WHERE id=$1", [r.sub_recipe_id as string]) : null;
+        out[Number(r.sort_order)] = row?.name ?? '';
+      }
+      return out;
+    };
+    const writtenAgainst = await namesOf(stepsSide === 'source' ? source : target);
+    const kept = await namesOf(ingredientsSide === 'source' ? source : target);
+    const sameList = writtenAgainst.every((n, i) => normalizeName(n) === normalizeName(kept[i] ?? ''));
+    const plain = (text: string) => text.replace(STEP_REF_RE, (whole, type: string, refId: string, raw?: string) =>
+      type === 'ing' ? (parseRefParams(raw).alias || writtenAgainst[Number(refId.trim())] || whole) : whole);
+
+    const steps = await query<{ id: string; description: string; step_ingredients: string | null }>(
+      "SELECT id, description, step_ingredients FROM recipe_steps WHERE recipe_id=$1", [targetId]
     );
     for (const step of steps) {
+      if (!sameList) {
+        await query("UPDATE recipe_steps SET description=$1, step_ingredients='[]' WHERE id=$2", [plain(step.description ?? ''), step.id]);
+        const translated = await query<{ id: string; description: string | null }>(
+          "SELECT id, description FROM recipe_step_translations WHERE step_id=$1", [step.id]
+        );
+        for (const tr of translated) {
+          if (tr.description && tr.description.includes('{{ing:')) {
+            await query("UPDATE recipe_step_translations SET description=$1 WHERE id=$2", [plain(tr.description), tr.id]);
+          }
+        }
+        continue;
+      }
       let refs: Array<{ ingredientSortOrder?: number }> = [];
       try { refs = JSON.parse(step.step_ingredients || '[]'); } catch { continue; }
       if (!Array.isArray(refs)) continue;
-      const kept = refs.filter((r) => present.has(Number(r?.ingredientSortOrder)));
-      if (kept.length !== refs.length) {
-        await query("UPDATE recipe_steps SET step_ingredients=$1 WHERE id=$2", [JSON.stringify(kept), step.id]);
+      const stillThere = refs.filter((r) => present.has(Number(r?.ingredientSortOrder)));
+      if (stillThere.length !== refs.length) {
+        await query("UPDATE recipe_steps SET step_ingredients=$1 WHERE id=$2", [JSON.stringify(stillThere), step.id]);
       }
     }
   }

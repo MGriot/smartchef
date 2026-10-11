@@ -12,14 +12,22 @@
 //     not touch a digit; an ingredient amount is only corrected when it looks
 //     like a slip of the pen and the recipe never uses it in portions.
 //
-// Step prose is never rewritten beyond typo fixes: no links or tokens added.
+// Step prose is never rewritten here beyond typo fixes. Two things do touch
+// the steps, each as its own reviewable change: a "link" turns words the step
+// already contains into an inline {{ing}}/{{tool}}/{{tech}} reference (the
+// model quotes the words, code checks they are in the step), and the
+// ingredient/steps mismatch flow in lib/recipeMismatchFix.ts, which the user
+// starts by choosing which side of the disagreement to believe.
 // What survives is a list of discrete changes the user goes through and ticks;
 // nothing touches the draft until applyCheckChanges() is called with the
 // ones they kept. Pure functions throughout, so the "never invent" rules are
 // testable without a model or a page.
 // ════════════════════════════════════════════════════════════════════════
 
-import { STEP_REF_RE, normalizeName, parseRefParams, type StepIngredientRefLike } from './stepRefs';
+import { STEP_REF_RE, buildRef, linkIngredientsInText, normalizeName, parseRefParams, reindexIngredientRefs, type StepIngredientRefLike } from './stepRefs';
+import { findMention } from './nameMatch';
+import { linkEntitiesInText, ingredientsNamedInText } from './importLinking';
+import { findUnusedIngredients, interpretMismatch, type IngredientMismatch } from './recipeConsistency';
 import { matchUnitId } from './fuzzyMatch';
 import { isCountryCode } from './countries';
 import { editDistance } from './wordDiff';
@@ -84,7 +92,7 @@ export interface CheckDraft {
   techniques?: CheckNamedEntity[];
 }
 
-export type CheckGroup = 'text' | 'ingredients' | 'steps' | 'fields' | 'tags' | 'regions';
+export type CheckGroup = 'text' | 'ingredients' | 'steps' | 'links' | 'fields' | 'tags' | 'regions';
 
 export type TextTarget = 'title' | 'description' | 'tips' | 'storage' | 'ingredientName' | 'stepTitle' | 'stepText';
 
@@ -110,7 +118,22 @@ export type CheckChange =
   | (ChangeBase & { type: 'field'; field: 'servings' | 'prep_time_min' | 'cook_time_min' | 'rest_time_min'; value: number; before: string; after: string })
   | (ChangeBase & { type: 'yield'; amount: number; unitId: string; unitSymbol: string; before: string; after: string })
   | (ChangeBase & { type: 'tag'; name: string })
-  | (ChangeBase & { type: 'region'; country: string | null; place: string | null; label: string });
+  | (ChangeBase & { type: 'region'; country: string | null; place: string | null; label: string })
+  /** Words the step already holds, turned into an inline reference. `from` is
+   *  those words as written; `targetId` is an ingredient's index (as text) or a
+   *  tool/technique id. */
+  | (ChangeBase & { type: 'link'; index: number; linkKind: 'ing' | 'tool' | 'tech'; targetId: string; label: string; from: string })
+  // The four below come from the ingredient/steps mismatch flow
+  // (lib/recipeMismatchFix.ts): the user picked a side, these make the other
+  // side agree with it.
+  | (ChangeBase & {
+      type: 'ingredientAdd'; name: string; quantity: number | null; unitId: string | null; unitSymbol: string | null;
+      /** The amount is the model's estimate: the steps do not state it. */
+      estimated: boolean; after: string;
+    })
+  | (ChangeBase & { type: 'ingredientRemove'; index: number; label: string })
+  | (ChangeBase & { type: 'stepRewrite'; index: number; text: string; before: string; after: string })
+  | (ChangeBase & { type: 'stepRemove'; index: number; label: string });
 
 export interface CheckResult {
   changes: CheckChange[];
@@ -118,12 +141,15 @@ export interface CheckResult {
   warnings: string[];
   /** Names the model used that match nothing in the library (tools, techniques, units). */
   unmatched: string[];
+  /** The steps name ingredients the list lacks. When set, the user is asked
+   *  which side to believe (see lib/recipeMismatchFix.ts). */
+  mismatch?: IngredientMismatch | null;
 }
 
 // ── Reading the recipe ──────────────────────────────────────────────────
 
-const labelOf = (e: CheckNamedEntity) => e.translated_name || e.name;
-const ingredientLabel = (i: CheckDraftIngredient) => i.ingredientName || i.subRecipeTitle || '';
+export const labelOf = (e: CheckNamedEntity) => e.translated_name || e.name;
+export const ingredientLabel = (i: CheckDraftIngredient) => i.ingredientName || i.subRecipeTitle || '';
 
 /** A step's prose with every {{…}} token replaced by the words it renders as,
  *  so the model (and the evidence check) read what the cook reads. */
@@ -161,7 +187,7 @@ export function normText(s: string): string {
 
 const FRACTIONS: Record<string, number> = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125 };
 
-function numbersIn(s: string): number[] {
+export function numbersIn(s: string): number[] {
   const out: number[] = [];
   for (const m of s.matchAll(/(\d+)?\s*([½¼¾⅓⅔⅛])|\d+(?:[.,]\d+)?/g)) {
     if (m[2]) out.push((m[1] ? Number(m[1]) : 0) + FRACTIONS[m[2]]);
@@ -216,10 +242,30 @@ export function buildCheckRequest(draft: CheckDraft, cat: CheckCatalog) {
       i: n,
       title: s.title,
       text: plainStepText(s.description, ingredients, cat),
+      // Words of this step that are already inline references, so the model
+      // does not propose linking them again.
+      linked: linkedLabels(s.description, ingredients, cat),
       durationMin: s.durationMin,
       notes: s.notes,
     })),
+    // What a step's words can be linked to besides the ingredient list.
+    catalog: { tools: cat.tools.map(labelOf), techniques: cat.techniques.map(labelOf) },
   };
+}
+
+/** The words of a step that are inline references already, as they read. */
+function linkedLabels(text: string, ingredients: CheckDraftIngredient[], cat: Pick<CheckCatalog, 'tools' | 'techniques'>): string[] {
+  const out: string[] = [];
+  (text || '').replace(STEP_REF_RE, (whole) => {
+    out.push(plainStepText(whole, ingredients, cat));
+    return whole;
+  });
+  return [...new Set(out.filter(Boolean))];
+}
+
+/** Every wording a library entity may appear under in prose. */
+export function entityNames(e: CheckNamedEntity): string[] {
+  return [e.name, e.translated_name, ...(e.synonyms ?? [])].filter((n): n is string => !!n && !!n.trim());
 }
 
 export function buildCheckSystemPrompt(cat: CheckCatalog): string {
@@ -228,7 +274,7 @@ export function buildCheckSystemPrompt(cat: CheckCatalog): string {
 
 ABSOLUTE RULE — NEVER INVENT DATA. Use only what the recipe itself literally says. Do not use cooking knowledge to supply typical quantities, times, servings, yields, tags or places. If the recipe does not state it, return null / leave it out. A smaller correct answer is always better than a larger guessed one. If you are unsure, return nothing.
 
-Every proposal (except "typos") MUST carry "evidence": a quote copied CHARACTER FOR CHARACTER from the recipe (title, description, tips, storage, an ingredient line, a step text or title), at most 25 words, that states the fact. Proposals without an exact quote are discarded automatically. Every number you propose must appear in its quote.
+Every proposal (except "typos", "links" and "mismatch", which carry their own "quote") MUST carry "evidence": a quote copied CHARACTER FOR CHARACTER from the recipe (title, description, tips, storage, an ingredient line, a step text or title), at most 25 words, that states the fact. Proposals without an exact quote are discarded automatically. Every number you propose must appear in its quote.
 
 Do this, in order:
 1. "typos": spelling and typing mistakes only (misspelt words, doubled letters, missing accents or apostrophes, a missing or extra space, wrong capital letter). {"target": "title"|"description"|"tips"|"storage"|"ingredientName"|"stepTitle"|"stepText", "i": ingredient/step index or null, "before": the mistaken words copied exactly (1 to 4 words), "after": the same words corrected}. NEVER reword, rephrase, translate, change a number or unit, change style, or fix grammar that is merely informal. Keep the author's language and voice. The text stays exactly as it is apart from the mistaken word itself.
@@ -238,19 +284,21 @@ Do this, in order:
 5. "yield": {"amount": number, "unit": string, "evidence": string} or null — the finished quantity, only when stated ("makes 12 cookies", "about 1 litre").
 6. "tags": [{"name": string, "evidence": string}] — only attributes the recipe states or plainly names (e.g. the title says "vegan", an ingredient list shows no meat only if the text says vegetarian). Prefer existing tags: ${list(cat.tagNames)}. Max 6.
 7. "regions": [{"country": ISO 3166-1 alpha-2 or null, "place": string|null, "evidence": string}] — only a place the recipe's text, title or source URL names as the dish's origin ("alla romana", "Sicilian", a .it recipe-site domain is NOT enough).
-8. "warnings": short notes on inconsistencies you noticed but could not resolve from the text (e.g. an ingredient never used in any step). Write them in the recipe's language.
+8. "links": [{"i": step index, "kind": "ing"|"tool"|"tech", "target": the ingredient's index "i" (a number) for "ing", or the name EXACTLY as written in the catalog lists below for "tool"/"tech", "quote": the words copied CHARACTER FOR CHARACTER from that step's text, 1 to 4 words}] — every place a step's text names an ingredient of the list, a tool or a cooking technique of the catalogs that is not already linked. Each step has "linked": the words already linked there; never repeat those. One entry per thing per step (its first mention). Only things the text literally names — never one it merely implies. Catalog tools: ${list(cat.tools.map(labelOf))}. Catalog techniques: ${list(cat.techniques.map(labelOf))}.
+9. "mismatch": does the ingredient list describe the same recipe as the steps? {"unlisted": [{"name": the ingredient as the step calls it, "step": step index, "quote": the step's own words naming it, copied CHARACTER FOR CHARACTER, at most 12 words}], "summary": one short sentence in the recipe's language} — ONLY ingredients (not tools, not plain water or ice) that a step names or uses and the ingredient list does not have, in any wording ("burro" matches "Burro morbido"; a step that says "the dough" is not a missing ingredient). null when nothing is missing. Do not guess: if the steps could be using a listed ingredient under another name, leave it out.
+10. "warnings": short notes on other inconsistencies you noticed but could not resolve from the text. Do not repeat what "mismatch" already says. Write them in the recipe's language.
 
 Respond EXCLUSIVELY with JSON:
-{"typos":[],"ingredients":[],"steps":[],"servings":null,"prepTimeMin":null,"cookTimeMin":null,"restTimeMin":null,"yield":null,"tags":[],"regions":[],"warnings":[]}`;
+{"typos":[],"ingredients":[],"steps":[],"servings":null,"prepTimeMin":null,"cookTimeMin":null,"restTimeMin":null,"yield":null,"tags":[],"regions":[],"links":[],"mismatch":null,"warnings":[]}`;
 }
 
 // ── What comes back ─────────────────────────────────────────────────────
 
-const num = (v: unknown): number | null => {
+export const num = (v: unknown): number | null => {
   const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v.replace(',', '.')) : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
 };
-const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+export const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
 /** An ingredient counts as mentioned when its whole name, or any word of it
  *  long enough to be meaningful, is in the step's text. */
@@ -265,7 +313,7 @@ function ingredientMentioned(textNorm: string, ing: CheckDraftIngredient): boole
  *  for import, where a wrong guess is reviewed row by row, and its alias
  *  table matches on substrings ("dozzine" contains the "n" of "n." and lands
  *  on pieces). Here an unrecognised unit is dropped, never guessed. */
-function resolveUnit(text: string | null | undefined, units: CheckUnit[]): CheckUnit | undefined {
+export function resolveUnit(text: string | null | undefined, units: CheckUnit[]): CheckUnit | undefined {
   const key = normText(text ?? '');
   if (!key) return undefined;
   const direct = units.find((u) => normText(u.symbol) === key || normText(u.name) === key);
@@ -275,7 +323,7 @@ function resolveUnit(text: string | null | undefined, units: CheckUnit[]): Check
   return viaAlias && key.length >= 4 && normText(viaAlias.name).startsWith(head) ? viaAlias : undefined;
 }
 
-const fmt = (qty: number | null | undefined, unit?: string | null) =>
+export const fmt = (qty: number | null | undefined, unit?: string | null) =>
   qty == null ? '—' : `${qty % 1 === 0 ? qty : Number(qty.toFixed(2))}${unit ? ` ${unit}` : ''}`;
 
 const TEXT_TARGETS: TextTarget[] = ['title', 'description', 'tips', 'storage', 'ingredientName', 'stepTitle', 'stepText'];
@@ -479,22 +527,128 @@ export function interpretCheckResponse(parsed: any, draft: CheckDraft, cat: Chec
     changes.push({ id: id('region'), group: 'regions', type: 'region', kind: 'fill', country, place, label: [place, country].filter(Boolean).join(' · '), evidence: r.evidence.trim() });
   }
 
-  return { changes, warnings: [...new Set(warnings)], unmatched: [...new Set(unmatched)] };
+  // 7 ── Links: words a step already holds, turned into inline references.
+  // The model only quotes; the quote must be in the step's own text (outside
+  // any existing token) and must really be a wording of what it points at.
+  const seenLinks = new Set<string>();
+  const entityOf = (list: CheckNamedEntity[], name: string) => {
+    const key = normalizeName(name);
+    return key ? list.find((e) => entityNames(e).some((n) => normalizeName(n) === key)) : undefined;
+  };
+  for (const row of (Array.isArray(parsed?.links) ? parsed.links : []).slice(0, 60)) {
+    const index = Number.isInteger(row?.i) ? (row.i as number) : -1;
+    const step = steps[index];
+    const quote = str(row?.quote);
+    const kind = row?.kind;
+    if (!step || !quote || (kind !== 'ing' && kind !== 'tool' && kind !== 'tech')) continue;
+
+    let targetId: string;
+    let names: string[];
+    let label: string;
+    if (kind === 'ing') {
+      const at = Number.isInteger(row?.target) ? (row.target as number) : typeof row?.target === 'string' && /^\d+$/.test(row.target) ? Number(row.target) : -1;
+      const ing = ingredients[at];
+      if (!ing) continue;
+      targetId = String(at);
+      label = ingredientLabel(ing);
+      names = [label];
+    } else {
+      const name = str(row?.target);
+      const entity = name ? entityOf(kind === 'tool' ? cat.tools : cat.techniques, name) : undefined;
+      if (!entity) { if (name) unmatched.push(name); continue; }
+      targetId = entity.id;
+      label = labelOf(entity);
+      names = entityNames(entity);
+    }
+    const nameKind = kind === 'tech' ? 'verb' : 'noun';
+    // The quote has to be a wording of its target, not an unrelated phrase.
+    if (!findMention(quote, names, nameKind)) continue;
+    const hit = findMention(step.description, [quote], nameKind);
+    if (!hit) continue;
+    // Already an inline reference to this very thing in the step.
+    if (new RegExp(String.raw`\{\{${kind}:${targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[|}]`).test(step.description)) continue;
+    const key = `${index}:${kind}:${targetId}`;
+    if (seenLinks.has(key)) continue;
+    seenLinks.add(key);
+    const from = step.description.slice(hit.start, hit.end);
+    changes.push({
+      id: id('link'), group: 'links', type: 'link', kind: 'fill', index, linkKind: kind, targetId, label, from,
+      evidence: plainStepText(step.description, ingredients, cat),
+    });
+  }
+
+  // 8 ── Does the ingredient list describe the same recipe as the steps?
+  const labels = ingredients.map(ingredientLabel);
+  const plainSteps = steps.map((s) => plainStepText(`${s.title ?? ''} ${s.description}`.trim(), ingredients, cat));
+  const linkedRows = new Set<number>();
+  steps.forEach((s) => {
+    (s.stepIngredients ?? []).forEach((r) => linkedRows.add(r.ingredientSortOrder));
+    for (const m of (s.description || '').matchAll(/\{\{ing:(\d+)[|}]/g)) linkedRows.add(Number(m[1]));
+  });
+  const unused = findUnusedIngredients(labels, plainSteps, linkedRows);
+  const mismatch = interpretMismatch(parsed?.mismatch, labels, plainSteps, unused);
+
+  return { changes, warnings: [...new Set(warnings)], unmatched: [...new Set(unmatched)], mismatch };
 }
 
 // ── Applying the ones the user kept ─────────────────────────────────────
 
-export interface ResolvedRegionsInput {
-  regions: string[];
-  regionCoords: Record<string, unknown>;
+/** What the page resolves before applying, because it needs the network. */
+export interface ResolvedApplyInput {
+  /** Region labels and coordinates need a geocoder. */
+  regions?: string[];
+  regionCoords?: Record<string, unknown>;
+  /** The library ingredient behind each `ingredientAdd`, by change id. An add
+   *  with no entry here is skipped: a row cannot be saved without one. */
+  ingredients?: Record<string, { ingredientId: string; ingredientName: string }>;
 }
 
-/** Returns a new draft with `changes` applied. Region changes are carried by
- *  `resolved` (their labels and coordinates need a geocoder, which is async
- *  and belongs to the page); everything else is derived from the change. */
-export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: CheckChange[], resolved?: ResolvedRegionsInput): T {
+/** Puts back the inline references a rewritten step lost: ingredients its new
+ *  text names, and the tools and techniques it already listed. */
+function relinkStep(step: any, ingredients: CheckDraftIngredient[], draft: CheckDraft): void {
+  const rows = ingredients.map((i) => ({ name: ingredientLabel(i) }));
+  const refs: StepIngredientRefLike[] = [...(step.stepIngredients ?? [])];
+  const have = new Set(refs.map((r) => r.ingredientSortOrder));
+  for (const at of ingredientsNamedInText(step.description, rows, have)) {
+    refs.push({ ingredientSortOrder: at, amountMode: 'fraction', portion: 1 });
+  }
+  step.stepIngredients = refs;
+  step.description = linkIngredientsInText(step.description, refs, rows);
+  const targets = (list: CheckNamedEntity[] | undefined, ids: string[]) =>
+    (list ?? []).filter((e) => ids.includes(e.id)).map((e) => ({ id: e.id, names: entityNames(e) }));
+  step.description = linkEntitiesInText(step.description, 'tool', targets(draft.tools, step.toolIds ?? []));
+  step.description = linkEntitiesInText(step.description, 'tech', targets(draft.techniques, step.techniqueIds ?? []));
+}
+
+/** Deletes ingredient row `at` the way the editor does: the references that
+ *  pointed at it become the plain words they read as, and the ones above it
+ *  move down by one. */
+function removeIngredientRow(ingredients: any[], steps: any[], at: number): void {
+  const label = ingredientLabel(ingredients[at]);
+  for (const s of steps) {
+    s.description = (s.description ?? '').replace(STEP_REF_RE, (whole: string, type: string, rid: string, raw?: string) =>
+      type === 'ing' && rid.trim() === String(at) ? (parseRefParams(raw).alias || label) : whole);
+    s.description = reindexIngredientRefs(s.description, at);
+    s.stepIngredients = (s.stepIngredients ?? [])
+      .filter((r: StepIngredientRefLike) => r.ingredientSortOrder !== at)
+      .map((r: StepIngredientRefLike) => (r.ingredientSortOrder > at ? { ...r, ingredientSortOrder: r.ingredientSortOrder - 1 } : r));
+  }
+  ingredients.splice(at, 1);
+  ingredients.forEach((row, i) => {
+    row.sortOrder = i;
+    if (typeof row.substituteFor === 'number') row.substituteFor = row.substituteFor === at ? null : row.substituteFor > at ? row.substituteFor - 1 : row.substituteFor;
+  });
+}
+
+/** Returns a new draft with `changes` applied. Region and new-ingredient
+ *  changes are carried by `resolved` (they need a geocoder or the library,
+ *  which are async and belong to the page); everything else is derived from
+ *  the change. Order matters: row and step indexes in the changes were taken
+ *  from the draft as it is now, so edits in place come first and the
+ *  removals, which shift indexes, come last. */
+export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: CheckChange[], resolved?: ResolvedApplyInput): T {
   const next: any = { ...draft };
-  const steps: any[] = (draft.steps ?? []).map((s) => ({ ...s }));
+  const steps: any[] = (draft.steps ?? []).map((s) => ({ ...s, stepIngredients: [...(s.stepIngredients ?? [])] }));
   const ingredients: any[] = (draft.ingredients ?? []).map((i) => ({ ...i }));
   const tags = [...(draft.tags ?? [])];
 
@@ -520,17 +674,67 @@ export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: Check
       case 'field': next[c.field] = c.value; break;
       case 'yield': next.yield_amount = c.amount; next.yield_unit_id = c.unitId; next.yield_unit_symbol = c.unitSymbol; break;
       case 'tag': if (!tags.some((t) => t.toLowerCase() === c.name.toLowerCase())) tags.push(c.name); break;
-      case 'region': break;
+      case 'link': {
+        const step = steps[c.index];
+        if (!step) break;
+        const hit = findMention(step.description, [c.from], c.linkKind === 'tech' ? 'verb' : 'noun');
+        if (!hit) break;
+        const words = step.description.slice(hit.start, hit.end);
+        // The author's own words stay on the page; the reference only adds
+        // the link. An alias is dropped when it is just the entity's name.
+        const alias = normalizeName(words) === normalizeName(c.label) ? undefined : words;
+        step.description = step.description.slice(0, hit.start) + buildRef(c.linkKind, c.targetId, alias ? { alias } : {}) + step.description.slice(hit.end);
+        if (c.linkKind === 'ing') {
+          const at = Number(c.targetId);
+          if (!step.stepIngredients.some((r: StepIngredientRefLike) => r.ingredientSortOrder === at)) {
+            step.stepIngredients.push({ ingredientSortOrder: at, amountMode: 'fraction', portion: 1 });
+          }
+        } else {
+          const key = c.linkKind === 'tool' ? 'toolIds' : 'techniqueIds';
+          const list: string[] = step[key] ?? [];
+          if (!list.includes(c.targetId)) step[key] = [...list, c.targetId];
+        }
+        break;
+      }
+      case 'region': case 'ingredientAdd': case 'ingredientRemove': case 'stepRewrite': case 'stepRemove': break;
     }
   }
 
-  next.steps = steps;
+  // Rows are added at the end, so no existing index moves.
+  for (const c of changes) {
+    if (c.type !== 'ingredientAdd') continue;
+    const lib = resolved?.ingredients?.[c.id];
+    if (!lib) continue;
+    ingredients.push({
+      id: '', sortOrder: ingredients.length, ingredientId: lib.ingredientId, ingredientName: lib.ingredientName,
+      quantity: c.quantity, quantityText: null, unitId: c.unitId, unitSymbol: c.unitSymbol,
+      isOptional: false, notes: '', groupName: null,
+    });
+  }
+
+  for (const c of changes) {
+    if (c.type === 'stepRewrite' && steps[c.index]) {
+      steps[c.index].description = c.text;
+      relinkStep(steps[c.index], ingredients, draft);
+    }
+  }
+
+  // Removals shift indexes: highest first, so the ones still to come hold.
+  for (const at of changes.flatMap((c) => (c.type === 'ingredientRemove' ? [c.index] : [])).sort((a, b) => b - a)) {
+    if (ingredients[at]) removeIngredientRow(ingredients, steps, at);
+  }
+  const removedSteps = new Set(changes.flatMap((c) => (c.type === 'stepRemove' ? [c.index] : [])));
+  const keptSteps = removedSteps.size
+    ? steps.filter((_, i) => !removedSteps.has(i)).map((s, i) => ({ ...s, stepNumber: i + 1 }))
+    : steps;
+
+  next.steps = keptSteps;
   next.ingredients = ingredients;
   next.tags = tags;
-  if (resolved && changes.some((c) => c.type === 'region')) {
+  if (resolved?.regions && changes.some((c) => c.type === 'region')) {
     const have = new Set((draft.regions ?? []).map((r) => r.toLowerCase()));
     next.regions = [...(draft.regions ?? []), ...resolved.regions.filter((r) => !have.has(r.toLowerCase()))];
-    next.region_coords = { ...((draft as any).region_coords ?? {}), ...resolved.regionCoords };
+    next.region_coords = { ...((draft as any).region_coords ?? {}), ...(resolved.regionCoords ?? {}) };
   }
   return next as T;
 }

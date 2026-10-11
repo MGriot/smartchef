@@ -506,11 +506,12 @@
       "unmatched": "Absents de votre bibliothèque, ignorés : {{names}}",
       "group": {
         "text": "Orthographe",
-        "ingredients": "Quantités des ingrédients",
+        "ingredients": "Ingrédients",
         "steps": "Étapes",
         "fields": "Portions, durées et rendement",
         "tags": "Étiquettes",
-        "regions": "Régions"
+        "regions": "Régions",
+        "links": "Liens dans les étapes"
       },
       "field": {
         "servings": "Portions",
@@ -534,6 +535,26 @@
         "ingredientName": "Nom de l'ingrédient {{n}}",
         "stepTitle": "Titre de l'étape {{n}}",
         "stepText": "Texte de l'étape {{n}}"
+      },
+      "link": "Étape {{n}} : « {{from}} » → {{label}}",
+      "ingredientAdd": "Ajouter l'ingrédient : {{name}}",
+      "ingredientRemove": "Retirer l'ingrédient : {{label}}",
+      "stepRewrite": "Réécrire l'étape {{n}}",
+      "stepRemove": "Supprimer l'étape {{n}}",
+      "estimated": "quantité estimée par l'IA",
+      "mismatch": {
+        "title": "Les ingrédients et les étapes ne correspondent pas",
+        "stepsSay": "Cités dans les étapes, absents de la liste",
+        "listUnused": "Dans la liste, jamais utilisés dans les étapes",
+        "question": "Quelle version est la bonne ?",
+        "followSteps": "Suivre les étapes",
+        "followStepsHint": "Je corrige la liste d'ingrédients",
+        "followIngredients": "Suivre les ingrédients",
+        "followIngredientsHint": "Je réécris les étapes qui les contredisent",
+        "ignore": "Ignorer",
+        "resolving": "Préparation des corrections…",
+        "nothing": "Aucune correction vérifiable pour ce choix. Vous pouvez modifier la recette à la main.",
+        "error": "Impossible de préparer les corrections."
       }
     },
     "saving": "En cours d'enregistrement…",
@@ -1021,7 +1042,8 @@
     "noServer": "Aucun serveur configuré — connectez-vous d'abord à votre serveur SmartChef.",
     "mergeIntoSelf": "Impossible de fusionner un élément avec lui-même.",
     "toolNotFound": "Ustensile introuvable",
-    "providerBusy": "{{provider}} est surchargé en ce moment (HTTP {{status}}), même après plusieurs tentatives. Le problème vient du fournisseur — réessayez dans quelques minutes."
+    "providerBusy": "{{provider}} est surchargé en ce moment (HTTP {{status}}), même après plusieurs tentatives. Le problème vient du fournisseur — réessayez dans quelques minutes.",
+    "llmReplyTruncated": "La réponse du modèle a été coupée : les dernières étapes peuvent être incomplètes ou sans liens."
   },
   "shopping": {
     "otherAisle": "Autres",

@@ -48,6 +48,18 @@ export interface TemplateParseStep {
    *  time (lib/stepRefs.ts's matchStepIngredients) rather than trusted as
    *  an index. AI path only — the text template has no such field. */
   ingredients?: Array<{ name: string; quantity?: number | null; unit?: string | null }>;
+  /** The exact words of this step's prose that name each ingredient, tool or
+   *  technique it lists. A candidate only: import checks each against the step
+   *  text before linking it. AI path only. */
+  mentions?: StepMention[];
+}
+
+export interface StepMention {
+  kind: 'ingredient' | 'tool' | 'technique';
+  /** The name the model used in the step's own list for that kind. */
+  name: string;
+  /** The words as written in the step description. */
+  text: string;
 }
 
 // Shared "parsed but not yet matched against the library" shape — produced
