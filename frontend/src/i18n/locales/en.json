@@ -1244,6 +1244,11 @@
     "source": "Source",
     "printedFrom": "Printed from SmartChef",
     "uncheckedOnly": "Print only unchecked items",
+    "list": {
+      "pageTitle": "Print shopping list",
+      "loadFailed": "Couldn't load this list.",
+      "empty": "Nothing left to buy."
+    },
     "paper": {
       "label": "Paper",
       "a4": "A4",

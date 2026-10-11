@@ -1244,6 +1244,11 @@
     "source": "Fuente",
     "printedFrom": "Impreso desde SmartChef",
     "uncheckedOnly": "Imprimir solo los artículos sin marcar",
+    "list": {
+      "pageTitle": "Imprimir lista de la compra",
+      "loadFailed": "No se pudo cargar esta lista.",
+      "empty": "Nada más que comprar."
+    },
     "paper": {
       "label": "Papel",
       "a4": "A4",

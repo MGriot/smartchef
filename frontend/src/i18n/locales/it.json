@@ -1244,6 +1244,11 @@
     "source": "Fonte",
     "printedFrom": "Stampato da SmartChef",
     "uncheckedOnly": "Stampa solo gli articoli non spuntati",
+    "list": {
+      "pageTitle": "Stampa lista della spesa",
+      "loadFailed": "Impossibile caricare questa lista.",
+      "empty": "Non resta niente da comprare."
+    },
     "paper": {
       "label": "Carta",
       "a4": "A4",

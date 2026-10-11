@@ -1,15 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
-import { canPrint, printPage } from '../lib/print';
+import { canPrint } from '../lib/print';
 import { useFileExport } from '../hooks/useFileExport';
 import { slugForFilename } from '../lib/fileExport';
-import { pickIngredientName } from '../lib/ingredientDisplay';
+import {
+  displayName as itemName, formatQty as itemQty, groupByAisle,
+  type ShoppingListDetail, type ShoppingListItem,
+} from '../lib/shoppingPrint';
+import { useNavigate } from 'react-router-dom';
 
 interface MenuSummary {
   id: string;
@@ -23,39 +26,6 @@ interface RecipeOption {
   translated_title?: string | null;
 }
 
-interface ShoppingListSource {
-  recipeId: string;
-  recipeTitle: string;
-  servings: number;
-  quantity: number;
-  unitSymbol: string;
-}
-
-interface ShoppingListItem {
-  id: string;
-  ingredientId?: string;
-  ingredientName?: string;
-  ingredientPluralName?: string;
-  totalQuantity?: number;
-  quantityText?: string;
-  unit?: { symbol: string; name: string };
-  isChecked: boolean;
-  sourceDetails: ShoppingListSource[];
-  categoryId?: string;
-  categoryName?: string;
-  categoryColor?: string;
-  categoryIcon?: string;
-  categorySortOrder?: number;
-}
-
-interface ShoppingListDetail {
-  id: string;
-  name: string;
-  menuId?: string;
-  items: ShoppingListItem[];
-  createdAt: string;
-}
-
 interface ShoppingListSummary {
   id: string;
   name: string;
@@ -64,56 +34,13 @@ interface ShoppingListSummary {
   created_at: string;
 }
 
-/** Aisles in walking order, uncategorised last. Mirrors groupByAisle() in
- *  services/shopping.local.ts and shopping.service.ts — the three have to
- *  agree or the screen, the offline screen and the Markdown export show the
- *  same list in three different orders. */
-function groupByAisle(items: ShoppingListItem[], otherLabel: string) {
-  const buckets = new Map<string, {
-    key: string; name: string; color?: string; icon?: string;
-    sortOrder: number; items: ShoppingListItem[];
-  }>();
-
-  for (const item of items) {
-    const key = item.categoryId ?? '__other__';
-    if (!buckets.has(key)) {
-      buckets.set(key, {
-        key,
-        name: item.categoryName ?? otherLabel,
-        color: item.categoryColor,
-        icon: item.categoryIcon,
-        sortOrder: item.categoryName ? (item.categorySortOrder ?? 0) : Number.MAX_SAFE_INTEGER,
-        items: [],
-      });
-    }
-    buckets.get(key)!.items.push(item);
-  }
-
-  for (const bucket of buckets.values()) {
-    bucket.items.sort((a, b) => (a.ingredientName ?? '').localeCompare(b.ingredientName ?? ''));
-  }
-
-  return [...buckets.values()].sort(
-    (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
-  );
-}
-
-function displayName(item: ShoppingListItem, t: TFunction): string {
-  if (!item.ingredientName) return t('shopping.ingredientFallback');
-  return pickIngredientName(item.ingredientName, item.ingredientPluralName, item.totalQuantity ?? null);
-}
-
-function formatQty(item: ShoppingListItem, t: TFunction): string {
-  if (item.quantityText) return item.quantityText;
-  if (item.totalQuantity) {
-    const v = item.totalQuantity;
-    return `${v % 1 === 0 ? v : v.toFixed(1)} ${item.unit?.symbol ?? ''}`.trim();
-  }
-  return t('shopping.toTaste');
-}
+const OPEN_LIST_KEY = 'smartchef.shopping.openList';
 
 export default function ShoppingList() {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
+  const displayName = (item: ShoppingListItem) => itemName(item, (k) => t(k));
+  const formatQty = (item: ShoppingListItem) => itemQty(item, (k) => t(k));
   const cart = useStore((s) => s.shoppingCart);
   const removeFromCart = useStore((s) => s.removeFromShoppingCart);
   const updateCartServings = useStore((s) => s.updateShoppingCartServings);
@@ -157,7 +84,19 @@ export default function ShoppingList() {
   useEffect(() => {
     fetchMenus();
     fetchPastLists();
+    // Back from the print page reopens the list that was on screen.
+    try {
+      const open = sessionStorage.getItem(OPEN_LIST_KEY);
+      if (open) openList(open);
+    } catch { /* ignore */ }
   }, []);
+
+  useEffect(() => {
+    try {
+      if (activeList) sessionStorage.setItem(OPEN_LIST_KEY, activeList.id);
+      else sessionStorage.removeItem(OPEN_LIST_KEY);
+    } catch { /* ignore */ }
+  }, [activeList?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     (async () => {
@@ -457,7 +396,7 @@ export default function ShoppingList() {
                 </button>
                 {canPrint() && (
                   <button
-                    onClick={() => { printPage(activeList.name).catch(err => console.error('Print failed:', err)); }}
+                    onClick={() => navigate(`/shopping/${activeList.id}/print`)}
                     className="flex items-center gap-1.5 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-full text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                   >
                     <span className="material-symbols-outlined text-sm">print</span>
@@ -477,9 +416,6 @@ export default function ShoppingList() {
               </p>
             )}
             <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight mb-4">{activeList.name}</h1>
-            <p className="print-only text-xs mb-4">
-              {t('print.printedFrom')} · {progress.total - progress.checked}/{progress.total}
-            </p>
 
             <div className="flex items-center gap-4 mb-8 no-print">
               <div className="flex-1 h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
@@ -538,14 +474,14 @@ export default function ShoppingList() {
                               className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
                             />
                             <div className="flex-1 min-w-0">
-                              <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item, t)}</p>
+                              <p className={`text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item)}</p>
                               {item.sourceDetails.length > 0 && (
                                 <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium truncate">
                                   {t('shopping.usedIn')} {item.sourceDetails.map(s => s.recipeTitle).join(', ')}
                                 </p>
                               )}
                             </div>
-                            <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums shrink-0">{formatQty(item, t)}</span>
+                            <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums shrink-0">{formatQty(item)}</span>
                           </label>
                         ))}
                       </div>
@@ -566,7 +502,7 @@ export default function ShoppingList() {
                             onChange={e => handleToggleCheck(item.id, e.target.checked)}
                             className="w-5 h-5 rounded border-zinc-300 dark:border-zinc-600 text-primary focus:ring-primary/30 shrink-0"
                           />
-                          <span className={`flex-1 text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item, t)}</span>
+                          <span className={`flex-1 text-sm font-bold text-zinc-800 dark:text-zinc-200 ${item.isChecked ? 'line-through' : ''}`}>{displayName(item)}</span>
                           <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">{item.forQuantity}</span>
                         </label>
                       ))}

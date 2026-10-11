@@ -29,6 +29,7 @@ const Planner = lazy(() => import("./pages/Planner"));
 const MenuPrint = lazy(() => import("./pages/MenuPrint"));
 const CookHistory = lazy(() => import("./pages/CookHistory"));
 const ShoppingList = lazy(() => import("./pages/ShoppingList"));
+const ShoppingPrint = lazy(() => import("./pages/ShoppingPrint"));
 const Account = lazy(() => import("./pages/Account"));
 const ManageUsers = lazy(() => import("./pages/ManageUsers"));
 const SyncHistory = lazy(() => import("./pages/SyncHistory"));
@@ -355,6 +356,7 @@ export default function App() {
         <Route path="/planner/menu/:id/print" element={<MenuPrint />} />
         <Route path="/history" element={<CookHistory />} />
         <Route path="/shopping" element={<ShoppingList />} />
+        <Route path="/shopping/:id/print" element={<ShoppingPrint />} />
         <Route path="/account" element={<Account />} />
         <Route path="/manage-users" element={<ManageUsers />} />
         <Route path="/sync-history" element={<SyncHistory />} />
