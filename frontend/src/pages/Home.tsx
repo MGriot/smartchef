@@ -13,6 +13,7 @@ import { apiFetch } from '../lib/api';
 import { useFileExport } from '../hooks/useFileExport';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
+import { galleryKey, readGallery, writeGallery, REVEAL_INITIAL, REVEAL_STEP, REVEAL_DELAY_MS } from '../lib/galleryCache';
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface TagDisplay {
@@ -65,20 +66,23 @@ export const GRID_COL_CHOICES = [2, 3, 4, 5, 6, 7] as const;
 export type GridCols = typeof GRID_COL_CHOICES[number];
 
 /* ── Gallery card badges: Matrioska + up to 3 catalog tags (localized + colored), "+N" overflow ── */
-type CardBadge = { label: string; bg?: string; text?: string; color?: string | null };
+// `toggle` marks the overflow chip: "more" expands the card's full tag list, "less" collapses it.
+type CardBadge = { label: string; bg?: string; text?: string; color?: string | null; toggle?: 'more' | 'less' };
 const MAX_CARD_TAG_BADGES = 3;
-const getCardBadges = (recipe: Recipe): CardBadge[] => {
+const getCardBadges = (recipe: Recipe, expanded = false): CardBadge[] => {
   const badges: CardBadge[] = [];
   if (recipe.is_component) {
     badges.push({ label: 'MATRIOSKA', bg: 'bg-orange-200/90', text: 'text-red-800' });
   }
   const tagsDisplay = recipe.tags_display;
   if (tagsDisplay && tagsDisplay.length > 0) {
-    for (const tag of tagsDisplay.slice(0, MAX_CARD_TAG_BADGES)) {
+    for (const tag of expanded ? tagsDisplay : tagsDisplay.slice(0, MAX_CARD_TAG_BADGES)) {
       badges.push({ label: tag.translated_name.toUpperCase(), color: tag.color });
     }
     if (tagsDisplay.length > MAX_CARD_TAG_BADGES) {
-      badges.push({ label: `+${tagsDisplay.length - MAX_CARD_TAG_BADGES}`, bg: 'bg-zinc-700/90', text: 'text-white' });
+      badges.push(expanded
+        ? { label: '−', bg: 'bg-zinc-700/90', text: 'text-white', toggle: 'less' }
+        : { label: `+${tagsDisplay.length - MAX_CARD_TAG_BADGES}`, bg: 'bg-zinc-700/90', text: 'text-white', toggle: 'more' });
     }
   } else if (!recipe.is_component && recipe.tags?.[0]) {
     // Legacy free-text tag with no catalog match — still show something rather than nothing.
@@ -110,8 +114,18 @@ interface Collection {
 const Home: React.FC = () => {
   const { t } = useTranslation();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  // Starts from the list this device last saw for the opening query, so the
+  // gallery has cards on its first frame; the fetch below still replaces it.
+  const [recipes, setRecipes] = useState<Recipe[]>(() => readGallery<Recipe>({
+    lang: useStore.getState().contentLang,
+    q: (new URLSearchParams(window.location.search).get('q') || '').trim(),
+    sort: 'recently-edited',
+  }) ?? []);
+  // True while a fetch is in flight. The spinner is only for an empty grid;
+  // otherwise the cards on screen stay (dimmed) until the new ones arrive.
   const [loading, setLoading] = useState(true);
+  // How many of `recipes` are mounted; grows in steps (see below).
+  const [revealed, setRevealed] = useState(REVEAL_INITIAL);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [activeCategoryFilters, setActiveCategoryFilters] = useState<string[]>([]);
   const [activeRegionFilters, setActiveRegionFilters] = useState<string[]>([]);
@@ -201,6 +215,15 @@ const Home: React.FC = () => {
     (acc[t.group_name] ||= []).push(t);
     return acc;
   }, {});
+
+  const [expandedTagCards, setExpandedTagCards] = useState<Set<string>>(new Set());
+  const toggleTagsExpanded = (id: string) => {
+    setExpandedTagCards((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  };
 
   const [activeTab, setActiveTab] = useState<'recipes' | 'collections'>('recipes');
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -299,9 +322,27 @@ const Home: React.FC = () => {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
+  // A stale response (the query changed meanwhile) is dropped by the token.
+  const fetchToken = useRef(0);
+  // The key the cards on screen belong to: a different one restarts the reveal.
+  const shownKey = useRef('');
   useEffect(() => {
+    const token = ++fetchToken.current;
+    const query = {
+      lang: contentLang,
+      q: debouncedQuery,
+      tags: activeTagFilters,
+      categories: activeCategoryFilters,
+      regions: activeRegionFilters,
+      seasonalOnly,
+      sort: sortBy,
+    };
+    // This query's last answer shows at once; without one the previous cards
+    // stay (dimmed) rather than the grid collapsing to a spinner.
+    const cached = readGallery<Recipe>(query);
+    if (cached) setRecipes(cached);
+    setLoading(true);
     (async () => {
-      setLoading(true);
       try {
         const params = new URLSearchParams();
         if (contentLang) params.set('lang', contentLang);
@@ -313,14 +354,34 @@ const Home: React.FC = () => {
         params.set('sort', sortBy);
         const res = await apiFetch(`/api/recipes?${params.toString()}`);
         const json = await res.json();
-        setRecipes(json.data || []);
+        if (token !== fetchToken.current) return;
+        const list: Recipe[] = json.data || [];
+        writeGallery(query, list);
+        setRecipes(list);
       } catch (err) {
         console.error('Error fetching recipes:', err);
       } finally {
-        setLoading(false);
+        if (token === fetchToken.current) setLoading(false);
       }
     })();
   }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, seasonalOnly, sortBy, syncStatus.appliedRevision]);
+
+  // Cards are mounted a few at a time instead of the whole library in one
+  // render, so the first ones are on screen while the rest keep arriving.
+  // Only a different query starts over: a refresh of the same list (a sync
+  // landed) never hides cards that are already showing.
+  const queryKey = galleryKey({ lang: contentLang, q: debouncedQuery, tags: activeTagFilters, categories: activeCategoryFilters, regions: activeRegionFilters, seasonalOnly, sort: sortBy });
+  useEffect(() => {
+    if (shownKey.current !== queryKey) {
+      shownKey.current = queryKey;
+      setRevealed(REVEAL_INITIAL);
+    }
+  }, [queryKey]);
+  useEffect(() => {
+    if (revealed >= recipes.length) return;
+    const timer = setTimeout(() => setRevealed((r) => r + REVEAL_STEP), REVEAL_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [revealed, recipes.length]);
 
   return (
     <AppLayout>
@@ -621,7 +682,7 @@ const Home: React.FC = () => {
           )}
 
           {/* ─── Recipe Grid (Bento-style) ──────────────────────── */}
-          {loading ? (
+          {loading && recipes.length === 0 ? (
             <div className="flex justify-center items-center h-80">
               <div className="flex flex-col items-center gap-4">
                 <div className="animate-spin rounded-full h-10 w-10 border-[3px] border-primary/20 border-t-primary"></div>
@@ -651,11 +712,12 @@ const Home: React.FC = () => {
             </div>
           ) : (
             <div
-              className={`grid grid-cols-1 animate-fade-in-up ${dense ? 'gap-4' : 'gap-7'}`}
+              className={`grid grid-cols-1 animate-fade-in-up transition-opacity duration-200 ${dense ? 'gap-4' : 'gap-7'} ${loading ? 'opacity-60' : ''}`}
               style={isDesktopViewport ? { animationDelay: '0.1s', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` } : { animationDelay: '0.1s' }}
+              aria-busy={loading}
             >
-              {recipes.map((recipe) => {
-                const badges = getCardBadges(recipe);
+              {recipes.slice(0, revealed).map((recipe, index) => {
+                const badges = getCardBadges(recipe, expandedTagCards.has(recipe.id));
                 // Waiting time counts: leaving rest_time_min out is what
                 // made a 15-day mirto advertise "25 min" on its card while
                 // its own page said 360 hours. Matches RecipeDetail.
@@ -668,7 +730,10 @@ const Home: React.FC = () => {
                   // itself: a button (the "…" menu) may not nest in an <a>.
                   <div
                     key={recipe.id}
-                    className={`group relative bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px] ${selected ? 'ring-4 ring-primary' : ''}`}
+                    // Plays once, when the card first mounts: cards that arrive
+                    // together fan in a few at a time (see `revealed`).
+                    style={{ '--sc-delay': `${(index % REVEAL_STEP) * 35}ms` } as React.CSSProperties}
+                    className={`group relative animate-card-in bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px] ${selected ? 'ring-4 ring-primary' : ''}`}
                   >
                   {!selectMode && (
                     <RecipeCardMenu
@@ -708,8 +773,31 @@ const Home: React.FC = () => {
 
                       {/* Tag/Matrioska badges */}
                       {badges.length > 0 && (
-                        <div className={`absolute top-4 left-4 flex flex-wrap gap-1.5 ${selectMode ? 'right-4' : dense ? 'right-11' : 'right-14'}`}>
-                          {badges.map((badge, i) => (
+                        <div className={`absolute top-4 left-4 flex flex-wrap gap-1.5 max-h-[calc(100%-2rem)] overflow-y-auto ${selectMode ? 'right-4' : dense ? 'right-11' : 'right-14'}`}>
+                          {badges.map((badge, i) => {
+                            const badgeClass = `inline-flex items-center gap-1 px-3 py-1 ${badge.bg || ''} ${badge.text || 'text-white'} text-[10px] font-extrabold uppercase tracking-[0.12em] rounded-full shadow-sm`;
+                            if (badge.toggle) {
+                              return (
+                                // Inside the card <Link>: swallow the click so
+                                // it expands the tags instead of opening the
+                                // recipe (or toggling selection).
+                                <button
+                                  key={i}
+                                  type="button"
+                                  aria-expanded={badge.toggle === 'less'}
+                                  aria-label={t(badge.toggle === 'more' ? 'gallery.showAllTags' : 'gallery.showFewerTags')}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    toggleTagsExpanded(recipe.id);
+                                  }}
+                                  className={`${badgeClass} cursor-pointer hover:bg-zinc-600/90`}
+                                >
+                                  {badge.label}
+                                </button>
+                              );
+                            }
+                            return (
                             <span
                               key={i}
                               // No backdrop-blur here on purpose. Every badge
@@ -719,12 +807,13 @@ const Home: React.FC = () => {
                               // the photo behind it. A gallery of 47 recipes
                               // carries ~150 of these, which is a real cost on
                               // a phone GPU and free on a desktop one.
-                              className={`inline-flex items-center gap-1 px-3 py-1 ${badge.bg || ''} ${badge.text || 'text-white'} text-[10px] font-extrabold uppercase tracking-[0.12em] rounded-full shadow-sm`}
+                              className={badgeClass}
                               style={!badge.bg ? { backgroundColor: badge.color || '#3f3f46' } : undefined}
                             >
                               {badge.label}
                             </span>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>

@@ -419,6 +419,8 @@
     }
   },
   "gallery": {
+    "showAllTags": "Mostrar todas las etiquetas",
+    "showFewerTags": "Mostrar menos etiquetas",
     "seasonalOnly": "Solo de temporada este mes",
     "title": "Galería de recetas",
     "subtitle": "Crea tu cocina digital con inspiración de nivel profesional.",
@@ -2019,6 +2021,7 @@
     "search": "Buscar en los títulos…",
     "all": "Todos",
     "loading": "Cargando feeds…",
+    "loadingProgress": "Cargando sitios {{done}}/{{total}}…",
     "empty": "No hay títulos que mostrar.",
     "noSources": "Todavía no sigues ningún sitio.",
     "manageSources": "Añadir sitios en los ajustes",
@@ -2029,6 +2032,8 @@
     "pagination": "Paginación",
     "previous": "Anterior",
     "next": "Siguiente",
-    "pageOf": "Página {{page}} de {{total}}"
+    "pageOf": "Página {{page}} de {{total}}",
+    "searchingSites": "Buscando en los sitios…",
+    "notSearchable": "No se puede buscar en estos sitios, solo entre sus últimas publicaciones: {{names}}."
   }
 }

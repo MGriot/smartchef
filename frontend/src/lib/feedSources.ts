@@ -66,6 +66,35 @@ export function parseFeedSources(raw: unknown): FeedSource[] {
   return out;
 }
 
+/** The address a WordPress site answers a search with as an RSS feed
+ *  (`/?s=term&feed=rss2`), derived from the source's own feed URL. Null when
+ *  the feed does not look like a site's own `/feed` (aggregator APIs, `/rss`
+ *  endpoints): those sites have no search this app can read, and guessing
+ *  would only fetch a page that is not a feed. */
+export function searchFeedUrl(feedUrl: string, query: string): string | null {
+  const q = query.trim();
+  if (!q) return null;
+  try {
+    const u = new URL(feedUrl);
+    if (!/^\/feed(\/|$)/i.test(u.pathname)) return null;
+    return `${u.origin}/?s=${encodeURIComponent(q)}&feed=rss2`;
+  } catch {
+    return null;
+  }
+}
+
+/** Appends `extra` to `base`, dropping any whose link is already present. */
+export function mergeByLink<T extends { link: string }>(base: T[], extra: T[]): T[] {
+  const seen = new Set(base.map((i) => i.link));
+  const out = [...base];
+  for (const it of extra) {
+    if (seen.has(it.link)) continue;
+    seen.add(it.link);
+    out.push(it);
+  }
+  return out;
+}
+
 /** A stable id for a source the user adds: the feed's host plus a short hash
  *  of its URL, so two feeds from one site do not collide. */
 export function feedSourceId(feedUrl: string): string {

@@ -1,0 +1,1 @@
+Scopri e la galleria si aprono subito con quanto era stato caricato l'ultima volta, e si riempiono un sito o un gruppo di ricette alla volta invece di aspettare tutto.

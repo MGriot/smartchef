@@ -90,6 +90,12 @@ the filters open as a sheet rather than a popover wider than the screen.
 <img src="docs/images/03-gallery-phone.png" width="300" alt="The gallery on a phone" />
 <img src="docs/images/05-gallery-filters-phone.png" width="300" alt="Filters on a phone" />
 
+Discover lists the newest recipe titles from the sites you follow, like a feed reader. It opens on what it loaded last time and fills in one site at a time; **Import to gallery** sends a page through the normal import flow.
+
+![Discover](docs/images/13-discover.png)
+
+<img src="docs/images/14-discover-phone.png" width="300" alt="Discover on a phone" />
+
 A recipe's own actions live in one button rather than a permanent bar over
 the page, and fan out when you need them.
 

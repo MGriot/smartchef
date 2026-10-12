@@ -419,6 +419,8 @@
     }
   },
   "gallery": {
+    "showAllTags": "Mostra tutti i tag",
+    "showFewerTags": "Mostra meno tag",
     "seasonalOnly": "Solo di stagione questo mese",
     "title": "Galleria Ricette",
     "subtitle": "Raccogli ispirazioni di alta qualità per la tua cucina digitale.",
@@ -2019,6 +2021,7 @@
     "search": "Cerca nei titoli…",
     "all": "Tutti",
     "loading": "Caricamento dei feed…",
+    "loadingProgress": "Caricamento dei siti {{done}}/{{total}}…",
     "empty": "Nessun titolo da mostrare.",
     "noSources": "Non segui ancora nessun sito.",
     "manageSources": "Aggiungi siti nelle impostazioni",
@@ -2029,6 +2032,8 @@
     "pagination": "Paginazione",
     "previous": "Precedente",
     "next": "Successiva",
-    "pageOf": "Pagina {{page}} di {{total}}"
+    "pageOf": "Pagina {{page}} di {{total}}",
+    "searchingSites": "Cerco nei siti…",
+    "notSearchable": "In questi siti non si può cercare, solo tra gli ultimi articoli: {{names}}."
   }
 }

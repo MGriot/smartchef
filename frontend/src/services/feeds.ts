@@ -7,13 +7,15 @@
 // private-network guard. A feed is just text it returns.
 //
 // One bad site must never blank the list, so every source settles on its
-// own. Results are kept in memory and in localStorage for a quarter of an
-// hour so reopening the view is instant and survives a flaky connection.
+// own. Results are kept in memory and in localStorage: a copy under a quarter
+// of an hour old is used as is, an older one (up to a week) is shown at once
+// and refreshed behind it, so opening the view is instant and survives a flaky
+// connection.
 // ════════════════════════════════════════════════════════════════════════
 
 import { fetchPageHtml } from './pageFetcher';
 import { parseFeed, looksLikeFeed, discoverFeedLinks, type FeedItem } from '../lib/feedParser';
-import type { FeedSource } from '../lib/feedSources';
+import { searchFeedUrl, type FeedSource } from '../lib/feedSources';
 
 export interface DiscoverItem extends FeedItem {
   sourceId: string;
@@ -24,38 +26,77 @@ export interface DiscoverResult {
   items: DiscoverItem[];
   /** Source id → what went wrong, for sources that returned nothing usable. */
   errors: Record<string, string>;
+  /** While loading: sources settled so far out of those being loaded. */
+  done?: number;
+  total?: number;
 }
 
+/** A copy younger than this is shown without asking the site again. */
 const TTL_MS = 15 * 60_000;
+/** An older copy is still painted first (then refreshed) for this long. */
+const MAX_STALE_MS = 7 * 24 * 60 * 60_000;
 const CACHE_KEY = 'smartchef.discover.cache';
-const memory = new Map<string, { at: number; items: FeedItem[] }>();
+const SAVE_DELAY_MS = 300;
 
-function readDisk(): Record<string, { at: number; items: FeedItem[] }> {
-  try { return JSON.parse(localStorage.getItem(CACHE_KEY) ?? '{}') ?? {}; } catch { return {}; }
+type CacheEntry = { at: number; items: FeedItem[] };
+
+// Loaded from localStorage once, then kept here: reading and rewriting the
+// whole JSON blob for every feed that lands was a per-feed cost on the UI thread.
+let cache: Record<string, CacheEntry> | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+function entries(): Record<string, CacheEntry> {
+  if (cache) return cache;
+  try { cache = JSON.parse(localStorage.getItem(CACHE_KEY) ?? '{}') ?? {}; } catch { cache = {}; }
+  return cache!;
 }
 
-function writeDisk(url: string, entry: { at: number; items: FeedItem[] }) {
-  try {
-    const all = readDisk();
-    all[url] = entry;
-    localStorage.setItem(CACHE_KEY, JSON.stringify(all));
-  } catch { /* a full or blocked store only costs the offline copy */ }
+function remember(url: string, entry: CacheEntry) {
+  entries()[url] = entry;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const all = entries();
+    const now = Date.now();
+    for (const [key, e] of Object.entries(all)) {
+      if (now - e.at > MAX_STALE_MS) delete all[key];
+    }
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(all)); } catch { /* a full or blocked store only costs the offline copy */ }
+  }, SAVE_DELAY_MS);
 }
 
-async function loadOne(source: FeedSource, force: boolean): Promise<{ items: FeedItem[]; error?: string }> {
-  const hit = memory.get(source.feedUrl);
-  if (!force && hit && Date.now() - hit.at < TTL_MS) return { items: hit.items };
+/** Test seam: forget everything held in memory (the stored copy is untouched). */
+export function resetDiscoverCache() {
+  cache = null;
+  clearTimeout(saveTimer);
+}
+
+const isFresh = (e: CacheEntry | undefined) => !!e && Date.now() - e.at < TTL_MS;
+const isUsable = (e: CacheEntry | undefined) => !!e && Date.now() - e.at < MAX_STALE_MS;
+
+// A second load that starts while a feed is still on its way (a chip tapped, a
+// source added, React mounting twice in dev) waits for that request instead of
+// sending another to the same site.
+const inflight = new Map<string, Promise<{ items: FeedItem[]; error?: string }>>();
+
+function loadOne(source: FeedSource) {
+  let p = inflight.get(source.feedUrl);
+  if (!p) {
+    p = fetchOne(source).finally(() => inflight.delete(source.feedUrl));
+    inflight.set(source.feedUrl, p);
+  }
+  return p;
+}
+
+async function fetchOne(source: FeedSource): Promise<{ items: FeedItem[]; error?: string }> {
   try {
     const text = await fetchPageHtml(source.feedUrl);
     if (!looksLikeFeed(text)) throw new Error('not a feed');
     const items = parseFeed(text).items;
-    const entry = { at: Date.now(), items };
-    memory.set(source.feedUrl, entry);
-    writeDisk(source.feedUrl, entry);
+    remember(source.feedUrl, { at: Date.now(), items });
     return { items };
   } catch (err) {
     // Offline or blocked: fall back to the last copy this device saw.
-    const stale = hit ?? readDisk()[source.feedUrl];
+    const stale = entries()[source.feedUrl];
     const error = err instanceof Error ? err.message : String(err);
     return { items: stale?.items ?? [], error };
   }
@@ -67,14 +108,84 @@ const CONCURRENCY = 3;
 
 const byNewest = (a: DiscoverItem, b: DiscoverItem) => (b.published ?? '').localeCompare(a.published ?? '');
 
-/** Loads the given sources a few at a time, handing the merged list so far to
- *  `onUpdate` after each one, so the first page appears without waiting for
- *  the slowest site. Each source keeps only its newest entries (see parseFeed). */
+const tag = (s: FeedSource, items: FeedItem[]): DiscoverItem[] =>
+  items.map((it) => ({ ...it, sourceId: s.id, sourceName: s.name }));
+
+/** Whatever this device already holds for these sources, however old, or null
+ *  when nothing is cached. Lets the view paint on its first frame. */
+export function peekDiscover(sources: FeedSource[]): DiscoverResult | null {
+  const all = entries();
+  const items: DiscoverItem[] = [];
+  for (const s of sources) {
+    const e = all[s.feedUrl];
+    if (isUsable(e)) items.push(...tag(s, e.items));
+  }
+  return items.length ? { items: items.sort(byNewest), errors: {} } : null;
+}
+
+/** Shows the cached copy of every source at once, then asks only the sites
+ *  whose copy is missing or older than TTL_MS (all of them when `force`), a few
+ *  at a time, handing the merged list so far to `onUpdate` after each one. The
+ *  empty sources go first so the list fills where it is emptiest. Each source
+ *  keeps only its newest entries (see parseFeed). */
 export async function loadDiscover(
   sources: FeedSource[],
   force = false,
   onUpdate?: (partial: DiscoverResult) => void,
 ): Promise<DiscoverResult> {
+  const all = entries();
+  const bySource = new Map<string, DiscoverItem[]>();
+  const errors: Record<string, string> = {};
+  for (const s of sources) {
+    const e = all[s.feedUrl];
+    if (isUsable(e)) bySource.set(s.id, tag(s, e.items));
+  }
+  const queue = sources
+    .filter((s) => force || !isFresh(all[s.feedUrl]))
+    .sort((a, b) => Number(bySource.has(a.id)) - Number(bySource.has(b.id)));
+  const total = sources.length;
+  let done = total - queue.length;
+  const snapshot = (): DiscoverResult => ({
+    items: [...bySource.values()].flat().sort(byNewest),
+    errors: { ...errors },
+    done,
+    total,
+  });
+  // Cached copies go out first, before any network round trip.
+  if (bySource.size > 0) onUpdate?.(snapshot());
+  let next = 0;
+  const worker = async () => {
+    while (next < queue.length) {
+      const s = queue[next++];
+      const r = await loadOne(s);
+      if (r.error && r.items.length === 0) errors[s.id] = r.error;
+      else delete errors[s.id];
+      bySource.set(s.id, tag(s, r.items));
+      done++;
+      onUpdate?.(snapshot());
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+  return snapshot();
+}
+
+const SEARCH_TTL_MS = 5 * 60_000;
+const SEARCH_LIMIT = 20;
+const searchMemory = new Map<string, { at: number; items: FeedItem[] }>();
+
+/** Marker error for a source whose site has no search this app can read. */
+export const NOT_SEARCHABLE = 'not searchable';
+
+/** Asks each source's own site for `query`, a few at a time, so recipes that
+ *  have scrolled out of the feed can still be found. Only WordPress-style
+ *  sites answer (see searchFeedUrl); the rest are reported as NOT_SEARCHABLE.
+ *  Same shape and pacing as loadDiscover. */
+export async function searchDiscover(
+  sources: FeedSource[],
+  query: string,
+  onUpdate?: (partial: DiscoverResult) => void,
+): Promise<DiscoverResult> {
+  const q = query.trim().toLowerCase();
   const items: DiscoverItem[] = [];
   const errors: Record<string, string> = {};
   const snapshot = (): DiscoverResult => ({ items: [...items].sort(byNewest), errors: { ...errors } });
@@ -82,9 +193,27 @@ export async function loadDiscover(
   const worker = async () => {
     while (next < sources.length) {
       const s = sources[next++];
-      const r = await loadOne(s, force);
-      if (r.error && r.items.length === 0) errors[s.id] = r.error;
-      for (const it of r.items) items.push({ ...it, sourceId: s.id, sourceName: s.name });
+      const url = searchFeedUrl(s.feedUrl, q);
+      if (!url) {
+        errors[s.id] = NOT_SEARCHABLE;
+      } else {
+        const key = `${s.id}:${q}`;
+        const hit = searchMemory.get(key);
+        try {
+          let found: FeedItem[];
+          if (hit && Date.now() - hit.at < SEARCH_TTL_MS) {
+            found = hit.items;
+          } else {
+            const text = await fetchPageHtml(url);
+            if (!looksLikeFeed(text)) throw new Error(NOT_SEARCHABLE);
+            found = parseFeed(text, SEARCH_LIMIT).items;
+            searchMemory.set(key, { at: Date.now(), items: found });
+          }
+          for (const it of found) items.push({ ...it, sourceId: s.id, sourceName: s.name });
+        } catch (err) {
+          errors[s.id] = err instanceof Error ? err.message : String(err);
+        }
+      }
       onUpdate?.(snapshot());
     }
   };

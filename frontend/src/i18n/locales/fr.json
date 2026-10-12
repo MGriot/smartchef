@@ -419,6 +419,8 @@
     }
   },
   "gallery": {
+    "showAllTags": "Afficher tous les tags",
+    "showFewerTags": "Afficher moins de tags",
     "seasonalOnly": "De saison ce mois-ci seulement",
     "title": "Galerie de recettes",
     "subtitle": "Créez votre galerie de recettes avec des inspirations professionnelles.",
@@ -2019,6 +2021,7 @@
     "search": "Rechercher dans les titres…",
     "all": "Tous",
     "loading": "Chargement des flux…",
+    "loadingProgress": "Chargement des sites {{done}}/{{total}}…",
     "empty": "Aucun titre à afficher.",
     "noSources": "Vous ne suivez encore aucun site.",
     "manageSources": "Ajouter des sites dans les réglages",
@@ -2029,6 +2032,8 @@
     "pagination": "Pagination",
     "previous": "Précédent",
     "next": "Suivant",
-    "pageOf": "Page {{page}} sur {{total}}"
+    "pageOf": "Page {{page}} sur {{total}}",
+    "searchingSites": "Recherche dans les sites…",
+    "notSearchable": "Ces sites ne peuvent pas être interrogés, seulement leurs derniers articles : {{names}}."
   }
 }

@@ -357,27 +357,36 @@ export default function RecipeImport() {
   // that was loaded first.
   const categoriesLang = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (categoriesLang.current !== null && categoriesLang.current !== matchLang) {
-      setCategories(null);
-    }
-  }, [matchLang]);
-
-  const loadCategoriesOnce = async (): Promise<Category[]> => {
-    if (categories && categoriesLang.current === matchLang) return categories;
+  // `lang` is passed explicitly by callers that have just chosen a language:
+  // beginReview()/changeMatchLang() call setMatchLang() and then matching in
+  // the same tick, so reading `matchLang` here would be the previous render's
+  // value, and the list would be cached under (and then discarded for) the
+  // wrong language, leaving the "new" rows' category select empty.
+  const loadCategoriesOnce = async (lang: string = matchLang): Promise<Category[]> => {
+    if (categories && categoriesLang.current === lang) return categories;
     try {
-      const res = await apiFetch(`/api/ingredients/categories?lang=${encodeURIComponent(matchLang)}`);
+      const res = await apiFetch(`/api/ingredients/categories?lang=${encodeURIComponent(lang)}`);
+      if (!res.ok) throw new Error(`categories ${res.status}`);
       const json = await res.json();
       const cats: Category[] = json.data || [];
       setCategories(cats);
-      categoriesLang.current = matchLang;
+      categoriesLang.current = lang;
       return cats;
     } catch {
-      setCategories([]);
-      categoriesLang.current = matchLang;
+      // Left unset (not cached as []) so the next attempt retries.
       return [];
     }
   };
+
+  // Safety net: a row that defaults to "new" has its radio already checked,
+  // so clicking it fires no change event. Load whenever one is in play.
+  const anyNewResolution = ingredientRes.some((r) => r.choice === 'new');
+  useEffect(() => {
+    if (anyNewResolution && (!categories || categoriesLang.current !== matchLang)) {
+      void loadCategoriesOnce(matchLang);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyNewResolution, matchLang, categories]);
 
   // Runs the same matching step regardless of how `d` was produced (AI or
   // the local template/JSON parser) — the whole point of splitting parsing
@@ -464,7 +473,7 @@ export default function RecipeImport() {
     setTechniqueNames(techNames);
     setTechniqueRes(techNames.map((n) => defaultResolution(matches.techniques[n] || [])));
     if (ingredientNames.some((n) => defaultResolution(byIngredientName[n] || []).choice === 'new')) {
-      loadCategoriesOnce();
+      void loadCategoriesOnce(lang);
     }
     void requestNaming(d, ingredientNames
       .map((n, i) => (defaultResolution(byIngredientName[n] || []).choice === 'new' ? i : -1))

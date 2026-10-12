@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseFeed, looksLikeFeed, discoverFeedLinks } from './feedParser';
-import { parseFeedSources, DEFAULT_FEED_SOURCES } from './feedSources';
+import { parseFeedSources, DEFAULT_FEED_SOURCES, searchFeedUrl, mergeByLink } from './feedSources';
 
 const rss = `<?xml version="1.0"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:atom="http://www.w3.org/2005/Atom"><channel>
 <title>Serious &amp; Eats</title><link>https://x.test/</link><atom:link href="https://x.test/feed" rel="self"/>
@@ -65,5 +65,24 @@ describe('parseFeedSources', () => {
 
   it('ships defaults that all validate', () => {
     expect(parseFeedSources(DEFAULT_FEED_SOURCES)).toHaveLength(DEFAULT_FEED_SOURCES.length);
+  });
+});
+
+describe('site search helpers', () => {
+  it('builds a WordPress search feed from a /feed URL', () => {
+    expect(searchFeedUrl('https://saveur.com/feed/', ' pasta e fagioli ')).toBe('https://saveur.com/?s=pasta%20e%20fagioli&feed=rss2');
+  });
+
+  it('returns null for feeds that are not a site /feed, or an empty query', () => {
+    expect(searchFeedUrl('https://feeds-api.dotdashmeredith.com/v1/rss/google/abc', 'pasta')).toBeNull();
+    expect(searchFeedUrl('https://www.bbcgoodfood.com/rss', 'pasta')).toBeNull();
+    expect(searchFeedUrl('https://saveur.com/feed/', '  ')).toBeNull();
+    expect(searchFeedUrl('not a url', 'pasta')).toBeNull();
+  });
+
+  it('merges by link, keeping the first occurrence', () => {
+    const a = [{ link: 'x', n: 1 }];
+    const b = [{ link: 'x', n: 2 }, { link: 'y', n: 3 }, { link: 'y', n: 4 }];
+    expect(mergeByLink(a, b)).toEqual([{ link: 'x', n: 1 }, { link: 'y', n: 3 }]);
   });
 });

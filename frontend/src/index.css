@@ -201,6 +201,22 @@
     animation: fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  /* ── Card arrival ───────────────────────────────────────────────────────
+     For cards that appear one by one while a list loads. `backwards` rather
+     than `both`: once it ends nothing is held, so the card's own hover lift
+     (a transform) still works. --sc-delay staggers a batch. */
+  @keyframes sc-card-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .animate-card-in {
+    animation: sc-card-in 0.35s ease-out backwards;
+    animation-delay: var(--sc-delay, 0s);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-card-in { animation: none; }
+  }
+
   /* ── Dialog entry ───────────────────────────────────────────────────────
      The dialogs were all marked `animate-in fade-in zoom-in`, which is
      tailwindcss-animate's syntax - a plugin this project doesn't install, so

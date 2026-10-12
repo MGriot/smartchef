@@ -189,6 +189,33 @@ To connect it to an MCP client (e.g. Claude Desktop) that requires a stdio trans
 
 ---
 
+## Loading, one piece at a time
+
+Two views read a list that can be slow to arrive, and both follow the same
+rule: show what this device already has, ask for the fresh copy behind it,
+and let the result land in pieces rather than behind a spinner.
+
+**Discover** (`frontend/src/services/feeds.ts`) keeps one entry per feed in
+memory and in `localStorage` (`smartchef.discover.cache`). `peekDiscover`
+returns whatever is held, up to a week old, so the view paints on its first
+frame. `loadDiscover` then fetches only the feeds that are missing or older
+than 15 minutes (all of them on *Refresh*), empty ones first, three at a
+time, and reports each one as it settles together with a done/total count.
+Two loads that overlap share one request per site. A failed fetch keeps the
+older copy and records no error while a copy exists. The cache is read once
+and written back after a short pause, pruning entries past a week, rather
+than re-parsing the whole blob for every feed.
+
+**The gallery** (`frontend/src/lib/galleryCache.ts`) remembers the last list
+per query (language, search, tags, categories, regions, seasonal, sort; the
+key ignores the order filters were picked in). The unfiltered list is also
+stored so a restart is not an empty screen. The request always goes out, so
+a sync is never hidden; the cached list is only what shows until it lands.
+Changing a filter keeps the previous cards on screen, dimmed, and a stale
+response is dropped. Cards are mounted twelve at first, then eight every 50 ms,
+and a refresh of the same query never hides cards already showing.
+
+---
 ## One layout, every width
 
 There is no separate mobile build and no separate mobile routes: the same

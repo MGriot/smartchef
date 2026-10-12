@@ -3,12 +3,15 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import { formatRelativeTime } from '../lib/relativeTime';
-import { DISCOVER_SOURCES, type FeedSource } from '../lib/feedSources';
+import { DISCOVER_SOURCES, mergeByLink, type FeedSource } from '../lib/feedSources';
 import { getSetting } from '../lib/settingsRegistry';
 import { subscribeSettings } from '../lib/settingsCache';
-import { loadDiscover, type DiscoverResult } from '../services/feeds';
+import { loadDiscover, peekDiscover, searchDiscover, NOT_SEARCHABLE, type DiscoverResult } from '../services/feeds';
 
 const PAGE_SIZE = 25;
+const MIN_SITE_SEARCH = 3;
+/** Placeholder cards shown while nothing is cached and the first feed is on its way. */
+const SKELETONS = 6;
 
 /** Recipe titles from the sites the user follows, like an RSS reader. A title
  *  opens the original page in the browser; "Import" sends the page through the
@@ -17,7 +20,9 @@ export default function Discover() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [sources, setSources] = useState<FeedSource[]>(() => getSetting<FeedSource[]>(DISCOVER_SOURCES));
-  const [result, setResult] = useState<DiscoverResult | null>(null);
+  // Painted from whatever this device already holds, so reopening the view
+  // shows titles on the first frame while the stale feeds refresh behind them.
+  const [result, setResult] = useState<DiscoverResult | null>(() => peekDiscover(sources));
   const [loading, setLoading] = useState(true);
   const [only, setOnly] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -34,6 +39,9 @@ export default function Discover() {
     const token = ++loadToken.current;
     const scope = only ? sources.filter((s) => s.id === only) : sources;
     setLoading(true);
+    // A chip or a source change: show that scope's cached titles at once.
+    const cached = peekDiscover(scope);
+    if (cached) setResult(cached);
     try {
       const final = await loadDiscover(scope, force, (partial) => {
         if (token === loadToken.current) setResult(partial);
@@ -48,16 +56,44 @@ export default function Discover() {
   // A new filter or search starts again from the first page.
   useEffect(() => { setPage(0); }, [only, query]);
 
+  // The feeds hold only each site's newest posts, so a search of three or more
+  // characters also asks the sites themselves, after the typing pauses. Local
+  // title matches show at once; site results are appended as they arrive.
+  const [remote, setRemote] = useState<DiscoverResult | null>(null);
+  const [searching, setSearching] = useState(false);
+  const searchToken = useRef(0);
+  useEffect(() => {
+    const q = query.trim();
+    const token = ++searchToken.current;
+    if (q.length < MIN_SITE_SEARCH) {
+      setRemote(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timer = setTimeout(() => {
+      const scope = only ? sources.filter((s) => s.id === only) : sources;
+      searchDiscover(scope, q, (partial) => {
+        if (token === searchToken.current) setRemote(partial);
+      })
+        .then((final) => { if (token === searchToken.current) setRemote(final); })
+        .finally(() => { if (token === searchToken.current) setSearching(false); });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [query, only, sources]);
+
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (result?.items ?? []).filter((i) => (!only || i.sourceId === only) && (!q || i.title.toLowerCase().includes(q)));
-  }, [result, only, query]);
+    const local = (result?.items ?? []).filter((i) => (!only || i.sourceId === only) && (!q || i.title.toLowerCase().includes(q)));
+    return remote ? mergeByLink(local, remote.items) : local;
+  }, [result, remote, only, query]);
 
   const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
   const current = Math.min(page, pageCount - 1);
   const pageItems = items.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
 
   const failed = sources.filter((s) => result?.errors[s.id]);
+  const unsearchable = remote && !searching ? sources.filter((s) => (!only || s.id === only) && remote.errors[s.id] === NOT_SEARCHABLE) : [];
 
   return (
     <AppLayout>
@@ -118,15 +154,46 @@ export default function Discover() {
               </p>
             )}
 
-            {loading && !result && (
-              <div className="flex items-center justify-center gap-3 py-16 text-zinc-500 dark:text-zinc-400">
-                <span className="material-symbols-outlined animate-spin">progress_activity</span>
-                <span className="font-medium">{t('discover.loading')}</span>
-              </div>
+            {searching && (
+              <p className="mb-4 flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
+                {t('discover.searchingSites')}
+              </p>
             )}
 
-            {result && items.length === 0 && !loading && (
+            {unsearchable.length > 0 && (
+              <p className="mb-4 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                {t('discover.notSearchable', { names: unsearchable.map((s) => s.name).join(', ') })}
+              </p>
+            )}
+
+            {/* Feeds land one by one: say how far along, instead of blocking the list. */}
+            {loading && (
+              <p className="mb-4 flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400" role="status">
+                <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
+                {result?.total
+                  ? t('discover.loadingProgress', { done: result.done ?? 0, total: result.total })
+                  : t('discover.loading')}
+              </p>
+            )}
+
+            {result && items.length === 0 && !loading && !searching && (
               <p className="py-12 text-center text-zinc-500 dark:text-zinc-400 font-medium">{t('discover.empty')}</p>
+            )}
+
+            {/* Nothing cached yet and the first feed still on its way. */}
+            {loading && items.length === 0 && (
+              <ul className="divide-y divide-zinc-100 dark:divide-zinc-800 md:divide-y-0 md:grid md:grid-cols-2 xl:grid-cols-3 md:gap-7" aria-hidden="true">
+                {Array.from({ length: SKELETONS }, (_, i) => (
+                  <li key={i} className="flex animate-pulse items-center gap-4 py-3 md:py-0 md:flex-col md:items-stretch md:gap-0 md:bg-white md:dark:bg-zinc-900 md:rounded-3xl md:overflow-hidden md:shadow-[0_2px_16px_rgba(0,0,0,0.05)]">
+                    <div className="h-16 w-16 shrink-0 rounded-xl bg-zinc-100 dark:bg-zinc-800 md:h-auto md:w-full md:aspect-[4/3] md:rounded-none" />
+                    <div className="min-w-0 flex-1 space-y-2 md:p-6">
+                      <div className="h-4 w-3/4 rounded bg-zinc-100 dark:bg-zinc-800" />
+                      <div className="h-3 w-1/3 rounded bg-zinc-100 dark:bg-zinc-800" />
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
 
             {/* A list of rows on a phone, a grid of cards like the gallery from md up. */}
@@ -134,7 +201,7 @@ export default function Discover() {
               {pageItems.map((item) => (
                 <li
                   key={`${item.sourceId}:${item.link}`}
-                  className="group flex items-center gap-4 py-3 md:py-0 md:flex-col md:items-stretch md:gap-0 md:bg-white md:dark:bg-zinc-900 md:rounded-3xl md:overflow-hidden md:shadow-[0_2px_16px_rgba(0,0,0,0.05)] md:hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] md:transition-all md:duration-300 md:hover:-translate-y-1"
+                  className={`group flex items-center gap-4 py-3 md:py-0 md:flex-col md:items-stretch md:gap-0 md:bg-white md:dark:bg-zinc-900 md:rounded-3xl md:overflow-hidden md:shadow-[0_2px_16px_rgba(0,0,0,0.05)] md:hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] md:transition-all md:duration-300 md:hover:-translate-y-1 animate-card-in`}
                 >
                   <a
                     href={item.link}

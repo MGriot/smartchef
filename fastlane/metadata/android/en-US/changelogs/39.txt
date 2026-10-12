@@ -1,0 +1,1 @@
+Discover and the gallery now open instantly from what was loaded last time, and fill in one site or one batch of recipes at a time instead of waiting for everything.

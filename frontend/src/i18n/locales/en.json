@@ -419,6 +419,8 @@
     }
   },
   "gallery": {
+    "showAllTags": "Show all tags",
+    "showFewerTags": "Show fewer tags",
     "seasonalOnly": "In season this month only",
     "title": "Recipe Gallery",
     "subtitle": "Curate your digital kitchen with professional-grade inspirations.",
@@ -2019,6 +2021,7 @@
     "search": "Search titles…",
     "all": "All",
     "loading": "Loading feeds…",
+    "loadingProgress": "Loading sources {{done}}/{{total}}…",
     "empty": "No titles to show.",
     "noSources": "You are not following any sites yet.",
     "manageSources": "Add sites in Settings",
@@ -2029,6 +2032,8 @@
     "pagination": "Pagination",
     "previous": "Previous",
     "next": "Next",
-    "pageOf": "Page {{page}} of {{total}}"
+    "pageOf": "Page {{page}} of {{total}}",
+    "searchingSites": "Searching the sites…",
+    "notSearchable": "These sites can't be searched, only their latest posts: {{names}}."
   }
 }
