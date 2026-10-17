@@ -296,6 +296,8 @@ export interface LLMParseResult {
   difficulty?: DifficultyLevel;
   tags: string[];
   tools: string[];
+  /** Geographic origin of the dish; empty when the source doesn't say. */
+  regions?: Array<{ country: string | null; place: string | null }>;
   storageInstructions?: string | null;
   tips?: string | null;
   ingredients: Array<{

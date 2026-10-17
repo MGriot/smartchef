@@ -31,6 +31,9 @@ import { startSyncLoop }    from "./services/mdns.service";
 import { startFolderSyncLoop, SYNC_ENABLED } from "./services/folder-sync.service";
 import { UPLOAD_DIR }       from "./services/uploadDir";
 import pool                 from "./db/pool";
+import { assertProductionSecrets } from "./config/assertSecrets";
+
+assertProductionSecrets();
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
