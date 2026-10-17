@@ -32,10 +32,14 @@ import { startFolderSyncLoop, SYNC_ENABLED } from "./services/folder-sync.servic
 import { UPLOAD_DIR }       from "./services/uploadDir";
 import pool                 from "./db/pool";
 import { assertProductionSecrets } from "./config/assertSecrets";
+import { APP_VERSION } from "./config/appVersion";
 
 assertProductionSecrets();
 
 const app = express();
+// Needed for per-client rate limiting behind nginx/Tailscale; off by default
+// because trusting X-Forwarded-For on a directly exposed port lets clients spoof it.
+if (process.env.TRUST_PROXY) app.set("trust proxy", Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 
 // ── Middleware ─────────────────────────────────────────────────────────
@@ -102,7 +106,7 @@ app.get("/health", async (_req, res) => {
     db: dbOk,
     ollama: ollama.ok,
     ollamaModels: ollama.models,
-    version: "1.1.1",
+    version: APP_VERSION,
     timestamp: new Date().toISOString(),
   });
 });

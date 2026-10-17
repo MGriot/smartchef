@@ -42,6 +42,9 @@ services:
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: gemma3:4b
       PORT: 3000
+      # The bundled nginx fronts the API; trust its X-Forwarded-For so auth
+      # rate limiting is per client, not one bucket for everyone.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       UPLOAD_DIR: /app/uploads
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in docker/.env (openssl rand -hex 32)}
       # Session cookie behavior. Defaults preserve today's plain-HTTP,

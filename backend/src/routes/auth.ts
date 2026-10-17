@@ -13,6 +13,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { encrypt } from "../services/crypto.service";
+import { loginLimiter, signupLimiter } from "../middleware/authRateLimit";
 
 export const authRouter = Router();
 
@@ -115,7 +116,7 @@ const SetupSchema = z.object({
 
 // POST /auth/setup — only when no account row exists yet. This is always
 // the instance's very first account, so it's always the admin.
-authRouter.post("/setup", async (req: Request, res: Response) => {
+authRouter.post("/setup", signupLimiter, async (req: Request, res: Response) => {
   const existing = await queryOne<Account>("SELECT id FROM account LIMIT 1");
   if (existing) return res.status(409).json({ error: "Account already set up" });
 
@@ -138,7 +139,7 @@ authRouter.post("/setup", async (req: Request, res: Response) => {
 const LoginSchema = z.object({ username: z.string().min(1), password: z.string().min(1) });
 
 // POST /auth/login
-authRouter.post("/login", async (req: Request, res: Response) => {
+authRouter.post("/login", loginLimiter, async (req: Request, res: Response) => {
   const parsed = LoginSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
@@ -184,7 +185,7 @@ const RegisterSchema = z.object({
 // through /setup, which is what mints the admin. Never lets a caller pick
 // its own role — promotion stays admin-only (PATCH /users/:id/role), so
 // self-registering can't be an escalation path.
-authRouter.post("/register", async (req: Request, res: Response) => {
+authRouter.post("/register", signupLimiter, async (req: Request, res: Response) => {
   if (!selfServiceAuthEnabled()) {
     return res.status(403).json({ error: "Self sign-up is turned off on this instance. Ask an admin to create your account." });
   }
