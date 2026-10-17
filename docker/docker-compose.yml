@@ -22,7 +22,7 @@ services:
       - pg_data:/var/lib/postgresql/data
       - ../db/migrations:/docker-entrypoint-initdb.d
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U smartchef"]
       interval: 10s
@@ -43,7 +43,7 @@ services:
       OLLAMA_MODEL: gemma3:4b
       PORT: 3000
       UPLOAD_DIR: /app/uploads
-      SESSION_SECRET: ${SESSION_SECRET:-smartchef-dev-secret-change-me}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in docker/.env (openssl rand -hex 32)}
       # Session cookie behavior. Defaults preserve today's plain-HTTP,
       # same-origin (browser via nginx) setup exactly. Only needed once a
       # native app or another cross-origin client talks to the API
@@ -69,7 +69,7 @@ services:
       # per-account in Account settings) before storing them in the DB —
       # only relevant if you select a cloud provider for recipe-import
       # parsing; local Ollama needs none of this. See docker/.env.example.
-      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET:-smartchef-dev-encryption-secret-change-me}
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET:?Set LLM_KEY_ENCRYPTION_SECRET in docker/.env (openssl rand -hex 32)}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
@@ -95,7 +95,7 @@ services:
       BACKEND_URL: http://backend:3000
       PORT: 3002
     ports:
-      - "3002:3002"
+      - "127.0.0.1:3002:3002"
     depends_on:
       - backend
 

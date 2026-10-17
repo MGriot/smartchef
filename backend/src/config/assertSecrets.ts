@@ -9,7 +9,7 @@ const DEFAULTS: Record<string, string> = {
 export function assertProductionSecrets(env: NodeJS.ProcessEnv = process.env): void {
   if (env.NODE_ENV !== "production") return;
   const bad = Object.entries(DEFAULTS)
-    .filter(([name, dev]) => !env[name] || env[name] === dev)
+    .filter(([name, dev]) => !env[name] || env[name] === dev || /change[-_]?me/i.test(env[name]!))
     .map(([name]) => name);
   if (bad.length === 0) return;
   throw new Error(
