@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, GeoJSON, Popup, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, GeoJSON, Popup, Tooltip } from '../lib/leafletReact';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import CoverImage from './CoverImage';

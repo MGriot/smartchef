@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, GeoJSON, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, GeoJSON, Tooltip } from '../lib/leafletReact';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Feature, Geometry } from 'geojson';
