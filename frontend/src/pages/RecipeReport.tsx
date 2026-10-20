@@ -89,6 +89,7 @@ export default function RecipeReport() {
   const [subRecipes, setSubRecipes] = useState<Map<string, ReportRecipeInput>>(new Map());
   const [componentsLoading, setComponentsLoading] = useState(false);
   const [techniques, setTechniques] = useState<ReportNamedInput[]>([]);
+  const [toolLibrary, setToolLibrary] = useState<ReportNamedInput[]>([]);
   const [nutrition, setNutrition] = useState<ReportNutritionInput | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -140,6 +141,19 @@ export default function RecipeReport() {
     })();
     return () => { cancelled = true; };
   }, [id, langQuery, t]);
+
+  /* ── Tool names for {{tool:id}} references the recipe doesn't list ── */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/tools${langQuery}`);
+        const json = await res.json();
+        if (!cancelled) setToolLibrary(json.data || []);
+      } catch (err) { console.error('Report: tools fetch failed:', err); }
+    })();
+    return () => { cancelled = true; };
+  }, [langQuery]);
 
   /* ── Technique names for {{tech:id}} references ────────────────── */
   useEffect(() => {
@@ -210,7 +224,7 @@ export default function RecipeReport() {
   /* ── The sheet's content ───────────────────────────────────────── */
   const model = useMemo<RecipeReportModel | null>(() => {
     if (!recipe || servings == null) return null;
-    const input: ReportInput = { recipe, subRecipes, techniques, nutrition };
+    const input: ReportInput = { recipe, subRecipes, techniques, tools: toolLibrary, nutrition };
     const options: ReportOptions = { servings, displaySystem, ...toggles };
     return buildRecipeReport(input, options, {
       t: (key, opts) => t(key, opts) as string,
@@ -219,7 +233,7 @@ export default function RecipeReport() {
       // its two code letters instead ("MA Morocco").
       formatRegion: r => (isCountryCode(r) ? countryDisplayName(r, i18n.language) : r),
     });
-  }, [recipe, subRecipes, techniques, nutrition, servings, displaySystem, toggles, t]);
+  }, [recipe, subRecipes, techniques, toolLibrary, nutrition, servings, displaySystem, toggles, t]);
 
   /* ── The tab title seeds every "Save as PDF" filename ──────────── */
   useEffect(() => {

@@ -22,6 +22,7 @@ import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/reci
 import RegionPicker from '../components/RegionPicker';
 import RegionsMap from '../components/RegionsMap';
 import RenderStepText from '../components/RenderStepText';
+import { withLibraryNames } from '../lib/stepRefs';
 import AutoTextarea from '../components/AutoTextarea';
 import {
   STEP_REF_RE, syncIngredientRefAmount, reindexIngredientRefs, normalizeName,
@@ -513,6 +514,18 @@ const RecipeDetail: React.FC = () => {
     })();
   }, [libraryLang]);
 
+  /* ── Tool names for {{tool:id}} refs: a step can name a library tool the recipe doesn't list ── */
+  const [libraryTools, setLibraryTools] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/tools${libraryLang ? `?lang=${libraryLang}` : ''}`);
+        const json = await res.json();
+        setLibraryTools((json.data || []).map((t: Tool) => ({ id: t.id, name: t.translated_name || t.name })));
+      } catch (err) { console.error('Tools fetch failed:', err); }
+    })();
+  }, [libraryLang]);
+
   /* ── Fetch library data (for edit mode) ────────────────────────── */
   useEffect(() => {
     if (mode === 'edit') {
@@ -692,7 +705,7 @@ const RecipeDetail: React.FC = () => {
   };
 
   /* ── Context for resolving {{tool:id}}/{{tech:id}} inline refs in step text ── */
-  const stepTextTools = (recipe?.tools || []).map(t => ({ id: t.id, name: t.translated_name || t.name }));
+  const stepTextTools = withLibraryNames((recipe?.tools || []).map(t => ({ id: t.id, name: t.translated_name || t.name })), libraryTools);
   const stepTextTechniques = allTechniques.map(t => ({ id: t.id, name: t.translated_name || t.name }));
 
   /* ── Tick one of a step's ingredients off (cooking mode) ───────── */
@@ -993,7 +1006,7 @@ const RecipeDetail: React.FC = () => {
                   : undefined,
               };
             });
-            const sectionTools = section.tools.map(t => ({ id: t.id, name: t.name }));
+            const sectionTools = withLibraryNames(section.tools.map(t => ({ id: t.id, name: t.name })), libraryTools);
             return (
               <React.Fragment key={key}>
                 {isFirstOfSection && (

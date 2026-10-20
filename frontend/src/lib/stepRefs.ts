@@ -335,3 +335,15 @@ export function linkIngredientsInText(
   }
   return out;
 }
+
+/**
+ * The names a step's {{tool:id}} / {{tech:id}} references can resolve to: the
+ * recipe's own entries first, then the library for any id the recipe doesn't
+ * list. A step can name a library tool the recipe never ticked in its Tools
+ * section (imports, merges and older recipes all do), and without the library
+ * fallback that reference printed as a bare "[tool]".
+ */
+export function withLibraryNames<T extends { id: string; name: string }>(own: T[], library: T[]): T[] {
+  const have = new Set(own.map(item => item.id));
+  return [...own, ...library.filter(item => !have.has(item.id))];
+}

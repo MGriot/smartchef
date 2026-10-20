@@ -18,6 +18,7 @@
 
 import { formatDurationWith } from './duration';
 import { pickIngredientName } from './ingredientDisplay';
+import { withLibraryNames } from './stepRefs';
 import { createRecipeScaler, type RecipeScaler, type StepTextIngredient } from './recipeScaling';
 import type { MeasurementSystem } from './unitConvert';
 
@@ -141,6 +142,8 @@ export interface ReportInput {
   subRecipes?: Map<string, ReportRecipeInput>;
   /** The technique library, for {{tech:id}} references in step text. */
   techniques?: ReportNamedInput[];
+  /** The tool library, for {{tool:id}} references the recipe doesn't list. */
+  tools?: ReportNamedInput[];
   nutrition?: ReportNutritionInput | null;
 }
 
@@ -356,10 +359,12 @@ function buildSteps(
   recipe: ReportRecipeInput,
   scaler: RecipeScaler,
   library: ReportNamedInput[],
+  toolLibrary: ReportNamedInput[],
   options: ReportOptions,
   t: ReportFormatters['t'],
 ): ReportStep[] {
-  const tools = (recipe.tools || []).map(tool => ({ id: tool.id, name: nameOf(tool) }));
+  const ownTools = (recipe.tools || []).map(tool => ({ id: tool.id, name: nameOf(tool) }));
+  const tools = withLibraryNames(ownTools, toolLibrary.map(tool => ({ id: tool.id, name: nameOf(tool) })));
   // Recipe-level techniques first (getRecipe collects them from the steps,
   // translated), the library as the fallback for anything not among them.
   const techniqueNames = new Map<string, string>();
@@ -434,7 +439,7 @@ function buildSection(
     ingredientGroups: buildIngredientGroups(recipe, scaler, printedComponents),
     tools,
     techniques,
-    steps: buildSteps(recipe, scaler, input.techniques || [], options, t),
+    steps: buildSteps(recipe, scaler, input.techniques || [], input.tools || [], options, t),
     storage: nonEmpty(recipe.storage_instructions),
     tips: nonEmpty(recipe.tips),
   };

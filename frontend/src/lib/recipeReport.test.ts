@@ -313,3 +313,15 @@ describe('buildRecipeReport — closing sections', () => {
     expect(model.main.tips).toBeNull();
   });
 });
+
+describe('buildRecipeReport — tool references', () => {
+  it('resolves a {{tool:id}} the recipe does not list from the tool library', () => {
+    const recipe = { ...tart, tools: [], steps: [{ ...tart.steps![0], description: 'Preheat the {{tool:oven}}.' }] };
+    const report = buildRecipeReport(
+      { recipe, tools: [{ id: 'oven', name: 'Forno', translated_name: 'Oven' }] },
+      options(),
+      fmt,
+    );
+    expect(report.main.steps[0].textContext.tools).toEqual([{ id: 'oven', name: 'Oven' }]);
+  });
+});

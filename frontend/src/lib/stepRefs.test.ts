@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  withLibraryNames,
   parseRefParams, formatRefParams, buildRef,
   syncIngredientRefAmount, reindexIngredientRefs, scaleAmountText,
   stepIngredientConsumption, remainingBeforeStep,
@@ -222,5 +223,12 @@ describe('scaleAmountText', () => {
   });
   it('is a no-op at factor 1', () => {
     expect(scaleAmountText('500 g', 1)).toBe('500 g');
+  });
+});
+
+describe('withLibraryNames', () => {
+  it("keeps the recipe's own names and adds library entries it doesn't list", () => {
+    const merged = withLibraryNames([{ id: 'a', name: 'Pot (recipe)' }], [{ id: 'a', name: 'Pot (library)' }, { id: 'b', name: 'Oven' }]);
+    expect(merged).toEqual([{ id: 'a', name: 'Pot (recipe)' }, { id: 'b', name: 'Oven' }]);
   });
 });
