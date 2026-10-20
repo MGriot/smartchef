@@ -1,0 +1,1 @@
+Security and licensing fixes: sign-in attempts are rate limited, the server refuses default secrets, and the maps no longer depend on a non-free library.

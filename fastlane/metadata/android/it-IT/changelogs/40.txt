@@ -1,0 +1,1 @@
+Correzioni di sicurezza e licenze: i tentativi di accesso sono limitati, il server rifiuta i segreti predefiniti e le mappe non dipendono più da una libreria non libera.
