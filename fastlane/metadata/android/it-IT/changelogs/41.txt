@@ -1,0 +1,1 @@
+Corretto: i passaggi mostravano "[tool]" invece del nome dell'utensile quando citano un utensile della libreria che la ricetta non elenca.

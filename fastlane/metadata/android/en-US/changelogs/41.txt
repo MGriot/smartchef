@@ -1,0 +1,1 @@
+Fixed recipe steps showing "[tool]" instead of the tool's name when the step names a library tool the recipe doesn't list.
