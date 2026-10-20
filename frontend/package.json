@@ -2,6 +2,7 @@
   "name": "smartchef-frontend",
   "version": "1.13.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",

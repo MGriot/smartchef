@@ -1,6 +1,7 @@
 {
   "name": "smartchef-mcp",
   "version": "1.0.0",
+  "license": "MIT",
   "description": "SmartChef MCP Server — exposes the recipe library over the Model Context Protocol",
   "type": "module",
   "main": "dist/index.js",

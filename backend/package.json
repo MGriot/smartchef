@@ -1,6 +1,7 @@
 {
   "name": "smartchef-backend",
   "version": "1.10.2",
+  "license": "MIT",
   "description": "SmartChef Backend API — Node.js + PostgreSQL",
   "main": "dist/index.js",
   "scripts": {
