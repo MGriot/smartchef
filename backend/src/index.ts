@@ -9,7 +9,6 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import { recipeRouter }     from "./routes/recipes";
 import { shoppingRouter }   from "./routes/shopping";
-import { syncRouter }       from "./routes/sync";
 import { llmRouter }        from "./routes/llm";
 import { menuRouter }       from "./routes/menus";
 import { ingredientsRouter, unitsRouter, toolsRouter } from "./routes/ingredients";
@@ -27,7 +26,6 @@ import { cookLogRouter }    from "./routes/cook-log";
 import { geocodeRouter }    from "./routes/geocode";
 import { requireAuth }      from "./middleware/requireAuth";
 import { checkOllamaHealth } from "./services/llm.parser";
-import { startSyncLoop }    from "./services/mdns.service";
 import { startFolderSyncLoop, SYNC_ENABLED } from "./services/folder-sync.service";
 import { UPLOAD_DIR }       from "./services/uploadDir";
 import pool                 from "./db/pool";
@@ -62,10 +60,6 @@ app.use(cookieParser());
 
 // ── Routes ─────────────────────────────────────────────────────────────
 app.use("/api/auth", authRouter);
-// /api/sync is device-to-device (mDNS peer handshake/receive), not
-// browser traffic — it carries no session cookie, so it stays outside
-// the auth gate. Excluded before the blanket requireAuth below.
-app.use("/api/sync", syncRouter);
 // The only unauthenticated read path in the app: a recipe someone chose to
 // share by link. Mounted before the gate below, like /api/auth is.
 app.use("/api/public", publicRouter);
@@ -122,10 +116,6 @@ app.listen(PORT, () => {
   console.log(`🍳 SmartChef Backend running on :${PORT}`);
   console.log(`   DB:     ${process.env.DATABASE_URL?.replace(/:\/\/.*@/, "://***@") ?? "not set"}`);
   console.log(`   Ollama: ${process.env.OLLAMA_URL ?? "http://localhost:11434"}`);
-  if (process.env.NODE_ENV === "production") {
-    startSyncLoop(30_000);
-    console.log("   🔄 Sync loop attivo (30s)");
-  }
   if (SYNC_ENABLED) {
     startFolderSyncLoop(90_000);
     console.log(`   📁 Folder sync attivo (90s) — ${process.env.SYNC_FOLDER ?? "/app/sync"}`);

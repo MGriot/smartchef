@@ -1,11 +1,11 @@
 // ════════════════════════════════════════════════════════════════════════
 // SmartChef — Stable Device Identity
 // Folder sync writes one snapshot file per device and needs that device's
-// identity to stay the same across container restarts — mdns.service.ts's
-// DEVICE_ID falls back to a fresh random string every restart when the env
-// var isn't set, which would corrupt snapshot-file identity here (a device
-// could mistake its own older snapshot for a peer's). This persists a
-// generated id to a small file on first boot instead.
+// identity to stay the same across container restarts — a fresh random id
+// every restart (what the removed legacy CRDT sync used when the env var
+// wasn't set) would corrupt snapshot-file identity here (a device could
+// mistake its own older snapshot for a peer's). This persists a generated
+// id to a small file on first boot instead.
 // ════════════════════════════════════════════════════════════════════════
 
 import fs from "node:fs";

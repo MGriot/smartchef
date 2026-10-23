@@ -239,18 +239,6 @@ export interface ShoppingList {
   updatedAt: ISODate;
 }
 
-// ── CRDT ──────────────────────────────────────────────────────────────────
-
-export interface CRDTOperation {
-  type: "insert" | "update" | "delete";
-  entityType: "recipe" | "ingredient" | "menu" | "shopping_list";
-  entityId: UUID;
-  payload: Record<string, unknown>;
-  clock: Record<string, number>;
-  deviceId: string;
-  timestamp: ISODate;
-}
-
 // ── LLM Parser ────────────────────────────────────────────────────────────
 
 /** One non-text input: a photo, a scan, a PDF, a voice note, a clip.

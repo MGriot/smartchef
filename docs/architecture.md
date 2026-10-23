@@ -39,7 +39,6 @@ smartchef/
 │   │   │   ├── backup.ts               # Manual whole-library backup export/import
 │   │   │   ├── cook-log.ts             # Cook-history calendar (GET /cook-log?from=&to=)
 │   │   │   ├── geocode.ts              # Nominatim proxy for free-text region geocoding
-│   │   │   ├── sync.ts                 # Legacy CRDT/vector-clock P2P endpoints — see "Multi-device sync" below
 │   │   │   └── uploads.ts              # Image uploads (multer + sharp)
 │   │   ├── services/
 │   │   │   ├── matrioska.engine.ts     # ⭐ Recursive portion scaling across nested sub-recipes (incl. weight/volume-based sub-recipe yield)
@@ -52,8 +51,7 @@ smartchef/
 │   │   │   ├── pantry.service.ts       # Pantry rows + "what can I cook?" matching
 │   │   │   ├── importCatalog.service.ts # Library names for the import prompt to reuse instead of coining fresh wording (standalone twin: frontend/src/services/importCatalog.local.ts)
 │   │   │   ├── folder-sync.service.ts  # Whole-library snapshot export/merge (multi-device sync + backups)
-│   │   │   ├── device-identity.service.ts
-│   │   │   └── crdt/vector-clock.ts    # Legacy — not wired into any write path, kept for the old sync.ts routes
+│   │   │   └── device-identity.service.ts
 │   │   └── index.ts                    # Express entry point
 │   └── Dockerfile
 ├── mcp/
@@ -136,7 +134,6 @@ All routes below live under `/api` and (aside from `/api/auth/*`) require an aut
 | `/api/backup` | Manual whole-library backup export/import |
 | `/api/cook-log` | Cook-history calendar (`GET ?from=&to=`), backing the "I cooked this" log |
 | `/api/geocode` | Server-side Nominatim proxy for free-text region geocoding (cached) |
-| `/api/sync` | Legacy CRDT/vector-clock P2P endpoints — see [Multi-device sync](#-multi-device-sync) |
 | `/api/uploads` | Image uploads |
 | `/health` | DB + Ollama status (no auth required) |
 
