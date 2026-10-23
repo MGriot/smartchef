@@ -7,8 +7,7 @@
 // from inventing anything live in lib/recipeCheck.ts.
 // ════════════════════════════════════════════════════════════════════════
 
-import i18n from '../i18n';
-import { callConfiguredProvider, repairTruncatedJson } from './llmParser.local';
+import { callConfiguredProvider, parseJsonObject } from './llmParser.local';
 import {
   buildCheckRequest, buildCheckSystemPrompt, interpretCheckResponse,
   type CheckCatalog, type CheckDraft, type CheckResult,
@@ -18,16 +17,6 @@ import {
   buildFixRequest, buildFixSystemPrompt, interpretFixResponse,
   type MismatchFixResult, type MismatchSide,
 } from '../lib/recipeMismatchFix';
-
-function parseJsonObject(raw: string): any {
-  const match = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
-  if (!match) throw new Error(i18n.t('errors.noJsonFromModel'));
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return JSON.parse(repairTruncatedJson(match[0]));
-  }
-}
 
 export async function checkRecipeWithAi(draft: CheckDraft, catalog: CheckCatalog): Promise<CheckResult> {
   const request = buildCheckRequest(draft, catalog);

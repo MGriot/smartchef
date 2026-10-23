@@ -11,19 +11,8 @@
 // provider Account → AI Provider has selected answers these too.
 // ════════════════════════════════════════════════════════════════════════
 
-import i18n from '../i18n';
-import { callConfiguredProvider, repairTruncatedJson } from './llmParser.local';
+import { callConfiguredProvider, parseJsonObject } from './llmParser.local';
 import { languageLabel } from '../lib/languages';
-
-function parseJsonObject(raw: string): any {
-  const match = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
-  if (!match) throw new Error(i18n.t('errors.noJsonFromModel'));
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return JSON.parse(repairTruncatedJson(match[0]));
-  }
-}
 
 // ── Recipe translation ──────────────────────────────────────────────────
 

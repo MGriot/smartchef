@@ -647,6 +647,18 @@ export function repairTruncatedJson(raw: string): string {
   return truncated;
 }
 
+/** The first JSON object in a model reply, repairing a truncated one. Shared
+ *  by the AI tasks (translation, naming, tidy) and "Check with AI". */
+export function parseJsonObject(raw: string): any {
+  const match = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
+  if (!match) throw new Error(i18n.t('errors.noJsonFromModel'));
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return JSON.parse(repairTruncatedJson(match[0]));
+  }
+}
+
 /** The parser's `yield`: a positive amount with a unit wording, or nothing. */
 function parseYield(raw: unknown): { amount: number; unit: string } | undefined {
   const r = raw as { amount?: unknown; unit?: unknown } | null;

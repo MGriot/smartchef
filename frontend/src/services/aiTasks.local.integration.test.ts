@@ -40,7 +40,7 @@ vi.mock('./llmParser.local', () => ({
     providerCalls.push({ content, systemPrompt });
     return providerAnswer(content);
   },
-  repairTruncatedJson: (s: string) => s,
+  parseJsonObject: (raw: string) => JSON.parse(raw.match(/\{[\s\S]*\}/)![0]),
 }));
 
 beforeEach(async () => {
