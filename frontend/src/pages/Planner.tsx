@@ -19,7 +19,7 @@ import {
 } from '../components/planner/types';
 import { canPrint } from '../lib/print';
 import { weekDays } from '../lib/weekPrint';
-import { currentMeals, defaultCourses, mealsOf, planMealChange, type EventMealType } from '../lib/eventMenu';
+import { currentMeals, defaultCourses, mealsOf, planMealChange } from '../lib/eventMenu';
 
 /** The create/edit form for a menu's own details — both kinds share it,
  *  an event menu just has more of them. */

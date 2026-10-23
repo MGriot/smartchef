@@ -9,7 +9,6 @@ import { v4 as uuidv4 } from "uuid";
 import type { LLMParseResult, UUID } from "@shared/types/index";
 
 interface DBIngredient { id: UUID; name: string; category_id: UUID; plural_name: string | null; }
-interface DBUnit       { id: UUID; symbol: string; name: string; }
 interface DBTool       { id: UUID; name: string; }
 interface DBTechnique  { id: UUID; name: string; }
 

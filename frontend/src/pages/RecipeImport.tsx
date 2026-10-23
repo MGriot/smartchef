@@ -5,7 +5,7 @@ import i18n from '../i18n';
 import AppLayout from '../components/AppLayout';
 import CatalogSearchBox from '../components/CatalogSearchBox';
 import { useStore } from '../store/app.store';
-import { listLanguages, languageLabel } from '../lib/languages';
+import { listLanguages } from '../lib/languages';
 import { useLanguages } from '../hooks/useLanguages';
 import { apiFetch } from '../lib/api';
 import { tryParseStructuredText, TemplateParseResult } from '../services/recipeTemplateParser';

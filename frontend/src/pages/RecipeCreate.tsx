@@ -14,7 +14,6 @@ import RegionPicker from '../components/RegionPicker';
 import RegionsMap from '../components/RegionsMap';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useStore } from '../store/app.store';
-import { listLanguages, languageLabel } from '../lib/languages';
 import { useLanguages } from '../hooks/useLanguages';
 import { apiFetch } from '../lib/api';
 import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/recipeDraftCoercion';

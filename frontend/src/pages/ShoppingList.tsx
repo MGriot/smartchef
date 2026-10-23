@@ -58,7 +58,6 @@ export default function ShoppingList() {
   const [activeList, setActiveList] = useState<ShoppingListDetail | null>(null);
   const [viewMode, setViewMode] = useState<'ingredient' | 'recipe'>('ingredient');
   const [generating, setGenerating] = useState(false);
-  const [listName, setListName] = useState('');
   // Generation used to fail entirely into console.error, which is how a
   // missing offline route read as "the button does nothing" instead of as
   // an error. Anything that stops a list being generated says so here.
@@ -126,7 +125,7 @@ export default function ShoppingList() {
       const res = await apiFetch('/api/shopping/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menuId: selectedMenuId, listName: listName.trim() || t('shopping.listFromMenu', { menu: menuName }) }),
+        body: JSON.stringify({ menuId: selectedMenuId, listName: t('shopping.listFromMenu', { menu: menuName }) }),
       });
       const json = await res.json();
       if (res.ok) {
@@ -154,7 +153,7 @@ export default function ShoppingList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recipes: cart.map(c => ({ recipeId: c.recipeId, servings: c.servings })),
-          listName: listName.trim() || t('shopping.heading'),
+          listName: t('shopping.heading'),
         }),
       });
       const json = await res.json();

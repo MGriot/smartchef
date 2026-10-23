@@ -2391,7 +2391,6 @@ function LanguagesCard() {
     void i18n.changeLanguage(code);
   };
 
-  const custom = languages.filter((l) => !l.hasUiBundle);
   const preview = isValidLanguageCode(draft) ? languageLabel(draft) : null;
 
   const handleAdd = (e: React.FormEvent) => {

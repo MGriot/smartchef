@@ -4,7 +4,6 @@ import Modal from './Modal';
 import { Field, FormSection } from './Form';
 import {
   celsiusToFahrenheit,
-  fahrenheitToCelsius,
   celsiusToGasMark,
   roundOvenTemperature,
   tinScaleFactor,
