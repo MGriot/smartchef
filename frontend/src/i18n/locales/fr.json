@@ -518,7 +518,8 @@
         "fields": "Portions, durées et rendement",
         "tags": "Étiquettes",
         "regions": "Régions",
-        "links": "Liens dans les étapes"
+        "links": "Liens dans les étapes",
+        "sources": "Sources"
       },
       "field": {
         "servings": "Portions",
@@ -781,7 +782,21 @@
       "identicalFields_one": "{{count}} champ est identique",
       "identicalFields_other": "{{count}} champs sont identiques"
     },
-    "weightFromDensity": "Poids calculé à partir de la masse volumique de l'ingrédient"
+    "weightFromDensity": "Poids calculé à partir de la masse volumique de l'ingrédient",
+    "aiMerge": {
+      "button": "Fusionner un texte avec l'IA",
+      "title": "Fusionner un texte avec cette recette",
+      "subtitle": "Collez n'importe quel texte sur ce plat : une autre version, un commentaire, des notes. L'IA ne propose que ce que le texte ajoute, et vous choisissez quoi garder.",
+      "placeholder": "Collez le texte ici…",
+      "hint": "Les liens, livres et auteurs cités dans le texte sont ajoutés comme sources. Rien n'est retiré de la recette.",
+      "submit": "Fusionner avec l'IA",
+      "reviewTitle": "Ce que le texte ajoute",
+      "reviewSubtitle": "Chaque modification cite le texte collé. Décochez ce que vous ne voulez pas, puis appliquez : vous pourrez encore modifier avant d'enregistrer.",
+      "merging": "Lecture du texte…",
+      "failed": "La fusion avec l'IA a échoué",
+      "stepAdd": "Nouvelle étape",
+      "sourceAdd": "Source : {{type}}"
+    }
   },
   "recipeCreate": {
     "newRecipe": "Nouvelle recette",

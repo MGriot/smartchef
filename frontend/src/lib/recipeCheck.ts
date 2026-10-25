@@ -90,9 +90,12 @@ export interface CheckDraft {
   steps?: CheckDraftStep[];
   tools?: CheckNamedEntity[];
   techniques?: CheckNamedEntity[];
+  sources?: CheckSource[];
 }
 
-export type CheckGroup = 'text' | 'ingredients' | 'steps' | 'links' | 'fields' | 'tags' | 'regions';
+export interface CheckSource { type: 'url' | 'book' | 'video' | 'other'; label?: string; url?: string }
+
+export type CheckGroup = 'text' | 'ingredients' | 'steps' | 'links' | 'fields' | 'tags' | 'regions' | 'sources';
 
 export type TextTarget = 'title' | 'description' | 'tips' | 'storage' | 'ingredientName' | 'stepTitle' | 'stepText';
 
@@ -133,7 +136,12 @@ export type CheckChange =
     })
   | (ChangeBase & { type: 'ingredientRemove'; index: number; label: string })
   | (ChangeBase & { type: 'stepRewrite'; index: number; text: string; before: string; after: string })
-  | (ChangeBase & { type: 'stepRemove'; index: number; label: string });
+  | (ChangeBase & { type: 'stepRemove'; index: number; label: string })
+  // The three below come from "Merge text with AI" (lib/recipeMerge.ts):
+  // information a pasted text has and the recipe lacks.
+  | (ChangeBase & { type: 'stepAdd'; title: string | null; text: string; durationMin: number | null; after: string })
+  | (ChangeBase & { type: 'textAppend'; target: 'description' | 'tips' | 'storage'; text: string; before: string; after: string })
+  | (ChangeBase & { type: 'sourceAdd'; source: CheckSource; label: string });
 
 export interface CheckResult {
   changes: CheckChange[];
@@ -696,7 +704,14 @@ export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: Check
         }
         break;
       }
-      case 'region': case 'ingredientAdd': case 'ingredientRemove': case 'stepRewrite': case 'stepRemove': break;
+      case 'textAppend': {
+        const key = c.target === 'storage' ? 'storage_instructions' : c.target;
+        const current = (next[key] ?? '').trim();
+        next[key] = current ? `${current}\n\n${c.text}` : c.text;
+        break;
+      }
+      case 'region': case 'ingredientAdd': case 'ingredientRemove': case 'stepRewrite': case 'stepRemove':
+      case 'stepAdd': case 'sourceAdd': break;
     }
   }
 
@@ -718,6 +733,25 @@ export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: Check
       relinkStep(steps[c.index], ingredients, draft);
     }
   }
+
+  // New steps go at the end, after the rewrites, and are linked like one.
+  for (const c of changes) {
+    if (c.type !== 'stepAdd') continue;
+    const step = {
+      id: '', stepNumber: steps.length + 1, title: c.title ?? '', description: c.text, durationMin: c.durationMin,
+      toolIds: [], techniqueIds: [], notes: '', imageUrl: null, stepIngredients: [], translations: [],
+    };
+    relinkStep(step, ingredients, draft);
+    steps.push(step);
+  }
+
+  const sources = [...(draft.sources ?? [])];
+  for (const c of changes) {
+    if (c.type !== 'sourceAdd') continue;
+    const dup = sources.some((s) => (c.source.url && s.url === c.source.url) || (!c.source.url && !!s.label && s.label.toLowerCase() === (c.source.label ?? '').toLowerCase()));
+    if (!dup) sources.push(c.source);
+  }
+  if (changes.some((c) => c.type === 'sourceAdd')) next.sources = sources;
 
   // Removals shift indexes: highest first, so the ones still to come hold.
   for (const at of changes.flatMap((c) => (c.type === 'ingredientRemove' ? [c.index] : [])).sort((a, b) => b - a)) {

@@ -518,7 +518,8 @@
         "fields": "Portions, times and yield",
         "tags": "Tags",
         "regions": "Regions",
-        "links": "Links in the steps"
+        "links": "Links in the steps",
+        "sources": "Sources"
       },
       "field": {
         "servings": "Servings",
@@ -781,7 +782,21 @@
       "identicalFields_one": "{{count}} field is identical",
       "identicalFields_other": "{{count}} fields are identical"
     },
-    "weightFromDensity": "Weight worked out from the ingredient's density"
+    "weightFromDensity": "Weight worked out from the ingredient's density",
+    "aiMerge": {
+      "button": "Merge text with AI",
+      "title": "Merge a text into this recipe",
+      "subtitle": "Paste anything about this dish: another version, a comment, notes. The AI proposes only what the text adds, and you choose what to keep.",
+      "placeholder": "Paste the text here…",
+      "hint": "Links, books and authors named in the text are added as sources. Nothing is removed from the recipe.",
+      "submit": "Merge with AI",
+      "reviewTitle": "What the text adds",
+      "reviewSubtitle": "Each change quotes the pasted text. Untick what you don't want, then apply: you can still edit before saving.",
+      "merging": "Reading the text…",
+      "failed": "The AI merge failed",
+      "stepAdd": "New step",
+      "sourceAdd": "Source: {{type}}"
+    }
   },
   "recipeCreate": {
     "newRecipe": "New Recipe",

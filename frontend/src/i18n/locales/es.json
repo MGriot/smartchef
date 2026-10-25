@@ -518,7 +518,8 @@
         "fields": "Raciones, tiempos y rendimiento",
         "tags": "Etiquetas",
         "regions": "Regiones",
-        "links": "Enlaces en los pasos"
+        "links": "Enlaces en los pasos",
+        "sources": "Fuentes"
       },
       "field": {
         "servings": "Raciones",
@@ -781,7 +782,21 @@
       "identicalFields_one": "{{count}} campo es idéntico",
       "identicalFields_other": "{{count}} campos son idénticos"
     },
-    "weightFromDensity": "Peso calculado a partir de la densidad del ingrediente"
+    "weightFromDensity": "Peso calculado a partir de la densidad del ingrediente",
+    "aiMerge": {
+      "button": "Fusionar texto con IA",
+      "title": "Fusionar un texto con esta receta",
+      "subtitle": "Pega cualquier texto sobre este plato: otra versión, un comentario, notas. La IA propone solo lo que el texto añade y tú eliges qué conservar.",
+      "placeholder": "Pega aquí el texto…",
+      "hint": "Los enlaces, libros y autores citados en el texto se añaden como fuentes. No se elimina nada de la receta.",
+      "submit": "Fusionar con IA",
+      "reviewTitle": "Lo que añade el texto",
+      "reviewSubtitle": "Cada cambio cita el texto pegado. Desmarca lo que no quieras y aplica: aún podrás editar antes de guardar.",
+      "merging": "Leyendo el texto…",
+      "failed": "La fusión con IA ha fallado",
+      "stepAdd": "Nuevo paso",
+      "sourceAdd": "Fuente: {{type}}"
+    }
   },
   "recipeCreate": {
     "newRecipe": "Nueva receta",

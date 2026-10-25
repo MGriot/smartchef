@@ -518,7 +518,8 @@
         "fields": "Porzioni, tempi e resa",
         "tags": "Tag",
         "regions": "Regioni",
-        "links": "Collegamenti nei passaggi"
+        "links": "Collegamenti nei passaggi",
+        "sources": "Fonti"
       },
       "field": {
         "servings": "Porzioni",
@@ -781,7 +782,21 @@
       "identicalFields_one": "{{count}} campo è identico",
       "identicalFields_other": "{{count}} campi sono identici"
     },
-    "weightFromDensity": "Peso calcolato dal peso specifico dell'ingrediente"
+    "weightFromDensity": "Peso calcolato dal peso specifico dell'ingrediente",
+    "aiMerge": {
+      "button": "Unisci testo con l'AI",
+      "title": "Unisci un testo a questa ricetta",
+      "subtitle": "Incolla qualsiasi testo su questo piatto: un'altra versione, un commento, degli appunti. L'AI propone solo ciò che il testo aggiunge e scegli tu cosa tenere.",
+      "placeholder": "Incolla qui il testo…",
+      "hint": "Link, libri e autori citati nel testo vengono aggiunti come fonti. Nulla viene tolto dalla ricetta.",
+      "submit": "Unisci con l'AI",
+      "reviewTitle": "Cosa aggiunge il testo",
+      "reviewSubtitle": "Ogni modifica cita il testo incollato. Togli la spunta a ciò che non vuoi, poi applica: potrai ancora modificare prima di salvare.",
+      "merging": "Leggo il testo…",
+      "failed": "L'unione con l'AI non è riuscita",
+      "stepAdd": "Nuovo passaggio",
+      "sourceAdd": "Fonte: {{type}}"
+    }
   },
   "login": {
     "password": "Password",

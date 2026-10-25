@@ -85,6 +85,20 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
       return { status: 502, error: err instanceof Error ? err.message : 'AI check failed' };
     }
   }
+  // The editor's "Merge text with AI": what a pasted text adds to the
+  // unsaved draft, each change quoting that text — see lib/recipeMerge.ts.
+  if (id === 'ai-merge') {
+    if (method !== 'POST' || sub) return NOT_HANDLED;
+    const body = parseBody(init) ?? {};
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!body.draft || !body.catalog || !text) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    try {
+      const { mergeTextWithAi } = await import('./recipeCheck.local');
+      return { status: 200, data: await mergeTextWithAi(body.draft, text, body.catalog) };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI merge failed' };
+    }
+  }
   if (id === 'parse') {
     if (method !== 'POST') return NOT_HANDLED;
     const body = parseBody(init) ?? {};

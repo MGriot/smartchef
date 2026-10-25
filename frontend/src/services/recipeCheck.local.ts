@@ -13,6 +13,7 @@ import {
   type CheckCatalog, type CheckDraft, type CheckResult,
 } from '../lib/recipeCheck';
 import type { IngredientMismatch } from '../lib/recipeConsistency';
+import { buildMergeRequest, buildMergeSystemPrompt, interpretMergeResponse } from '../lib/recipeMerge';
 import {
   buildFixRequest, buildFixSystemPrompt, interpretFixResponse,
   type MismatchFixResult, type MismatchSide,
@@ -22,6 +23,14 @@ export async function checkRecipeWithAi(draft: CheckDraft, catalog: CheckCatalog
   const request = buildCheckRequest(draft, catalog);
   const raw = await callConfiguredProvider(JSON.stringify(request), buildCheckSystemPrompt(catalog));
   return interpretCheckResponse(parseJsonObject(raw), draft, catalog);
+}
+
+/** "Merge text with AI": the draft plus a text the user pasted; back come
+ *  the changes that text supports, checked against it in lib/recipeMerge.ts. */
+export async function mergeTextWithAi(draft: CheckDraft, text: string, catalog: CheckCatalog): Promise<CheckResult> {
+  const request = buildMergeRequest(draft, text, catalog);
+  const raw = await callConfiguredProvider(JSON.stringify(request), buildMergeSystemPrompt(catalog));
+  return interpretMergeResponse(parseJsonObject(raw), draft, text, catalog);
 }
 
 /** The second call of the mismatch flow: the user said which side of the

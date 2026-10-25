@@ -48,6 +48,7 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { buildCookidooExport, type CookidooExport } from '../lib/cookidooExport';
 import RecipeAiReviewDialog from '../components/RecipeAiReviewDialog';
+import RecipeMergeTextDialog from '../components/RecipeMergeTextDialog';
 import { applyCheckChanges, type CheckChange, type CheckResult, type ResolvedApplyInput } from '../lib/recipeCheck';
 import type { MismatchSide } from '../lib/recipeMismatchFix';
 import { resolveRegions } from '../lib/importLinking';
@@ -466,6 +467,9 @@ const RecipeDetail: React.FC = () => {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<CheckResult | null>(null);
+  // The review dialog serves both "Check with AI" and "Merge text with AI".
+  const [aiMode, setAiMode] = useState<'check' | 'merge'>('check');
+  const [mergeTextOpen, setMergeTextOpen] = useState(false);
   const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
   // Which ingredient/step cards are folded down to a one-line summary, and
   // whether the two editors are folded whole. A long recipe is ~20 cards of
@@ -1507,6 +1511,7 @@ const RecipeDetail: React.FC = () => {
      *  and applies — see lib/recipeCheck.ts for why the answer can be trusted. */
     const runAiCheck = async () => {
       if (rawTextMode && !applyRawText()) return;
+      setAiMode('check');
       setAiOpen(true);
       setAiLoading(true);
       setAiError(null);
@@ -1536,6 +1541,48 @@ const RecipeDetail: React.FC = () => {
         setAiResult(json.data as CheckResult);
       } catch (err) {
         setAiError(err instanceof Error ? err.message : t('recipeDetail.aiCheck.failed'));
+      } finally {
+        setAiLoading(false);
+      }
+    };
+
+    /** "Merge text with AI": what a pasted text adds to the draft, reviewed
+     *  in the same dialog as the check — see lib/recipeMerge.ts. */
+    const runAiMerge = async (text: string) => {
+      if (rawTextMode && !applyRawText()) return;
+      setMergeTextOpen(false);
+      setAiMode('merge');
+      setAiOpen(true);
+      setAiLoading(true);
+      setAiError(null);
+      setAiResult(null);
+      try {
+        let tagNames: string[] = [];
+        try {
+          const tagRes = await apiFetch('/api/tags');
+          tagNames = ((await tagRes.json()).data || []).map((tg: { name: string }) => tg.name);
+        } catch { /* the merge works without the tag catalog */ }
+        const res = await apiFetch('/api/recipes/ai-merge', {
+          method: 'POST',
+          body: JSON.stringify({
+            text,
+            draft: {
+              title: draft.title, description: draft.description, tips: draft.tips,
+              storage_instructions: draft.storage_instructions, source_url: draft.source_url,
+              servings: draft.servings, prep_time_min: draft.prep_time_min, cook_time_min: draft.cook_time_min,
+              rest_time_min: draft.rest_time_min, yield_amount: draft.yield_amount, yield_unit_id: draft.yield_unit_id,
+              tags: draft.tags, regions: draft.regions, ingredients: draft.ingredients, steps: draft.steps,
+              tools: draft.tools, techniques: draft.techniques, sources: draft.sources,
+            },
+            catalog: { tools: allTools, techniques: allTechniques, units: allUnits, tagNames },
+          }),
+          timeoutMs: 300_000,
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || t('recipeDetail.aiMerge.failed'));
+        setAiResult(json.data as CheckResult);
+      } catch (err) {
+        setAiError(err instanceof Error ? err.message : t('recipeDetail.aiMerge.failed'));
       } finally {
         setAiLoading(false);
       }
@@ -1953,6 +2000,20 @@ const RecipeDetail: React.FC = () => {
             {label(t('recipeDetail.aiCheck.button'))}
           </button>
       );
+      // Runs on the device's own AI key, like the check (localRouter only).
+      const mergeTextBtn = isStandalone ? (
+          <button
+            key="ai-merge"
+            onClick={() => setMergeTextOpen(true)}
+            disabled={saving || aiLoading}
+            title={t('recipeDetail.aiMerge.button')}
+            aria-label={t('recipeDetail.aiMerge.button')}
+            className={`${base} flex items-center gap-2 text-primary hover:bg-primary/10 font-bold text-sm transition-all disabled:opacity-50`}
+          >
+            <span className="material-symbols-outlined text-[20px]">post_add</span>
+            {label(t('recipeDetail.aiMerge.button'))}
+          </button>
+      ) : null;
       const rawBtn = (
           <button
             key="raw"
@@ -1981,7 +2042,8 @@ const RecipeDetail: React.FC = () => {
       );
       // The fan seats the first action straight up from its button, so the
       // primary one leads there; the header keeps Save at the right edge.
-      return inBar ? [saveBtn, aiBtn, rawBtn, deleteBtn] : [aiBtn, rawBtn, deleteBtn, saveBtn];
+      return (inBar ? [saveBtn, aiBtn, mergeTextBtn, rawBtn, deleteBtn] : [aiBtn, mergeTextBtn, rawBtn, deleteBtn, saveBtn])
+        .filter((b): b is JSX.Element => b !== null);
     };
 
     return (
@@ -2013,7 +2075,13 @@ const RecipeDetail: React.FC = () => {
           onApply={applyAiChanges}
           onResolveMismatch={resolveAiMismatch}
           onDismissMismatch={() => setAiResult((prev) => prev && { ...prev, mismatch: null })}
+          {...(aiMode === 'merge' ? {
+            title: t('recipeDetail.aiMerge.reviewTitle'),
+            subtitle: t('recipeDetail.aiMerge.reviewSubtitle'),
+            loadingText: t('recipeDetail.aiMerge.merging'),
+          } : {})}
         />
+        <RecipeMergeTextDialog open={mergeTextOpen} onClose={() => setMergeTextOpen(false)} onSubmit={runAiMerge} />
 
         {rawTextMode ? (
           <main className="max-w-4xl mx-auto px-6 py-10 space-y-4">

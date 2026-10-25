@@ -176,7 +176,7 @@ export function parseQuantityStrict(text: string | null | undefined): number | n
   return value !== undefined && Number.isFinite(value) ? value : undefined;
 }
 
-/** Fractions a kitchen actually says, as glyphs. Sixths, fifths and
+/** Fractions a kitchen actually says, as Unicode characters. Sixths, fifths and
  *  sixteenths read as decimals: nobody measures ⅚ of a cup. */
 const DISPLAY_FRACTIONS: Array<[number, string]> = [
   [1 / 8, '⅛'], [1 / 4, '¼'], [1 / 3, '⅓'], [3 / 8, '⅜'], [1 / 2, '½'],
