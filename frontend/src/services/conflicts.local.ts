@@ -180,6 +180,8 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
       'image_urls', 'seasonal_months',
       // Left out of sync until ADR 0006's whole-library pass.
       'synonyms', 'plural_name', 'parent_ingredient_id',
+      // Volume → weight; another device drops it without this entry.
+      'density_g_per_ml',
       // Deletion marker — see recipe.
       'sync_status',
     ]),

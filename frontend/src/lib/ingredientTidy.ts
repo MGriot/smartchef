@@ -22,13 +22,16 @@
 //   - removing a tag is proposed but never pre-selected.
 // ════════════════════════════════════════════════════════════════════════
 
-export type NutrientKey = 'caloriesKcal' | 'proteinG' | 'carbsG' | 'fatG' | 'fiberG' | 'sugarG' | 'sodiumMg';
-export const NUTRIENT_KEYS: NutrientKey[] = ['caloriesKcal', 'proteinG', 'carbsG', 'fatG', 'fiberG', 'sugarG', 'sodiumMg'];
+/** The per-100 g values, plus density (g/ml) — not a nutrient, but the
+ *  same kind of "typical value from a reference table" the nutrition
+ *  aspect already asks for, and reviewed the same way. */
+export type NutrientKey = 'caloriesKcal' | 'proteinG' | 'carbsG' | 'fatG' | 'fiberG' | 'sugarG' | 'sodiumMg' | 'densityGPerMl';
+export const NUTRIENT_KEYS: NutrientKey[] = ['caloriesKcal', 'proteinG', 'carbsG', 'fatG', 'fiberG', 'sugarG', 'sodiumMg', 'densityGPerMl'];
 
 /** The row columns each nutrient lives in on GET /api/ingredients. */
 const NUTRIENT_COLUMN: Record<NutrientKey, keyof TidyIngredient> = {
   caloriesKcal: 'calories_kcal', proteinG: 'protein_g', carbsG: 'carbs_g', fatG: 'fat_g',
-  fiberG: 'fiber_g', sugarG: 'sugar_g', sodiumMg: 'sodium_mg',
+  fiberG: 'fiber_g', sugarG: 'sugar_g', sodiumMg: 'sodium_mg', densityGPerMl: 'density_g_per_ml',
 };
 
 export interface TidyIngredient {
@@ -45,6 +48,7 @@ export interface TidyIngredient {
   fiber_g?: number | null;
   sugar_g?: number | null;
   sodium_mg?: number | null;
+  density_g_per_ml?: number | null;
   synonyms?: string[];
 }
 
@@ -93,7 +97,7 @@ export type TidyChangeKind =
  *  correction rather than a rounding difference: 25 % of the larger value,
  *  and at least a floor per nutrient so near-zero values do not flap. */
 const NUTRIENT_FLOOR: Record<NutrientKey, number> = {
-  caloriesKcal: 30, proteinG: 3, carbsG: 3, fatG: 3, fiberG: 2, sugarG: 3, sodiumMg: 50,
+  caloriesKcal: 30, proteinG: 3, carbsG: 3, fatG: 3, fiberG: 2, sugarG: 3, sodiumMg: 50, densityGPerMl: 0.1,
 };
 
 export function isNutritionCorrection(key: NutrientKey, from: number, to: number): boolean {

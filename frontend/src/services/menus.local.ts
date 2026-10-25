@@ -283,6 +283,7 @@ interface IngredientNutritionRow {
   id: string;
   calories_kcal: number | null; protein_g: number | null; carbs_g: number | null;
   fat_g: number | null; fiber_g: number | null; sugar_g: number | null; sodium_mg: number | null;
+  density_g_per_ml: number | null;
 }
 
 async function recipeNutrition(recipeId: string, servings: number): Promise<{ totals: NutritionTotals; unresolved: string[] }> {
@@ -296,7 +297,7 @@ async function recipeNutrition(recipeId: string, servings: number): Promise<{ to
 
   const ingRows = ingredientIds.length
     ? await query<IngredientNutritionRow>(
-        `SELECT id, calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg
+        `SELECT id, calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, density_g_per_ml
            FROM ingredients WHERE id IN (${ingredientIds.map((_, i) => `$${i + 1}`).join(',')})`,
         ingredientIds,
       )
@@ -315,13 +316,15 @@ async function recipeNutrition(recipeId: string, servings: number): Promise<{ to
     const ing = ingredientById.get(item.ingredientId);
     const unit = item.unitId ? unitById.get(item.unitId) : undefined;
 
-    // Weight units only. The server also converts volume via the
-    // ingredient's density_g_per_ml, but the local ingredients table has no
-    // such column — so a volume line counts as unresolved here rather than
-    // being silently guessed at, which is what `unresolved` is for.
+    // Weight units directly; volume through the ingredient's
+    // density_g_per_ml, as the server does. A volume line with no density
+    // counts as unresolved rather than being silently guessed at, which is
+    // what `unresolved` is for.
     const grams = unit?.unit_type === 'weight' && unit.to_base_factor != null
       ? item.quantity * unit.to_base_factor
-      : null;
+      : unit?.unit_type === 'volume' && unit.to_base_factor != null && ing?.density_g_per_ml
+        ? item.quantity * unit.to_base_factor * ing.density_g_per_ml
+        : null;
 
     const hasData = ing && (
       ing.calories_kcal != null || ing.protein_g != null || ing.carbs_g != null ||

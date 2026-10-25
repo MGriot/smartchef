@@ -14,7 +14,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { remainingBeforeStep, stepIngredientConsumption } from './stepRefs';
-import { toSystem, type MeasurementSystem } from './unitConvert';
+import { toGrams, toSystem, roundForDisplay, type MeasurementSystem } from './unitConvert';
 import { formatQuantity } from './ingredientAmount';
 
 export interface ScalerIngredient {
@@ -24,6 +24,8 @@ export interface ScalerIngredient {
   quantity: number | null;
   quantityText?: string | null;
   unitSymbol?: string | null;
+  /** The ingredient's g/ml, when known — see weightHint(). */
+  densityGPerMl?: number | null;
 }
 
 export interface ScalerStepIngredientRef {
@@ -107,6 +109,20 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
     if (!unitSymbol) return fallback;
     const converted = toSystem(v, unitSymbol, displaySystem);
     return converted ? `${converted.value} ${converted.symbol}` : fallback;
+  };
+
+  /** "≈ 120 g" under a volume amount ("1 cup flour") whose ingredient has
+   *  a density; null for anything already a weight, countable or of
+   *  unknown density. Scaled like the amount it sits under, and given in
+   *  ounces when the reader asked for imperial. */
+  const weightHint = (qty: number | null, unitSymbol?: string | null, densityGPerMl?: number | null): string | null => {
+    const v = scaleNum(qty);
+    if (v === null) return null;
+    const grams = toGrams(v, unitSymbol, densityGPerMl);
+    if (grams === null || grams <= 0) return null;
+    const restated = toSystem(grams, 'g', displaySystem);
+    if (restated) return `≈ ${restated.value} ${restated.symbol}`;
+    return grams >= 1000 ? `≈ ${roundForDisplay(grams / 1000)} kg` : `≈ ${Math.round(grams) || roundForDisplay(grams)} g`;
   };
 
   /** Context for resolving {{ing:N}} inline refs in step text. */
@@ -193,6 +209,7 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
     scaleNum,
     scale,
     formatAmount,
+    weightHint,
     stepTextIngredients,
     stepTextIngredientsFor,
     sortedSteps,

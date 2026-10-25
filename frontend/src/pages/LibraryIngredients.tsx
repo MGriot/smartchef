@@ -65,7 +65,7 @@ export default function LibraryIngredients() {
   // Ingredient form
   const [editingIng, setEditingIng] = useState<any>(null);
   const emptyNutrition = { caloriesKcal: '', proteinG: '', carbsG: '', fatG: '', fiberG: '', sugarG: '', sodiumMg: '' };
-  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], seasonalMonths: [] as number[], synonyms: [] as string[], parentIngredientId: null as string | null, nutrition: { ...emptyNutrition } });
+  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], seasonalMonths: [] as number[], synonyms: [] as string[], parentIngredientId: null as string | null, density: '' as string | number, nutrition: { ...emptyNutrition } });
   const [parentQuery, setParentQuery] = useState('');
   const [translations, setTranslations] = useState<{lang: string, text: string}[]>([]);
   // AI naming (standalone mode only — the routes live in localRouter.ts).
@@ -163,6 +163,7 @@ export default function LibraryIngredients() {
         seasonalMonths: ing.seasonal_months || [],
         synonyms: ing.synonyms || [],
         parentIngredientId: ing.parent_ingredient_id ?? null,
+        density: ing.density_g_per_ml ?? '',
         nutrition: {
           caloriesKcal: ing.calories_kcal ?? '',
           proteinG: ing.protein_g ?? '',
@@ -187,6 +188,7 @@ export default function LibraryIngredients() {
         seasonalMonths: [],
         synonyms: [],
         parentIngredientId: null,
+        density: '',
         nutrition: { ...emptyNutrition },
       });
       setTranslations([]);
@@ -212,7 +214,10 @@ export default function LibraryIngredients() {
       Object.entries(form.nutrition).map(([k, v]) => [k, v === '' ? undefined : parseFloat(String(v))])
     );
 
-    const { nutrition, ...formRest } = form;
+    // Blank density is an explicit "unknown" (null), so clearing the field
+    // actually clears it rather than leaving the old value in place.
+    const densityGPerMl = form.density === '' ? null : parseFloat(String(form.density).replace(',', '.'));
+    const { nutrition, density, ...formRest } = form;
     const url = editingIng ? `/api/ingredients/${editingIng.id}` : '/api/ingredients';
     const method = editingIng ? 'PUT' : 'POST';
     // A new ingredient saved without translations gets them from the AI
@@ -223,7 +228,7 @@ export default function LibraryIngredients() {
       const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formRest, ...nutritionFields, translations: cleanTranslations, ...(autoTranslate ? { autoTranslate: true } : {}) }),
+        body: JSON.stringify({ ...formRest, ...nutritionFields, densityGPerMl: Number.isFinite(densityGPerMl) ? densityGPerMl : null, translations: cleanTranslations, ...(autoTranslate ? { autoTranslate: true } : {}) }),
         ...(autoTranslate ? { timeoutMs: 650_000 } : {}),
       });
       const result = await res.json();
@@ -976,6 +981,18 @@ export default function LibraryIngredients() {
             </div>
           </FormSection>
 
+          <FormSection title={t('library.ingredients.density')} description={t('library.ingredients.densityHint')}>
+            <label className="block max-w-[12rem]">
+              <span className="sc-label mb-1">{t('library.ingredients.densityUnit')}</span>
+              <input
+                type="text" inputMode="decimal" placeholder="1"
+                value={form.density}
+                onChange={e => setForm({ ...form, density: e.target.value })}
+                className="sc-field"
+              />
+            </label>
+          </FormSection>
+
           <FormSection
             title={t('library.ingredients.sectionNaming')}
             description={t('library.ingredients.sectionNamingHint')}
@@ -1328,6 +1345,18 @@ function IngredientDetailModal({
                 </div>
               ))}
             </div>
+          </FormSection>
+        )}
+
+        {ing.density_g_per_ml != null && (
+          <FormSection title={t('library.ingredients.density')}>
+            <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+              {Number(ing.density_g_per_ml)}
+              <span className="ml-0.5 text-[10px] font-bold text-zinc-400 dark:text-zinc-500">g/ml</span>
+              <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">
+                {t('library.ingredients.densityExample', { grams: Math.round(Number(ing.density_g_per_ml) * 240) })}
+              </span>
+            </p>
           </FormSection>
         )}
 

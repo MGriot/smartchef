@@ -505,7 +505,7 @@ export async function getRecipe(id: string, lang?: string) {
 
   // ── Ingredients ──────────────────────────────────────────────────────
   const ingredientRows = await query<Record<string, unknown>>(
-    `SELECT ri.*, i.name AS ingredient_name, i.plural_name AS ingredient_plural_name, sr.title AS sub_recipe_title, u.symbol AS unit_symbol
+    `SELECT ri.*, i.name AS ingredient_name, i.plural_name AS ingredient_plural_name, i.density_g_per_ml AS ingredient_density, sr.title AS sub_recipe_title, u.symbol AS unit_symbol
      FROM recipe_ingredients ri
      LEFT JOIN ingredients i ON i.id = ri.ingredient_id
      LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
@@ -602,6 +602,7 @@ export async function getRecipe(id: string, lang?: string) {
       quantityText: row.quantity_text,
       unitSymbol: row.unit_symbol,
       unitId: row.unit_id,
+      densityGPerMl: (row.ingredient_density as number | null) ?? null,
       isOptional: !!row.is_optional,
       notes: row.notes,
       // `ri.*` above already selects group_name, but it wasn't being copied

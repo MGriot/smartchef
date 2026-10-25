@@ -71,6 +71,7 @@ interface Ingredient {
   quantityText?: string | null;
   unitId: string | null;
   unitSymbol?: string | null;
+  densityGPerMl?: number | null;
   isOptional: boolean;
   notes: string | null;
   translatedNotes?: string | null;
@@ -676,7 +677,7 @@ const RecipeDetail: React.FC = () => {
   // The scaling itself lives in lib/recipeScaling.ts, shared with the
   // printed report so paper and screen never disagree on an amount.
   const {
-    scaleNum, servingsScale, formatAmount,
+    scaleNum, servingsScale, formatAmount, weightHint,
     stepTextIngredientsFor, stepIngredientList,
   } = createRecipeScaler({
     ingredients: recipe?.ingredients || [],
@@ -3672,8 +3673,13 @@ const RecipeDetail: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">
+                      <span className="flex flex-col items-end text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">
                         {formatAmount(ing.quantity, ing.unitSymbol, ing.quantityText)}
+                        {weightHint(ing.quantity, ing.unitSymbol, ing.densityGPerMl) && (
+                          <span className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500" title={t('recipeDetail.weightFromDensity')}>
+                            {weightHint(ing.quantity, ing.unitSymbol, ing.densityGPerMl)}
+                          </span>
+                        )}
                       </span>
                     </div>
                     {tidyNote(ing.translatedNotes || ing.notes) && (

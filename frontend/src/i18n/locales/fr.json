@@ -225,7 +225,12 @@
         "removeTags": "Étiquettes retirées",
         "nutrition": "Valeurs nutritionnelles",
         "synonyms": "Synonymes"
-      }
+      },
+      "density": "Du volume au poids",
+      "densityHint": "Masse volumique en grammes par millilitre (eau = 1, farine ≈ 0,53, sucre ≈ 0,85, huile ≈ 0,92). Si elle est renseignée, tasses et cuillères affichent aussi le poids.",
+      "densityUnit": "g/ml",
+      "densityExample": "1 tasse ≈ {{grams}} g",
+      "densityKey": "Masse volumique (g/ml)"
     },
     "common": {
       "gridView": "Vue en grille",
@@ -775,7 +780,8 @@
       "allIdentical": "Les deux recettes ont le même contenu : la fusion ne déplace que les collections, les plans et l'historique de cuisson.",
       "identicalFields_one": "{{count}} champ est identique",
       "identicalFields_other": "{{count}} champs sont identiques"
-    }
+    },
+    "weightFromDensity": "Poids calculé à partir de la masse volumique de l'ingrédient"
   },
   "recipeCreate": {
     "newRecipe": "Nouvelle recette",

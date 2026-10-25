@@ -27,6 +27,27 @@ const scalerAt = (servings: number, displaySystem: 'metric' | 'imperial' = 'metr
     fallbackName: 'Ingredient',
   });
 
+describe('createRecipeScaler — weight hint from density', () => {
+  const milk: ScalerIngredient = { sortOrder: 5, ingredientName: 'milk', quantity: 1, unitSymbol: 'cup', densityGPerMl: 1.03 };
+  const scaler = (servings: number, displaySystem: 'metric' | 'imperial' = 'metric') =>
+    createRecipeScaler({ ingredients: [milk], steps: [], baseServings: 4, servings, displaySystem, fallbackName: 'x' });
+
+  it('shows grams under a volume amount, scaled with it', () => {
+    expect(scaler(4).weightHint(1, 'cup', 1.03)).toBe('≈ 244 g');
+    expect(scaler(8).weightHint(1, 'cup', 1.03)).toBe('≈ 487 g');
+  });
+
+  it('switches to ounces for imperial readers', () => {
+    expect(scaler(4, 'imperial').weightHint(1, 'cup', 1.03)).toBe('≈ 8.6 oz');
+  });
+
+  it('shows nothing for weights, pieces or unknown density', () => {
+    expect(scaler(4).weightHint(200, 'g', 1)).toBeNull();
+    expect(scaler(4).weightHint(1, 'cup', null)).toBeNull();
+    expect(scaler(4).weightHint(null, 'cup', 1)).toBeNull();
+  });
+});
+
 describe('createRecipeScaler — amounts', () => {
   it('scales by servings ÷ base servings', () => {
     const s = scalerAt(8);

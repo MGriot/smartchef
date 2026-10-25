@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   convert,
+  toGrams,
   toSystem,
   normaliseMagnitude,
   roundForDisplay,
@@ -42,6 +43,22 @@ describe('convert', () => {
     expect(convert(2, 'pz', 'g')).toBeNull();
     expect(convert(1, 'q.b.', 'g')).toBeNull();
     expect(convert(1, '', 'g')).toBeNull();
+  });
+});
+
+describe('toGrams', () => {
+  it('weighs a volume through the density', () => {
+    expect(toGrams(1, 'cup', 0.53)).toBeCloseTo(125.39, 1);
+    expect(toGrams(2, 'tbsp', 1)).toBe(30);
+    expect(toGrams(1, 'cucchiaino', 0.85)).toBeCloseTo(4.25);
+  });
+
+  it('is null for weights, pieces, unknown units and unknown density', () => {
+    expect(toGrams(100, 'g', 0.53)).toBeNull();
+    expect(toGrams(2, 'pz', 0.53)).toBeNull();
+    expect(toGrams(1, 'cup', null)).toBeNull();
+    expect(toGrams(1, 'cup', 0)).toBeNull();
+    expect(toGrams(1, null, 1)).toBeNull();
   });
 });
 

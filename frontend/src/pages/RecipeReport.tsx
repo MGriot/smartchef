@@ -570,7 +570,7 @@ function SectionBody({ section, reportImage, compact = false }: {
                   {group.items.map((ing, i) => (
                     <li key={i} className="report-ingredient">
                       <span className="report-box" aria-hidden="true" />
-                      <span className="report-amount">{ing.amount}</span>
+                      <span className="report-amount">{ing.amount}{ing.weight && <small className="report-weight"> ({ing.weight})</small>}</span>
                       <span className="report-name">
                         <span className={ing.componentAnchor ? 'font-bold' : undefined}>{ing.name}</span>
                         {ing.optional && <span className="report-optional">{t('recipeDetail.optional')}</span>}

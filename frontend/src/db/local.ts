@@ -392,6 +392,11 @@ CREATE TABLE IF NOT EXISTS ingredients (
   -- everywhere (never a regression for ingredients nobody filled this in
   -- for). Backfilled via addColumnIfMissing() below.
   plural_name    TEXT,
+  -- Optional grams per millilitre, so a volume amount ("1 cup flour") can
+  -- also be shown as a weight. Same column as Postgres's
+  -- 001_initial_schema.sql. NULL = unknown, no weight shown. Backfilled via
+  -- addColumnIfMissing() below.
+  density_g_per_ml REAL,
   sync_status    TEXT DEFAULT 'local',
   created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at     TEXT DEFAULT CURRENT_TIMESTAMP
@@ -1082,6 +1087,7 @@ export async function initLocalSchema(): Promise<void> {
       if (earliestId) await db.execute(`UPDATE profiles SET role='admin' WHERE id='${earliestId}'`);
     }
     await addColumnIfMissing(db, 'ingredients', 'plural_name', 'TEXT');
+    await addColumnIfMissing(db, 'ingredients', 'density_g_per_ml', 'REAL');
     await addColumnIfMissing(db, 'sync_conflicts', 'local_updated_at', 'TEXT');
     await addColumnIfMissing(db, 'sync_conflicts', 'remote_updated_at', 'TEXT');
     await addColumnIfMissing(db, 'ingredient_translations', 'plural_translation', 'TEXT');

@@ -488,6 +488,12 @@
   color: #18181b;
 }
 
+.recipe-report .report-weight {
+  font-weight: 400;
+  font-size: 0.8em;
+  color: #71717a;
+}
+
 .recipe-report .report-name {
   flex: 1;
   min-width: 0;

@@ -225,7 +225,12 @@
         "removeTags": "Etiquetas quitadas",
         "nutrition": "Valores nutricionales",
         "synonyms": "Sinónimos"
-      }
+      },
+      "density": "De volumen a peso",
+      "densityHint": "Peso específico en gramos por mililitro (agua = 1, harina ≈ 0,53, azúcar ≈ 0,85, aceite ≈ 0,92). Si se indica, tazas y cucharas en las recetas muestran también el peso.",
+      "densityUnit": "g/ml",
+      "densityExample": "1 taza ≈ {{grams}} g",
+      "densityKey": "Densidad (g/ml)"
     },
     "common": {
       "gridView": "Vista de cuadrícula",
@@ -775,7 +780,8 @@
       "allIdentical": "Las dos recetas tienen el mismo contenido: combinar solo mueve colecciones, planes e historial de cocina.",
       "identicalFields_one": "{{count}} campo es idéntico",
       "identicalFields_other": "{{count}} campos son idénticos"
-    }
+    },
+    "weightFromDensity": "Peso calculado a partir de la densidad del ingrediente"
   },
   "recipeCreate": {
     "newRecipe": "Nueva receta",

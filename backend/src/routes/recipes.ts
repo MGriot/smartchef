@@ -334,6 +334,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'quantity', ri.quantity,
               'quantityText', ri.quantity_text,
               'unitSymbol', u.symbol, 'unitId', ri.unit_id,
+              'densityGPerMl', i.density_g_per_ml,
               'isOptional', ri.is_optional,
               'notes', ri.notes,
               'groupName', ri.group_name,
