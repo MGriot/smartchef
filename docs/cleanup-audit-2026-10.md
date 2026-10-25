@@ -106,20 +106,33 @@ Branch: `chore/cleanup-audit-2026-10`. Re-grep every symbol before editing, beca
 - **Q3 (DUP-05):** Long term, do you want one engine shared between server and standalone (wire `shared/` into the frontend build), or is the backend heading for maintenance-only status? That decides whether the drift matters.
 
 ## 7. Approval checklist
-- [ ] OBS-01 (P1) — remove the unauthenticated legacy CRDT/mDNS sync
-- [ ] OBS-02 — delete `services/api.ts`
-- [ ] OBS-03 — delete `convert-theme.js`
-- [ ] OBS-04 — drop 4 unused frontend deps and `@types/bcryptjs`
-- [ ] OBS-05 — delete 7 dead exports
-- [ ] OBS-06 — remove unused locals and imports (incl. `listName` state)
-- [ ] OBS-07 — remove 21 unused `React` default imports
-- [ ] OBS-08 — enable `noUnusedLocals`
-- [ ] DUP-01 — share `parseJsonObject`
-- [ ] DUP-02 — extract shared Tools/Techniques/Tags editor pieces
-- [ ] DUP-03 — `<AccountFields>` in `Login.tsx`
-- [ ] DUP-04 — backend list-with-translations helper
+- [x] OBS-01 (P1) — remove the unauthenticated legacy CRDT/mDNS sync
+- [x] OBS-02 — delete `services/api.ts`
+- [x] OBS-03 — delete `convert-theme.js`
+- [x] OBS-04 — drop 4 unused frontend deps and `@types/bcryptjs`
+- [x] OBS-05 — delete 7 dead exports
+- [x] OBS-06 — remove unused locals and imports (incl. `listName` state)
+- [x] OBS-07 — remove 21 unused `React` default imports
+- [x] OBS-08 — enable `noUnusedLocals`
+- [x] DUP-01 — share `parseJsonObject`
+- [x] DUP-02 — extract shared Tools/Techniques/Tags editor pieces
+- [x] DUP-03 — `<AccountFields>` in `Login.tsx`
+- [x] DUP-04 — backend list-with-translations helper
 - [ ] DUP-05 — report only (no change)
-- [ ] RED-01 — only if OBS-01 is rejected
-- [ ] PERF-01 — SQL pre-filter for tag delete
+- [x] RED-01 — only if OBS-01 is rejected
+- [x] PERF-01 — SQL pre-filter for tag delete
 
-Approved 2026-10-24: the top 5 quick wins (OBS-01, OBS-02, OBS-04, OBS-06, DUP-01).
+## 8. Outcome (2026-10-25)
+All findings except DUP-05 (report only) were applied on `chore/cleanup-audit-2026-10`, one commit per ID. Quick wins were approved 2026-10-24, the rest 2026-10-25. Afterwards the frontend has 1192 passing tests (4 new), all three packages typecheck with `noUnusedLocals`, and the icon subset is unchanged.
+
+Where the work differed from the plan above:
+- **OBS-01:** RED-01 went away with it. Booting the backend confirmed `/api/sync/*` now reaches `requireAuth`. The `crdt_operations` table and `crdt_clock` columns stay.
+- **OBS-04:** removing `react-query` also dropped 14 packages only it depended on.
+- **OBS-05:** `getCacheTimestamp` was removed as well; its only caller was `hasCachedData`.
+- **OBS-07:** 23 files, not 21 (`probe.tsx` and one more).
+- **DUP-02:** grew into `components/LibraryCatalog.tsx` and `hooks/useCatalogMerge.ts`. Tags keeps its own merge handler, because it also merges free-text tags. A probe page showed the markup byte-identical to before.
+- **DUP-03:** done as a shared JSX fragment rather than a separate component, matching the page's existing `avatarField`. The markup is identical to before.
+- **DUP-04:** became `services/catalogList.service.ts`. Its SQL text and params are byte-identical to the old handlers for every `lang`/`q` combination.
+- **PERF-01:** the plain `LIKE` pre-filter proposed above was wrong. SQLite's `LIKE` does not fold accented capitals, so deleting "été" would have left "Été" on recipes. The pre-filter now only applies to plain-ASCII names without `"` or `\`; other names keep the full read.
+
+New observation for a later round: `parseJsonResponse` in `frontend/src/services/llmParser.local.ts` repeats the JSON-extraction lines that DUP-01 shared.
