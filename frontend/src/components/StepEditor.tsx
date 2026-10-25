@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Autocomplete from './Autocomplete';
 import RenderStepText from './RenderStepText';

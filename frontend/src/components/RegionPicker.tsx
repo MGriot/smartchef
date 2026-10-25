@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { COUNTRIES, countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { apiFetch } from '../lib/api';

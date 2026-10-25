@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Modal, { ModalCancelButton } from './Modal';
 import { apiFetch, isNative, getServerUrl } from '../lib/api';
