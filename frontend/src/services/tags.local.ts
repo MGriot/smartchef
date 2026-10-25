@@ -171,7 +171,16 @@ export async function updateTag(id: string, d: TagInput): Promise<void> {
  *  just disappear from wherever it happened to be managed. */
 async function removeTagNameFromRecipes(name: string): Promise<{ recipesUpdated: number }> {
   const key = name.trim().toLowerCase();
-  const recipes = await query<{ id: string; tags: string }>("SELECT id, tags FROM recipes WHERE sync_status != 'deleted'");
+  // Narrow the read in SQL when it is safe to: SQLite's LIKE only folds
+  // ASCII case, and the JSON column escapes `"` and `\`, so any other name
+  // (an accented capital, a quote) reads every recipe and leaves the exact
+  // match to the JS check below. On Android each row read crosses the
+  // Capacitor bridge.
+  const prefilter = /^[\x20\x21\x23-\x5b\x5d-\x7e]+$/.test(key);
+  const recipes = await query<{ id: string; tags: string }>(
+    `SELECT id, tags FROM recipes WHERE sync_status != 'deleted'${prefilter ? ' AND tags LIKE $1' : ''}`,
+    prefilter ? [`%${key}%`] : [],
+  );
   const { syncRecipe } = await import('./recipes.local');
   let recipesUpdated = 0;
   for (const r of recipes) {
