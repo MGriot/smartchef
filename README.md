@@ -33,6 +33,14 @@ already knows, so you do not end up with four spellings of "tomato". A
 local model through Ollama works offline; Anthropic, Gemini and OpenAI work
 if you would rather. See [Getting recipes in](docs/importing.md).
 
+**It reads the way you cook.** Type an amount as `1 1/2`, `½` or `1,5`
+and it is shown back the way the unit is spoken — “1 ½ cups”, “250 g” —
+even after you double the portions; give an ingredient its weight per
+millilitre and every cup of it also shows grams. Descriptions and steps
+take **Markdown**, and a pasted note, comment or second version of a
+dish can be merged into the recipe by the AI, sources included, one
+reviewed change at a time.
+
 **Your data stays yours.** No account required, no telemetry, no cloud.
 Backups are plain JSON. API keys never leave the device they were typed on,
 and never enter a backup or a sync history.
