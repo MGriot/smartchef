@@ -1,3 +1,5 @@
+import { stripMarkdown } from '../lib/markdown';
+import MarkdownText from '../components/MarkdownText';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
@@ -164,7 +166,7 @@ export default function LibraryTechniques() {
                         {technique.translated_name || technique.name}
                       </p>
                       {technique.description && (
-                        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-2">{technique.description}</p>
+                        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-2">{stripMarkdown(technique.description)}</p>
                       )}
                       <CatalogItemActions
                         layout="tile"
@@ -197,7 +199,7 @@ export default function LibraryTechniques() {
                           <CatalogThumb layout="row" imageUrls={technique.image_urls} icon={technique.icon || 'TbFlame'} />
                           <div>
                             <p className="font-extrabold text-zinc-900 dark:text-zinc-100 leading-tight">{technique.translated_name || technique.name}</p>
-                            <p className="text-zinc-400 dark:text-zinc-500 text-[11px] font-medium tracking-tighter mt-1">{technique.description}</p>
+                            <MarkdownText text={technique.description} className="text-zinc-400 dark:text-zinc-500 text-[11px] font-medium tracking-tighter mt-1" />
                           </div>
                         </div>
                       </td>

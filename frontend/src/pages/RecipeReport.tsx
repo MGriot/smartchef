@@ -21,6 +21,7 @@
 //     none of those elements, and its photos carry the class.
 // ════════════════════════════════════════════════════════════════════════
 
+import MarkdownText from '../components/MarkdownText';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -433,7 +434,7 @@ export default function RecipeReport() {
             <div className="report-keep flex flex-col-reverse sm:flex-row gap-5 items-start">
               <div className="flex-1 min-w-0">
                 <h1 className="font-headline text-[26px] leading-tight font-extrabold">{model.title}</h1>
-                {model.description && <p className="mt-2 text-[13px] leading-relaxed text-zinc-700">{model.description}</p>}
+                {model.description && <MarkdownText text={model.description} className="mt-2 text-[13px] leading-relaxed text-zinc-700" />}
                 {model.meta.length > 0 && (
                   <p className="mt-2 text-[11px] text-zinc-500">{model.meta.join('  ·  ')}</p>
                 )}
@@ -506,7 +507,7 @@ export default function RecipeReport() {
                     {section.usedIn.length > 0 && (
                       <p className="mt-1 text-[11px] font-bold text-zinc-500 uppercase tracking-wider">{section.usedIn.join(' · ')}</p>
                     )}
-                    {section.description && <p className="mt-2 text-[12px] text-zinc-700">{section.description}</p>}
+                    {section.description && <MarkdownText text={section.description} className="mt-2 text-[12px] text-zinc-700" />}
                     <FactsGrid facts={section.facts} />
                     <SectionBody section={section} reportImage={reportImage} compact />
                   </div>
@@ -619,7 +620,7 @@ function SectionBody({ section, reportImage, compact = false }: {
                     {step.duration && <span className="ml-2 text-[11px] font-semibold text-zinc-500">⏱ {step.duration}</span>}
                   </p>
                   {reportImage(step.image, 'mt-2 w-full max-h-[60mm] object-cover rounded-md')}
-                  <p className="report-step-text mt-1.5 text-[12.5px] leading-relaxed text-zinc-800 whitespace-pre-line">
+                  <div className="report-step-text mt-1.5 text-[12.5px] leading-relaxed text-zinc-800">
                     <RenderStepText
                       text={step.text}
                       ingredients={step.textContext.ingredients}
@@ -627,7 +628,7 @@ function SectionBody({ section, reportImage, compact = false }: {
                       techniques={step.textContext.techniques}
                       scale={step.textContext.scale}
                     />
-                  </p>
+                  </div>
                   {step.uses.length > 0 && (
                     <p className="mt-1.5 text-[11px] text-zinc-600">
                       <span className="font-bold">{t('recipeDetail.ingredients')}:</span> {step.uses.join(' · ')}
@@ -655,13 +656,13 @@ function SectionBody({ section, reportImage, compact = false }: {
           {section.storage && (
             <div className="report-keep">
               <H className={headingClass}>{t('recipeDetail.storageInstructions')}</H>
-              <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{section.storage}</p>
+              <MarkdownText text={section.storage} className="text-[12px] leading-relaxed" />
             </div>
           )}
           {section.tips && (
             <div className="report-keep">
               <H className={headingClass}>{t('recipeDetail.tips')}</H>
-              <p className="text-[12px] leading-relaxed whitespace-pre-wrap">{section.tips}</p>
+              <MarkdownText text={section.tips} className="text-[12px] leading-relaxed" />
             </div>
           )}
         </div>

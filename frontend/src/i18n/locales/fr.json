@@ -1011,7 +1011,11 @@
     "ofTotal": "sur {{total}} dans la recette",
     "showUsedUp": "{{count}} déjà épuisés — les afficher quand même",
     "quantityHint": "Entiers, décimaux ou fractions : 2, 1,5, 3/4, 1 1/2, ½",
-    "quantityInvalid": "Quantité invalide. Essayez 2, 1,5, 3/4 ou 1 1/2"
+    "quantityInvalid": "Quantité invalide. Essayez 2, 1,5, 3/4 ou 1 1/2",
+    "markdownHint": "Mise en forme :",
+    "markdownBold": "gras",
+    "markdownItalic": "italique",
+    "markdownList": "liste"
   },
   "errors": {
     "couldNotCreateIngredient": "Impossible de créer l'ingrédient",

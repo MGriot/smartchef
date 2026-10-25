@@ -135,6 +135,22 @@
 }
 
 @layer components {
+  /* ── Markdown in recipe text (components/MarkdownText.tsx) ──────────────
+     Inherits the surrounding text's size and colour, so a description, a
+     step and a note each keep the look they had as plain text. */
+  .sc-md > * + * { margin-top: 0.6em; }
+  .sc-md ul { list-style: disc; padding-left: 1.25em; }
+  .sc-md ol { list-style: decimal; padding-left: 1.5em; }
+  .sc-md li + li { margin-top: 0.2em; }
+  .sc-md h3, .sc-md h4, .sc-md h5 { font-weight: 800; line-height: 1.3; }
+  .sc-md h3 { font-size: 1.1em; }
+  .sc-md h4, .sc-md h5 { font-size: 1em; }
+  .sc-md strong { font-weight: 700; }
+  .sc-md blockquote { border-left: 3px solid rgb(161 161 170 / 0.5); padding-left: 0.75em; font-style: italic; }
+  .sc-md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; padding: 0.05em 0.3em; border-radius: 0.3em; background: rgb(161 161 170 / 0.18); }
+  .sc-md a { text-decoration: underline; text-underline-offset: 2px; color: rgb(var(--color-primary)); }
+  .sc-md hr { border: 0; border-top: 1px solid rgb(161 161 170 / 0.35); }
+
   /* ── Scrollbar ─────────────────────────────────────────────── */
   .scrollbar-hide::-webkit-scrollbar { display: none; }
   .scrollbar-hide {

@@ -1,3 +1,5 @@
+import MarkdownHint from './MarkdownHint';
+import { hasMarkdown } from '../lib/markdown';
 import QuantityInput from './QuantityInput';
 import { formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { useRef, useState } from 'react';
@@ -468,8 +470,9 @@ export default function StepEditor({
         className="w-full border-none bg-white dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px] max-h-[60vh] overflow-y-auto"
         placeholder={t('editors.describeStep')}
       />
+      <MarkdownHint />
 
-      {description.includes('{{') && (
+      {(description.includes('{{') || hasMarkdown(description)) && (
         <div className="mt-2 px-4 py-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
           <RenderStepText text={description} ingredients={previewIngredients} tools={tools} techniques={techniques} />
         </div>

@@ -1,3 +1,5 @@
+import MarkdownHint from '../components/MarkdownHint';
+import MarkdownText from '../components/MarkdownText';
 import QuantityInput from '../components/QuantityInput';
 import { formatQuantity, formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { formatDurationWith } from '../lib/duration';
@@ -1040,9 +1042,9 @@ const RecipeDetail: React.FC = () => {
                         {step.translatedTitle || step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
                       </h3>
                       <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
-                      <p className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4 break-words">
+                      <div className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4 break-words">
                         <RenderStepText text={step.translatedDescription || step.description} ingredients={sectionIngredients} tools={sectionTools} techniques={stepTextTechniques} scale={servingsScale} />
-                      </p>
+                      </div>
 
                       {(step.stepIngredients || []).length > 0 && (
                         <ul className="mb-4 space-y-1">
@@ -1144,7 +1146,7 @@ const RecipeDetail: React.FC = () => {
                             <span className="material-symbols-outlined text-sm text-[18px]">lightbulb</span>
                             <span className="text-[10px] uppercase font-bold tracking-wider">{t('recipeDetail.chefsNote')}</span>
                           </div>
-                          <p className="text-sm text-zinc-300 dark:text-zinc-600 italic">{step.notes}</p>
+                          <MarkdownText text={step.notes} className="text-sm text-zinc-300 dark:text-zinc-600 italic" />
                         </div>
                       )}
 
@@ -1242,9 +1244,9 @@ const RecipeDetail: React.FC = () => {
                       {step.translatedTitle || step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
                     </h3>
                     <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
-                    <p className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4 break-words">
+                    <div className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4 break-words">
                       <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredientsFor(step)} tools={stepTextTools} techniques={stepTextTechniques} scale={servingsScale} />
-                    </p>
+                    </div>
 
                     {/* Kitchen mode gets a checklist, not a row of chips:
                         with both hands busy the question is "have I put the
@@ -1348,7 +1350,7 @@ const RecipeDetail: React.FC = () => {
                           <span className="material-symbols-outlined text-sm text-[18px]">lightbulb</span>
                           <span className="text-[10px] uppercase font-bold tracking-wider">{t('recipeDetail.chefsNote')}</span>
                         </div>
-                        <p className="text-sm text-zinc-300 dark:text-zinc-600 italic">{step.translatedNotes || step.notes}</p>
+                        <MarkdownText text={step.translatedNotes || step.notes} className="text-sm text-zinc-300 dark:text-zinc-600 italic" />
                       </div>
                     )}
 
@@ -2140,6 +2142,7 @@ const RecipeDetail: React.FC = () => {
                     className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[150px] max-h-[50vh] overflow-y-auto"
                     placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
                   />
+                  <MarkdownHint />
                 </label>
               </div>
 
@@ -2842,6 +2845,7 @@ const RecipeDetail: React.FC = () => {
                     className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[110px] max-h-[40vh] overflow-y-auto"
                     placeholder={t('recipeDetail.tipsPlaceholder')}
                   />
+                  <MarkdownHint />
                 </label>
               </div>
             </div>
@@ -3399,7 +3403,7 @@ const RecipeDetail: React.FC = () => {
           <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold leading-tight">{recipe.translated_title || recipe.title}</h1>
             {(recipe.translated_description || recipe.description) && (
-              <p className="mt-1 text-sm">{recipe.translated_description || recipe.description}</p>
+              <MarkdownText text={recipe.translated_description || recipe.description} className="mt-1 text-sm" />
             )}
             <p className="mt-2 text-xs">
               {[
@@ -3457,9 +3461,7 @@ const RecipeDetail: React.FC = () => {
             )}
             <h1 className="text-4xl md:text-6xl font-headline font-extrabold text-white leading-none">{recipe.translated_title || recipe.title}</h1>
             {(recipe.translated_description || recipe.description) && (
-              <p className="mt-3 text-white/80 text-sm font-medium max-w-2xl leading-relaxed">
-                {recipe.translated_description || recipe.description}
-              </p>
+              <MarkdownText text={recipe.translated_description || recipe.description} className="mt-3 text-white/80 text-sm font-medium max-w-2xl leading-relaxed" />
             )}
             {recipe.creator_name && (
               <div className="flex items-center gap-2 mt-3">
@@ -3850,9 +3852,9 @@ const RecipeDetail: React.FC = () => {
                     </h4>
                     <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 group-hover:border-primary/15 transition-colors">
                       <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-xl mb-4" />
-                      <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 mb-4">
+                      <div className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 mb-4">
                         <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredientsFor(step)} tools={stepTextTools} techniques={stepTextTechniques} scale={servingsScale} />
-                      </p>
+                      </div>
 
                       {stepIngredientList(step).length > 0 && (
                         <div className="flex flex-wrap gap-2 mb-4">
@@ -3890,7 +3892,7 @@ const RecipeDetail: React.FC = () => {
           {recipe.storage_instructions && (
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
               <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.storageInstructions')}</h3>
-              <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{recipe.storage_instructions}</p>
+              <MarkdownText text={recipe.storage_instructions} className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400" />
             </div>
           )}
 
@@ -3943,7 +3945,7 @@ const RecipeDetail: React.FC = () => {
             {recipe.tips && (
               <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
                 <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.tips')}</h3>
-                <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{recipe.tips}</p>
+                <MarkdownText text={recipe.tips} className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400" />
               </div>
             )}
             {recipe.sources && recipe.sources.length > 0 && (

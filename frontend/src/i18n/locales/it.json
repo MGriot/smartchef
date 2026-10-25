@@ -1011,7 +1011,11 @@
     "ofTotal": "su {{total}} nella ricetta",
     "showUsedUp": "{{count}} già esauriti — mostrali comunque",
     "quantityHint": "Interi, decimali o frazioni: 2, 1,5, 3/4, 1 1/2, ½",
-    "quantityInvalid": "Quantità non valida. Prova 2, 1,5, 3/4 o 1 1/2"
+    "quantityInvalid": "Quantità non valida. Prova 2, 1,5, 3/4 o 1 1/2",
+    "markdownHint": "Formattazione:",
+    "markdownBold": "grassetto",
+    "markdownItalic": "corsivo",
+    "markdownList": "elenco"
   },
   "errors": {
     "couldNotCreateIngredient": "Impossibile creare l'ingrediente",

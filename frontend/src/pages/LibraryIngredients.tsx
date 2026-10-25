@@ -1,3 +1,4 @@
+import MarkdownText from '../components/MarkdownText';
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -1327,7 +1328,7 @@ function IngredientDetailModal({
               </button>
             )}
             {ing.description && (
-              <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">{ing.description}</p>
+              <MarkdownText text={ing.description} className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400" />
             )}
           </div>
         )}

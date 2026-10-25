@@ -1,3 +1,4 @@
+import MarkdownText from '../MarkdownText';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -268,7 +269,7 @@ export default function EventMenu({
                 {[mealLabel, dateLabel].filter(Boolean).join(' · ')}
               </p>
               <h2 className="mt-1 font-headline text-2xl font-extrabold text-zinc-900 dark:text-zinc-100 break-words">{menu.name}</h2>
-              {menu.notes && <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400 whitespace-pre-wrap">{menu.notes}</p>}
+              {menu.notes && <MarkdownText text={menu.notes} className="mt-2 text-sm text-zinc-500 dark:text-zinc-400" />}
             </div>
             <div className="flex items-center gap-2">
               <button

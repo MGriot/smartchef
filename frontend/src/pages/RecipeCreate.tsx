@@ -1,3 +1,4 @@
+import MarkdownHint from '../components/MarkdownHint';
 import QuantityInput from '../components/QuantityInput';
 import { formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { formatDurationWith } from '../lib/duration';
@@ -827,6 +828,7 @@ const RecipeCreate: React.FC = () => {
               className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px] max-h-[50vh] overflow-y-auto"
               placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
             />
+            <MarkdownHint />
           </label>
           <label className="block mb-6">
             <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>

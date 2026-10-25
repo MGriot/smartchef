@@ -1,3 +1,4 @@
+import { stripMarkdown } from '../lib/markdown';
 import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect, useRef } from 'react';
 import { getSyncStatus, subscribeSyncStatus, hasEverCompletedSync } from '../lib/sync/syncStatus';
@@ -825,7 +826,7 @@ const Home: React.FC = () => {
                       </h3>
                       {!dense && (recipe.translated_description || recipe.description) && (
                         <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-2 line-clamp-2">
-                          {recipe.translated_description || recipe.description}
+                          {stripMarkdown(recipe.translated_description || recipe.description)}
                         </p>
                       )}
                       {recipe.creator_name && (

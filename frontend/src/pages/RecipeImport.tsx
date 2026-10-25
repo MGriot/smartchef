@@ -1,3 +1,4 @@
+import { stripMarkdown } from '../lib/markdown';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -1861,7 +1862,7 @@ export default function RecipeImport() {
                                <div key={`step-${i}`} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 bg-zinc-50/50 dark:bg-zinc-900/50 flex items-start justify-between gap-2">
                                  <div className="min-w-0">
                                    <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 break-words">{step.stepNumber}. {step.title || step.description.slice(0, 80)}</p>
-                                   {step.title && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-2">{step.description}</p>}
+                                   {step.title && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-2">{stripMarkdown(step.description)}</p>}
                                  </div>
                                  {removeButton(() => removeStep(i))}
                                </div>

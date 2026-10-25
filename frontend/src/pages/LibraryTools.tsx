@@ -1,3 +1,4 @@
+import MarkdownText from '../components/MarkdownText';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
@@ -202,7 +203,7 @@ export default function LibraryTools() {
                           <CatalogThumb layout="row" imageUrls={tool.image_urls} icon={tool.icon || 'TbToolsKitchen'} />
                           <div>
                             <p className="font-extrabold text-zinc-900 dark:text-zinc-100 leading-tight">{tool.translated_name || tool.name}</p>
-                            <p className="text-zinc-400 dark:text-zinc-500 text-[11px] font-medium tracking-tighter mt-1">{tool.description}</p>
+                            <MarkdownText text={tool.description} className="text-zinc-400 dark:text-zinc-500 text-[11px] font-medium tracking-tighter mt-1" />
                           </div>
                         </div>
                       </td>
