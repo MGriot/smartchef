@@ -1,17 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
-import Autocomplete from '../components/Autocomplete';
-import RenderFaIcon from '../components/RenderFaIcon';
 import ImageUrlsEditor from '../components/ImageUrlsEditor';
-import { ResolvedImage } from '../components/CoverImage';
-import SynonymsEditor from '../components/SynonymsEditor';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { TOOL_ICONS } from '../lib/icons';
 import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
-import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
+import { Field, FieldRow, FormSection, IconPicker } from '../components/Form';
+import { CatalogItemActions, CatalogMergeModal, CatalogNamingSection, CatalogThumb } from '../components/LibraryCatalog';
 import { LibraryToolbar } from '../components/LibraryViewControls';
+import { useCatalogMerge } from '../hooks/useCatalogMerge';
 import { useLibraryView } from '../hooks/useLibraryView';
 import { sortLibraryItems } from '../lib/librarySort';
 
@@ -24,9 +22,8 @@ export default function LibraryTools() {
   // Fold a duplicate tool into another one — POST /tools/:id/merge repoints
   // every recipe and every individual step that referenced it, so nothing
   // loses its equipment.
-  const [mergeSource, setMergeSource] = useState<any>(null);
-  const [mergeTargetId, setMergeTargetId] = useState('');
-  const [merging, setMerging] = useState(false);
+  const { mergeSource, setMergeSource, mergeTargetId, setMergeTargetId, merging, startMerge, handleMerge } =
+    useCatalogMerge<any>('/api/tools', () => fetchTools());
   const [form, setForm] = useState({ name: '', category: '', description: '', icon: 'TbToolsKitchen', imageUrls: [] as string[], synonyms: [] as string[] });
   const [translations, setTranslations] = useState<{ lang: string; name: string }[]>([]);
   const contentLang = useStore((s) => s.contentLang);
@@ -81,8 +78,6 @@ export default function LibraryTools() {
     setShowModal(true);
   };
 
-  const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);
-
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const url = editingTool ? `/api/tools/${editingTool.id}` : '/api/tools';
@@ -116,30 +111,6 @@ export default function LibraryTools() {
       }
     } catch (err) {
       console.error('Delete failed:', err);
-    }
-  };
-
-  const handleMerge = async () => {
-    if (!mergeSource || !mergeTargetId) return;
-    setMerging(true);
-    try {
-      const res = await apiFetch(`/api/tools/${mergeSource.id}/merge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetId: mergeTargetId }),
-      });
-      const result = await res.json();
-      if (res.ok) {
-        setMergeSource(null);
-        setMergeTargetId('');
-        fetchTools();
-      } else {
-        alert(t('library.shared.mergeFailed', { error: JSON.stringify(result.error || result) }));
-      }
-    } catch {
-      alert(t('library.shared.networkErrorMerging'));
-    } finally {
-      setMerging(false);
     }
   };
 
@@ -192,32 +163,21 @@ export default function LibraryTools() {
                       key={tool.id}
                       className="group relative bg-zinc-50/60 dark:bg-zinc-800/40 rounded-3xl p-4 border border-zinc-100 dark:border-zinc-800 hover:border-primary/30 hover:shadow-sm transition-all"
                     >
-                      <div className="aspect-square rounded-2xl overflow-hidden bg-white dark:bg-zinc-900 flex items-center justify-center mb-3">
-                        {tool.image_urls?.[0] ? (
-                          <ResolvedImage src={tool.image_urls[0]} className="w-full h-full object-cover" />
-                        ) : (
-                          <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-[32px] text-zinc-300 dark:text-zinc-600" />
-                        )}
-                      </div>
+                      <CatalogThumb layout="tile" imageUrls={tool.image_urls} icon={tool.icon || 'TbToolsKitchen'} />
                       <p className="font-extrabold text-sm text-zinc-900 dark:text-zinc-100 leading-tight truncate" title={tool.translated_name || tool.name}>
                         {tool.translated_name || tool.name}
                       </p>
                       <p className="text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mt-1 truncate">
                         {tool.category || t('library.tools.general')}
                       </p>
-                      {/* Same three actions as the table row, revealed on hover
-                          so the tile stays readable as a catalog at a glance. */}
-                      <div className="flex justify-center gap-1 mt-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                        <button onClick={() => handleOpenModal(tool)} title={t('library.tools.editThis')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
-                          <span className="material-symbols-outlined text-[18px]">edit</span>
-                        </button>
-                        <button onClick={() => { setMergeSource(tool); setMergeTargetId(''); }} title={t('library.tools.mergeIntoAnother')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
-                          <span className="material-symbols-outlined text-[18px]">call_merge</span>
-                        </button>
-                        <button onClick={() => handleDelete(tool.id)} title={t('common.delete')} className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-zinc-900 flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
-                          <span className="material-symbols-outlined text-[18px]">delete</span>
-                        </button>
-                      </div>
+                      <CatalogItemActions
+                        layout="tile"
+                        editTitle={t('library.tools.editThis')}
+                        mergeTitle={t('library.tools.mergeIntoAnother')}
+                        onEdit={() => handleOpenModal(tool)}
+                        onMerge={() => startMerge(tool)}
+                        onDelete={() => handleDelete(tool.id)}
+                      />
                     </div>
                   ))}
                 </div>
@@ -239,13 +199,7 @@ export default function LibraryTools() {
                     <tr key={tool.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50 transition-colors">
                       <td className="py-6 pl-4">
                         <div className="flex items-center gap-4">
-                          {tool.image_urls?.[0] ? (
-                            <ResolvedImage src={tool.image_urls[0]} className="w-12 h-12 rounded-2xl object-cover bg-zinc-100 dark:bg-zinc-800" />
-                          ) : (
-                            <div className="w-12 h-12 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-xl text-zinc-400 dark:text-zinc-500">
-                              <RenderFaIcon name={tool.icon || 'TbToolsKitchen'} className="text-[20px]" />
-                            </div>
-                          )}
+                          <CatalogThumb layout="row" imageUrls={tool.image_urls} icon={tool.icon || 'TbToolsKitchen'} />
                           <div>
                             <p className="font-extrabold text-zinc-900 dark:text-zinc-100 leading-tight">{tool.translated_name || tool.name}</p>
                             <p className="text-zinc-400 dark:text-zinc-500 text-[11px] font-medium tracking-tighter mt-1">{tool.description}</p>
@@ -258,17 +212,14 @@ export default function LibraryTools() {
                         </span>
                       </td>
                       <td className="py-6 text-right pr-4">
-                         <div className="flex justify-end gap-2">
-                            <button onClick={() => handleOpenModal(tool)} title={t('library.tools.editThis')} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
-                              <span className="material-symbols-outlined text-xl">edit</span>
-                            </button>
-                            <button onClick={() => { setMergeSource(tool); setMergeTargetId(''); }} title={t('library.tools.mergeIntoAnother')} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-primary transition-all">
-                              <span className="material-symbols-outlined text-xl">call_merge</span>
-                            </button>
-                            <button onClick={() => handleDelete(tool.id)} className="w-10 h-10 rounded-full hover:bg-white dark:hover:bg-zinc-900 hover:shadow-sm flex items-center justify-center text-zinc-400 dark:text-zinc-500 hover:text-tertiary transition-all">
-                              <span className="material-symbols-outlined text-xl">delete</span>
-                            </button>
-                         </div>
+                        <CatalogItemActions
+                          layout="row"
+                          editTitle={t('library.tools.editThis')}
+                          mergeTitle={t('library.tools.mergeIntoAnother')}
+                          onEdit={() => handleOpenModal(tool)}
+                          onMerge={() => startMerge(tool)}
+                          onDelete={() => handleDelete(tool.id)}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -280,33 +231,19 @@ export default function LibraryTools() {
       </AppLayout>
 
       {/* ─── Merge Tool ──────────────────────────────────────────────── */}
-      <Modal
+      <CatalogMergeModal
         open={!!mergeSource}
         onClose={() => setMergeSource(null)}
-        size="sm"
-        zIndex={120}
         title={t('library.tools.mergeTitle')}
         subtitle={mergeSource ? t('library.tools.mergeSubtitle', { name: mergeSource.translated_name || mergeSource.name }) : undefined}
-        footer={
-          <>
-            <ModalCancelButton onClick={() => setMergeSource(null)}>{t('common.cancel')}</ModalCancelButton>
-            <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
-              {merging ? t('library.shared.merging') : t('library.shared.merge')}
-            </ModalSubmitButton>
-          </>
-        }
-      >
-        <Field label={t('library.shared.mergeIntoLabel')} hint={t('library.tools.mergeIntoHint')}>
-          <Autocomplete
-            options={mergeOptions}
-            value={mergeTargetId || null}
-            onSelect={(id) => setMergeTargetId(id)}
-            onClear={() => setMergeTargetId('')}
-            placeholder={t('library.tools.search')}
-            className="sc-field"
-          />
-        </Field>
-      </Modal>
+        hint={t('library.tools.mergeIntoHint')}
+        placeholder={t('library.tools.search')}
+        options={mergeOptions}
+        targetId={mergeTargetId}
+        onTargetChange={setMergeTargetId}
+        merging={merging}
+        onMerge={handleMerge}
+      />
 
       <Modal
         open={showModal}
@@ -362,23 +299,13 @@ export default function LibraryTools() {
             </Field>
           </FormSection>
 
-          <FormSection
-            title={t('library.shared.sectionNaming')}
+          <CatalogNamingSection
             description={t('library.tools.namingHint')}
-            action={<AddLangButton onClick={addTranslation} label={t('library.shared.addLang')} />}
-          >
-            <Field label={t('library.shared.synonyms')}>
-              <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
-            </Field>
-            <Field label={t('library.shared.translations')}>
-              <TranslationRows
-                value={translations}
-                onChange={setTranslations}
-                emptyLabel={t('library.shared.noTranslations')}
-                textPlaceholder={t('library.shared.translatedNamePlaceholder')}
-              />
-            </Field>
-          </FormSection>
+            synonyms={form.synonyms}
+            onSynonymsChange={synonyms => setForm({ ...form, synonyms })}
+            translations={translations}
+            onTranslationsChange={setTranslations}
+          />
 
           {editingTool && (
             <p className="sc-hint font-mono">ID {editingTool.id}</p>
