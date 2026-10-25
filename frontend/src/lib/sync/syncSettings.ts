@@ -271,14 +271,6 @@ export async function getSyncInterval(): Promise<SyncInterval> {
   return DEFAULT_SYNC_INTERVAL;
 }
 
-export async function hasSyncIntervalOverride(): Promise<boolean> {
-  const [{ value: rawValue }, { value: rawUnit }] = await Promise.all([
-    Preferences.get({ key: INTERVAL_VALUE_KEY }),
-    Preferences.get({ key: INTERVAL_UNIT_KEY }),
-  ]);
-  return !!(rawValue && rawUnit && isSyncIntervalUnit(rawUnit));
-}
-
 export async function setSyncInterval(interval: SyncInterval, scope: SettingScope = 'device'): Promise<void> {
   const value = Math.max(1, interval.value);
   if (scope === 'all-devices') {

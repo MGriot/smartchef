@@ -86,10 +86,6 @@ export function getText(tree: FakeSafTree, path: string): string | undefined {
   return bytes ? new TextDecoder().decode(bytes) : undefined;
 }
 
-export function putBytes(tree: FakeSafTree, path: string, bytes: Uint8Array): void {
-  tree.files.set(normalize(path), bytes);
-}
-
 // ── Fake local fs (the private working copy androidMirror.ts reads/writes
 // via gitfs.promises) — same flat-Map-with-derived-directories shape as
 // the fake SAF tree above, so push/pull tests can seed and inspect

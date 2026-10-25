@@ -262,13 +262,3 @@ export async function resolveImageSrc(relPath: string): Promise<string> {
 export function peekResolvedImageSrc(relPath: string): string | null {
   return srcCache.get(relPath) ?? null;
 }
-
-/** Drops a path from the resolve cache — needed only when the bytes behind
- *  a path could have changed, which for a content-addressed path means
- *  "the file was deleted or rewritten", not "the image was edited" (an
- *  edited image gets a different hash and therefore a different path). */
-export function forgetResolvedImageSrc(relPath: string): void {
-  const cached = srcCache.get(relPath);
-  if (cached?.startsWith('blob:')) URL.revokeObjectURL(cached);
-  srcCache.delete(relPath);
-}

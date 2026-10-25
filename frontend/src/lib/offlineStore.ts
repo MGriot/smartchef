@@ -98,16 +98,6 @@ export async function upsertCachedEntity(entityType: EntityType, record: { id: s
   );
 }
 
-export async function getCacheTimestamp(): Promise<string | null> {
-  const db = await getDb();
-  const result = await db.query('SELECT cached_at FROM snapshot_cache ORDER BY cached_at DESC LIMIT 1');
-  return result.values?.[0]?.cached_at ?? null;
-}
-
-export async function hasCachedData(): Promise<boolean> {
-  return (await getCacheTimestamp()) !== null;
-}
-
 // ── Per-recipe offline downloads ────────────────────────────────────────
 // A second, opt-in layer on top of the whole-library snapshot cache above:
 // snapshot_cache holds list-view fields for every recipe (title,

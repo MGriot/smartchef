@@ -289,12 +289,6 @@ export async function retryStuckEntities(): Promise<number> {
   return rows.length;
 }
 
-/** Drops one stuck entity entirely: the user has decided they do not want
- *  it here. It will be re-offered if another device republishes it. */
-export async function forgetStuckEntity(entityType: string, entityId: string): Promise<void> {
-  await query(`DELETE FROM sync_repair WHERE entity_type = $1 AND entity_id = $2`, [entityType, entityId]);
-}
-
 /** Ids of the rows this device holds, per type. */
 async function localIds(entityType: string): Promise<Set<string>> {
   const info = getEntityTable(entityType);
