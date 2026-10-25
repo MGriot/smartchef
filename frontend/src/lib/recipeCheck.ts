@@ -282,7 +282,7 @@ Do this, in order:
 3. "steps": [{"i", "durationMin": number, "evidence": string}] — minutes, ONLY when the step text states a duration ("cook 20 minutes", "rest 1 hour" → 60).
 4. "servings", "prepTimeMin", "cookTimeMin", "restTimeMin": each {"value": number, "evidence": string} or null. Only when the recipe states it ("serves 4", "bake 30 minutes"). Do not add up or estimate.
 5. "yield": {"amount": number, "unit": string, "evidence": string} or null — the finished quantity, only when stated ("makes 12 cookies", "about 1 litre").
-6. "tags": [{"name": string, "evidence": string}] — only attributes the recipe states or plainly names (e.g. the title says "vegan", an ingredient list shows no meat only if the text says vegetarian). Prefer existing tags: ${list(cat.tagNames)}. Max 6.
+6. "tags": [{"name": string, "evidence": string}] — only attributes the recipe states or plainly names (e.g. the title says "vegan", an ingredient list shows no meat only if the text says vegetarian). Tags describe the DISH (course, cuisine, occasion, season, main cooking method, diet), never an ingredient — no "Tomato", "Beef", "Basil". Prefer existing tags: ${list(cat.tagNames)}. Max 5.
 7. "regions": [{"country": ISO 3166-1 alpha-2 or null, "place": string|null, "evidence": string}] — only a place the recipe's text, title or source URL names as the dish's origin ("alla romana", "Sicilian", a .it recipe-site domain is NOT enough).
 8. "links": [{"i": step index, "kind": "ing"|"tool"|"tech", "target": the ingredient's index "i" (a number) for "ing", or the name EXACTLY as written in the catalog lists below for "tool"/"tech", "quote": the words copied CHARACTER FOR CHARACTER from that step's text, 1 to 4 words}] — every place a step's text names an ingredient of the list, a tool or a cooking technique of the catalogs that is not already linked. Each step has "linked": the words already linked there; never repeat those. One entry per thing per step (its first mention). Only things the text literally names — never one it merely implies. Catalog tools: ${list(cat.tools.map(labelOf))}. Catalog techniques: ${list(cat.techniques.map(labelOf))}.
 9. "mismatch": does the ingredient list describe the same recipe as the steps? {"unlisted": [{"name": the ingredient as the step calls it, "step": step index, "quote": the step's own words naming it, copied CHARACTER FOR CHARACTER, at most 12 words}], "summary": one short sentence in the recipe's language} — ONLY ingredients (not tools, not plain water or ice) that a step names or uses and the ingredient list does not have, in any wording ("burro" matches "Burro morbido"; a step that says "the dough" is not a missing ingredient). null when nothing is missing. Do not guess: if the steps could be using a listed ingredient under another name, leave it out.
@@ -506,7 +506,7 @@ export function interpretCheckResponse(parsed: any, draft: CheckDraft, cat: Chec
   // 5 ── Tags
   const haveTags = new Set((draft.tags ?? []).map((t) => t.toLowerCase()));
   const byLower = new Map(cat.tagNames.map((t) => [t.toLowerCase(), t]));
-  for (const t of (Array.isArray(parsed?.tags) ? parsed.tags : []).slice(0, 6)) {
+  for (const t of (Array.isArray(parsed?.tags) ? parsed.tags : []).slice(0, 5)) {
     const raw = str(t?.name);
     if (!raw || !evidenceHolds(t.evidence, corpus)) continue;
     const name = byLower.get(raw.toLowerCase()) ?? raw;

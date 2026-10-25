@@ -880,7 +880,7 @@ export default function LibraryIngredients() {
             description={t('library.ingredients.sectionClassificationHint')}
           >
             <Field label={t('library.ingredients.tags')}>
-              <TagPicker by="id" value={form.tagIds} onChange={tagIds => setForm({ ...form, tagIds })} />
+              <TagPicker by="id" scope="ingredient" value={form.tagIds} onChange={tagIds => setForm({ ...form, tagIds })} />
             </Field>
             <Field
               label={t('library.ingredients.varietyOfLabel')}

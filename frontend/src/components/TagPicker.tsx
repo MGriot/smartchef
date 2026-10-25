@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { useTagGroupLabels } from '../hooks/useTagGroupLabels';
+import { ingredientTagFilter } from '../lib/tagScope';
 
 export interface CatalogTag {
   id: string;
@@ -10,6 +11,7 @@ export interface CatalogTag {
   translated_name?: string | null;
   group_name: string;
   color?: string | null;
+  exclude_tag_ids?: string[] | string | null;
 }
 
 interface TagPickerProps {
@@ -23,13 +25,17 @@ interface TagPickerProps {
    * read-only "custom" chip (handles legacy free-text recipe tags).
    */
   by?: 'name' | 'id';
+  /** 'ingredient': offer only what a food contains and the diets it fits
+   *  (lib/tagScope.ts) — tags already on the value stay visible so they
+   *  can be removed. */
+  scope?: 'all' | 'ingredient';
 }
 
 /**
  * Toggleable chips sourced from the managed tag catalog (GET /api/tags),
  * grouped by group_name.
  */
-export default function TagPicker({ value, onChange, by = 'name' }: TagPickerProps) {
+export default function TagPicker({ value, onChange, by = 'name', scope = 'all' }: TagPickerProps) {
   const [catalog, setCatalog] = useState<CatalogTag[]>([]);
   const contentLang = useStore((s) => s.contentLang);
   const { t } = useTranslation();
@@ -55,7 +61,9 @@ export default function TagPicker({ value, onChange, by = 'name' }: TagPickerPro
     }
   };
 
-  const groups = catalog.reduce<Record<string, CatalogTag[]>>((acc, t) => {
+  const isIngredientTag = ingredientTagFilter(catalog);
+  const offered = scope === 'ingredient' ? catalog.filter(t => isIngredientTag(t) || isActive(t)) : catalog;
+  const groups = offered.reduce<Record<string, CatalogTag[]>>((acc, t) => {
     (acc[t.group_name] ||= []).push(t);
     return acc;
   }, {});

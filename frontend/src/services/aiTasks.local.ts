@@ -294,9 +294,10 @@ export function buildIngredientTidyPrompt(ctx: TidyPromptContext): string {
     sections.push(
       `"category": the aisle this ingredient belongs in, copied EXACTLY from this list, or null if none fits: ` +
       `${ctx.categoryNames.length ? ctx.categoryNames.map((c) => `"${c}"`).join(', ') : '(no categories)'}.\n` +
-      `"tags": every tag from this list that applies to the ingredient (diet, allergens, kind of food…), copied EXACTLY; ` +
-      `never invent a tag: ${ctx.tagNames.length ? ctx.tagNames.map((c) => `"${c}"`).join(', ') : '(no tags)'}.\n` +
-      `"wrongTags": tags the item has today that do NOT apply (e.g. "Vegan" on butter). Empty array if none.`,
+      `"tags": ONLY what the ingredient contains (allergens, meat, fish…) or the diets it fits, from this list, copied ` +
+      `EXACTLY; usually 0-3, never invent a tag: ${ctx.tagNames.length ? ctx.tagNames.map((c) => `"${c}"`).join(', ') : '(no tags)'}.\n` +
+      `"wrongTags": tags the item has today that do NOT apply (e.g. "Vegan" on butter), including any tag that describes ` +
+      `a dish rather than a food (course, cuisine, occasion). Empty array if none.`,
     );
   }
   if (aspects.nutrition) {

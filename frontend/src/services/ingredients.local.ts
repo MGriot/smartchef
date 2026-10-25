@@ -381,8 +381,13 @@ export async function suggestIngredientTidy(
   const [catalog, categories, tags] = await Promise.all([
     query<{ id: string; name: string }>("SELECT id, name FROM ingredients WHERE sync_status != 'deleted' ORDER BY name"),
     query<{ id: string; name: string }>('SELECT id, name FROM ingredient_categories ORDER BY sort_order, name'),
-    query<{ id: string; name: string }>('SELECT id, name FROM tags WHERE deleted_at IS NULL ORDER BY name'),
+    query<{ id: string; name: string; group_name: string | null; exclude_tag_ids: string }>('SELECT id, name, group_name, exclude_tag_ids FROM tags WHERE deleted_at IS NULL ORDER BY name'),
   ]);
+  // Only what a food contains and the diets it fits are ever offered —
+  // see lib/tagScope.ts. "wrongTags" still sees every tag the item has, so
+  // a dish tag left on an ingredient can be flagged for removal.
+  const { ingredientTagFilter } = await import('../lib/tagScope');
+  const ingredientTags = tags.filter(ingredientTagFilter(tags));
   const idByLower = (rows: Array<{ id: string; name: string }>) => {
     const map = new Map<string, string>();
     for (const r of rows) if (!map.has(r.name.trim().toLowerCase())) map.set(r.name.trim().toLowerCase(), r.id);
@@ -401,7 +406,7 @@ export async function suggestIngredientTidy(
       langs,
       catalogNames: catalog.map((c) => c.name),
       categoryNames: categories.map((c) => c.name),
-      tagNames: tags.map((t) => t.name),
+      tagNames: ingredientTags.map((t) => t.name),
     },
   );
 

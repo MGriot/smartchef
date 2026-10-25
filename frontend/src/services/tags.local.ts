@@ -16,6 +16,7 @@
 // LibraryIngredients.tsx's combined ingredients+categories+tags fetch).
 // ════════════════════════════════════════════════════════════════════════
 
+import { ingredientTagFilter } from '../lib/tagScope';
 import { query, queryOne, chunk, inPlaceholders, type LocalClient } from "../db/local";
 import { freshPortableId, portableTagId } from "./syncExtras.local";
 
@@ -400,6 +401,10 @@ export async function mergeCustomTagIntoTag(customName: string, targetTagId: str
   return { recipesUpdated };
 }
 
+/** Only what an ingredient CONTAINS and the diets that follow pass on to
+ *  the recipes that use it — see lib/tagScope.ts. Course, cuisine and the
+ *  like describe a dish, and used to pile onto every recipe that touched
+ *  an ingredient carrying one. Same rule as the backend's tags.service.ts. */
 export async function computeAutoTagNames(client: LocalClient, recipeId: string): Promise<string[]> {
   const presentRows = await client.query<{ id: string; name: string }>(
     `SELECT DISTINCT t.id, t.name
@@ -409,14 +414,22 @@ export async function computeAutoTagNames(client: LocalClient, recipeId: string)
      WHERE ri.recipe_id = $1 AND ri.ingredient_id IS NOT NULL`,
     [recipeId]
   );
-  const presentTagIds = new Set(presentRows.rows.map(r => r.id));
-  const names = new Set(presentRows.rows.map(r => r.name));
-
-  const dietRows = await client.query<{ name: string; exclude_tag_ids: string }>(
-    `SELECT name, exclude_tag_ids FROM tags WHERE exclude_tag_ids != '[]'`
+  const catalogRows = await client.query<{ id: string; name: string; group_name: string | null; exclude_tag_ids: string }>(
+    `SELECT id, name, group_name, exclude_tag_ids FROM tags`
   );
-  for (const tag of dietRows.rows) {
+  const isIngredientTag = ingredientTagFilter(catalogRows.rows);
+  const catalogById = new Map(catalogRows.rows.map(r => [r.id, r]));
+
+  const present = presentRows.rows.filter(r => {
+    const tag = catalogById.get(r.id);
+    return !!tag && isIngredientTag(tag);
+  });
+  const presentTagIds = new Set(present.map(r => r.id));
+  const names = new Set(present.map(r => r.name));
+
+  for (const tag of catalogRows.rows) {
     const excludeIds: string[] = JSON.parse(tag.exclude_tag_ids || '[]');
+    if (excludeIds.length === 0) continue;
     const excluded = excludeIds.some(id => presentTagIds.has(id));
     if (!excluded) names.add(tag.name);
   }

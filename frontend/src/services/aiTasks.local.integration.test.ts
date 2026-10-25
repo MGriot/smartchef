@@ -167,7 +167,7 @@ describe('standalone ingredient tidy (category, tags, nutrition, synonyms)', () 
   async function seedSugar() {
     const { query } = await import('../db/local');
     await query("INSERT INTO ingredient_categories (id, name, sort_order) VALUES ('bak', 'Bakery', 0), ('pan', 'Pantry', 1)");
-    await query("INSERT INTO tags (id, name) VALUES ('t-vegan', 'Vegan'), ('t-gluten', 'Gluten')");
+    await query("INSERT INTO tags (id, name, group_name) VALUES ('t-vegan', 'Vegan', 'Dieta'), ('t-gluten', 'Gluten', 'Contiene'), ('t-dessert', 'Dessert', 'Portata')");
     await query("INSERT INTO ingredients (id, category_id, name, synonyms) VALUES ('sugar', 'bak', 'Sugar', '[\"Granulated Sugar\"]')");
     await query("INSERT INTO ingredient_tags (ingredient_id, tag_id) VALUES ('sugar', 't-gluten')");
   }
@@ -175,7 +175,7 @@ describe('standalone ingredient tidy (category, tags, nutrition, synonyms)', () 
   it('asks only for the aspects requested and resolves categories and tags to ids', async () => {
     await seedSugar();
     providerAnswer = () => JSON.stringify({ items: [{
-      key: 'sugar', category: 'pantry', tags: ['vegan', 'Invented Tag'], wrongTags: ['Gluten'],
+      key: 'sugar', category: 'pantry', tags: ['vegan', 'Invented Tag', 'Dessert'], wrongTags: ['Gluten'],
       nutrition: { kcal: 387, protein: 0, carbs: 99.8, fat: 0, fiber: 0, sugar: 99.8, sodium: 1, bogus: 5 },
       synonyms: ['Table Sugar'],
       // Not asked for — must not come back.
@@ -190,7 +190,8 @@ describe('standalone ingredient tidy (category, tags, nutrition, synonyms)', () 
     const [s] = res.data;
     expect(s.categoryId).toBe('pan');
     // Names are matched case-insensitively against the user's own lists;
-    // a tag the model made up is dropped.
+    // a tag the model made up is dropped, and so is a dish tag (a course),
+    // which never belongs on an ingredient.
     expect(s.tagIds).toEqual(['t-vegan']);
     expect(s.wrongTagIds).toEqual(['t-gluten']);
     expect(s.nutrition).toMatchObject({ caloriesKcal: 387, carbsG: 99.8, sodiumMg: 1 });
