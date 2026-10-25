@@ -1,0 +1,1 @@
+Merge a pasted text into a recipe with AI (sources included); amounts as fractions (1 1/2, ½) shown the way the unit is spoken; ingredient density shows grams under cups and spoons; Markdown in descriptions and steps; a language bar for editing translations; tags now describe the dish, not its ingredients.

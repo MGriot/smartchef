@@ -1,0 +1,1 @@
+Unisci con l'AI un testo incollato alla ricetta (fonti incluse); quantità come frazioni (1 1/2, ½) mostrate come si dicono; il peso specifico degli ingredienti mostra i grammi sotto tazze e cucchiai; Markdown in descrizioni e passaggi; una barra delle lingue per modificare le traduzioni; i tag ora descrivono il piatto, non gli ingredienti.
