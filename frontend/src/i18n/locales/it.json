@@ -988,7 +988,9 @@
     "nameOnly": "Solo nome",
     "remainingAtThisStep": "A questo passaggio restano {{amount}} — usa questi",
     "ofTotal": "su {{total}} nella ricetta",
-    "showUsedUp": "{{count}} già esauriti — mostrali comunque"
+    "showUsedUp": "{{count}} già esauriti — mostrali comunque",
+    "quantityHint": "Interi, decimali o frazioni: 2, 1,5, 3/4, 1 1/2, ½",
+    "quantityInvalid": "Quantità non valida. Prova 2, 1,5, 3/4 o 1 1/2"
   },
   "errors": {
     "couldNotCreateIngredient": "Impossibile creare l'ingrediente",

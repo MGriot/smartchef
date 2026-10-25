@@ -143,3 +143,85 @@ export function repairIngredientAmount(input: IngredientAmount): IngredientAmoun
 
   return { quantity, quantityText, notes };
 }
+
+// ── Editor input & display ─────────────────────────────────────────────
+//
+// A cook types "1 1/2", "½", "1,5" or "3" into the same field, and expects
+// to read back whatever form suits the unit: "1 ½ cup" but "250 g". The
+// stored value stays a plain number (REAL / NUMERIC(10,4)), so scaling is
+// arithmetic and the display form is chosen again for every servings value.
+
+/**
+ * Parses a whole quantity field, strictly. Unlike parseAmount() — which
+ * is built for import and takes the first number it sees — anything left
+ * over after the amount ("abc 5", "3-4", "2 eggs") makes the input invalid,
+ * so a typo in the editor is flagged rather than silently half-read.
+ * Returns null for an empty field and undefined for an invalid one.
+ */
+export function parseQuantityStrict(text: string | null | undefined): number | null | undefined {
+  const s = String(text ?? '').trim();
+  if (!s) return null;
+  const vulgar = `[${VULGAR_CHARS}]`;
+  const shapes = [
+    /^\d+(?:[.,]\d+)?$/,
+    /^[.,]\d+$/,
+    /^\d+\s*\/\s*\d+$/,
+    /^\d+\s*[-\s]\s*\d+\s*\/\s*\d+$/,
+    new RegExp(`^${vulgar}$`),
+    new RegExp(`^\\d+\\s*${vulgar}$`),
+  ];
+  if (!shapes.some(re => re.test(s))) return undefined;
+  if (/\/\s*0+$/.test(s)) return undefined;
+  const value = /^[.,]/.test(s) ? round(parseFloat(`0.${s.slice(1)}`)) : parseAmount(s);
+  return value !== undefined && Number.isFinite(value) ? value : undefined;
+}
+
+/** Fractions a kitchen actually says, as glyphs. Sixths, fifths and
+ *  sixteenths read as decimals: nobody measures ⅚ of a cup. */
+const DISPLAY_FRACTIONS: Array<[number, string]> = [
+  [1 / 8, '⅛'], [1 / 4, '¼'], [1 / 3, '⅓'], [3 / 8, '⅜'], [1 / 2, '½'],
+  [5 / 8, '⅝'], [2 / 3, '⅔'], [3 / 4, '¾'], [7 / 8, '⅞'],
+];
+
+/** How close the fractional part must be to a kitchen fraction to be
+ *  written as one: 0.333 is ⅓, 0.3 is not. */
+const FRACTION_TOLERANCE = 0.02;
+
+/** Units measured on a scale or a jug: grams and millilitres read as
+ *  decimals ("250 g", "1.2 kg"); "1 ½ g" would look like a typo. Spoons
+ *  and cups — volume, but system-neutral or imperial — keep fractions. */
+const DECIMAL_UNITS = new Set(['mg', 'g', 'gr', 'grammi', 'kg', 'kilogrammi', 'ml', 'millilitri', 'cl', 'dl', 'l', 'litri', 'oz', 'lb', 'lbs', 'mm', 'cm']);
+
+function decimalText(value: number): string {
+  const abs = Math.abs(value);
+  const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
+  return String(Number(value.toFixed(digits)));
+}
+
+/**
+ * Writes a quantity in the form that suits its unit: a rounded decimal for
+ * weights and metric volumes, a mixed number ("1 ½", "⅓") for spoons, cups,
+ * pieces and unit-less amounts whenever the value is close to a kitchen
+ * fraction — a decimal otherwise ("2.4").
+ */
+export function formatQuantity(value: number, unitSymbol?: string | null): string {
+  if (!Number.isFinite(value)) return '';
+  const symbol = unitSymbol?.trim().toLowerCase() ?? '';
+  if (DECIMAL_UNITS.has(symbol) || value < 0) return decimalText(value);
+
+  let whole = Math.floor(value);
+  const frac = value - whole;
+  if (frac < FRACTION_TOLERANCE) return String(whole);
+  if (1 - frac < FRACTION_TOLERANCE) return String(whole + 1);
+  const near = DISPLAY_FRACTIONS.find(([f]) => Math.abs(frac - f) < FRACTION_TOLERANCE);
+  if (!near) return decimalText(value);
+  whole = Math.max(0, whole);
+  return whole > 0 ? `${whole} ${near[1]}` : near[1];
+}
+
+/** formatQuantity() followed by the unit, the shape every amount label
+ *  in the app takes. */
+export function formatQuantityWithUnit(value: number, unitSymbol?: string | null): string {
+  const qty = formatQuantity(value, unitSymbol);
+  return unitSymbol ? `${qty} ${unitSymbol}` : qty;
+}

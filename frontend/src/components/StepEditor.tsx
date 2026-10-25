@@ -1,3 +1,5 @@
+import QuantityInput from './QuantityInput';
+import { formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Autocomplete from './Autocomplete';
@@ -77,7 +79,7 @@ type Popover = 'ingredient' | 'tool' | 'technique' | null;
 type PickAmountMode = 'fraction' | 'absolute' | 'none';
 
 const amountText = (qty: number, unitSymbol?: string | null): string =>
-  `${qty % 1 === 0 ? qty : Number(qty.toFixed(2))}${unitSymbol ? ` ${unitSymbol}` : ''}`;
+  formatQuantityWithUnit(qty, unitSymbol);
 
 /**
  * A step description textarea with a small toolbar to insert inline
@@ -354,9 +356,9 @@ export default function StepEditor({
             <>
               <div className="w-24">
                 <label className="block text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('editors.qty')}</label>
-                <input
-                  type="number" step="any" value={pickQuantity ?? ''}
-                  onChange={e => setPickQuantity(e.target.value ? parseFloat(e.target.value) : null)}
+                <QuantityInput
+                  value={pickQuantity} unitSymbol={selectedIngredient?.unitSymbol}
+                  onChange={setPickQuantity}
                   className="w-full px-3 py-2 bg-white dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-sm font-bold"
                 />
               </div>

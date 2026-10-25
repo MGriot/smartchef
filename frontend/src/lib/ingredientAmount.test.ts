@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseAmount, repairIngredientAmount } from './ingredientAmount';
+import { parseAmount, repairIngredientAmount, parseQuantityStrict, formatQuantity, formatQuantityWithUnit } from './ingredientAmount';
 
 describe('parseAmount', () => {
   it('parses plain numbers with either decimal separator', () => {
@@ -100,5 +100,66 @@ describe('repairIngredientAmount', () => {
   it('passes a clean row through untouched', () => {
     const input = { quantity: 3, quantityText: '3', notes: null };
     expect(repairIngredientAmount(input)).toEqual(input);
+  });
+});
+
+describe('parseQuantityStrict', () => {
+  it('accepts integers, decimals, fractions and mixed numbers', () => {
+    expect(parseQuantityStrict('3')).toBe(3);
+    expect(parseQuantityStrict('1,5')).toBe(1.5);
+    expect(parseQuantityStrict('1.25')).toBe(1.25);
+    expect(parseQuantityStrict(',5')).toBe(0.5);
+    expect(parseQuantityStrict('3/4')).toBe(0.75);
+    expect(parseQuantityStrict('1 1/2')).toBe(1.5);
+    expect(parseQuantityStrict('½')).toBe(0.5);
+    expect(parseQuantityStrict('2½')).toBe(2.5);
+    expect(parseQuantityStrict(' 2 ¼ ')).toBe(2.25);
+  });
+
+  it('returns null for an empty field', () => {
+    expect(parseQuantityStrict('')).toBeNull();
+    expect(parseQuantityStrict('   ')).toBeNull();
+    expect(parseQuantityStrict(null)).toBeNull();
+  });
+
+  it('rejects leftovers, ranges and division by zero', () => {
+    expect(parseQuantityStrict('abc 5')).toBeUndefined();
+    expect(parseQuantityStrict('3-4')).toBeUndefined();
+    expect(parseQuantityStrict('2 eggs')).toBeUndefined();
+    expect(parseQuantityStrict('1/0')).toBeUndefined();
+  });
+});
+
+describe('formatQuantity', () => {
+  it('writes kitchen fractions for spoons, cups and pieces', () => {
+    expect(formatQuantity(0.5, 'cup')).toBe('½');
+    expect(formatQuantity(1.5, 'tbsp')).toBe('1 ½');
+    expect(formatQuantity(0.3333, 'tsp')).toBe('⅓');
+    expect(formatQuantity(2.6667)).toBe('2 ⅔');
+    expect(formatQuantity(0.75, 'pz')).toBe('¾');
+  });
+
+  it('falls back to decimals when no kitchen fraction is close', () => {
+    expect(formatQuantity(2.4, 'cup')).toBe('2.4');
+    expect(formatQuantity(0.1)).toBe('0.1');
+  });
+
+  it('keeps whole numbers whole, absorbing float noise', () => {
+    expect(formatQuantity(3)).toBe('3');
+    expect(formatQuantity(1.9999)).toBe('2');
+  });
+
+  it('writes decimals for metric weights and volumes', () => {
+    expect(formatQuantity(1.5, 'kg')).toBe('1.5');
+    expect(formatQuantity(250, 'g')).toBe('250');
+    expect(formatQuantity(0.3333, 'l')).toBe('0.33');
+    expect(formatQuantity(123.456, 'ml')).toBe('123');
+  });
+
+  it('re-chooses the form after scaling', () => {
+    // 1 cup for 4 servings, read for 6: 1.5 cups.
+    expect(formatQuantity(1 * 6 / 4, 'cup')).toBe('1 ½');
+    expect(formatQuantityWithUnit(1 * 6 / 4, 'cup')).toBe('1 ½ cup');
+    expect(formatQuantityWithUnit(2)).toBe('2');
   });
 });

@@ -1,3 +1,5 @@
+import QuantityInput from '../components/QuantityInput';
+import { formatQuantity, formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -276,7 +278,7 @@ const popoverLayer = (inBar: boolean, node: React.ReactNode) =>
  *  recipe's own base servings. (View mode's formatAmount() is the one that
  *  scales to the slider and restates in the reader's measurement system.) */
 const formatEditorAmount = (qty: number, unitSymbol?: string | null): string =>
-  `${qty % 1 === 0 ? qty : Number(qty.toFixed(2))}${unitSymbol ? ` ${unitSymbol}` : ''}`;
+  formatQuantityWithUnit(qty, unitSymbol);
 
 const uniqueNames = (values: Array<string | null | undefined>): string[] => {
   const out: string[] = [];
@@ -346,7 +348,7 @@ const SubIngredientList: React.FC<{
               <div key={i} className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400 py-1">
                 <span>{ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaled) : ing.subRecipeTitle}</span>
                 <span className="text-zinc-400 dark:text-zinc-500 font-medium">
-                  {scaled !== null ? scaled % 1 === 0 ? scaled : scaled.toFixed(1) : ''} {ing.unitSymbol || ing.quantityText || ''}
+                  {scaled !== null ? formatQuantity(scaled, ing.unitSymbol) : ''} {ing.unitSymbol || ing.quantityText || ''}
                 </span>
               </div>
             );
@@ -2328,9 +2330,9 @@ const RecipeDetail: React.FC = () => {
                         </div>
                         <div className="col-span-5 @lg:col-span-3">
                           <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.qty')}</label>
-                          <input
-                            type="number" step="any" value={ing.quantity || ''}
-                            onChange={e => updateIngredient(idx, 'quantity', parseFloat(e.target.value))}
+                          <QuantityInput
+                            value={ing.quantity} unitSymbol={ing.unitSymbol}
+                            onChange={v => updateIngredient(idx, 'quantity', v)}
                             className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
                           />
                         </div>
@@ -2707,9 +2709,9 @@ const RecipeDetail: React.FC = () => {
                                         </>
                                       ) : (
                                         <>
-                                          <input
-                                            type="number" step="any" value={ref!.quantity ?? ''}
-                                            onChange={e => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', e.target.value ? parseFloat(e.target.value) : null)}
+                                          <QuantityInput
+                                            value={ref!.quantity} unitSymbol={ref!.unitSymbol || ing.unitSymbol}
+                                            onChange={v => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', v)}
                                             className="flex-1 min-w-0 max-w-[6rem] border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
                                           />
                                           <select

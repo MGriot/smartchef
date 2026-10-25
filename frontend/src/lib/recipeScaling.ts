@@ -15,6 +15,7 @@
 
 import { remainingBeforeStep, stepIngredientConsumption } from './stepRefs';
 import { toSystem, type MeasurementSystem } from './unitConvert';
+import { formatQuantity } from './ingredientAmount';
 
 export interface ScalerIngredient {
   sortOrder: number;
@@ -84,10 +85,12 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
     return qty * servingsScale;
   };
 
-  const scale = (qty: number | null): string => {
+  /** The form ("1 ½", "250", "2.4") is chosen per unit after scaling, so
+   *  a cup that becomes 1.5 cups reads "1 ½" rather than "1.5". */
+  const scale = (qty: number | null, unitSymbol?: string | null): string => {
     const v = scaleNum(qty);
     if (v === null) return '';
-    return v % 1 === 0 ? String(v) : v.toFixed(1);
+    return formatQuantity(v, unitSymbol);
   };
 
   /** Scales to the current portion count AND restates in the chosen system.
@@ -100,7 +103,7 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
   const formatAmount = (qty: number | null, unitSymbol?: string | null, quantityText?: string | null): string => {
     const v = scaleNum(qty);
     if (v === null) return quantityText || '';
-    const fallback = `${v % 1 === 0 ? v : v.toFixed(1)}${unitSymbol ? ` ${unitSymbol}` : quantityText ? ` ${quantityText}` : ''}`;
+    const fallback = `${formatQuantity(v, unitSymbol)}${unitSymbol ? ` ${unitSymbol}` : quantityText ? ` ${quantityText}` : ''}`;
     if (!unitSymbol) return fallback;
     const converted = toSystem(v, unitSymbol, displaySystem);
     return converted ? `${converted.value} ${converted.symbol}` : fallback;
@@ -165,10 +168,10 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
         return {
           sortOrder: ing.sortOrder,
           name: ing.ingredientName || ing.subRecipeTitle || fallbackName,
-          quantity: ref.quantity != null ? scale(ref.quantity) : '',
+          quantity: ref.quantity != null ? scale(ref.quantity, ref.unitSymbol || ing.unitSymbol) : '',
           unitSymbol: ref.unitSymbol || ing.unitSymbol || '',
           portionPct: 100,
-          remainingAfter: after != null ? scale(after) : '',
+          remainingAfter: after != null ? scale(after, ing.unitSymbol) : '',
           totalUnitSymbol: ing.unitSymbol || '',
         };
       }
@@ -176,10 +179,10 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
       return {
         sortOrder: ing.sortOrder,
         name: ing.ingredientName || ing.subRecipeTitle || fallbackName,
-        quantity: scale(portionQty),
+        quantity: scale(portionQty, ing.unitSymbol),
         unitSymbol: ing.unitSymbol || '',
         portionPct: Math.round(ref.portion * 100),
-        remainingAfter: after != null ? scale(after) : '',
+        remainingAfter: after != null ? scale(after, ing.unitSymbol) : '',
         totalUnitSymbol: ing.unitSymbol || '',
       };
     }).filter((x): x is StepIngredientUse => x !== null);

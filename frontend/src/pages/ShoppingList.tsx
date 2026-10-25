@@ -1,3 +1,4 @@
+import { formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
@@ -244,7 +245,7 @@ export default function ShoppingList() {
     for (const item of activeList.items) {
       for (const src of item.sourceDetails) {
         if (!map.has(src.recipeId)) map.set(src.recipeId, { recipeTitle: src.recipeTitle, items: [] });
-        map.get(src.recipeId)!.items.push({ ...item, forQuantity: `${src.quantity % 1 === 0 ? src.quantity : src.quantity.toFixed(1)} ${src.unitSymbol}` });
+        map.get(src.recipeId)!.items.push({ ...item, forQuantity: formatQuantityWithUnit(src.quantity, src.unitSymbol) });
       }
     }
     return Array.from(map.entries()).map(([recipeId, v]) => ({ recipeId, ...v }));

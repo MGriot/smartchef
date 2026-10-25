@@ -988,7 +988,9 @@
     "nameOnly": "Name only",
     "remainingAtThisStep": "{{amount}} left at this step — use that",
     "ofTotal": "of {{total}} in the recipe",
-    "showUsedUp": "{{count}} already used up — show them anyway"
+    "showUsedUp": "{{count}} already used up — show them anyway",
+    "quantityHint": "Whole numbers, decimals or fractions: 2, 1.5, 3/4, 1 1/2, ½",
+    "quantityInvalid": "Not a quantity. Try 2, 1.5, 3/4 or 1 1/2"
   },
   "errors": {
     "couldNotCreateIngredient": "Could not create ingredient",

@@ -7,6 +7,7 @@
 // be tested — the suite has no jsdom.
 // ════════════════════════════════════════════════════════════════════════
 
+import { formatQuantity } from './ingredientAmount';
 import { pickIngredientName } from './ingredientDisplay';
 
 export interface ShoppingListSource {
@@ -87,13 +88,13 @@ export function formatQty(item: ShoppingListItem, t: Translate): string {
   if (item.quantityText) return item.quantityText;
   if (item.totalQuantity) {
     const v = item.totalQuantity;
-    return `${v % 1 === 0 ? v : v.toFixed(1)} ${item.unit?.symbol ?? ''}`.trim();
+    return `${formatQuantity(v, item.unit?.symbol)} ${item.unit?.symbol ?? ''}`.trim();
   }
   return t('shopping.toTaste');
 }
 
 function formatAmount(quantity: number, unitSymbol: string): string {
-  return `${quantity % 1 === 0 ? quantity : quantity.toFixed(1)} ${unitSymbol}`.trim();
+  return `${formatQuantity(quantity, unitSymbol)} ${unitSymbol}`.trim();
 }
 
 export interface ShoppingSheetRow {

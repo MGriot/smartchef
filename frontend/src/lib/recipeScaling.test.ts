@@ -35,11 +35,13 @@ describe('createRecipeScaler — amounts', () => {
     expect(s.formatAmount(600, 'g')).toBe('1200 g');
   });
 
-  it('keeps one decimal for fractional results, none for whole ones', () => {
+  it('picks the display form after scaling: fractions for pieces and cups, decimals for grams', () => {
     const s = scalerAt(3);
-    expect(s.scale(3)).toBe('2.3');
+    expect(s.scale(3)).toBe('2 ¼');
     expect(s.scale(4)).toBe('3');
-    expect(s.formatAmount(3, 'pz')).toBe('2.3 pz');
+    expect(s.formatAmount(3, 'pz')).toBe('2 ¼ pz');
+    expect(s.formatAmount(3, 'g')).toBe('2.25 g');
+    expect(s.scale(3.2)).toBe('2.4');
   });
 
   it('restates in the reader\'s system where a conversion exists', () => {
