@@ -10,7 +10,7 @@ import AddToCollectionPicker from '../components/AddToCollectionPicker';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { useStore } from '../store/app.store';
-import { listLanguages, languageLabel } from '../lib/languages';
+import { languageLabel } from '../lib/languages';
 import { useLanguages } from '../hooks/useLanguages';
 import { useFileExport } from '../hooks/useFileExport';
 import { slugForFilename } from '../lib/fileExport';
@@ -19,7 +19,10 @@ import Autocomplete from '../components/Autocomplete';
 import StepEditor, { StepIngredientAmount } from '../components/StepEditor';
 import RecipeSourcesEditor, { RecipeSourceEntry, SOURCE_TYPE_META } from '../components/RecipeSourcesEditor';
 import ImageUrlInput from '../components/ImageUrlInput';
-import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
+import type { TranslationEntry } from '../components/TranslationsEditor';
+import TranslationLanguageBar from '../components/TranslationLanguageBar';
+import RecipeTranslationPanel from '../components/RecipeTranslationPanel';
+import { applyMachineTranslation, completeness, languagesIn, machineTranslationInput, withoutLanguage, type TranslatableDraft } from '../lib/recipeTranslationDraft';
 import TagPicker from '../components/TagPicker';
 import { pickIngredientName } from '../lib/ingredientDisplay';
 import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/recipeDraftCoercion';
@@ -472,6 +475,11 @@ const RecipeDetail: React.FC = () => {
   // The review dialog serves both "Check with AI" and "Merge text with AI".
   const [aiMode, setAiMode] = useState<'check' | 'merge'>('check');
   const [mergeTextOpen, setMergeTextOpen] = useState(false);
+  // The language the editor is writing in: null = the recipe's own, a code
+  // = that translation (components/RecipeTranslationPanel.tsx). Languages
+  // just added from the bar are listed before they hold any text.
+  const [editLang, setEditLang] = useState<string | null>(null);
+  const [addedLangs, setAddedLangs] = useState<string[]>([]);
   const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
   // Which ingredient/step cards are folded down to a one-line summary, and
   // whether the two editors are folded whole. A long recipe is ~20 cards of
@@ -607,32 +615,34 @@ const RecipeDetail: React.FC = () => {
   };
 
   /* ── AI recipe translation ──────────────────────────────────────── */
-  // English is the app's base language, never a translation target.
-  const [aiTranslateLang, setAiTranslateLang] = useState(listLanguages().find(l => l.code !== 'en')?.code || '');
   const [aiTranslating, setAiTranslating] = useState(false);
   const [aiTranslateError, setAiTranslateError] = useState<string | null>(null);
 
-  // If the target language ever matches the recipe's own written language
-  // (e.g. once `recipe` finishes loading after this state's initial guess),
-  // bump to the next different language rather than offering a no-op translate.
-  useEffect(() => {
-    const baseLang = recipe?.language_code || draft.language_code;
-    if (baseLang && aiTranslateLang === baseLang) {
-      setAiTranslateLang(listLanguages().find(l => l.code !== baseLang && l.code !== 'en')?.code || aiTranslateLang);
-    }
-  }, [recipe?.language_code, draft.language_code]);
-
-  const handleAiTranslate = async () => {
+  /** Fills the empty fields of `targetLang` in the editor's draft. In
+   *  standalone mode the translation comes back unsaved (translate-preview)
+   *  and only blanks are filled, so nothing the user wrote is replaced; a
+   *  server translates and saves in one go, as it always has. */
+  const handleAiTranslate = async (targetLang: string) => {
     if (!id) return;
-    const langLabel = languageLabel(aiTranslateLang);
-    if (!window.confirm(t('recipeDetail.aiTranslateConfirm', { lang: langLabel }))) return;
     setAiTranslating(true);
     setAiTranslateError(null);
     try {
+      if (isStandalone) {
+        const res = await apiFetch('/api/recipes/translate-preview', {
+          method: 'POST',
+          body: JSON.stringify({ input: machineTranslationInput(draft), lang: targetLang }),
+          timeoutMs: 650_000,
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.translationFailed'));
+        setDraft(prev => applyMachineTranslation(prev as TranslatableDraft, targetLang, json.data) as Partial<Recipe>);
+        return;
+      }
+      if (!window.confirm(t('recipeDetail.aiTranslateConfirm', { lang: languageLabel(targetLang) }))) return;
       // LLM translation of a full recipe (title/description/steps/notes) can take
       // several minutes on local CPU-only Ollama inference — same ceiling as
       // RecipeImport.tsx's parse call, just above the backend's own 600s cap.
-      const res = await apiFetch(`/api/recipes/${id}/translate/${aiTranslateLang}`, { method: 'POST', timeoutMs: 650_000 });
+      const res = await apiFetch(`/api/recipes/${id}/translate/${targetLang}`, { method: 'POST', timeoutMs: 650_000 });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.translationFailed'));
       await fetchRecipe();
@@ -1508,6 +1518,10 @@ const RecipeDetail: React.FC = () => {
         enterRawTextMode();
       }
     };
+    const editBaseLang = draft.language_code || recipe.language_code || 'en';
+    const editLangs = [...new Set([...languagesIn(draft as TranslatableDraft), ...addedLangs, ...(editLang ? [editLang] : [])])]
+      .filter(l => l !== editBaseLang);
+
     /** "Check with AI": sends the draft as it is right now (unsaved edits
      *  included) and opens the review. Nothing changes until the user ticks
      *  and applies — see lib/recipeCheck.ts for why the answer can be trusted. */
@@ -2085,6 +2099,28 @@ const RecipeDetail: React.FC = () => {
         />
         <RecipeMergeTextDialog open={mergeTextOpen} onClose={() => setMergeTextOpen(false)} onSubmit={runAiMerge} />
 
+        {!rawTextMode && (
+          <TranslationLanguageBar
+            baseLang={editBaseLang}
+            active={editLang}
+            langs={editLangs}
+            languages={languages}
+            progress={lang => completeness(draft as TranslatableDraft, lang)}
+            onSelect={setEditLang}
+            onAdd={lang => { setAddedLangs(prev => [...new Set([...prev, lang])]); setEditLang(lang); }}
+            onRemove={lang => {
+              setDraft(prev => withoutLanguage(prev as TranslatableDraft, lang) as Partial<Recipe>);
+              setAddedLangs(prev => prev.filter(l => l !== lang));
+              setEditLang(null);
+            }}
+            onAiFill={id ? handleAiTranslate : undefined}
+            aiBusy={aiTranslating}
+          />
+        )}
+        {aiTranslateError && !rawTextMode && (
+          <p className="max-w-7xl mx-auto px-6 mt-3 text-sm text-red-600 font-medium">{aiTranslateError}</p>
+        )}
+
         {rawTextMode ? (
           <main className="max-w-4xl mx-auto px-6 py-10 space-y-4">
             <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('recipeDetail.rawTextEditHint')}</p>
@@ -2098,6 +2134,16 @@ const RecipeDetail: React.FC = () => {
               className="w-full h-[70vh] rounded-3xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 font-mono text-xs leading-relaxed focus:ring-2 focus:ring-primary/20 focus:outline-none"
             />
           </main>
+        ) : editLang ? (
+          <RecipeTranslationPanel
+            draft={draft as TranslatableDraft}
+            lang={editLang}
+            langLabel={languageLabel(editLang)}
+            onChange={next => setDraft(next as Partial<Recipe>)}
+            stepIngredients={(draft.ingredients || []).map(i => ({ sortOrder: i.sortOrder, name: i.ingredientName || i.subRecipeTitle || '', quantity: '' }))}
+            stepTools={stepTextTools}
+            stepTechniques={stepTextTechniques}
+          />
         ) : (
         <main className="max-w-7xl mx-auto px-6 py-10">
           {/* Two columns: what you actually edit on the left, everything
@@ -2121,7 +2167,6 @@ const RecipeDetail: React.FC = () => {
                       >
                         {languages.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                       </select>
-                      <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
                     </span>
                   </div>
                   {/* A textarea so a long title wraps instead of being clipped. */}
@@ -2467,16 +2512,6 @@ const RecipeDetail: React.FC = () => {
                             <p className="text-[9px] text-sky-600 dark:text-sky-500 font-bold mt-1">{t('recipeDetail.substituteHint')}</p>
                           )}
                         </div>
-                        <details className="col-span-12">
-                          <summary className="cursor-pointer text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 select-none">{t('recipeDetail.ingredientTranslationsOptional')}</summary>
-                          <TranslationsEditor
-                            translations={ing.translations || []}
-                            onChange={translations => updateIngredient(idx, 'translations', translations)}
-                            showTitleDescription={false}
-                            notesLabel={t('recipeDetail.chefsNoteIngredientPlaceholder')}
-                            compact
-                          />
-                        </details>
                       </div>
                       </>
                       )}
@@ -2600,17 +2635,6 @@ const RecipeDetail: React.FC = () => {
                           className="flex-1 min-w-0 border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
                         />
                       </div>
-                      <details className="mt-3">
-                        <summary className="cursor-pointer text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 select-none">{t('recipeDetail.stepTranslationsOptional')}</summary>
-                        <TranslationsEditor
-                          translations={step.translations || []}
-                          onChange={translations => updateStep(idx, 'translations', translations)}
-                          titleLabel={t('recipeDetail.stepTitle')}
-                          descriptionLabel={t('recipeDetail.stepDescription')}
-                          notesLabel={t('recipeDetail.chefsNote')}
-                          compact
-                        />
-                      </details>
                       <AutoTextarea
                         value={step.notes || ''}
                         onChange={e => updateStep(idx, 'notes', e.target.value)}
@@ -3032,40 +3056,6 @@ const RecipeDetail: React.FC = () => {
                 />
               </div>
 
-              {/* Translations */}
-              <div id="translations-section" className="order-[12] xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] scroll-mt-24">
-                <details>
-                <summary className="cursor-pointer font-headline font-bold text-lg select-none">{t('recipeDetail.translations')}</summary>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2 mb-6">{t('recipeDetail.translationsHint')}</p>
-                <TranslationsEditor
-                  translations={draft.translations || []}
-                  onChange={translations => updateDraft('translations', translations)}
-                />
-                <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800">
-                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.aiTranslate')}</span>
-                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-3">{t('recipeDetail.aiTranslateHint')}</p>
-                  <div className="flex items-center gap-3">
-                    <select
-                      value={aiTranslateLang}
-                      onChange={e => setAiTranslateLang(e.target.value)}
-                      className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
-                    >
-                      {languages.filter(l => l.code !== 'en').map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={handleAiTranslate}
-                      disabled={aiTranslating || !aiTranslateLang}
-                      className="px-5 py-3 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
-                    >
-                      {aiTranslating && <span className="material-symbols-outlined text-base animate-spin">sync</span>}
-                      {aiTranslating ? t('recipeDetail.aiTranslating') : t('recipeDetail.aiTranslateButton')}
-                    </button>
-                  </div>
-                  {aiTranslateError && <p className="mt-3 text-sm text-red-600 font-medium">{aiTranslateError}</p>}
-                </div>
-                </details>
-              </div>
             </aside>
           </div>
         </main>

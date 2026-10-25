@@ -796,6 +796,19 @@
       "failed": "La fusion avec l'IA a échoué",
       "stepAdd": "Nouvelle étape",
       "sourceAdd": "Source : {{type}}"
+    },
+    "editLang": {
+      "editing": "Modification",
+      "add": "Langue",
+      "pick": "Ajouter une traduction…",
+      "aiFill": "Compléter avec l'IA",
+      "remove": "Supprimer la traduction",
+      "removeConfirm": "Supprimer toute la traduction en {{lang}} de cette recette ? Elle disparaît à l'enregistrement.",
+      "missing": "manquant",
+      "panelHint": "Vous rédigez la version en {{lang}}. Chaque champ affiche l'original au-dessus. Quantités, unités, ustensiles et temps sont les mêmes dans toutes les langues : revenez à l'original pour les modifier.",
+      "ingredientNotes": "Notes des ingrédients",
+      "stepText": "Texte",
+      "copyOriginal": "Partir de l'original (garde les liens vers les ingrédients)"
     }
   },
   "recipeCreate": {

@@ -796,6 +796,19 @@
       "failed": "L'unione con l'AI non è riuscita",
       "stepAdd": "Nuovo passaggio",
       "sourceAdd": "Fonte: {{type}}"
+    },
+    "editLang": {
+      "editing": "Stai modificando",
+      "add": "Lingua",
+      "pick": "Aggiungi una traduzione…",
+      "aiFill": "Completa con l'AI",
+      "remove": "Elimina traduzione",
+      "removeConfirm": "Eliminare l'intera traduzione in {{lang}} di questa ricetta? Sparisce quando salvi.",
+      "missing": "mancante",
+      "panelHint": "Stai scrivendo la versione in {{lang}}. Ogni campo mostra sopra l'originale. Quantità, unità, strumenti e tempi sono uguali in ogni lingua: torna all'originale per modificarli.",
+      "ingredientNotes": "Note degli ingredienti",
+      "stepText": "Testo",
+      "copyOriginal": "Parti dall'originale (mantiene i collegamenti agli ingredienti)"
     }
   },
   "login": {

@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { useLanguages } from '../hooks/useLanguages';
 
 export interface TranslationEntry {
   lang: string;
@@ -30,6 +31,7 @@ export default function TranslationsEditor({
   showTitleDescription = true, compact = false,
 }: TranslationsEditorProps) {
   const { t } = useTranslation();
+  const { languages } = useLanguages();
   const resolvedTitleLabel = titleLabel ?? t('common.title');
   const resolvedDescriptionLabel = descriptionLabel ?? t('recipeDetail.description');
 
@@ -43,13 +45,20 @@ export default function TranslationsEditor({
     <div className="space-y-2">
       {translations.map((tr, idx) => (
         <div key={idx} className={`flex gap-2 items-start ${compact ? 'bg-white dark:bg-zinc-900 rounded-lg p-2 border border-zinc-100 dark:border-zinc-800' : 'bg-zinc-50 dark:bg-zinc-900 rounded-xl p-3'}`}>
-          <input
-            type="text" value={tr.lang}
+          {/* A picker, not a free-text code: "EN", "en-GB" and "eng" typed by
+              hand used to land as three different languages. */}
+          <select
+            value={tr.lang}
             onChange={e => update(idx, 'lang', e.target.value)}
-            placeholder="lang"
             title={t('common.languageCodeHint')}
-            className={`w-16 shrink-0 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 font-bold focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs' : 'py-2 text-sm'}`}
-          />
+            className={`w-28 shrink-0 border-none bg-zinc-50 dark:bg-zinc-900 rounded-lg px-2 font-bold focus:ring-2 focus:ring-primary/20 ${compact ? 'py-1.5 text-xs' : 'py-2 text-sm'}`}
+          >
+            <option value="" disabled>—</option>
+            {tr.lang && !languages.some(l => l.code === tr.lang) && <option value={tr.lang}>{tr.lang}</option>}
+            {languages.map(l => (
+              <option key={l.code} value={l.code} disabled={l.code !== tr.lang && translations.some(o => o.lang === l.code)}>{l.label}</option>
+            ))}
+          </select>
           <div className="flex-1 space-y-1.5">
             {showTitleDescription && (
               <>

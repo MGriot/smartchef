@@ -796,6 +796,19 @@
       "failed": "The AI merge failed",
       "stepAdd": "New step",
       "sourceAdd": "Source: {{type}}"
+    },
+    "editLang": {
+      "editing": "Editing",
+      "add": "Language",
+      "pick": "Add a translation…",
+      "aiFill": "Fill the gaps with AI",
+      "remove": "Remove translation",
+      "removeConfirm": "Remove the whole {{lang}} translation of this recipe? It is gone once you save.",
+      "missing": "missing",
+      "panelHint": "You are writing the {{lang}} version. Each field shows the original above it. Quantities, units, tools and times are the same in every language: switch back to the original to change them.",
+      "ingredientNotes": "Ingredient notes",
+      "stepText": "Text",
+      "copyOriginal": "Start from the original (keeps the ingredient links)"
     }
   },
   "recipeCreate": {
