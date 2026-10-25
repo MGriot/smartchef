@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from "express";
 import { query } from "../db/pool";
+import { listCatalog } from "../services/catalogList.service";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 
@@ -12,23 +13,9 @@ export const techniquesRouter = Router();
 
 // GET /techniques
 techniquesRouter.get("/", async (req: Request, res: Response) => {
-  const { lang, q } = req.query;
-  const params: unknown[] = [];
-  if (lang) params.push(lang);
-  if (q) params.push(`%${q}%`);
-  const rows = await query(
-    `SELECT t.*, ${lang ? "tt.name" : "NULL"} AS translated_name,
-            COALESCE(
-              (SELECT json_agg(json_build_object('lang', tr.language_code, 'name', tr.name, 'description', tr.description))
-               FROM technique_translations tr WHERE tr.technique_id = t.id),
-              '[]'::json
-            ) AS translations
-     FROM techniques t
-     ${lang ? "LEFT JOIN technique_translations tt ON tt.technique_id = t.id AND LOWER(tt.language_code) = LOWER($1)" : ""}
-     WHERE t.deleted_at IS NULL
-       ${q ? `AND (t.name ILIKE $${params.length} OR EXISTS (SELECT 1 FROM unnest(t.synonyms) syn WHERE syn ILIKE $${params.length}))` : ""}
-     ORDER BY t.name`,
-    params
+  const rows = await listCatalog(
+    { table: "techniques", translationTable: "technique_translations", foreignKey: "technique_id", withDescription: true, orderBy: "t.name" },
+    req.query.lang, req.query.q,
   );
   res.json({ data: rows });
 });
