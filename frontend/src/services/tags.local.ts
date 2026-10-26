@@ -40,6 +40,16 @@ export async function syncTag(id: string): Promise<void> {
   }
 }
 
+/** Every tag edit used to `await syncTag()`, which waits on gitSync's single
+ *  shared queue — the same one a whole sync cycle (fetch, merge, push)
+ *  holds — so saving or deleting a tag could hang the Tags page for
+ *  seconds. Same fix and trade-off as recipes.local.ts's
+ *  syncRecipeInBackground(): the SQLite write is the answer, the entity
+ *  file follows. */
+function syncTagInBackground(id: string): void {
+  void syncTag(id);
+}
+
 /** Re-serializes every tag into the Hidden Clone — same "picking a new
  *  Sync Folder/Git Remote can't know about rows that predate it" reason
  *  ingredients.local.ts's resyncAllTools() exists for, and was missing
@@ -126,13 +136,17 @@ export interface TagInput {
 async function upsertTagTranslations(tagId: string, translations?: TagInput['translations']) {
   if (!translations) return;
   await query("DELETE FROM tag_translations WHERE tag_id=$1", [tagId]);
+  // One INSERT for every language: each statement is a bridge round-trip on Android.
+  const params: unknown[] = [];
+  const values: string[] = [];
   for (const t of translations) {
     if (!t.lang || !t.name) continue;
-    await query(
-      `INSERT INTO tag_translations (id, tag_id, language_code, name) VALUES ($1, $2, $3, $4)`,
-      [newId(), tagId, t.lang, t.name]
-    );
+    params.push(newId(), tagId, t.lang, t.name);
+    const n = params.length;
+    values.push(`($${n - 3}, $${n - 2}, $${n - 1}, $${n})`);
   }
+  if (values.length === 0) return;
+  await query(`INSERT INTO tag_translations (id, tag_id, language_code, name) VALUES ${values.join(', ')}`, params);
 }
 
 /** '' is a real answer here — the ungrouped bucket — and has to survive
@@ -152,7 +166,7 @@ export async function createTag(d: TagInput): Promise<{ id: string }> {
     [id, d.name, resolveGroupName(d.groupName), d.color || null, d.icon || null, d.excludeTagIds ?? [], d.synonyms ?? []]
   );
   await upsertTagTranslations(id, d.translations);
-  await syncTag(id);
+  syncTagInBackground(id);
   return { id };
 }
 
@@ -162,7 +176,7 @@ export async function updateTag(id: string, d: TagInput): Promise<void> {
     [d.name, resolveGroupName(d.groupName), d.color || null, d.icon || null, d.excludeTagIds ?? [], d.synonyms ?? [], id]
   );
   await upsertTagTranslations(id, d.translations);
-  await syncTag(id);
+  syncTagInBackground(id);
 }
 
 /** Strips `name` (case-insensitive) out of every recipe's tags array —
@@ -182,14 +196,14 @@ async function removeTagNameFromRecipes(name: string): Promise<{ recipesUpdated:
     `SELECT id, tags FROM recipes WHERE sync_status != 'deleted'${prefilter ? ' AND tags LIKE $1' : ''}`,
     prefilter ? [`%${key}%`] : [],
   );
-  const { syncRecipe } = await import('./recipes.local');
+  const { syncRecipeInBackground } = await import('./recipes.local');
   let recipesUpdated = 0;
   for (const r of recipes) {
     const tagsArr: string[] = JSON.parse(r.tags ?? '[]');
     if (!tagsArr.some(t => t.trim().toLowerCase() === key)) continue;
     const filtered = tagsArr.filter(t => t.trim().toLowerCase() !== key);
     await query("UPDATE recipes SET tags=$1, updated_at=now() WHERE id=$2", [filtered, r.id]);
-    await syncRecipe(r.id);
+    syncRecipeInBackground(r.id);
     recipesUpdated++;
   }
   return { recipesUpdated };
@@ -198,7 +212,10 @@ async function removeTagNameFromRecipes(name: string): Promise<{ recipesUpdated:
 export async function deleteTag(id: string): Promise<{ recipesUpdated: number }> {
   const tag = await queryOne<{ name: string }>("SELECT name FROM tags WHERE id=$1", [id]);
   await query("UPDATE tags SET deleted_at=now(), updated_at=now() WHERE id=$1", [id]);
-  await syncTag(id);
+  // A tombstone is not a hard delete, so ON DELETE CASCADE never fires: left
+  // in place, these links kept auto-tagging recipes with the deleted name.
+  await query("DELETE FROM ingredient_tags WHERE tag_id=$1", [id]);
+  syncTagInBackground(id);
   return tag ? await removeTagNameFromRecipes(tag.name) : { recipesUpdated: 0 };
 }
 
@@ -236,8 +253,8 @@ export async function mergeTags(sourceId: string, targetId: string): Promise<{ r
   const { recipesUpdated } = await mergeCustomTagIntoTag(source.name, targetId);
 
   await query("UPDATE tags SET deleted_at=now(), updated_at=now() WHERE id=$1", [sourceId]);
-  await syncTag(sourceId);
-  await syncTag(targetId);
+  syncTagInBackground(sourceId);
+  syncTagInBackground(targetId);
   return { recipesUpdated };
 }
 
@@ -254,10 +271,8 @@ export async function mergeTags(sourceId: string, targetId: string): Promise<{ r
  *  the entity merges follow. */
 export async function mergeTagGroups(sourceGroup: string, targetGroup: string): Promise<{ tagsUpdated: number }> {
   const rows = await query<{ id: string }>("SELECT id FROM tags WHERE group_name=$1 AND deleted_at IS NULL", [sourceGroup]);
-  for (const row of rows) {
-    await query("UPDATE tags SET group_name=$1, updated_at=now() WHERE id=$2", [targetGroup, row.id]);
-    await syncTag(row.id);
-  }
+  await query("UPDATE tags SET group_name=$1, updated_at=now() WHERE group_name=$2 AND deleted_at IS NULL", [targetGroup, sourceGroup]);
+  for (const row of rows) syncTagInBackground(row.id);
   if (sourceGroup !== targetGroup) {
     const existing = new Set(
       (await query<{ language_code: string }>("SELECT language_code FROM tag_group_translations WHERE group_name=$1", [targetGroup]))
@@ -288,10 +303,8 @@ export async function mergeTagGroups(sourceGroup: string, targetGroup: string): 
 export async function deleteTagGroup(groupName: string): Promise<{ tagsUngrouped: number }> {
   const group = groupName.trim();
   const rows = await query<{ id: string }>("SELECT id FROM tags WHERE group_name=$1 AND deleted_at IS NULL", [group]);
-  for (const row of rows) {
-    await query("UPDATE tags SET group_name='', updated_at=now() WHERE id=$1", [row.id]);
-    await syncTag(row.id);
-  }
+  await query("UPDATE tags SET group_name='', updated_at=now() WHERE group_name=$1 AND deleted_at IS NULL", [group]);
+  for (const row of rows) syncTagInBackground(row.id);
   await query("DELETE FROM tag_group_translations WHERE group_name=$1", [group]);
   return { tagsUngrouped: rows.length };
 }
@@ -383,7 +396,7 @@ export async function mergeCustomTagIntoTag(customName: string, targetTagId: str
 
   const key = customName.trim().toLowerCase();
   const recipes = await query<{ id: string; tags: string }>("SELECT id, tags FROM recipes WHERE sync_status != 'deleted'");
-  const { syncRecipe } = await import('./recipes.local');
+  const { syncRecipeInBackground } = await import('./recipes.local');
   let recipesUpdated = 0;
   for (const r of recipes) {
     const tags: string[] = JSON.parse(r.tags ?? '[]');
@@ -395,7 +408,7 @@ export async function mergeCustomTagIntoTag(customName: string, targetTagId: str
       merged.set(trimmed.toLowerCase(), trimmed);
     }
     await query("UPDATE recipes SET tags=$1, updated_at=now() WHERE id=$2", [Array.from(merged.values()), r.id]);
-    await syncRecipe(r.id);
+    syncRecipeInBackground(r.id);
     recipesUpdated++;
   }
   return { recipesUpdated };
@@ -411,11 +424,13 @@ export async function computeAutoTagNames(client: LocalClient, recipeId: string)
      FROM recipe_ingredients ri
      JOIN ingredient_tags it ON it.ingredient_id = ri.ingredient_id
      JOIN tags t ON t.id = it.tag_id
-     WHERE ri.recipe_id = $1 AND ri.ingredient_id IS NOT NULL`,
+     WHERE ri.recipe_id = $1 AND ri.ingredient_id IS NOT NULL AND t.deleted_at IS NULL`,
     [recipeId]
   );
+  // Live tags only: a deleted diet tag kept being stamped back onto every
+  // recipe saved afterwards, where it resurfaced as a "custom" tag.
   const catalogRows = await client.query<{ id: string; name: string; group_name: string | null; exclude_tag_ids: string }>(
-    `SELECT id, name, group_name, exclude_tag_ids FROM tags`
+    `SELECT id, name, group_name, exclude_tag_ids FROM tags WHERE deleted_at IS NULL`
   );
   const isIngredientTag = ingredientTagFilter(catalogRows.rows);
   const catalogById = new Map(catalogRows.rows.map(r => [r.id, r]));

@@ -301,7 +301,7 @@ async function buildTagsDisplayBatch(allTagNames: string[], lang?: string): Prom
 
   const tagParams: unknown[] = [];
   const tags = await query<{ id: string; name: string; color: string | null }>(
-    `SELECT id, name, color FROM tags WHERE lower(name) IN (${inPlaceholders(tagParams, uniqueLower)})`,
+    `SELECT id, name, color FROM tags WHERE deleted_at IS NULL AND lower(name) IN (${inPlaceholders(tagParams, uniqueLower)})`,
     tagParams
   );
   const tagIdByLowerName = new Map(tags.map(t => [t.name.toLowerCase(), t] as const));
@@ -805,7 +805,7 @@ async function insertIngredientTranslations(client: LocalClient, recipeIngredien
  *  The commit was already debounced 2s behind this point, so that exposure
  *  existed regardless; this only widens it slightly, and it is strictly
  *  better than freezing the editor. */
-function syncRecipeInBackground(id: string): void {
+export function syncRecipeInBackground(id: string): void {
   void syncRecipe(id);
 }
 

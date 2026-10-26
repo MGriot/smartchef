@@ -202,7 +202,7 @@ export function writeEntityFile(type: EntityType, id: string, data: Record<strin
     if (entityType) await recordSynced(entityType, id, data.updated_at);
     logIfSlow(`writeEntityFile(${type}) fs write`, startedAt, `${Math.round(json.length / 1024)}KB`);
     scheduleCommit();
-  });
+  }, `writeEntityFile(${type})`);
 }
 
 // ── Debounced commit — a burst of edits (typing a form, saving several

@@ -18,6 +18,9 @@ import {
   TbCoffee, TbMug, TbCup, TbTeapot, TbGlassCocktail, TbBeer,
   // prepared
   TbPizza, TbSoup, TbBowlSpoon, TbBowlChopsticks,
+  // tag-only extras
+  TbBaguette, TbBurger, TbEggFried, TbCakeRoll, TbLollipop, TbMilkshake,
+  TbGlassChampagne, TbGlassFull, TbPlant, TbBone, TbFishBone,
   // heat & cold
   TbFlame, TbGrill, TbGrillFork, TbGrillSpatula, TbCooker, TbSteam,
   TbSnowflake, TbFridge, TbMicrowave, TbThermometer,
@@ -30,6 +33,7 @@ import {
   // this family was picked: allergen and diet tags finally have an icon
   // that says "without" rather than borrowing the ingredient's own.
   TbMeatOff, TbMilkOff, TbWheatOff, TbEggOff, TbFishOff,
+  TbCarrotOff, TbMushroomOff, TbPepperOff, TbBreadOff,
   // misc / fallback
   TbTag, TbTree, TbHandGrab, TbMenu2,
 } from 'react-icons/tb';
@@ -52,12 +56,15 @@ export const ICON_REGISTRY: Record<string, IconType> = {
   TbCandy, TbCake, TbCookie, TbIceCream, TbNut,
   TbCoffee, TbMug, TbCup, TbTeapot, TbGlassCocktail, TbBeer,
   TbPizza, TbSoup, TbBowlSpoon, TbBowlChopsticks,
+  TbBaguette, TbBurger, TbEggFried, TbCakeRoll, TbLollipop, TbMilkshake,
+  TbGlassChampagne, TbGlassFull, TbPlant, TbBone, TbFishBone,
   TbFlame, TbGrill, TbGrillFork, TbGrillSpatula, TbCooker, TbSteam,
   TbSnowflake, TbFridge, TbMicrowave, TbThermometer,
   TbHourglass, TbHourglassHigh, TbHourglassLow, TbClock,
   TbToolsKitchen, TbToolsKitchen2, TbToolsKitchen3, TbChefHat,
   TbBlender, TbScale, TbSlice, TbFilter, TbBrush, TbBox,
   TbMeatOff, TbMilkOff, TbWheatOff, TbEggOff, TbFishOff,
+  TbCarrotOff, TbMushroomOff, TbPepperOff, TbBreadOff,
   TbTag, TbTree, TbHandGrab, TbMenu2,
 };
 
@@ -142,13 +149,28 @@ export const INGREDIENT_ICONS = [
   'TbPizza', 'TbSoup', 'TbTag',
 ];
 
-/** Tags — course, diet and allergens, the three groups you actually use. */
+/** Tags — course and dish, the ingredients a "contains" tag names, drinks,
+ *  then diet and allergens. */
 export const TAG_ICONS = [
-  'TbGlassCocktail', 'TbBowlSpoon', 'TbSoup', 'TbMeat', 'TbSalad', 'TbCake', 'TbCup',
-  'TbLeaf', 'TbSeedling',
+  // course & dish
+  'TbBowlSpoon', 'TbSoup', 'TbSalad', 'TbBowl', 'TbBowlChopsticks', 'TbPizza', 'TbBurger',
+  'TbBaguette', 'TbBread', 'TbCake', 'TbCakeRoll', 'TbCookie', 'TbCandy', 'TbLollipop', 'TbIceCream',
+  // produce
+  'TbApple', 'TbCarrot', 'TbLemon', 'TbCherry', 'TbMelon', 'TbAvocado', 'TbMushroom',
+  'TbPepper', 'TbLeaf', 'TbSeedling', 'TbPlant', 'TbNut', 'TbGrain', 'TbWheat',
+  // protein & dairy
+  'TbMeat', 'TbSausage', 'TbBone', 'TbFish', 'TbFishBone', 'TbEgg', 'TbEggs', 'TbEggFried',
+  'TbMilk', 'TbCheese',
+  // seasoning
+  'TbSalt', 'TbDroplet', 'TbBottle',
+  // drinks
+  'TbGlassCocktail', 'TbGlassChampagne', 'TbGlassFull', 'TbBeer', 'TbMilkshake',
+  'TbCoffee', 'TbMug', 'TbTeapot', 'TbCup',
+  // diet & allergens
   'TbMeatOff', 'TbMilkOff', 'TbWheatOff', 'TbEggOff', 'TbFishOff',
-  'TbMilk', 'TbWheat', 'TbEgg', 'TbFish', 'TbCheese', 'TbNut',
-  'TbPepper', 'TbFlame', 'TbSnowflake', 'TbTag',
+  'TbCarrotOff', 'TbMushroomOff', 'TbPepperOff', 'TbBreadOff',
+  // other
+  'TbFlame', 'TbSnowflake', 'TbTag',
 ];
 
 /** Techniques — heat, cold, time and knife work. */

@@ -253,32 +253,57 @@ export default function LibraryTags() {
     e.preventDefault();
     const url = editingTag ? `/api/tags/${editingTag.id}` : '/api/tags';
     const method = editingTag ? 'PUT' : 'POST';
+    const cleanTranslations = translations.filter(t => t.lang.trim() && t.name.trim());
+
+    // The edit lands on the page first and the request follows: the modal
+    // closing is the answer, and the refetch afterwards settles the row.
+    if (editingTag) {
+      const patched = {
+        ...editingTag,
+        name: form.name,
+        group_name: form.groupName,
+        color: form.color,
+        icon: form.icon,
+        exclude_tag_ids: form.excludeTagIds,
+        synonyms: form.synonyms,
+        translations: cleanTranslations,
+        translated_name: cleanTranslations.find(tr => tr.lang.toLowerCase() === contentLang?.toLowerCase())?.name ?? null,
+      };
+      setTags(prev => prev.map(tag => tag.id === editingTag.id ? patched : tag));
+    }
+    setShowModal(false);
 
     try {
       const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, translations: translations.filter(t => t.lang.trim() && t.name.trim()) })
+        body: JSON.stringify({ ...form, translations: cleanTranslations })
       });
       const result = await res.json();
-      if (res.ok) {
-        setShowModal(false);
-        fetchTags();
-      } else {
-        alert(t('library.shared.saveFailed', { error: JSON.stringify(result.error || result) }));
-      }
+      if (!res.ok) alert(t('library.shared.saveFailed', { error: JSON.stringify(result.error || result) }));
     } catch (err) {
       console.error('Save failed:', err);
     }
+    fetchTags();
   };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm(t('library.tags.confirmDelete'))) return;
+    // Gone from the page at once — the open modal used to keep showing the
+    // deleted tag, which read as "the delete didn't work".
+    const previous = tags;
+    setTags(prev => prev.filter(tag => tag.id !== id));
+    setShowModal(false);
+    setEditingTag(null);
     try {
       const res = await apiFetch(`/api/tags/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchTags();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fetchTags();
+      fetchCustomTags();
     } catch (err) {
       console.error('Delete failed:', err);
+      setTags(previous);
+      alert(t('library.shared.saveFailed', { error: String(err) }));
     }
   };
 
