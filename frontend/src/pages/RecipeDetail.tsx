@@ -3414,23 +3414,26 @@ const RecipeDetail: React.FC = () => {
 
       {/* ── Hero Image ─────────────────────────────────────────── */}
       <div className="max-w-7xl mx-auto px-6 pt-8 no-print">
-        <div className="relative h-[360px] md:h-[400px] rounded-3xl overflow-hidden">
+        {/* A minimum height, not a fixed one: on a phone a long title plus
+            the description, author and language picker used to push the
+            tags out of the top of a 360px box, where they were clipped. */}
+        <div className="relative min-h-[360px] md:min-h-[400px] flex flex-col justify-end rounded-3xl overflow-hidden">
           <CoverImage
-            className="w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-cover"
             src={recipe.cover_image_url}
             alt={recipe.translated_title || recipe.title}
             fallbackSrc="https://images.unsplash.com/photo-1495521821757-a1efb6729352?q=80&w=2000"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-          <div className="absolute bottom-8 left-8 right-8">
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/50 to-black/10" />
+          <div className="relative min-w-0 p-6 md:p-8 [text-shadow:0_1px_8px_rgba(0,0,0,0.5)]">
             {((recipe.tags_display && recipe.tags_display.length > 0) || recipe.tags?.[0]) && (
-              <div className="flex flex-wrap gap-1.5 mb-3">
+              <div className="flex flex-wrap gap-1.5 mb-3 [text-shadow:none]">
                 {recipe.tags_display && recipe.tags_display.length > 0 ? (
                   <>
                     {recipe.tags_display.slice(0, 3).map((tag, i) => (
                       <span
                         key={i}
-                        className="inline-block px-3 py-1 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full"
+                        className="inline-block max-w-full truncate px-3 py-1 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full ring-1 ring-white/20"
                         style={{ backgroundColor: tag.color || '#3f3f46' }}
                       >
                         {tag.translated_name}
@@ -3449,9 +3452,9 @@ const RecipeDetail: React.FC = () => {
                 )}
               </div>
             )}
-            <h1 className="text-4xl md:text-6xl font-headline font-extrabold text-white leading-none">{recipe.translated_title || recipe.title}</h1>
+            <h1 lang={shownLang || undefined} className="text-3xl sm:text-4xl md:text-6xl font-headline font-extrabold text-white leading-tight md:leading-none break-words hyphens-auto">{recipe.translated_title || recipe.title}</h1>
             {(recipe.translated_description || recipe.description) && (
-              <MarkdownText text={recipe.translated_description || recipe.description} className="mt-3 text-white/80 text-sm font-medium max-w-2xl leading-relaxed" />
+              <MarkdownText text={recipe.translated_description || recipe.description} className="mt-3 text-white/90 text-sm font-medium max-w-2xl leading-relaxed line-clamp-3 md:line-clamp-none" />
             )}
             {recipe.creator_name && (
               <div className="flex items-center gap-2 mt-3">
