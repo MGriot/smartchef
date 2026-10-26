@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyMachineTranslation, completeness, entryFor, languagesIn, machineTranslationInput, withField, withoutLanguage,
+  applyMachineTranslation, completeness, entryFor, languagesIn, libraryNameIn, machineTranslationInput, withField, withoutLanguage,
   type TranslatableDraft,
 } from './recipeTranslationDraft';
 
@@ -66,5 +66,15 @@ describe('machine translation', () => {
     // The user's own "Bake." stays.
     expect(entryFor(out.steps![1], 'en')).toEqual({ lang: 'en', description: 'Bake.', title: 'Baking' });
     expect(entryFor(out.ingredients![0], 'en')).toEqual({ lang: 'en', notes: 'in pieces' });
+  });
+});
+
+describe('libraryNameIn', () => {
+  const tr = [{ lang: 'en', text: 'Apple' }, { lang: 'fr-FR', text: 'Pomme' }, { lang: 'de', text: '  ' }];
+  it('finds the exact language', () => expect(libraryNameIn(tr, 'en')).toBe('Apple'));
+  it('falls back to the base language', () => expect(libraryNameIn(tr, 'fr')).toBe('Pomme'));
+  it('ignores blank names and missing lists', () => {
+    expect(libraryNameIn(tr, 'de')).toBeNull();
+    expect(libraryNameIn(undefined, 'en')).toBeNull();
   });
 });

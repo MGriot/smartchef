@@ -50,16 +50,21 @@ function Field({ label, original, value, onValue, placeholder, multiline = true,
 /**
  * The editor in translation mode: every translatable field of the recipe,
  * each with the original above it, for ONE language. Amounts, units, tools
- * and times have no translation and aren't shown — they are the same in
+ * and times have no translation and aren't editable here — they are the same in
  * every language and stay editable in the original.
  */
 export default function RecipeTranslationPanel<T extends Draft>({
-  draft, lang, langLabel, onChange, stepIngredients, stepTools, stepTechniques,
+  draft, lang, langLabel, onChange, ingredientNames, stepIngredients, stepTools, stepTechniques,
 }: {
   draft: T;
   lang: string;
   langLabel: string;
   onChange: (next: T) => void;
+  /** Per ingredient row, by index: its name in the original and in `lang`
+   *  (from the shared library, so shown read-only), and its amount.
+   *  `translatable` is false for a sub-recipe row, which has no library
+   *  entry to carry a translated name. */
+  ingredientNames: Array<{ original: string; translated: string | null; amount: string; translatable: boolean }>;
   stepIngredients: StepTextIngredientCtx[];
   stepTools: StepTextToolCtx[];
   stepTechniques: StepTextTechniqueCtx[];
@@ -73,7 +78,7 @@ export default function RecipeTranslationPanel<T extends Draft>({
     onChange({ ...draft, ingredients: (draft.ingredients ?? []).map((row, i) => (i === n ? withField(row, lang, 'notes', v) : row)) });
 
   const recipeTr = entryFor(draft, lang);
-  const ingredientRows = (draft.ingredients ?? []).map((row, n) => ({ row, n })).filter(({ row }) => row.notes?.trim() || entryFor(row, lang)?.notes);
+  const ingredientRows = draft.ingredients ?? [];
 
   return (
     <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
@@ -86,18 +91,40 @@ export default function RecipeTranslationPanel<T extends Draft>({
 
       {ingredientRows.length > 0 && (
         <section className={card}>
-          <h3 className="font-headline font-bold text-lg">{t('recipeDetail.editLang.ingredientNotes')}</h3>
-          {ingredientRows.map(({ row, n }) => (
-            <Field
-              placeholder={langLabel}
-              key={n}
-              label={rowLabel(row) || `#${n + 1}`}
-              original={row.notes}
-              value={entryFor(row, lang)?.notes}
-              onValue={(v) => setIngredient(n, v)}
-              multiline={false}
-            />
-          ))}
+          <div className="space-y-1">
+            <h3 className="font-headline font-bold text-lg">{t('recipeDetail.editLang.ingredients')}</h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('recipeDetail.editLang.ingredientNamesHint')}</p>
+          </div>
+          {ingredientRows.map((row, n) => {
+            const name = ingredientNames[n];
+            const original = name?.original || rowLabel(row) || `#${n + 1}`;
+            const translated = name?.translated;
+            const hasNotes = !!(row.notes?.trim() || entryFor(row, lang)?.notes);
+            return (
+              <div key={n} className="space-y-3 border-t border-zinc-100 dark:border-zinc-800 pt-4">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  {name?.amount && <span className="text-xs font-semibold tabular-nums text-zinc-500 dark:text-zinc-400">{name.amount}</span>}
+                  <span className="font-semibold text-sm break-words">{translated || original}</span>
+                  {!translated && name?.translatable && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">{t('recipeDetail.editLang.missing')}</span>
+                  )}
+                  {translated && translated !== original && (
+                    <span className="text-xs italic text-zinc-400 dark:text-zinc-500 break-words">{original}</span>
+                  )}
+                </div>
+                {hasNotes && (
+                  <Field
+                    placeholder={langLabel}
+                    label={t('recipeDetail.editLang.ingredientNotes')}
+                    original={row.notes}
+                    value={entryFor(row, lang)?.notes}
+                    onValue={(v) => setIngredient(n, v)}
+                    multiline={false}
+                  />
+                )}
+              </div>
+            );
+          })}
         </section>
       )}
 

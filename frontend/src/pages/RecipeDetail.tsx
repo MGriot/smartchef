@@ -22,7 +22,7 @@ import ImageUrlInput from '../components/ImageUrlInput';
 import type { TranslationEntry } from '../components/TranslationsEditor';
 import TranslationLanguageBar from '../components/TranslationLanguageBar';
 import RecipeTranslationPanel from '../components/RecipeTranslationPanel';
-import { applyMachineTranslation, completeness, languagesIn, machineTranslationInput, withoutLanguage, type TranslatableDraft } from '../lib/recipeTranslationDraft';
+import { applyMachineTranslation, completeness, languagesIn, libraryNameIn, machineTranslationInput, withoutLanguage, type TranslatableDraft } from '../lib/recipeTranslationDraft';
 import TagPicker from '../components/TagPicker';
 import { pickIngredientName } from '../lib/ingredientDisplay';
 import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/recipeDraftCoercion';
@@ -2140,6 +2140,15 @@ const RecipeDetail: React.FC = () => {
             lang={editLang}
             langLabel={languageLabel(editLang)}
             onChange={next => setDraft(next as Partial<Recipe>)}
+            ingredientNames={(draft.ingredients || []).map(i => {
+              const lib = i.ingredientId ? allIngredients.find(a => a.id === i.ingredientId) : undefined;
+              return {
+                original: i.ingredientName || i.subRecipeTitle || '',
+                translated: lib ? libraryNameIn(lib.translations, editLang) : null,
+                amount: i.quantity != null ? formatEditorAmount(i.quantity, i.unitSymbol) : '',
+                translatable: !!i.ingredientId,
+              };
+            })}
             stepIngredients={(draft.ingredients || []).map(i => ({ sortOrder: i.sortOrder, name: i.ingredientName || i.subRecipeTitle || '', quantity: '' }))}
             stepTools={stepTextTools}
             stepTechniques={stepTextTechniques}

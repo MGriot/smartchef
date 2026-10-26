@@ -807,9 +807,11 @@
       "removeConfirm": "Remove the whole {{lang}} translation of this recipe? It is gone once you save.",
       "missing": "missing",
       "panelHint": "You are writing the {{lang}} version. Each field shows the original above it. Quantities, units, tools and times are the same in every language: switch back to the original to change them.",
-      "ingredientNotes": "Ingredient notes",
+      "ingredientNotes": "Notes",
       "stepText": "Text",
-      "copyOriginal": "Start from the original (keeps the ingredient links)"
+      "copyOriginal": "Start from the original (keeps the ingredient links)",
+      "ingredients": "Ingredients",
+      "ingredientNamesHint": "Names come from the ingredient library, so they are the same in every recipe: translate them in Library → Ingredients."
     }
   },
   "recipeCreate": {

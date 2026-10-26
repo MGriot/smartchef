@@ -145,3 +145,15 @@ export function applyMachineTranslation<T extends TranslatableDraft>(draft: T, l
   }
   return next;
 }
+
+/** A library entry's name in `lang`, from its `{lang, text}` translations —
+ *  ingredient names live in the shared library, not on the recipe, so the
+ *  translation panel can show them but not edit them. Matches the base
+ *  language too ("it" finds "it-IT"); null when there is none. */
+export function libraryNameIn(translations: Array<{ lang: string; text: string }> | null | undefined, lang: string): string | null {
+  const base = (code: string) => code.trim().toLowerCase().split(/[-_]/)[0];
+  const want = lang.trim().toLowerCase();
+  const list = (translations ?? []).filter((t) => t.text?.trim());
+  const hit = list.find((t) => t.lang.trim().toLowerCase() === want) ?? list.find((t) => base(t.lang) === base(want));
+  return hit ? hit.text.trim() : null;
+}

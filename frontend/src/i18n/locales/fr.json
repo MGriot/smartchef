@@ -807,9 +807,11 @@
       "removeConfirm": "Supprimer toute la traduction en {{lang}} de cette recette ? Elle disparaît à l'enregistrement.",
       "missing": "manquant",
       "panelHint": "Vous rédigez la version en {{lang}}. Chaque champ affiche l'original au-dessus. Quantités, unités, ustensiles et temps sont les mêmes dans toutes les langues : revenez à l'original pour les modifier.",
-      "ingredientNotes": "Notes des ingrédients",
+      "ingredientNotes": "Notes",
       "stepText": "Texte",
-      "copyOriginal": "Partir de l'original (garde les liens vers les ingrédients)"
+      "copyOriginal": "Partir de l'original (garde les liens vers les ingrédients)",
+      "ingredients": "Ingrédients",
+      "ingredientNamesHint": "Les noms viennent de la bibliothèque d'ingrédients et sont donc les mêmes dans toutes les recettes : traduisez-les dans Bibliothèque → Ingrédients."
     }
   },
   "recipeCreate": {
