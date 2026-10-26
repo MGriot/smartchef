@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import Login from "./pages/Login";
 import ServerConnect from "./pages/ServerConnect";
 import ProfilePicker from "./pages/ProfilePicker";
+import ScrollToTop from "./components/ScrollToTop";
 // ── Routes are code-split ────────────────────────────────────────────────
 // Every page used to be a static import, so the main bundle carried all of
 // them plus everything they pull in — most expensively lib/worldGeo.ts,
@@ -338,6 +339,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<Home />} />
