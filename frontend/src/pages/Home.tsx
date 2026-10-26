@@ -11,6 +11,7 @@ import RecipeCardMenu from '../components/RecipeCardMenu';
 import { useStore } from '../store/app.store';
 import { useIsWideViewport } from '../hooks/useMediaQuery';
 import { apiFetch } from '../lib/api';
+import { tagTextColor } from '../lib/tagColor';
 import { useFileExport } from '../hooks/useFileExport';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
@@ -809,7 +810,7 @@ const Home: React.FC = () => {
                               // carries ~150 of these, which is a real cost on
                               // a phone GPU and free on a desktop one.
                               className={badgeClass}
-                              style={!badge.bg ? { backgroundColor: badge.color || '#3f3f46' } : undefined}
+                              style={!badge.bg ? { backgroundColor: badge.color || '#3f3f46', color: tagTextColor(badge.color || '#3f3f46') } : undefined}
                             >
                               {badge.label}
                             </span>

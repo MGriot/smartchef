@@ -49,6 +49,7 @@ import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
 import CoverImage, { ResolvedImage } from '../components/CoverImage';
 import { apiFetch, isNative } from '../lib/api';
+import { tagTextColor } from '../lib/tagColor';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { buildCookidooExport, type CookidooExport } from '../lib/cookidooExport';
@@ -496,6 +497,8 @@ const RecipeDetail: React.FC = () => {
   // = that translation (components/RecipeTranslationPanel.tsx). Languages
   // just added from the bar are listed before they hold any text.
   const [editLang, setEditLang] = useState<string | null>(null);
+  // The hero shows three tags and a "+N" chip that opens the rest.
+  const [heroTagsOpen, setHeroTagsOpen] = useState(false);
   const [addedLangs, setAddedLangs] = useState<string[]>([]);
   const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
   // Which ingredient/step cards are folded down to a one-line summary, and
@@ -3443,7 +3446,7 @@ const RecipeDetail: React.FC = () => {
         {/* A minimum height, not a fixed one: on a phone a long title plus
             the description, author and language picker used to push the
             tags out of the top of a 360px box, where they were clipped. */}
-        <div className="relative min-h-[360px] md:min-h-[400px] flex flex-col justify-end rounded-3xl overflow-hidden">
+        <div className="relative min-h-[360px] md:min-h-[400px] flex flex-col justify-between rounded-3xl overflow-hidden">
           <CoverImage
             className="absolute inset-0 w-full h-full object-cover"
             src={recipe.cover_image_url}
@@ -3451,24 +3454,34 @@ const RecipeDetail: React.FC = () => {
             fallbackSrc="https://images.unsplash.com/photo-1495521821757-a1efb6729352?q=80&w=2000"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/50 to-black/10" />
-          <div className="relative min-w-0 p-6 md:p-8 [text-shadow:0_1px_8px_rgba(0,0,0,0.5)]">
-            {((recipe.tags_display && recipe.tags_display.length > 0) || recipe.tags?.[0]) && (
-              <div className="flex flex-wrap gap-1.5 mb-3 [text-shadow:none]">
+          {/* Tags sit at the top of the photo, in the flow rather than
+              absolutely placed, so a tall title block below can never run
+              under them. A dark top edge keeps them readable on a light
+              photo. */}
+          <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/40 to-transparent" />
+          {((recipe.tags_display && recipe.tags_display.length > 0) || recipe.tags?.[0]) && (
+              <div className="relative flex flex-wrap gap-1.5 p-6 pb-0 md:p-8 md:pb-0">
                 {recipe.tags_display && recipe.tags_display.length > 0 ? (
                   <>
-                    {recipe.tags_display.slice(0, 3).map((tag, i) => (
+                    {(heroTagsOpen ? recipe.tags_display : recipe.tags_display.slice(0, 3)).map((tag, i) => (
                       <span
                         key={i}
                         className="inline-block max-w-full truncate px-3 py-1 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full ring-1 ring-white/20"
-                        style={{ backgroundColor: tag.color || '#3f3f46' }}
+                        style={{ backgroundColor: tag.color || '#3f3f46', color: tagTextColor(tag.color || '#3f3f46') }}
                       >
                         {tag.translated_name}
                       </span>
                     ))}
                     {recipe.tags_display.length > 3 && (
-                      <span className="inline-block px-3 py-1 bg-black/40 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full">
-                        +{recipe.tags_display.length - 3}
-                      </span>
+                      <button
+                        type="button"
+                        aria-expanded={heroTagsOpen}
+                        aria-label={t(heroTagsOpen ? 'gallery.showFewerTags' : 'gallery.showAllTags')}
+                        onClick={() => setHeroTagsOpen(o => !o)}
+                        className="inline-block px-3 py-1 bg-black/50 hover:bg-black/70 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full ring-1 ring-white/20"
+                      >
+                        {heroTagsOpen ? '−' : `+${recipe.tags_display.length - 3}`}
+                      </button>
                     )}
                   </>
                 ) : (
@@ -3477,7 +3490,8 @@ const RecipeDetail: React.FC = () => {
                   </span>
                 )}
               </div>
-            )}
+          )}
+          <div className="relative min-w-0 mt-auto p-6 md:p-8 [text-shadow:0_1px_8px_rgba(0,0,0,0.5)]">
             <h1 lang={shownLang || undefined} className="text-3xl sm:text-4xl md:text-6xl font-headline font-extrabold text-white leading-tight md:leading-none break-words hyphens-auto">{recipe.translated_title || recipe.title}</h1>
             {(recipe.translated_description || recipe.description) && (
               <MarkdownText text={recipe.translated_description || recipe.description} className="mt-3 text-white/90 text-sm font-medium max-w-2xl leading-relaxed line-clamp-3 md:line-clamp-none" />
