@@ -563,7 +563,8 @@
         "resolving": "Preparing the fixes…",
         "nothing": "No verifiable fix for this choice. You can edit the recipe by hand.",
         "error": "Could not prepare the fixes."
-      }
+      },
+      "elapsed": "{{seconds}} s"
     },
     "saving": "Saving…",
     "saveRecipe": "Save Recipe",
@@ -1085,7 +1086,8 @@
     "mergeIntoSelf": "Cannot merge an item into itself.",
     "toolNotFound": "Tool not found",
     "providerBusy": "{{provider}} is overloaded right now (HTTP {{status}}) and still was after several retries. This is on the provider's side — try again in a few minutes.",
-    "llmReplyTruncated": "The model's reply was cut off: the last steps may be incomplete or missing their links."
+    "llmReplyTruncated": "The model's reply was cut off: the last steps may be incomplete or missing their links.",
+    "aiTimedOut": "{{provider}} didn't answer within {{seconds}} seconds. Long texts and slow models take longer: try pasting only the part you need, or pick a faster model under AI Provider in your account."
   },
   "shopping": {
     "otherAisle": "Other",

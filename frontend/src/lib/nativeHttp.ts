@@ -55,6 +55,8 @@ export async function nativeHttpRequest(req: NativeHttpRequest): Promise<NativeH
     // The Capacitor plugin bridge is JSON-only, so bytes cross it base64'd
     // — unlike Electron's IPC, which structured-clones a Uint8Array as-is.
     ...(req.body ? { body: bytesToBase64(req.body) } : {}),
+    // The plugin's read timeout; it keeps its own 60s when this is unset.
+    ...(req.timeoutMs ? { timeoutMs: req.timeoutMs } : {}),
   });
   // A large response is spilled to a file by the plugin rather than
   // returned inline — see spilledBody.ts. Uncommon here (a provider's JSON

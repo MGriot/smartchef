@@ -11,15 +11,17 @@
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 
-const posts: Array<{ url: string; body: any }> = [];
-/** Status per call, consumed in order; anything left over answers 200. */
+const posts: Array<{ url: string; body: any; timeoutMs: number }> = [];
+/** Status per call, consumed in order; anything left over answers 200.
+ *  -1 stands for the native side giving up on a slow answer. */
 let statuses: number[] = [];
 let prefs: Record<string, string> = {};
 
 vi.mock('../lib/nativeHttp', () => ({
-  nativeHttpPostJson: async (url: string, _headers: unknown, payload: unknown) => {
-    posts.push({ url, body: payload });
+  nativeHttpPostJson: async (url: string, _headers: unknown, payload: unknown, timeoutMs: number) => {
+    posts.push({ url, body: payload, timeoutMs });
     const statusCode = statuses.shift() ?? 200;
+    if (statusCode === -1) throw Object.assign(new Error('Read timed out'), { code: 'TIMEOUT' });
     return {
       statusCode,
       text: statusCode === 200 ? '' : '{"error":{"message":"busy"}}',
@@ -94,5 +96,19 @@ describe('a busy model', () => {
     statuses = [401];
     await expect(callWithTimers()).rejects.toThrow(/401/);
     expect(posts).toHaveLength(1);
+  });
+});
+
+describe('a slow answer', () => {
+  it('says who timed out and after how long, without trying the fallback model', async () => {
+    statuses = [-1];
+    await expect(callWithTimers()).rejects.toThrow(/Gemini.*60/);
+    expect(posts).toHaveLength(1);
+  });
+
+  it('waits longer when the caller asks it to', async () => {
+    const { callConfiguredProvider, LONG_AI_TIMEOUT_MS } = await import('./llmParser.local');
+    await callConfiguredProvider('hello', 'system', undefined, { timeoutMs: LONG_AI_TIMEOUT_MS });
+    expect(posts[0].timeoutMs).toBe(LONG_AI_TIMEOUT_MS);
   });
 });

@@ -96,6 +96,26 @@ const CLOUD_TIMEOUT_MS = 60_000;
 /** CPU-only local inference does not — the backend allows 600s for the
  *  same call, and RecipeImport.tsx's own apiFetch ceiling is 650s. */
 const OLLAMA_TIMEOUT_MS = 600_000;
+/** ...except when the answer is a whole recipe. Check, merge and the
+ *  mismatch fix send the full draft and get up to 4096 tokens back, which a
+ *  thinking model can take minutes over; at 60s "Merge text with AI" timed
+ *  out on long pastes. */
+export const LONG_AI_TIMEOUT_MS = 240_000;
+
+export interface ProviderCallOptions {
+  /** Ceiling for one cloud request; defaults to CLOUD_TIMEOUT_MS. Ollama
+   *  keeps its own, longer one either way. */
+  timeoutMs?: number;
+}
+
+const PROVIDER_NAMES: Record<string, string> = { anthropic: 'Claude', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama' };
+
+/** Android's plugin rejects a timeout with code TIMEOUT; Electron's IPC
+ *  handler with "Request to <host> timed out". */
+function isTimeoutError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  return e?.code === 'TIMEOUT' || /timed out/i.test(e?.message ?? '');
+}
 
 // ── The extraction contract ─────────────────────────────────────────────
 // Copied verbatim from backend/src/services/llm.parser.ts's SYSTEM_PROMPT_BASE.
@@ -433,7 +453,7 @@ async function postWithRetry(
   }
 }
 
-async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
+async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
   // A media turn is content BLOCKS rather than a bare string; the image or
   // document goes first so the text that follows reads as an instruction
   // about it, which is what Anthropic's own guidance asks for.
@@ -464,7 +484,7 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
       // No temperature/top_p/top_k — current Claude models return HTTP 400
       // on any non-default sampling param.
     },
-    CLOUD_TIMEOUT_MS,
+    timeoutMs,
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('Anthropic', statusCode, text);
   const data = json as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
@@ -472,7 +492,7 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
   return data?.content?.find((b) => b.type === 'text')?.text ?? '';
 }
 
-async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
+async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
   // inlineData covers images, PDFs, audio AND video with one shape — the
   // reason Gemini is the fallback this file steers people to for a voice
   // note or a clip.
@@ -489,14 +509,14 @@ async function callGemini(content: string, apiKey: string, systemPrompt: string,
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ role: 'user', parts }],
     },
-    CLOUD_TIMEOUT_MS,
+    timeoutMs,
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('Gemini', statusCode, text);
   const data = json as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
   return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
-async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
+async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
   // OpenAI takes an image as a data URI in an image_url part rather than as
   // raw base64 — the one provider here that does.
   const userContent = media?.length
@@ -515,14 +535,14 @@ async function callOpenAI(content: string, apiKey: string, systemPrompt: string,
         { role: 'user', content: userContent },
       ],
     },
-    CLOUD_TIMEOUT_MS,
+    timeoutMs,
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('OpenAI', statusCode, text);
   const data = json as { choices?: Array<{ message?: { content?: string } }> };
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
-async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
+async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
   const base = ollamaUrl.replace(/\/+$/, '');
   // Ollama attaches images as a base64 array on the message itself. Note
   // that it accepts this against ANY model: a text-only one silently drops
@@ -546,7 +566,7 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
         num_predict: 1500,
       },
     },
-    OLLAMA_TIMEOUT_MS,
+    Math.max(timeoutMs, OLLAMA_TIMEOUT_MS),
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('Ollama', statusCode, text);
   const data = json as { message?: { content?: string } };
@@ -557,7 +577,8 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
  *  a cloud provider selected with no key is a settings mistake the user
  *  needs told about, not a reason to silently spend a different provider's
  *  quota — same rule as the backend's callConfiguredProvider(). */
-export async function callConfiguredProvider(content: string, systemPrompt: string, media?: ParseMedia[]): Promise<string> {
+export async function callConfiguredProvider(content: string, systemPrompt: string, media?: ParseMedia[], opts: ProviderCallOptions = {}): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? CLOUD_TIMEOUT_MS;
   const settings = await getLlmSettings();
   // Checked before the key check on purpose: "Gemini can't do video" is
   // the more useful sentence than "no key saved" when both are true, since
@@ -567,17 +588,17 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
   const call = (model: string): Promise<string> => {
     if (settings.provider === 'anthropic') {
       if (!settings.keys.anthropic) throw new Error(i18n.t('errors.noApiKey', { provider: 'Anthropic' }));
-      return callAnthropic(content, settings.keys.anthropic, systemPrompt, model, media);
+      return callAnthropic(content, settings.keys.anthropic, systemPrompt, model, media, timeoutMs);
     }
     if (settings.provider === 'gemini') {
       if (!settings.keys.gemini) throw new Error(i18n.t('errors.noApiKey', { provider: 'Google Gemini' }));
-      return callGemini(content, settings.keys.gemini, systemPrompt, model, media);
+      return callGemini(content, settings.keys.gemini, systemPrompt, model, media, timeoutMs);
     }
     if (settings.provider === 'openai') {
       if (!settings.keys.openai) throw new Error(i18n.t('errors.noApiKey', { provider: 'OpenAI' }));
-      return callOpenAI(content, settings.keys.openai, systemPrompt, model, media);
+      return callOpenAI(content, settings.keys.openai, systemPrompt, model, media, timeoutMs);
     }
-    return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, model, media);
+    return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, model, media, timeoutMs);
   };
 
   const models = modelsFor(settings.provider, settings.models?.[settings.provider] ?? null, !!media?.length);
@@ -585,6 +606,13 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
     try {
       return await call(models[i]);
     } catch (err) {
+      // A raw "Read timed out" told the user nothing; say who was slow,
+      // for how long, and what helps. Not retried: a fallback model would
+      // most likely be just as slow on the same request.
+      if (isTimeoutError(err)) {
+        const seconds = Math.round((settings.provider === 'ollama' ? Math.max(timeoutMs, OLLAMA_TIMEOUT_MS) : timeoutMs) / 1000);
+        throw new Error(i18n.t('errors.aiTimedOut', { provider: PROVIDER_NAMES[settings.provider] ?? settings.provider, seconds }));
+      }
       // Only a model that is busy or gone is worth asking a different one;
       // a bad key or a refusal would fail exactly the same way twice.
       const retryable = err instanceof ProviderUnavailableError;

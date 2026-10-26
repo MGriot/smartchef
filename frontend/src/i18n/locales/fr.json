@@ -563,7 +563,8 @@
         "resolving": "Préparation des corrections…",
         "nothing": "Aucune correction vérifiable pour ce choix. Vous pouvez modifier la recette à la main.",
         "error": "Impossible de préparer les corrections."
-      }
+      },
+      "elapsed": "{{seconds}} s"
     },
     "saving": "En cours d'enregistrement…",
     "saveRecipe": "Enregistrer la recette",
@@ -1085,7 +1086,8 @@
     "mergeIntoSelf": "Impossible de fusionner un élément avec lui-même.",
     "toolNotFound": "Ustensile introuvable",
     "providerBusy": "{{provider}} est surchargé en ce moment (HTTP {{status}}), même après plusieurs tentatives. Le problème vient du fournisseur — réessayez dans quelques minutes.",
-    "llmReplyTruncated": "La réponse du modèle a été coupée : les dernières étapes peuvent être incomplètes ou sans liens."
+    "llmReplyTruncated": "La réponse du modèle a été coupée : les dernières étapes peuvent être incomplètes ou sans liens.",
+    "aiTimedOut": "{{provider}} n'a pas répondu en {{seconds}} secondes. Les textes longs et les modèles lents prennent plus de temps : collez seulement la partie utile, ou choisissez un modèle plus rapide dans Fournisseur IA, dans votre compte."
   },
   "shopping": {
     "otherAisle": "Autres",

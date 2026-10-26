@@ -25,6 +25,9 @@ export interface GitHttpPlugin {
     method: string;
     headers: Record<string, string>;
     body?: string; // base64, omitted for a bodyless request
+    /** Read timeout in ms; the plugin uses 60s when omitted. A timeout
+     *  rejects with code "TIMEOUT". */
+    timeoutMs?: number;
   }): Promise<{
     url: string;
     statusCode: number;

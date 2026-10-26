@@ -563,7 +563,8 @@
         "resolving": "Preparando las correcciones…",
         "nothing": "No hay una corrección verificable para esta opción. Puedes editar la receta a mano.",
         "error": "No se pudieron preparar las correcciones."
-      }
+      },
+      "elapsed": "{{seconds}} s"
     },
     "saving": "Guardando…",
     "saveRecipe": "Guardar Receta",
@@ -1085,7 +1086,8 @@
     "mergeIntoSelf": "No se puede combinar un elemento consigo mismo.",
     "toolNotFound": "Utensilio no encontrado",
     "providerBusy": "{{provider}} está saturado ahora mismo (HTTP {{status}}) y seguía así tras varios reintentos. Es un problema del proveedor: vuelve a intentarlo en unos minutos.",
-    "llmReplyTruncated": "La respuesta del modelo se cortó: los últimos pasos pueden estar incompletos o sin enlaces."
+    "llmReplyTruncated": "La respuesta del modelo se cortó: los últimos pasos pueden estar incompletos o sin enlaces.",
+    "aiTimedOut": "{{provider}} no respondió en {{seconds}} segundos. Los textos largos y los modelos lentos tardan más: prueba a pegar solo la parte que necesitas o elige un modelo más rápido en Proveedor de IA, en tu cuenta."
   },
   "shopping": {
     "otherAisle": "Otros",

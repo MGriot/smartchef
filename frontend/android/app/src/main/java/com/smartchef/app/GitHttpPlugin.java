@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.util.Iterator;
 import java.util.List;
@@ -192,7 +193,11 @@ public class GitHttpPlugin extends Plugin {
             conn.setRequestMethod(call.getString("method", "GET"));
             conn.setInstanceFollowRedirects(true);
             conn.setConnectTimeout(30000);
-            conn.setReadTimeout(60000);
+            // A caller may raise the read ceiling: an AI call that rewrites a
+            // whole recipe can take minutes, and a fixed 60s ended it with a
+            // bare "Read timed out". optLong, not call.getLong(): getLong()
+            // ignores a JS number that arrives as an Integer.
+            conn.setReadTimeout((int) Math.max(1000, Math.min(Integer.MAX_VALUE, call.getData().optLong("timeoutMs", 60000))));
 
             JSObject headers = call.getObject("headers", new JSObject());
             Iterator<String> keys = headers.keys();
@@ -258,7 +263,9 @@ public class GitHttpPlugin extends Plugin {
                 //noinspection ResultOfMethodCallIgnored
                 spill.delete();
             }
-            call.reject(e.getMessage(), e);
+            // A code the renderer can tell apart from "unreachable", so it
+            // can say in words that the server was simply too slow.
+            call.reject(e.getMessage(), e instanceof SocketTimeoutException ? "TIMEOUT" : null, e);
         } finally {
             if (conn != null) conn.disconnect();
         }

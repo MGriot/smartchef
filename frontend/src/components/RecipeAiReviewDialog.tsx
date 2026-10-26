@@ -66,6 +66,16 @@ export default function RecipeAiReviewDialog({
   // result that only gained changes (the mismatch fix) ticks just the new
   // ones, so what the user unticked stays unticked.
   const seen = useRef<Set<string>>(new Set());
+  // Seconds since loading started: a merge of a long text can take minutes,
+  // and a spinner alone looked frozen.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!loading) return;
+    setElapsed(0);
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [loading]);
 
   useEffect(() => {
     const ids = result?.changes.map((c) => c.id) ?? [];
@@ -157,6 +167,7 @@ export default function RecipeAiReviewDialog({
         <div className="flex items-center gap-3 py-10 justify-center text-zinc-500 dark:text-zinc-400">
           <span className="material-symbols-outlined animate-spin">progress_activity</span>
           <span className="font-medium">{loadingText ?? t('recipeDetail.aiCheck.checking')}</span>
+          {elapsed >= 5 && <span className="text-xs tabular-nums text-zinc-400">{t('recipeDetail.aiCheck.elapsed', { seconds: elapsed })}</span>}
         </div>
       )}
       {error && <p className="text-sm text-red-600 font-medium bg-red-50 rounded-xl px-4 py-3">{error}</p>}
