@@ -254,6 +254,23 @@ interface RecipeNutritionResult {
 /* ═══════════════════════════════════════════════════════════════════════
    HELPERS
    ═══════════════════════════════════════════════════════════════════════ */
+/** An ingredient row's name, linked to what it is: a recipe used as an
+ *  ingredient opens that recipe, a library ingredient opens its card in
+ *  the Library (whose Edit button covers editing). A row with neither —
+ *  free text — stays plain. */
+function IngredientNameLink({ ing, className, children }: {
+  ing: { ingredientId?: string | null; subRecipeId?: string | null };
+  className: string;
+  children: React.ReactNode;
+}) {
+  const to = ing.subRecipeId ? `/recipe/${ing.subRecipeId}` : ing.ingredientId ? `/library/ingredients?view=${ing.ingredientId}` : null;
+  if (!to) return <span className={className}>{children}</span>;
+  return (
+    <Link to={to} className={`${className} underline decoration-dotted decoration-zinc-300 dark:decoration-zinc-600 underline-offset-4 hover:text-primary hover:decoration-primary`}>
+      {children}
+    </Link>
+  );
+}
 // Recipe actions inside FloatingActionBar: 44px touch targets instead of the
 // header's bare 20px icons.
 const BAR_BUTTON = 'w-11 h-11 justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800';
@@ -353,7 +370,7 @@ const SubIngredientList: React.FC<{
             const scaled = ing.quantity ? ((ing.quantity * servings) / baseServings) : null;
             return (
               <div key={i} className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400 py-1">
-                <span>{ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaled) : ing.subRecipeTitle}</span>
+                <IngredientNameLink ing={ing} className="">{ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaled) : ing.subRecipeTitle}</IngredientNameLink>
                 <span className="text-zinc-400 dark:text-zinc-500 font-medium">
                   {scaled !== null ? formatQuantity(scaled, ing.unitSymbol) : ''} {ing.unitSymbol || ing.quantityText || ''}
                 </span>
@@ -3731,9 +3748,12 @@ const RecipeDetail: React.FC = () => {
                         {ing.subRecipeId && (
                           <span className="material-symbols-outlined text-primary text-[18px]">package_2</span>
                         )}
-                        <span className={`text-sm ${ing.subRecipeId ? 'font-bold text-zinc-800 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'}`}>
+                        <IngredientNameLink
+                          ing={ing}
+                          className={`text-sm ${ing.subRecipeId ? 'font-bold text-zinc-800 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'}`}
+                        >
                           {ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaleNum(ing.quantity)) : ing.subRecipeTitle}
-                        </span>
+                        </IngredientNameLink>
                         {/* Said out loud rather than left to the cook to
                             infer from a note: this is also the flag the
                             pantry matcher discounts, so someone wondering
@@ -3761,9 +3781,9 @@ const RecipeDetail: React.FC = () => {
                       <div key={`alt-${altIdx}`} className="flex items-center justify-between gap-3 py-2 pl-8 pr-3 -mt-1">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="shrink-0 text-[9px] font-black uppercase tracking-wider text-sky-600 dark:text-sky-500">{t('recipeDetail.orInstead')}</span>
-                          <span className="text-sm text-zinc-600 dark:text-zinc-400 truncate">
+                          <IngredientNameLink ing={alt} className="text-sm text-zinc-600 dark:text-zinc-400 truncate">
                             {alt.ingredientName ? pickIngredientName(alt.ingredientName, alt.ingredientPluralName, scaleNum(alt.quantity)) : alt.subRecipeTitle}
-                          </span>
+                          </IngredientNameLink>
                         </div>
                         <span className="text-sm text-zinc-400 dark:text-zinc-500 font-semibold tabular-nums shrink-0">
                           {formatAmount(alt.quantity, alt.unitSymbol, alt.quantityText)}

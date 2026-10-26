@@ -1,6 +1,6 @@
 import MarkdownText from '../components/MarkdownText';
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import { CollapseAllButton, GroupToggle, SortSelect, ViewToggle } from '../components/LibraryViewControls';
@@ -54,6 +54,11 @@ export default function LibraryIngredients() {
   // is what a fresh install should look like.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [viewingIng, setViewingIng] = useState<any>(null);
+  // A recipe's ingredient list links here as ?view=<id>: that ingredient's
+  // card opens on arrival, and closing it goes back to the recipe.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [openedFromLink, setOpenedFromLink] = useState(false);
   const [mergingIng, setMergingIng] = useState<any>(null);
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [mergeQuery, setMergeQuery] = useState('');
@@ -115,6 +120,20 @@ export default function LibraryIngredients() {
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    const id = searchParams.get('view');
+    if (!id || loading) return;
+    // Replaced, not pushed, so Back from here is the recipe again.
+    setSearchParams({}, { replace: true });
+    const target = ingredients.find(i => i.id === id);
+    if (target) { setViewingIng(target); setOpenedFromLink(true); }
+  }, [searchParams, loading, ingredients, setSearchParams]);
+
+  const closeViewing = () => {
+    setViewingIng(null);
+    if (openedFromLink) { setOpenedFromLink(false); navigate(-1); }
   };
 
   const toggleTagFilter = (tagId: string) => {
@@ -1214,11 +1233,11 @@ export default function LibraryIngredients() {
       {viewingIng && (
         <IngredientDetailModal
           ing={viewingIng}
-          onClose={() => setViewingIng(null)}
+          onClose={closeViewing}
           onViewImage={(url, name) => setPreviewImage({ url, name })}
-          onEdit={() => { setViewingIng(null); handleOpenModal(viewingIng); }}
-          onMerge={() => { setViewingIng(null); setMergingIng(viewingIng); setMergeTargetId(''); setMergeQuery(''); }}
-          onDelete={() => { setViewingIng(null); handleDelete(viewingIng.id); }}
+          onEdit={() => { setViewingIng(null); setOpenedFromLink(false); handleOpenModal(viewingIng); }}
+          onMerge={() => { setViewingIng(null); setOpenedFromLink(false); setMergingIng(viewingIng); setMergeTargetId(''); setMergeQuery(''); }}
+          onDelete={() => { setViewingIng(null); setOpenedFromLink(false); handleDelete(viewingIng.id); }}
           onOpenVariety={(id) => {
             const target = ingredients.find(i => i.id === id);
             if (target) setViewingIng(target);
