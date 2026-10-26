@@ -1,0 +1,1 @@
+A recipe's tags sit at the top of its photo and "+N" opens the rest; pale tags get dark lettering; the ingredient card fits a phone and says how to add details when it has none.
