@@ -3752,7 +3752,12 @@ const RecipeDetail: React.FC = () => {
                           ing={ing}
                           className={`text-sm ${ing.subRecipeId ? 'font-bold text-zinc-800 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'}`}
                         >
-                          {ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaleNum(ing.quantity)) : ing.subRecipeTitle}
+                          {ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaleNum(ing.quantity)) : ing.subRecipeTitle || (
+                            // Neither an ingredient nor a recipe: the import
+                            // lost its name. Said, so it can be fixed in the
+                            // editor, rather than an amount with no name.
+                            <span className="italic text-zinc-400 dark:text-zinc-500">{t('recipeDetail.unnamedIngredient')}</span>
+                          )}
                         </IngredientNameLink>
                         {/* Said out loud rather than left to the cook to
                             infer from a note: this is also the flag the

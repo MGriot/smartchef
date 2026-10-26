@@ -111,6 +111,7 @@ Regole:
 - ingredients (negli step) è l'elenco degli ingredienti che QUEL passaggio usa. Il campo name deve essere copiato ESATTAMENTE come compare nella lista "ingredients" principale, altrimenti il collegamento viene scartato. Metti quantity/unit SOLO quando il passaggio usa una parte dichiarata dell'ingrediente (es. "metà dello zucchero" su 100 g -> quantity 50, unit "g"); se il passaggio usa semplicemente l'ingrediente, lascia quantity e unit a null. Elenca TUTTI gli ingredienti che quel passaggio nomina o usa, anche al plurale o con un nome più breve (es. "le uova" per "Uova", "il burro" per "Burro morbido") e nessun altro; non inventarne di assenti dalla lista principale
 - mentions (negli step) dice DOVE il testo di QUEL passaggio nomina ciascun ingrediente, strumento o tecnica elencati in quel passaggio: kind, name (lo stesso nome usato nell'elenco "ingredients", "tools" o "techniques" di quel passaggio) e text (le parole ESATTE come compaiono nel campo description di quel passaggio, copiate carattere per carattere, es. "cipollotti", "nel forno", "sbattere"). Una voce per ogni elemento elencato nel passaggio, sulla sua prima occorrenza nel testo; se il testo non lo nomina letteralmente (lo usa soltanto) non aggiungere la voce. Non inventare parole assenti dal testo
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
+- quantity non è mai negativa. Per un intervallo (es. "1/2-1 cucchiaio", "2-3 uova") usa il valore minore in quantity e scrivi l'intervallo in notes
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
 - NON INVENTARE MAI DATI: servings, tempi, yield, tag, regions, quantità e durate degli step vanno riportati SOLO se compaiono nel contenuto (anche in forma equivalente: "1 ora" = 60 minuti). Non stimarli e non usare conoscenza culinaria generica per riempirli: se non sono dichiarati, null
@@ -861,7 +862,8 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
           // it against the catalog actually sent before anything acts on it.
           catalogName:
             typeof ing.catalogName === "string" && ing.catalogName.trim() ? ing.catalogName.trim() : null,
-          quantity: typeof ing.quantity === "number" ? ing.quantity : undefined,
+          // Math.abs: a range ("½-1 tbsp") has come back as -0.5 before.
+          quantity: typeof ing.quantity === "number" && Number.isFinite(ing.quantity) ? Math.abs(ing.quantity) : undefined,
           quantityText: ing.quantityText ?? undefined,
           unit: ing.unit ?? undefined,
           notes: ing.notes ?? undefined,
@@ -886,7 +888,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
                 .filter((u: any) => u && typeof u.name === "string")
                 .map((u: any) => ({
                   name: u.name as string,
-                  quantity: typeof u.quantity === "number" ? u.quantity : null,
+                  quantity: typeof u.quantity === "number" && Number.isFinite(u.quantity) ? Math.abs(u.quantity) : null,
                   unit: typeof u.unit === "string" ? u.unit : null,
                 }))
             : [],

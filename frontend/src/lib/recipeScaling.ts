@@ -15,7 +15,7 @@
 
 import { remainingBeforeStep, stepIngredientConsumption } from './stepRefs';
 import { toGrams, toSystem, roundForDisplay, type MeasurementSystem } from './unitConvert';
-import { formatQuantity } from './ingredientAmount';
+import { formatQuantity, isToTasteUnit } from './ingredientAmount';
 
 export interface ScalerIngredient {
   sortOrder: number;
@@ -103,8 +103,13 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
    *  of those cases. A quantityText with no number ("a pinch") never even
    *  reaches it. */
   const formatAmount = (qty: number | null, unitSymbol?: string | null, quantityText?: string | null): string => {
-    const v = scaleNum(qty);
-    if (v === null) return quantityText || '';
+    if (isToTasteUnit(unitSymbol)) return unitSymbol!.trim();
+    const scaled = scaleNum(qty);
+    if (scaled === null) return quantityText || '';
+    // No amount is negative. One that reads so came from an import that
+    // took a range ("½–1 tbsp") for a minus sign; its size is the best
+    // reading of what was meant.
+    const v = Math.abs(scaled);
     const fallback = `${formatQuantity(v, unitSymbol)}${unitSymbol ? ` ${unitSymbol}` : quantityText ? ` ${quantityText}` : ''}`;
     if (!unitSymbol) return fallback;
     const converted = toSystem(v, unitSymbol, displaySystem);

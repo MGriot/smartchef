@@ -78,6 +78,17 @@ describe('createRecipeScaler — amounts', () => {
     expect(s.formatAmount(2, null, 'cloves')).toBe('2 cloves');
   });
 
+  it('shows a to-taste unit alone, with or without a number', () => {
+    const s = scalerAt(8);
+    expect(s.formatAmount(1, 'q.b.')).toBe('q.b.');
+    expect(s.formatAmount(null, 'q.b.')).toBe('q.b.');
+  });
+
+  it('never shows a negative amount', () => {
+    const s = scalerAt(4);
+    expect(s.formatAmount(-0.5, 'tbsp')).toBe('½ tbsp');
+  });
+
   it('does not scale when the base servings are unknown', () => {
     const s = scalerAt(8, 'metric', null);
     expect(s.servingsScale).toBe(1);

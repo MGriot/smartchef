@@ -204,6 +204,14 @@ function decimalText(value: number): string {
  * pieces and unit-less amounts whenever the value is close to a kitchen
  * fraction — a decimal otherwise ("2.4").
  */
+/** "As much as needed" units. A number in front of one says nothing
+ *  ("1 q.b."), and the unit alone is the whole amount even when no number
+ *  was given at all. */
+const TO_TASTE_UNITS = new Set(['q.b.', 'q.b', 'qb', 'q.s.', 'to taste', 'a piacere']);
+export function isToTasteUnit(unitSymbol: string | null | undefined): boolean {
+  return TO_TASTE_UNITS.has(unitSymbol?.trim().toLowerCase() ?? '');
+}
+
 export function formatQuantity(value: number, unitSymbol?: string | null): string {
   if (!Number.isFinite(value)) return '';
   const symbol = unitSymbol?.trim().toLowerCase() ?? '';
