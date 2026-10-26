@@ -230,7 +230,8 @@
       "densityHint": "Peso specifico in grammi per millilitro (acqua = 1, farina ≈ 0,53, zucchero ≈ 0,85, olio ≈ 0,92). Se impostato, tazze e cucchiai nelle ricette mostrano anche il peso.",
       "densityUnit": "g/ml",
       "densityExample": "1 tazza ≈ {{grams}} g",
-      "densityKey": "Peso specifico (g/ml)"
+      "densityKey": "Peso specifico (g/ml)",
+      "noDetails": "Per questo ingrediente non c'è ancora nulla. Tocca Modifica per aggiungere descrizione, valori nutrizionali, stagionalità, tag o traduzioni."
     },
     "common": {
       "gridView": "Vista a griglia",

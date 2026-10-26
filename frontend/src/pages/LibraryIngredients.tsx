@@ -1271,6 +1271,8 @@ function IngredientDetailModal({
     [t('library.ingredients.sugar'), ing.sugar_g, 'g'],
     [t('library.ingredients.sodium'), ing.sodium_mg, 'mg'],
   ].filter(([, v]) => v !== null && v !== undefined) as Array<[string, unknown, string]>;
+  const hasDetails = !!(ing.parent_name || ing.description || nutritionRows.length > 0 || ing.density_g_per_ml != null
+    || ing.seasonal_months?.length > 0 || ing.tags?.length > 0 || ing.synonyms?.length > 0 || ing.translations?.length > 0);
 
   return (
     <Modal
@@ -1310,32 +1312,47 @@ function IngredientDetailModal({
           )}
         </div>
       }
+      // Four actions on a phone-wide footer squeezed every label until
+      // they overflowed their pills and Edit wrapped its icon onto a second
+      // line. Below `sm` the two secondary actions are icon squares, like
+      // Delete, and Edit takes the rest of the row.
       footer={
         <>
+          <ModalDeleteButton onClick={onDelete} label={t('common.delete')} />
           <Link
             to={`/?q=${encodeURIComponent(ing.name)}`}
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 py-3.5 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            title={t('library.ingredients.recipes')}
+            aria-label={t('library.ingredients.recipes')}
+            className="flex shrink-0 sm:flex-1 h-[52px] w-[52px] sm:w-auto items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
           >
             <span className="material-symbols-outlined text-lg">search</span>
-            {t('library.ingredients.recipes')}
+            <span className="hidden sm:inline">{t('library.ingredients.recipes')}</span>
           </Link>
           <button
             type="button"
             onClick={onMerge}
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 py-3.5 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            title={t('library.ingredients.merge')}
+            aria-label={t('library.ingredients.merge')}
+            className="flex shrink-0 sm:flex-1 h-[52px] w-[52px] sm:w-auto items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
           >
             <span className="material-symbols-outlined text-lg">call_merge</span>
-            {t('library.ingredients.merge')}
+            <span className="hidden sm:inline">{t('library.ingredients.merge')}</span>
           </button>
-          <ModalDeleteButton onClick={onDelete} label={t('common.delete')} />
           <ModalSubmitButton type="button" onClick={onEdit}>
-            <span className="material-symbols-outlined mr-1.5 align-middle text-lg">edit</span>
-            {t('common.edit')}
+            <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <span className="material-symbols-outlined text-lg">edit</span>
+              {t('common.edit')}
+            </span>
           </ModalSubmitButton>
         </>
       }
     >
       <div className="space-y-7">
+        {/* An ingredient with nothing recorded used to open onto an empty
+            band between two rules, which read as a broken dialog. */}
+        {!hasDetails && (
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('library.ingredients.noDetails')}</p>
+        )}
         {(ing.parent_name || ing.description) && (
           <div className="space-y-2">
             {ing.parent_name && (

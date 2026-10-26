@@ -230,7 +230,8 @@
       "densityHint": "Masse volumique en grammes par millilitre (eau = 1, farine ≈ 0,53, sucre ≈ 0,85, huile ≈ 0,92). Si elle est renseignée, tasses et cuillères affichent aussi le poids.",
       "densityUnit": "g/ml",
       "densityExample": "1 tasse ≈ {{grams}} g",
-      "densityKey": "Masse volumique (g/ml)"
+      "densityKey": "Masse volumique (g/ml)",
+      "noDetails": "Rien n'est encore enregistré pour cet ingrédient. Touchez Modifier pour ajouter une description, des valeurs nutritionnelles, la saison, des tags ou des traductions."
     },
     "common": {
       "gridView": "Vue en grille",

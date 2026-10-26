@@ -230,7 +230,8 @@
       "densityHint": "Peso específico en gramos por mililitro (agua = 1, harina ≈ 0,53, azúcar ≈ 0,85, aceite ≈ 0,92). Si se indica, tazas y cucharas en las recetas muestran también el peso.",
       "densityUnit": "g/ml",
       "densityExample": "1 taza ≈ {{grams}} g",
-      "densityKey": "Densidad (g/ml)"
+      "densityKey": "Densidad (g/ml)",
+      "noDetails": "Todavía no hay nada para este ingrediente. Toca Editar para añadir descripción, valores nutricionales, temporada, etiquetas o traducciones."
     },
     "common": {
       "gridView": "Vista de cuadrícula",

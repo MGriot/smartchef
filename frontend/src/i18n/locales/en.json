@@ -230,7 +230,8 @@
       "densityHint": "Specific weight in grams per millilitre (water = 1, flour ≈ 0.53, sugar ≈ 0.85, oil ≈ 0.92). When set, cups and spoons in recipes also show the weight.",
       "densityUnit": "g/ml",
       "densityExample": "1 cup ≈ {{grams}} g",
-      "densityKey": "Density (g/ml)"
+      "densityKey": "Density (g/ml)",
+      "noDetails": "Nothing recorded for this ingredient yet. Tap Edit to add a description, nutrition, seasonality, tags or translations."
     },
     "common": {
       "gridView": "Grid view",
