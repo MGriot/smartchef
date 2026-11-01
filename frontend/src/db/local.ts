@@ -814,6 +814,37 @@ CREATE TABLE IF NOT EXISTS sync_repair (
   PRIMARY KEY (entity_type, entity_id)
 );
 
+-- Sync v2 (docs/plans/2026-11-01-sync-v2-change-log.md,
+-- services/changeLog.local.ts). Local-only bookkeeping.
+-- change_log: this device's own changes, in the order it made them. seq is
+-- the device's sequence number other devices count it by.
+CREATE TABLE IF NOT EXISTS change_log (
+  seq         INTEGER PRIMARY KEY,
+  hlc         TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id   TEXT NOT NULL,
+  path        TEXT NOT NULL,
+  value       TEXT
+);
+-- field_state: per path of every entity, the value that won and the change
+-- that wrote it (its stamp, author and the author's seq) — what an
+-- incoming change is compared with.
+CREATE TABLE IF NOT EXISTS field_state (
+  entity_type TEXT NOT NULL,
+  entity_id   TEXT NOT NULL,
+  path        TEXT NOT NULL,
+  value       TEXT,
+  hlc         TEXT NOT NULL,
+  device      TEXT NOT NULL,
+  seq         INTEGER NOT NULL,
+  PRIMARY KEY (entity_type, entity_id, path)
+);
+-- sync_cursor: how far this device has applied each other device's log.
+CREATE TABLE IF NOT EXISTS sync_cursor (
+  device TEXT PRIMARY KEY,
+  seq    INTEGER NOT NULL
+);
+
 -- An id another device published that this device resolved onto one of its
 -- own rows: the same real-world tool/tag/technique/category created
 -- independently on two devices before they had portable ids, so each minted

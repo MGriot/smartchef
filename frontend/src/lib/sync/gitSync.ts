@@ -200,9 +200,22 @@ export function writeEntityFile(type: EntityType, id: string, data: Record<strin
     // The file now reflects the row as of this updated_at — see
     // syncReconcile.local.ts.
     if (entityType) await recordSynced(entityType, id, data.updated_at);
+    // Sync v2, phase 1: the change log rides along on the same hook, off
+    // unless switched on (services/changeLog.local.ts). Never fails a save.
+    if (entityType) await recordChangeIfEnabled(entityType, id, data);
     logIfSlow(`writeEntityFile(${type}) fs write`, startedAt, `${Math.round(json.length / 1024)}KB`);
     scheduleCommit();
   }, `writeEntityFile(${type})`);
+}
+
+async function recordChangeIfEnabled(entityType: string, id: string, data: Record<string, unknown>): Promise<void> {
+  try {
+    const log = await import('../../services/changeLog.local');
+    if (!(await log.isChangeLogEnabled())) return;
+    await log.recordEntityChange(entityType, id, data, await getDeviceId());
+  } catch (err) {
+    console.error(`SmartChef: change log could not record ${entityType} ${id}:`, err);
+  }
 }
 
 // ── Debounced commit — a burst of edits (typing a form, saving several

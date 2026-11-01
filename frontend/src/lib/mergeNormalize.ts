@@ -32,7 +32,7 @@ export const SET_FIELDS = new Set([
 ]);
 
 /** Columns stored as JSON text in SQLite — parsed before comparing. */
-const JSON_TEXT_FIELDS = new Set([
+export const JSON_TEXT_FIELDS = new Set([
   'tags', 'regions', 'region_coords', 'sources', 'image_urls', 'seasonal_months',
   'exclude_tag_ids', 'synonyms', 'tool_ids', 'technique_ids', 'step_ingredients',
 ]);
@@ -166,6 +166,13 @@ export function fieldValuesEqual(fieldName: string, a: unknown, b: unknown): boo
   return deepEqual(normalizeForCompare(fieldName, a), normalizeForCompare(fieldName, b));
 }
 
+/** The identity of one set member: equal for every spelling of the same
+ *  member, so it can key the member on its own (sync v2 tracks each member
+ *  of a set as its own field — see lib/changeLog/fieldPaths.ts). */
+export function setMemberKey(member: unknown): string {
+  return JSON.stringify(normalizeDeep(member));
+}
+
 /** A set field's members, parsed, deduplicated, in first-seen order. */
 export function setMembers(value: unknown): unknown[] {
   const v = parseMaybeJson(value);
@@ -235,7 +242,7 @@ export const KEYED_LIST_FIELDS: Record<string, string> = {
   group_translations: 'lang',
 };
 
-function keyedEntries(value: unknown, keyName: string): Map<string, Record<string, unknown>> {
+export function keyedEntries(value: unknown, keyName: string): Map<string, Record<string, unknown>> {
   const v = parseMaybeJson(value);
   const out = new Map<string, Record<string, unknown>>();
   if (!Array.isArray(v)) return out;
