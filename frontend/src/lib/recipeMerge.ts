@@ -29,7 +29,7 @@
 import { isListed } from './recipeConsistency';
 import { isCountryCode } from './countries';
 import {
-  buildCheckRequest, fmt, ingredientLabel, normText, num, numberSupportedBy, numbersIn, plainStepText, resolveUnit, str,
+  buildCheckRequest, fmt, ingredientLabel, interpretFieldsAndTimes, normText, num, numberSupportedBy, numbersIn, plainStepText, resolveUnit, str,
   type CheckCatalog, type CheckChange, type CheckDraft, type CheckResult, type CheckSource,
 } from './recipeCheck';
 
@@ -61,7 +61,8 @@ Propose ONLY what "newText" adds to the recipe or states more precisely. ABSOLUT
 Return:
 1. "ingredients": [{"i": index of the existing row it completes, or null for a NEW ingredient, "name": plain ingredient name, "quantity": number|null, "unit": string|null, "evidence"}] — new ingredients "newText" uses that the list lacks, or the amount of an existing row that has none or a different one stated by "newText".
 2. "steps": [{"i": index of the step it enriches, or null for a NEW step, "title": string|null, "text": the whole step text, "durationMin": number|null, "evidence"}] — for an existing step, its text rewritten to include the extra detail from "newText" (temperatures, times, tricks), keeping everything it already says; for a new step, a stage of the preparation the recipe lacks. Plain text, no {{ }} tokens.
-3. "servings", "prepTimeMin", "cookTimeMin", "restTimeMin": each {"value": number, "evidence"} or null — only when "newText" states it and it differs from the recipe.
+3. "servings", "prepTimeMin", "cookTimeMin", "restTimeMin", "totalTimeMin": each {"value": number, "evidence"} or null — only when "newText" states it and it differs from the recipe ("1 hour 30 minutes" → 90). "totalTimeMin" is an overall time ("ready in 1 hour"). When neither the recipe nor "newText" states a prep, cook or rest time, you may instead add up the recipe's steps: {"value": the sum, "fromSteps": [the indexes "i" of the steps]} — only steps with a "durationMin" (or one you propose in "steps"); hands-on work → prepTimeMin, on the heat or in the oven → cookTimeMin, waiting (resting, rising, marinating, chilling) → restTimeMin; a step in one of the three at most.
+   "difficulty": "easy"|"medium"|"hard"|"expert" — the recipe's difficulty once merged, estimated from the number of steps and the techniques used (no evidence needed). The current one is in "recipe.difficulty"; null when that already fits.
 4. "yield": {"amount": number, "unit": string, "evidence"} or null.
 5. "texts": [{"target": "description"|"tips"|"storage", "text": string, "evidence"}] — a short paragraph to ADD: background on the dish, tips and variations, how to keep it. Not repeating what the recipe already says.
 6. "tags": [{"name": string, "evidence"}] — tags describe the DISH (course, cuisine, occasion, season, main cooking method, diet), NEVER an ingredient. Prefer existing tags: ${list(cat.tagNames)}. At most ${MAX_TAGS}.
@@ -70,7 +71,7 @@ Return:
 9. "warnings": short notes, in the recipe's language, on things "newText" says that conflict with the recipe and you did not propose.
 
 Respond EXCLUSIVELY with JSON:
-{"ingredients":[],"steps":[],"servings":null,"prepTimeMin":null,"cookTimeMin":null,"restTimeMin":null,"yield":null,"texts":[],"tags":[],"regions":[],"sources":[],"warnings":[]}`;
+{"ingredients":[],"steps":[],"servings":null,"prepTimeMin":null,"cookTimeMin":null,"restTimeMin":null,"totalTimeMin":null,"difficulty":null,"yield":null,"texts":[],"tags":[],"regions":[],"sources":[],"warnings":[]}`;
 }
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
@@ -170,22 +171,8 @@ export function interpretMergeResponse(parsed: any, draft: CheckDraft, pasted: s
     changes.push({ id: id('step'), group: 'steps', type: 'stepAdd', kind: 'fill', title, text, durationMin, after: title ? `${title} — ${text}` : text, evidence });
   }
 
-  // 3 ── Servings and times
-  const fields: Array<['servings' | 'prep_time_min' | 'cook_time_min' | 'rest_time_min', string]> = [
-    ['servings', 'servings'], ['prep_time_min', 'prepTimeMin'], ['cook_time_min', 'cookTimeMin'], ['rest_time_min', 'restTimeMin'],
-  ];
-  for (const [field, key] of fields) {
-    const entry = parsed?.[key];
-    const value = num(entry?.value);
-    const evidence = str(entry?.evidence);
-    if (value == null || !quoted(evidence) || !numberSupportedBy(value, evidence) || value > 10000) continue;
-    const current = draft[field] ?? null;
-    if (current === value) continue;
-    changes.push({
-      id: id('field'), group: 'fields', type: 'field', kind: current ? 'fix' : 'fill', field, value: Math.round(value),
-      before: current ? String(current) : '—', after: String(Math.round(value)), evidence,
-    });
-  }
+  // 3 ── Servings, times and difficulty
+  changes.push(...interpretFieldsAndTimes(parsed, draft, changes, quoted, id));
 
   // 4 ── Yield
   const y = parsed?.yield;

@@ -527,7 +527,8 @@
         "prep_time_min": "Prep time (min)",
         "cook_time_min": "Cook time (min)",
         "rest_time_min": "Rest time (min)",
-        "yield": "Yield"
+        "yield": "Yield",
+        "difficulty": "Difficulty"
       },
       "kind": {
         "fix": "fix",
@@ -551,6 +552,8 @@
       "stepRewrite": "Rewrite step {{n}}",
       "stepRemove": "Remove step {{n}}",
       "estimated": "amount estimated by AI",
+      "fromSteps": "added up from steps {{steps}}",
+      "estimatedByAi": "estimated by AI",
       "mismatch": {
         "title": "Ingredients and steps do not match",
         "stepsSay": "Named in the steps, missing from the list",

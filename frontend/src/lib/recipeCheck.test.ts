@@ -36,6 +36,69 @@ describe('numberSupportedBy', () => {
     expect(numberSupportedBy(1500, '1,5 kg di farina')).toBe(true);
     expect(numberSupportedBy(45, 'cuoci 20 minuti')).toBe(false);
   });
+
+  it('accepts a duration given in hours and minutes', () => {
+    expect(numberSupportedBy(90, 'cuoci 1 ora e 30 minuti')).toBe(true);
+    expect(numberSupportedBy(90, 'cuoci 1h30')).toBe(true);
+    expect(numberSupportedBy(100, 'cuoci 1 ora e 30 minuti')).toBe(false);
+  });
+});
+
+describe('interpretCheckResponse — times and difficulty', () => {
+  const timed = (): CheckDraft => {
+    const d = draft();
+    d.steps = [
+      { title: null, description: 'Impasta per 10 minuti.', durationMin: 10, toolIds: [], techniqueIds: [], notes: null, stepIngredients: [] },
+      { title: null, description: 'Lascia lievitare 2 ore.', durationMin: 120, toolIds: [], techniqueIds: [], notes: null, stepIngredients: [] },
+      { title: null, description: 'Cuoci nel forno 1 ora e 30 minuti.', durationMin: null, toolIds: [], techniqueIds: [], notes: null, stepIngredients: [] },
+    ];
+    return d;
+  };
+  const fields = (r: ReturnType<typeof interpretCheckResponse>) =>
+    r.changes.filter((c) => c.type === 'field').map((c: any) => [c.field, c.value, c.fromSteps ?? null]);
+
+  it('adds up step durations, including one proposed in the same answer', () => {
+    const r = interpretCheckResponse({
+      steps: [{ i: 2, durationMin: 90, evidence: 'Cuoci nel forno 1 ora e 30 minuti' }],
+      prepTimeMin: { value: 10, fromSteps: [0] },
+      restTimeMin: { value: 120, fromSteps: [1] },
+      cookTimeMin: { value: 90, fromSteps: [2] },
+    }, timed(), catalog);
+    expect(fields(r)).toEqual([['prep_time_min', 10, [0]], ['cook_time_min', 90, [2]], ['rest_time_min', 120, [1]]]);
+  });
+
+  it('drops a sum that does not add up, a step without a duration, or a step counted twice', () => {
+    const r = interpretCheckResponse({
+      prepTimeMin: { value: 15, fromSteps: [0] },
+      cookTimeMin: { value: 90, fromSteps: [2] },
+      restTimeMin: { value: 130, fromSteps: [0, 1] },
+    }, timed(), catalog);
+    expect(fields(r)).toEqual([['rest_time_min', 130, [0, 1]]]);
+    const twice = interpretCheckResponse({
+      prepTimeMin: { value: 10, fromSteps: [0] },
+      restTimeMin: { value: 130, fromSteps: [0, 1] },
+    }, timed(), catalog);
+    expect(fields(twice)).toEqual([['prep_time_min', 10, [0]]]);
+  });
+
+  it('turns a stated total into the cook time when none is set', () => {
+    const d = timed();
+    d.prep_time_min = 20;
+    d.description = 'Pronta in 1 ora e 30 minuti.';
+    const r = interpretCheckResponse({ totalTimeMin: { value: 90, evidence: 'Pronta in 1 ora e 30 minuti' } }, d, catalog);
+    expect(fields(r)).toEqual([['cook_time_min', 70, null]]);
+    d.prep_time_min = 100;
+    expect(fields(interpretCheckResponse({ totalTimeMin: { value: 90, evidence: 'Pronta in 1 ora e 30 minuti' } }, d, catalog))).toEqual([]);
+  });
+
+  it('proposes a valid difficulty that differs, and applies it', () => {
+    const d = { ...timed(), difficulty: 'medium' };
+    const r = interpretCheckResponse({ difficulty: 'Hard' }, d, catalog);
+    expect(r.changes).toEqual([expect.objectContaining({ type: 'difficulty', value: 'hard', before: 'medium', kind: 'fix' })]);
+    expect(applyCheckChanges(d, r.changes).difficulty).toBe('hard');
+    expect(interpretCheckResponse({ difficulty: 'medium' }, d, catalog).changes).toEqual([]);
+    expect(interpretCheckResponse({ difficulty: 'impossible' }, d, catalog).changes).toEqual([]);
+  });
 });
 
 describe('interpretCheckResponse — never invents', () => {

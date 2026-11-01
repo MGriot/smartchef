@@ -119,3 +119,22 @@ describe('applying a merge', () => {
     expect(next.sources.map((s: any) => s.url)).toEqual(['https://example.com/old', 'https://nonna.example.it/torta']);
   });
 });
+
+describe('interpretMergeResponse — times and difficulty', () => {
+  it('reads a compound time and a total from the pasted text, and a difficulty', () => {
+    const text = 'Si cuoce per 1 ora e 30 minuti. Tempo totale: 2 ore.';
+    const r = interpretMergeResponse({
+      cookTimeMin: { value: 90, evidence: 'Si cuoce per 1 ora e 30 minuti' },
+      totalTimeMin: { value: 120, evidence: 'Tempo totale: 2 ore' },
+      difficulty: 'easy',
+    }, draft(), text, catalog);
+    const out = r.changes.map((c: any) => [c.type, c.field ?? null, c.value]);
+    // The stated cook time wins over the total.
+    expect(out).toEqual([['field', 'cook_time_min', 90], ['difficulty', null, 'easy']]);
+  });
+
+  it('derives the cook time from a total when nothing else is said', () => {
+    const r = interpretMergeResponse({ totalTimeMin: { value: 45, evidence: 'pronta in 45 minuti' } }, draft(), 'È pronta in 45 minuti.', catalog);
+    expect(r.changes.map((c: any) => [c.field, c.value])).toEqual([['cook_time_min', 45]]);
+  });
+});

@@ -5,6 +5,7 @@ import type { CheckChange, CheckGroup, CheckResult } from '../lib/recipeCheck';
 import type { MismatchSide } from '../lib/recipeMismatchFix';
 import { diffWords } from '../lib/wordDiff';
 import { SOURCE_TYPE_META } from './RecipeSourcesEditor';
+import { difficultyKey } from '../lib/recipeReport';
 
 const GROUPS: CheckGroup[] = ['text', 'ingredients', 'steps', 'links', 'fields', 'tags', 'regions', 'sources'];
 
@@ -27,8 +28,9 @@ function DiffLine({ side, before, after }: { side: 'del' | 'add'; before: string
 
 /** What a change does, as the lines of a diff. A fill has no old value, so it
  *  shows only the green line. */
-function diffOf(c: CheckChange): { before: string | null; after: string } | null {
+function diffOf(c: CheckChange, t: (key: string) => string): { before: string | null; after: string } | null {
   switch (c.type) {
+    case 'difficulty': return { before: c.before ? t(difficultyKey[c.before]) : null, after: t(difficultyKey[c.value]) };
     case 'textFix': case 'ingredientQty': case 'stepDuration': case 'field': case 'yield': case 'stepRewrite': case 'textAppend':
       return { before: c.before === '—' ? null : c.before, after: c.after };
     case 'stepAdd': return { before: null, after: c.after };
@@ -127,6 +129,7 @@ export default function RecipeAiReviewDialog({
       case 'stepDuration': return t('recipeDetail.aiCheck.stepDuration', { n: c.index + 1 });
       case 'field': return t(`recipeDetail.aiCheck.field.${c.field}`);
       case 'yield': return t('recipeDetail.aiCheck.field.yield');
+      case 'difficulty': return t('recipeDetail.aiCheck.field.difficulty');
       case 'tag': return c.name;
       case 'region': return c.label;
       case 'link': return t('recipeDetail.aiCheck.link', { n: c.index + 1, from: c.from, label: c.label });
@@ -253,9 +256,16 @@ export default function RecipeAiReviewDialog({
                             {t('recipeDetail.aiCheck.estimated')}
                           </span>
                         )}
+                        {(c.type === 'difficulty' || (c.type === 'field' && c.fromSteps)) && (
+                          <span className="ml-1 align-middle text-[10px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                            {c.type === 'field' && c.fromSteps
+                              ? t('recipeDetail.aiCheck.fromSteps', { steps: c.fromSteps.map((i) => i + 1).join(', ') })
+                              : t('recipeDetail.aiCheck.estimatedByAi')}
+                          </span>
+                        )}
                       </span>
                       {(() => {
-                        const d = diffOf(c);
+                        const d = diffOf(c, t);
                         return d ? (
                           <span className="block mt-2 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
                             {d.before != null && <DiffLine side="del" before={d.before} after={d.after} />}

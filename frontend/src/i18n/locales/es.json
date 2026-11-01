@@ -527,7 +527,8 @@
         "prep_time_min": "Preparación (min)",
         "cook_time_min": "Cocción (min)",
         "rest_time_min": "Reposo (min)",
-        "yield": "Rendimiento"
+        "yield": "Rendimiento",
+        "difficulty": "Dificultad"
       },
       "kind": {
         "fix": "corrección",
@@ -551,6 +552,8 @@
       "stepRewrite": "Reescribir el paso {{n}}",
       "stepRemove": "Quitar el paso {{n}}",
       "estimated": "cantidad estimada por la IA",
+      "fromSteps": "suma de los pasos {{steps}}",
+      "estimatedByAi": "estimada por la IA",
       "mismatch": {
         "title": "Los ingredientes y los pasos no coinciden",
         "stepsSay": "Citados en los pasos, ausentes de la lista",
