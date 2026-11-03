@@ -1635,13 +1635,23 @@
       "couldNotSaveGitRemote": "Impossible d’enregistrer les paramètres du dépôt git distant",
       "autoResolvedFields_one": "{{count}} différence résolue automatiquement.",
       "autoResolvedFields_other": "{{count}} différences résolues automatiquement.",
+      "webdav": {
+        "mode": "WebDAV",
+        "modeHint": "Nextcloud, ownCloud, Koofr, pCloud ou un NAS. Utilise le nouveau moteur de synchronisation.",
+        "url": "URL du dossier WebDAV",
+        "urlHint": "Le dossier où garder la bibliothèque. Sur Nextcloud : Fichiers → Paramètres → WebDAV, plus un nom de dossier.",
+        "password": "Mot de passe d'application",
+        "passwordHint": "Créez un mot de passe d'application dans les paramètres de sécurité du serveur plutôt que d'utiliser celui du compte. Il reste sur cet appareil.",
+        "passwordKept": "Enregistré — laissez vide pour le garder",
+        "save": "Enregistrer et synchroniser",
+        "saving": "Connexion…"
+      },
       "engine": {
         "label": "Moteur de synchronisation",
         "git": "Classique (git)",
         "gitHint": "Le moteur que SmartChef a toujours utilisé.",
         "v2": "Nouveau moteur (bêta)",
         "v2Hint": "Chaque appareil tient un journal de ses propres modifications : plus rapide, sans verrou. Tous les appareils de la bibliothèque devraient basculer.",
-        "v2NeedsFolder": "Fonctionne pour l'instant avec un dossier de synchronisation ; les serveurs git arrivent bientôt.",
         "switching": "Bascule en cours : publication de toute la bibliothèque une fois…",
         "confirmSwitch": "Basculer cet appareil vers le nouveau moteur de synchronisation ? Il synchronise d'abord une fois avec le moteur classique, puis publie toute la bibliothèque au nouveau format. Basculez tous les appareils de la bibliothèque, un par un."
       },

@@ -65,11 +65,11 @@ async function on(device: Device) {
   const sync = (policy: 'ask' | 'newest' = 'ask') => v2.syncOnceV2(store, { device: device.name, policy, images: imageFsOf(device) });
   return { db, log, conflicts, v2, sync };
 }
-type Mods = Awaited<ReturnType<typeof on>>;
+type DeviceCtx = Awaited<ReturnType<typeof on>>;
 
-const recipeRow = (m: Mods, id: string) => m.db.queryOne<Record<string, unknown>>(`SELECT * FROM recipes WHERE id = $1`, [id]);
+const recipeRow = (m: DeviceCtx, id: string) => m.db.queryOne<Record<string, unknown>>(`SELECT * FROM recipes WHERE id = $1`, [id]);
 
-async function edit(m: Mods, id: string, set: Record<string, unknown>) {
+async function edit(m: DeviceCtx, id: string, set: Record<string, unknown>) {
   const cols = Object.keys(set);
   await m.db.query(`UPDATE recipes SET ${cols.map((c, i) => `${c} = $${i + 1}`).join(', ')} WHERE id = $${cols.length + 1}`, [...Object.values(set), id]);
   await m.log.recordEntityChange('recipe', id, (await recipeRow(m, id))!, current.name);

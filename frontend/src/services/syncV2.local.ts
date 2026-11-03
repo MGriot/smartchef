@@ -68,6 +68,7 @@ export function syncOnceV2(store: SyncStore, opts: SyncV2Options): Promise<SyncV
 }
 
 async function runCycle(store: SyncStore, opts: SyncV2Options): Promise<SyncV2Report> {
+  await store.begin?.();
   const format = await ensureFormat(store);
   const report: SyncV2Report = {
     libraryId: format.libraryId, pulledChanges: 0, pushedChanges: 0, conflicts: 0, failed: [],
@@ -80,6 +81,7 @@ async function runCycle(store: SyncStore, opts: SyncV2Options): Promise<SyncV2Re
   await pull(store, opts, report);
   await push(store, opts, report);
   if (opts.images) report.imagesUploaded = await uploadImages(store, opts.images);
+  await store.finish?.();
   return report;
 }
 

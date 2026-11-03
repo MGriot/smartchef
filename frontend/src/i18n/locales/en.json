@@ -1635,13 +1635,23 @@
       "couldNotSaveGitRemote": "Could not save git remote settings",
       "autoResolvedFields_one": "{{count}} difference settled automatically.",
       "autoResolvedFields_other": "{{count}} differences settled automatically.",
+      "webdav": {
+        "mode": "WebDAV",
+        "modeHint": "Nextcloud, ownCloud, Koofr, pCloud or a NAS. Uses the new sync engine.",
+        "url": "WebDAV folder URL",
+        "urlHint": "The folder to keep the library in. On Nextcloud: Files → Settings → WebDAV, plus a folder name.",
+        "password": "App password",
+        "passwordHint": "Create an app password in your server's security settings rather than using your account password. It stays on this device.",
+        "passwordKept": "Saved — leave blank to keep",
+        "save": "Save and sync",
+        "saving": "Connecting…"
+      },
       "engine": {
         "label": "Sync engine",
         "git": "Classic (git)",
         "gitHint": "The engine SmartChef has always used.",
         "v2": "New engine (beta)",
         "v2Hint": "Each device keeps a log of its own changes: faster, and nothing to lock. Every device of the library should switch.",
-        "v2NeedsFolder": "Works with a Sync Folder for now; git servers come next.",
         "switching": "Switching: publishing the whole library once…",
         "confirmSwitch": "Switch this device to the new sync engine? It syncs once with the classic engine, then publishes the whole library in the new format. Switch every device of this library, one at a time."
       },

@@ -180,6 +180,34 @@ public class GitHttpPlugin extends Plugin {
         return bytes;
     }
 
+    /** HttpURLConnection only accepts the seven HTTP/1.1 methods and throws
+     *  ProtocolException for WebDAV's PROPFIND and MKCOL, which sync v2's
+     *  WebDAV store needs (lib/changeLog/webdavStore.ts). The standard
+     *  workaround: set the protected "method" field directly — on the
+     *  connection, and on the delegate an HTTPS connection wraps. */
+    private static void setMethod(HttpURLConnection conn, String method) throws java.net.ProtocolException {
+        try {
+            conn.setRequestMethod(method);
+            return;
+        } catch (java.net.ProtocolException unsupported) {
+            try {
+                java.lang.reflect.Field field = HttpURLConnection.class.getDeclaredField("method");
+                field.setAccessible(true);
+                field.set(conn, method);
+                try {
+                    java.lang.reflect.Field delegateField = conn.getClass().getDeclaredField("delegate");
+                    delegateField.setAccessible(true);
+                    Object delegate = delegateField.get(conn);
+                    if (delegate instanceof HttpURLConnection) field.set(delegate, method);
+                } catch (NoSuchFieldException noDelegate) {
+                    // Plain HTTP: no wrapper to reach into.
+                }
+            } catch (ReflectiveOperationException e) {
+                throw unsupported;
+            }
+        }
+    }
+
     @PluginMethod
     public void request(PluginCall call) {
         HttpURLConnection conn = null;
@@ -190,7 +218,7 @@ public class GitHttpPlugin extends Plugin {
 
             URL url = new URL(call.getString("url"));
             conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod(call.getString("method", "GET"));
+            setMethod(conn, call.getString("method", "GET"));
             conn.setInstanceFollowRedirects(true);
             conn.setConnectTimeout(30000);
             // A caller may raise the read ceiling: an AI call that rewrites a

@@ -78,6 +78,10 @@ export interface SetupFilePayload {
       token: string | null;
       corsProxy: string | null;
     } | null;
+    /** Sync v2. Absent in files from before it: the classic engine. */
+    engine?: 'git' | 'v2';
+    /** Only in 'webdav' mode. The app password travels like the git token. */
+    webdav?: { url: string; username: string; password: string } | null;
   };
 }
 
@@ -227,13 +231,16 @@ function parseEnvelope(text: string): SetupFileEnvelope {
 function assertPayload(value: unknown): SetupFilePayload {
   const payload = value as Partial<SetupFilePayload>;
   const sync = payload?.sync;
-  if (!sync || (sync.mode !== 'folder' && sync.mode !== 'git-remote')) {
+  if (!sync || (sync.mode !== 'folder' && sync.mode !== 'git-remote' && sync.mode !== 'webdav')) {
     throw new SetupFileError('invalid-contents', i18n.t('setupFile.errors.noSettings'));
   }
   // A file whose git-remote block is missing a URL would import as "Git
   // Remote mode, configured against nothing", which fails later and far
   // from here. Reject it while there is still context to explain it.
   if (sync.mode === 'git-remote' && !sync.gitRemote?.url) {
+    throw new SetupFileError('invalid-contents', i18n.t('setupFile.errors.noRepoUrl'));
+  }
+  if (sync.mode === 'webdav' && !sync.webdav?.url) {
     throw new SetupFileError('invalid-contents', i18n.t('setupFile.errors.noRepoUrl'));
   }
   return payload as SetupFilePayload;
@@ -282,6 +289,9 @@ export function describeSetupPayload(payload: SetupFilePayload): string {
   if (mode === 'git-remote' && gitRemote) {
     const token = gitRemote.token ? 'with an access token' : 'with no access token';
     return `Git Remote mode — ${gitRemote.url} (${token}), syncing ${every}.`;
+  }
+  if (mode === 'webdav' && payload.sync.webdav) {
+    return `WebDAV — ${payload.sync.webdav.url}, syncing ${every} with the new sync engine.`;
   }
   return `Folder mode, syncing ${every}. You will still need to choose this device's own sync folder.`;
 }

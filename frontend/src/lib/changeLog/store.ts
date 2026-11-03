@@ -27,6 +27,10 @@ export interface SyncStore {
   /** The file's bytes, or null when there is no such file. */
   get(path: string): Promise<Uint8Array | null>;
   put(path: string, data: Uint8Array): Promise<void>;
+  /** Called before a cycle's first read (a git store fetches here). */
+  begin?(): Promise<void>;
+  /** Called after a cycle's last write (a git store commits and pushes). */
+  finish?(): Promise<void>;
 }
 
 export const STORE_ROOT = 'smartchef-v2';

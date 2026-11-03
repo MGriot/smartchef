@@ -54,14 +54,14 @@ async function on(device: Device) {
   return { db, log, conflicts };
 }
 
-type Mods = Awaited<ReturnType<typeof on>>;
+type DeviceCtx = Awaited<ReturnType<typeof on>>;
 const lastSeq = (s: { changes: Array<{ seq: number }> }) => s.changes[s.changes.length - 1].seq;
 
-const recipeRow = async (m: Mods, id: string) => m.db.queryOne<Record<string, unknown>>(`SELECT * FROM recipes WHERE id = $1`, [id]);
+const recipeRow = async (m: DeviceCtx, id: string) => m.db.queryOne<Record<string, unknown>>(`SELECT * FROM recipes WHERE id = $1`, [id]);
 const tagsOf = (row: Record<string, unknown> | null) => (JSON.parse(String(row?.tags ?? '[]')) as string[]).sort();
 
 /** A save on the current device: the row changes, then the hook records it. */
-async function edit(m: Mods, id: string, set: Record<string, unknown>) {
+async function edit(m: DeviceCtx, id: string, set: Record<string, unknown>) {
   const cols = Object.keys(set);
   await m.db.query(`UPDATE recipes SET ${cols.map((c, i) => `${c} = $${i + 1}`).join(', ')} WHERE id = $${cols.length + 1}`, [...Object.values(set), id]);
   return m.log.recordEntityChange('recipe', id, (await recipeRow(m, id))!, current.name);

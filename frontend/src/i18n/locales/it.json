@@ -1635,13 +1635,23 @@
       "couldNotSaveGitRemote": "Impossibile salvare le impostazioni del git remoto",
       "autoResolvedFields_one": "{{count}} differenza risolta automaticamente.",
       "autoResolvedFields_other": "{{count}} differenze risolte automaticamente.",
+      "webdav": {
+        "mode": "WebDAV",
+        "modeHint": "Nextcloud, ownCloud, Koofr, pCloud o un NAS. Usa il nuovo motore di sincronizzazione.",
+        "url": "URL della cartella WebDAV",
+        "urlHint": "La cartella in cui tenere la libreria. Su Nextcloud: File → Impostazioni → WebDAV, più il nome di una cartella.",
+        "password": "Password per app",
+        "passwordHint": "Crea una password per app nelle impostazioni di sicurezza del server invece di usare la password dell'account. Resta su questo dispositivo.",
+        "passwordKept": "Salvata — lascia vuoto per mantenerla",
+        "save": "Salva e sincronizza",
+        "saving": "Connessione…"
+      },
       "engine": {
         "label": "Motore di sincronizzazione",
         "git": "Classico (git)",
         "gitHint": "Il motore usato finora da SmartChef.",
         "v2": "Nuovo motore (beta)",
         "v2Hint": "Ogni dispositivo tiene un registro delle proprie modifiche: più veloce e senza blocchi. Tutti i dispositivi della libreria dovrebbero passare al nuovo motore.",
-        "v2NeedsFolder": "Per ora funziona con una cartella di sincronizzazione; i server git arriveranno a breve.",
         "switching": "Passaggio in corso: pubblico l'intera libreria una volta…",
         "confirmSwitch": "Passare questo dispositivo al nuovo motore di sincronizzazione? Prima sincronizza una volta con il motore classico, poi pubblica l'intera libreria nel nuovo formato. Passa tutti i dispositivi della libreria, uno alla volta."
       },

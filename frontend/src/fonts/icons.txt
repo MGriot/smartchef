@@ -61,6 +61,7 @@ cloud
 cloud_done
 cloud_download
 cloud_off
+cloud_sync
 code
 collections
 collections_bookmark

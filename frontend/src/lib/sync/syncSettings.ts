@@ -21,7 +21,9 @@
 import { Preferences } from '@capacitor/preferences';
 import type { ConflictPolicy } from '../structuredMerge';
 
-export type SyncMode = 'folder' | 'git-remote';
+/** 'webdav' exists only for sync v2 (lib/changeLog/webdavStore.ts): picking
+ *  it moves the device onto the v2 engine. */
+export type SyncMode = 'folder' | 'git-remote' | 'webdav';
 
 const MODE_KEY = 'smartchef.sync.mode';
 const GIT_REMOTE_URL_KEY = 'smartchef.sync.gitRemote.url';
@@ -104,7 +106,7 @@ export async function setConflictPolicy(policy: ConflictPolicy, scope: SettingSc
 
 export async function getSyncMode(): Promise<SyncMode> {
   const { value } = await Preferences.get({ key: MODE_KEY });
-  return value === 'git-remote' ? 'git-remote' : 'folder';
+  return value === 'git-remote' || value === 'webdav' ? value : 'folder';
 }
 
 export async function setSyncMode(mode: SyncMode): Promise<void> {
@@ -126,6 +128,29 @@ export async function getSyncEngine(): Promise<SyncEngine> {
 export async function setSyncEngine(engine: SyncEngine): Promise<void> {
   await Preferences.set({ key: ENGINE_KEY, value: engine });
   engineCache = engine;
+}
+
+// WebDAV (sync v2 only). Same storage bar as the git token above: plain
+// on-device Preferences, on this device only, never synced. An app
+// password, not the account password, is what the settings ask for.
+const WEBDAV_URL_KEY = 'smartchef.sync.webdav.url';
+const WEBDAV_USERNAME_KEY = 'smartchef.sync.webdav.username';
+const WEBDAV_PASSWORD_KEY = 'smartchef.sync.webdav.password';
+
+export interface WebDavSettings { url: string; username: string; password: string }
+
+export async function getWebDavConfig(): Promise<WebDavSettings | null> {
+  const [{ value: url }, { value: username }, { value: password }] = await Promise.all([
+    Preferences.get({ key: WEBDAV_URL_KEY }), Preferences.get({ key: WEBDAV_USERNAME_KEY }), Preferences.get({ key: WEBDAV_PASSWORD_KEY }),
+  ]);
+  return url ? { url, username: username ?? '', password: password ?? '' } : null;
+}
+
+/** `password` undefined keeps the saved one (leave-blank-to-keep). */
+export async function setWebDavConfig(config: { url: string; username: string; password?: string }): Promise<void> {
+  await Preferences.set({ key: WEBDAV_URL_KEY, value: config.url });
+  await Preferences.set({ key: WEBDAV_USERNAME_KEY, value: config.username });
+  if (config.password !== undefined) await Preferences.set({ key: WEBDAV_PASSWORD_KEY, value: config.password });
 }
 
 export interface GitRemoteConfig {

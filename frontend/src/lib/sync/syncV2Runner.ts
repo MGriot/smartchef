@@ -19,24 +19,37 @@
 // equal and merge silently, so the first v2 cycles only settle what the
 // git era had not.
 //
-// The store is the same Sync Folder the git era uses, under its own
-// `smartchef-v2/` root (lib/changeLog/store.ts). A git server as the store
-// is phase 4; until then a device in git-remote mode cannot switch.
+// The store is the same place the git era syncs through: the Sync Folder,
+// under its own `smartchef-v2/` root (lib/changeLog/store.ts), or the same
+// git server, on its own `smartchef-v2` branch (lib/changeLog/gitStore.ts).
 // ════════════════════════════════════════════════════════════════════════
 
 import { Preferences } from '@capacitor/preferences';
 import { storeFromTransport, type SyncStore } from '../changeLog/store';
 import { defaultImageFs } from '../localImages';
-import { getConflictPolicy, getSyncMode, setSyncEngine } from './syncSettings';
+import { getConflictPolicy, getGitRemoteConfig, getSyncMode, getWebDavConfig, setSyncEngine } from './syncSettings';
 import { reportSyncFinished, reportSyncStarted, LAST_SYNC_KEY } from './syncStatus';
 import type { SyncResult } from './gitSync';
 
-export class SyncV2UnavailableError extends Error {}
-
 /** The store this device syncs through, or null when none is set up. */
 export async function getV2Store(): Promise<SyncStore | null> {
-  if ((await getSyncMode()) === 'git-remote') {
-    throw new SyncV2UnavailableError('The new sync engine works with a Sync Folder for now; a git server is coming next.');
+  const mode = await getSyncMode();
+  if (mode === 'webdav') {
+    const config = await getWebDavConfig();
+    if (!config) return null;
+    const { createWebDavStore } = await import('../changeLog/webdavStore');
+    return createWebDavStore(config);
+  }
+  if (mode === 'git-remote') {
+    const config = await getGitRemoteConfig();
+    if (!config) return null;
+    const [{ gitfs }, { getHiddenCloneDir }, { createGitStore }, { isomorphicGitRemote }, { getDeviceName }] = await Promise.all([
+      import('../gitfs'), import('./hiddenClone'), import('../changeLog/gitStore'), import('../changeLog/gitStoreRemote'), import('./gitSync'),
+    ]);
+    // Its own small repository beside the Hidden Clone, never inside it.
+    const dir = `${(await getHiddenCloneDir()).replace(/\/+$/, '')}-v2`;
+    const gitdir = `${dir}/.git`;
+    return createGitStore({ fs: gitfs, dir, gitdir, remote: isomorphicGitRemote(gitfs, dir, gitdir, config), message: `Sync from ${await getDeviceName()}` });
   }
   const { getConfiguredRemoteTransport } = await import('./gitSync');
   const transport = await getConfiguredRemoteTransport();
@@ -125,9 +138,6 @@ export async function recordWholeLibrary(): Promise<void> {
 
 /** Moves this device onto sync v2. See the header for the steps. */
 export async function switchToSyncV2(): Promise<SyncResult> {
-  if ((await getSyncMode()) === 'git-remote') {
-    throw new SyncV2UnavailableError('The new sync engine works with a Sync Folder for now; a git server is coming next.');
-  }
   const gitSync = await import('./gitSync');
   try {
     await gitSync.syncNow();
@@ -144,8 +154,10 @@ export async function switchToSyncV2(): Promise<SyncResult> {
 }
 
 /** Back to the git engine on this device. The change log is kept (and
- *  stops recording), so switching forward again resumes where it was. */
+ *  stops recording), so switching forward again resumes where it was.
+ *  Not available on WebDAV, which only v2 can sync through. */
 export async function switchBackToGit(): Promise<void> {
+  if ((await getSyncMode()) === 'webdav') throw new Error('WebDAV syncs only with the new engine. Pick a Sync Folder or a git server first.');
   const { setChangeLogEnabled } = await import('../../services/changeLog.local');
   await setSyncEngine('git');
   await setChangeLogEnabled(false);

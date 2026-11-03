@@ -854,7 +854,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
   if (syncMode === 'git-remote') {
     const gitRemoteConfig = await getGitRemoteConfig();
     if (gitRemoteConfig) await syncGitRemoteMode(gitRemoteConfig);
-  } else {
+  } else if (syncMode === 'folder') {
     const transport = await getConfiguredRemoteTransport();
     if (transport) await syncFolderMode(transport);
   }

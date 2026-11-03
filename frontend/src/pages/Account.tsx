@@ -207,7 +207,12 @@ function FolderSyncCard() {
   // just this profile — only an admin profile may change them (mirrors the
   // same admin-only gating server mode already applies to Manage Users).
   const [isAdmin, setIsAdmin] = useState(false);
-  const [syncMode, setSyncModeState] = useState<'folder' | 'git-remote'>('folder');
+  const [syncMode, setSyncModeState] = useState<'folder' | 'git-remote' | 'webdav'>('folder');
+  const [webdavUrl, setWebdavUrl] = useState('');
+  const [webdavUsername, setWebdavUsername] = useState('');
+  const [webdavPassword, setWebdavPassword] = useState('');
+  const [webdavPasswordSaved, setWebdavPasswordSaved] = useState(false);
+  const [savingWebdav, setSavingWebdav] = useState(false);
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [gitRemoteUrl, setGitRemoteUrl] = useState('');
   const [gitRemoteUsername, setGitRemoteUsername] = useState('');
@@ -373,6 +378,14 @@ function FolderSyncCard() {
 
       const mode = await getSyncMode();
       setSyncModeState(mode);
+      const { getSyncEngine, getWebDavConfig } = await import('../lib/sync/syncSettings');
+      setSyncEngineState(await getSyncEngine());
+      const webdav = await getWebDavConfig();
+      if (webdav) {
+        setWebdavUrl(webdav.url);
+        setWebdavUsername(webdav.username);
+        setWebdavPasswordSaved(!!webdav.password);
+      }
       const gitRemoteConfig = await getGitRemoteConfig();
       if (gitRemoteConfig) {
         setGitRemoteUrl(gitRemoteConfig.url);
@@ -614,13 +627,41 @@ function FolderSyncCard() {
     }
   };
 
-  const handleSelectMode = async (mode: 'folder' | 'git-remote') => {
+  const handleSelectMode = async (mode: 'folder' | 'git-remote' | 'webdav') => {
     setSyncModeState(mode);
     setError(null);
     setConnectionTestResult(null);
+    // WebDAV is saved with its form (it needs a URL before it can sync).
+    if (mode === 'webdav') return;
     const { setSyncMode } = await import('../lib/sync/syncSettings');
     await setSyncMode(mode);
     if (mode === 'folder' && folderPath) await handleSyncNow();
+  };
+
+  /** WebDAV syncs only with sync v2, so saving it also moves this device
+   *  onto v2 when it isn't there yet. */
+  const handleSaveWebdav = async () => {
+    setSavingWebdav(true);
+    setError(null);
+    try {
+      const { setWebDavConfig, setSyncMode, getSyncEngine } = await import('../lib/sync/syncSettings');
+      await setWebDavConfig({ url: webdavUrl.trim(), username: webdavUsername.trim(), password: webdavPassword ? webdavPassword : undefined });
+      if (webdavPassword) { setWebdavPasswordSaved(true); setWebdavPassword(''); }
+      await setSyncMode('webdav');
+      if ((await getSyncEngine()) === 'v2') {
+        await handleSyncNow();
+      } else {
+        const runner = await import('../lib/sync/syncV2Runner');
+        const r = await runner.switchToSyncV2();
+        setResult(r);
+        setLastSyncAt(r.lastSyncAt);
+        setSyncEngineState('v2');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('account.folderSync.syncFailed'));
+    } finally {
+      setSavingWebdav(false);
+    }
   };
 
   const handleTestConnection = async () => {
@@ -789,10 +830,65 @@ function FolderSyncCard() {
               <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.modeGitRemote')}</p>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{t('account.folderSync.modeGitRemoteHint')}</p>
             </button>
+            <button
+              type="button"
+              onClick={() => handleSelectMode('webdav')}
+              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'webdav' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+            >
+              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.webdav.mode')}</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{t('account.folderSync.webdav.modeHint')}</p>
+            </button>
           </div>
         </div>
 
-        {syncMode === 'folder' ? (
+        {syncMode === 'webdav' ? (
+          <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-5">
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.webdav.url')}</label>
+              <input
+                type="url"
+                value={webdavUrl}
+                onChange={(e) => setWebdavUrl(e.target.value)}
+                placeholder="https://cloud.example.com/remote.php/dav/files/you/SmartChef"
+                className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
+              />
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.webdav.urlHint')}</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.username')}</label>
+                <input
+                  type="text"
+                  value={webdavUsername}
+                  onChange={(e) => setWebdavUsername(e.target.value)}
+                  autoComplete="username"
+                  className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.webdav.password')}</label>
+                <input
+                  type="password"
+                  value={webdavPassword}
+                  onChange={(e) => setWebdavPassword(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={webdavPasswordSaved ? t('account.folderSync.webdav.passwordKept') : ''}
+                  className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">{t('account.folderSync.webdav.passwordHint')}</p>
+            <button
+              type="button"
+              onClick={handleSaveWebdav}
+              disabled={savingWebdav || !webdavUrl.trim() || !webdavUsername.trim() || (!webdavPassword && !webdavPasswordSaved)}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-black text-xs hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-base">cloud_sync</span>
+              {savingWebdav ? t('account.folderSync.webdav.saving') : t('account.folderSync.webdav.save')}
+            </button>
+          </div>
+        ) : syncMode === 'folder' ? (
           <div className="flex gap-8 flex-wrap">
             <div className="min-w-0">
               <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.syncFolder')}</p>
@@ -997,14 +1093,13 @@ function FolderSyncCard() {
           <div role="radiogroup" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {(['git', 'v2'] as const).map((engine) => {
               const active = syncEngine === engine;
-              const unavailable = engine === 'v2' && syncMode === 'git-remote' && !active;
               return (
                 <button
                   key={engine}
                   type="button"
                   role="radio"
                   aria-checked={active}
-                  disabled={switchingEngine || syncing || unavailable}
+                  disabled={switchingEngine || syncing || (engine === 'git' && syncMode === 'webdav')}
                   onClick={() => void handleSyncEngineChange(engine)}
                   className={`text-left rounded-2xl border-2 p-3 transition-colors disabled:opacity-50 ${active ? 'border-primary bg-primary/5' : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'}`}
                 >
@@ -1013,7 +1108,7 @@ function FolderSyncCard() {
                     {t(`account.folderSync.engine.${engine}`)}
                   </span>
                   <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                    {unavailable ? t('account.folderSync.engine.v2NeedsFolder') : t(`account.folderSync.engine.${engine}Hint`)}
+                    {t(`account.folderSync.engine.${engine}Hint`)}
                   </span>
                 </button>
               );
