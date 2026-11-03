@@ -267,6 +267,13 @@ function FolderSyncCard() {
   // this device syncs with, and whether a switch is running.
   const [syncEngine, setSyncEngineState] = useState<'git' | 'v2'>('git');
   const [switchingEngine, setSwitchingEngine] = useState(false);
+  // Sync v2 encryption: this device's recovery key (shown on request) and
+  // whether a library it creates is encrypted.
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [showRecoveryKey, setShowRecoveryKey] = useState(false);
+  const [recoveryKeyInput, setRecoveryKeyInput] = useState('');
+  const [recoveryKeyNote, setRecoveryKeyNote] = useState<string | null>(null);
+  const [encryptNew, setEncryptNewState] = useState(true);
   // "Replace with synced data" — preview first, then an explicit confirm.
   const [replacePreview, setReplacePreview] = useState<ReplacePreview | null>(null);
   const [preparingReplace, setPreparingReplace] = useState(false);
@@ -378,8 +385,11 @@ function FolderSyncCard() {
 
       const mode = await getSyncMode();
       setSyncModeState(mode);
-      const { getSyncEngine, getWebDavConfig } = await import('../lib/sync/syncSettings');
+      const { getSyncEngine, getWebDavConfig, getLibraryKey, getEncryptNewLibrary } = await import('../lib/sync/syncSettings');
       setSyncEngineState(await getSyncEngine());
+      setEncryptNewState(await getEncryptNewLibrary());
+      const libraryKey = await getLibraryKey();
+      if (libraryKey) setRecoveryKey((await import('../lib/changeLog/libraryStore')).formatRecoveryKey(libraryKey));
       const webdav = await getWebDavConfig();
       if (webdav) {
         setWebdavUrl(webdav.url);
@@ -530,11 +540,33 @@ function FolderSyncCard() {
         await runner.switchBackToGit();
       }
       setSyncEngineState(engine);
+      const { getLibraryKey } = await import('../lib/sync/syncSettings');
+      const libraryKey = await getLibraryKey();
+      if (libraryKey) setRecoveryKey((await import('../lib/changeLog/libraryStore')).formatRecoveryKey(libraryKey));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('account.folderSync.syncFailed'));
     } finally {
       setSwitchingEngine(false);
     }
+  };
+
+  const handleSaveRecoveryKey = async () => {
+    const [{ parseRecoveryKey, formatRecoveryKey }, { setLibraryKey }] = await Promise.all([
+      import('../lib/changeLog/libraryStore'), import('../lib/sync/syncSettings'),
+    ]);
+    const key = parseRecoveryKey(recoveryKeyInput);
+    if (!key) { setRecoveryKeyNote(t('account.folderSync.encryption.invalidKey')); return; }
+    await setLibraryKey(key);
+    setRecoveryKey(formatRecoveryKey(key));
+    setRecoveryKeyInput('');
+    setRecoveryKeyNote(t('account.folderSync.encryption.keySaved'));
+    await handleSyncNow();
+  };
+
+  const handleEncryptNewChange = async (on: boolean) => {
+    setEncryptNewState(on);
+    const { setEncryptNewLibrary } = await import('../lib/sync/syncSettings');
+    await setEncryptNewLibrary(on);
   };
 
   const handleConflictPolicyChange = async (policy: ConflictPolicy, scope: SettingScope = policyScope) => {
@@ -1116,6 +1148,53 @@ function FolderSyncCard() {
           </div>
           {switchingEngine && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5">{t('account.folderSync.engine.switching')}</p>}
         </div>
+
+        {syncEngine === 'v2' && (
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.encryption.label')}</label>
+            {recoveryKey ? (
+              <div className="space-y-2">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('account.folderSync.encryption.hint')}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <code className="min-w-0 break-all rounded-xl bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-xs font-mono text-zinc-800 dark:text-zinc-200">
+                    {showRecoveryKey ? recoveryKey : '•'.repeat(24)}
+                  </code>
+                  <button type="button" onClick={() => setShowRecoveryKey((v) => !v)} className="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300">
+                    {showRecoveryKey ? t('account.folderSync.encryption.hide') : t('account.folderSync.encryption.show')}
+                  </button>
+                  {showRecoveryKey && (
+                    <button type="button" onClick={() => void navigator.clipboard?.writeText(recoveryKey)} className="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300">
+                      {t('account.folderSync.encryption.copy')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <label className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                <input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={encryptNew} onChange={(e) => void handleEncryptNewChange(e.target.checked)} />
+                <span>
+                  <span className="font-bold">{t('account.folderSync.encryption.encryptNew')}</span>
+                  <span className="block text-xs text-zinc-500 dark:text-zinc-400">{t('account.folderSync.encryption.encryptNewHint')}</span>
+                </span>
+              </label>
+            )}
+            <div className="flex flex-wrap gap-2 mt-3">
+              <input
+                type="text"
+                value={recoveryKeyInput}
+                onChange={(e) => { setRecoveryKeyInput(e.target.value); setRecoveryKeyNote(null); }}
+                placeholder={t('account.folderSync.encryption.enterKey')}
+                autoComplete="off"
+                spellCheck={false}
+                className="min-w-0 flex-1 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-mono px-3 py-2 text-xs"
+              />
+              <button type="button" onClick={() => void handleSaveRecoveryKey()} disabled={!recoveryKeyInput.trim()} className="px-4 py-2 bg-zinc-900 text-white rounded-xl font-black text-xs disabled:opacity-50">
+                {t('account.folderSync.encryption.useKey')}
+              </button>
+            </div>
+            {recoveryKeyNote && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5">{recoveryKeyNote}</p>}
+          </div>
+        )}
 
         <div>
           <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.setupFile.label')}</label>

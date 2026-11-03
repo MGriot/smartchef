@@ -26,8 +26,14 @@
 
 import { Preferences } from '@capacitor/preferences';
 import { storeFromTransport, type SyncStore } from '../changeLog/store';
+import { openLibraryStore, type Keyring } from '../changeLog/libraryStore';
 import { defaultImageFs } from '../localImages';
-import { getConflictPolicy, getGitRemoteConfig, getSyncMode, getWebDavConfig, setSyncEngine } from './syncSettings';
+import {
+  getConflictPolicy, getEncryptNewLibrary, getGitRemoteConfig, getLibraryKey, getSyncMode, getWebDavConfig, setLibraryKey, setSyncEngine,
+} from './syncSettings';
+
+/** This device's library key, kept in its settings. */
+export const deviceKeyring: Keyring = { get: getLibraryKey, set: setLibraryKey, encryptNew: getEncryptNewLibrary };
 import { reportSyncFinished, reportSyncStarted, LAST_SYNC_KEY } from './syncStatus';
 import type { SyncResult } from './gitSync';
 
@@ -66,8 +72,9 @@ export async function syncNowV2(): Promise<SyncResult> {
   };
 
   await publishRowsAhead();
-  const store = await getV2Store();
-  if (!store) return result;
+  const raw = await getV2Store();
+  if (!raw) return result;
+  const store = openLibraryStore(raw, deviceKeyring);
 
   reportSyncStarted();
   try {

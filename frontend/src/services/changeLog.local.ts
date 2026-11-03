@@ -183,30 +183,7 @@ export async function applySegment(segment: Segment, opts: { device: string; pol
   const fresh = segment.changes.filter((c) => c.seq > from).sort((a, b) => a.seq - b.seq);
   if (fresh.length === 0) return report;
 
-  const c = await clockFor(opts.device);
-  const byEntity = new Map<string, SegmentChange[]>();
-  for (const change of fresh) {
-    const key = `${change.entityType}\u0000${change.entityId}`;
-    if (!byEntity.has(key)) byEntity.set(key, []);
-    byEntity.get(key)!.push(change);
-  }
-  const order = (type: string) => { const i = ENTITY_ORDER.indexOf(type); return i < 0 ? ENTITY_ORDER.length : i; };
-  const entities = [...byEntity.values()].sort((a, b) => order(a[0].entityType) - order(b[0].entityType));
-
-  for (const changes of entities) {
-    const { entityType } = changes[0];
-    try {
-      // Every write lands on the row this id resolves to here — the same
-      // aliasing the git merge applies (resolveAlias in conflicts.local.ts).
-      const entityId = await resolveAlias(entityType, changes[0].entityId);
-      const outcome = await applyEntityChanges(entityType, entityId, changes, segment, opts.policy, c);
-      report.applied += outcome.applied;
-      report.ignored += outcome.ignored;
-      report.conflicts += outcome.conflicts;
-    } catch (err) {
-      report.failed.push({ entityType, entityId: changes[0].entityId, error: err instanceof Error ? err.message : String(err) });
-    }
-  }
+  await applyRows(fresh.map((ch) => ({ ...ch, device: segment.device })), segment.seen, opts, report);
 
   // The cursor moves past the whole segment, failures included: a failed
   // write is a schema or constraint problem a retry of the same change will
@@ -221,8 +198,43 @@ export async function applySegment(segment: Segment, opts: { device: string; pol
   return report;
 }
 
+/** A change together with the device that wrote it — a segment's changes
+ *  all have one author, a snapshot's rows have many. */
+type AuthoredChange = SegmentChange & { device: string };
+
+/** Applies changes entity by entity, parents first. `seen` is how far the
+ *  writer of these rows had read every device — what decides whether a
+ *  change was made with the local value in view. */
+async function applyRows(rows: AuthoredChange[], seen: Record<string, number>, opts: { device: string; policy: ConflictPolicy }, report: ApplyReport): Promise<void> {
+  const c = await clockFor(opts.device);
+  const byEntity = new Map<string, AuthoredChange[]>();
+  for (const row of rows) {
+    if (row.device === opts.device) continue; // our own change, coming back
+    const key = `${row.entityType}\u0000${row.entityId}`;
+    if (!byEntity.has(key)) byEntity.set(key, []);
+    byEntity.get(key)!.push(row);
+  }
+  const order = (type: string) => { const i = ENTITY_ORDER.indexOf(type); return i < 0 ? ENTITY_ORDER.length : i; };
+  const entities = [...byEntity.values()].sort((a, b) => order(a[0].entityType) - order(b[0].entityType));
+
+  for (const changes of entities) {
+    const { entityType } = changes[0];
+    try {
+      // Every write lands on the row this id resolves to here — the same
+      // aliasing the git merge applies (resolveAlias in conflicts.local.ts).
+      const entityId = await resolveAlias(entityType, changes[0].entityId);
+      const outcome = await applyEntityChanges(entityType, entityId, changes, seen, opts.policy, c);
+      report.applied += outcome.applied;
+      report.ignored += outcome.ignored;
+      report.conflicts += outcome.conflicts;
+    } catch (err) {
+      report.failed.push({ entityType, entityId: changes[0].entityId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+}
+
 async function applyEntityChanges(
-  entityType: string, entityId: string, changes: SegmentChange[], segment: Segment, policy: ConflictPolicy, c: HlcClock,
+  entityType: string, entityId: string, changes: AuthoredChange[], seen: Record<string, number>, policy: ConflictPolicy, c: HlcClock,
 ): Promise<{ applied: number; ignored: number; conflicts: number }> {
   const state = await loadState(entityType, entityId);
   const before = new Map([...state].map(([p, s]) => [p, s.value]));
@@ -234,13 +246,13 @@ async function applyEntityChanges(
 
   for (const change of changes) {
     c.receive(change.hlc);
-    const incoming: IncomingChange = { device: segment.device, seq: change.seq, hlc: change.hlc, entityType, entityId, path: change.path, value: change.value };
+    const incoming: IncomingChange = { device: change.device, seq: change.seq, hlc: change.hlc, entityType, entityId, path: change.path, value: change.value };
     const local = state.get(change.path);
-    const decision = decide(local, incoming, segment.seen);
+    const decision = decide(local, incoming, seen);
     const field = pathInfo(change.path).field;
     if (decision.action !== 'ignore' && decision.concurrent && policy === 'ask') disputed.set(change.path, change.value);
     if (decision.action !== 'apply') { ignored += 1; continue; }
-    const next: PathState = { value: change.value, hlc: change.hlc, device: segment.device, seq: change.seq };
+    const next: PathState = { value: change.value, hlc: change.hlc, device: change.device, seq: change.seq };
     state.set(change.path, next);
     await writeState(entityType, entityId, change.path, next);
     touched.add(field);
@@ -282,6 +294,49 @@ async function applyEntityChanges(
     await applyEntityMergeResult(entityType, entityId, { applied: {}, conflicts }, { remoteUpdatedAt });
   }
   return { applied, ignored, conflicts: conflictedFields.size };
+}
+
+// ── Snapshots ───────────────────────────────────────────────────────────
+// The whole library as this device holds it — every path's winning value
+// with the change that wrote it — and how far it had read every device.
+// A device catching up from nothing, or from behind segments that have
+// been compacted away, starts from one of these instead of the full log.
+
+export interface Snapshot {
+  device: string;
+  createdAt: string;
+  /** Every device's seq this snapshot includes (its own included). */
+  covers: Record<string, number>;
+  rows: Array<[entityType: string, entityId: string, path: string, value: unknown, hlc: string, device: string, seq: number]>;
+}
+
+export async function buildSnapshot(device: string): Promise<Snapshot> {
+  const covers = await readCursors();
+  const own = await queryOne<{ seq: number | null }>(`SELECT MAX(seq) AS seq FROM change_log`);
+  covers[device] = Number(own?.seq ?? 0);
+  const rows = await query<{ entity_type: string; entity_id: string; path: string; value: string | null; hlc: string; device: string; seq: number }>(
+    `SELECT entity_type, entity_id, path, value, hlc, device, seq FROM field_state ORDER BY entity_type, entity_id, path`,
+  );
+  return {
+    device, createdAt: new Date().toISOString(), covers,
+    rows: rows.map((r) => [r.entity_type, r.entity_id, r.path, decode(r.value), r.hlc, r.device, Number(r.seq)]),
+  };
+}
+
+/** Applies a snapshot like a very large segment, then moves every cursor up
+ *  to what it covers — the changes before that are in it. */
+export async function applySnapshot(snapshot: Snapshot, opts: { device: string; policy: ConflictPolicy }): Promise<ApplyReport> {
+  const report: ApplyReport = { applied: 0, ignored: 0, conflicts: 0, failed: [] };
+  const rows: AuthoredChange[] = snapshot.rows.map(([entityType, entityId, path, value, hlc, device, seq]) => ({ entityType, entityId, path, value, hlc, device, seq }));
+  await applyRows(rows, snapshot.covers, opts, report);
+  for (const [device, seq] of Object.entries(snapshot.covers)) {
+    if (device === opts.device) continue;
+    await query(
+      `INSERT INTO sync_cursor (device, seq) VALUES ($1, $2) ON CONFLICT(device) DO UPDATE SET seq = MAX(sync_cursor.seq, excluded.seq)`,
+      [device, seq],
+    );
+  }
+  return report;
 }
 
 /** Paths the log knows for an entity — for tests and the future history view. */

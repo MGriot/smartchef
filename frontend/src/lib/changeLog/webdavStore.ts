@@ -114,5 +114,10 @@ export function createWebDavStore(config: WebDavConfig, http?: HttpFn): SyncStor
       const res = await call('PUT', path, { body: data, headers: { 'Content-Type': 'application/octet-stream' } });
       if (res.statusCode < 200 || res.statusCode >= 300) throw describe(res.statusCode, `write ${path}`);
     },
+
+    async remove(path) {
+      const res = await call('DELETE', path);
+      if (res.statusCode !== 404 && (res.statusCode < 200 || res.statusCode >= 300)) throw describe(res.statusCode, `delete ${path}`);
+    },
   };
 }

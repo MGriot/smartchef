@@ -31,6 +31,14 @@ export interface SyncStore {
   begin?(): Promise<void>;
   /** Called after a cycle's last write (a git store commits and pushes). */
   finish?(): Promise<void>;
+  /** The name a blob is listed under in `blobs/` — its own name, unless the
+   *  store hides names (lib/changeLog/libraryStore.ts). */
+  blobKey?(name: string): Promise<string>;
+  /** A blob by its listed key, with its real name. */
+  getBlobByKey?(key: string): Promise<{ name: string; data: Uint8Array } | null>;
+  /** Deletes a file. Optional: only compaction uses it, and a store without
+   *  it simply keeps every segment. Only ever called by a file's author. */
+  remove?(path: string): Promise<void>;
 }
 
 export const STORE_ROOT = 'smartchef-v2';
@@ -73,6 +81,9 @@ export function createMemoryStore(): SyncStore & { files: Map<string, Uint8Array
     },
     async put(path, data) {
       files.set(path, new Uint8Array(data));
+    },
+    async remove(path) {
+      files.delete(path);
     },
   };
 }

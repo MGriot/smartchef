@@ -1646,6 +1646,19 @@
         "save": "Salva e sincronizza",
         "saving": "Connessione…"
       },
+      "encryption": {
+        "label": "Crittografia",
+        "hint": "Il cloud conserva questa libreria cifrata. Ogni dispositivo ha bisogno di questa chiave di recupero, inclusa nel file di configurazione. Conservane una copia al sicuro: senza di essa la copia sincronizzata non si può leggere.",
+        "show": "Mostra chiave di recupero",
+        "hide": "Nascondi",
+        "copy": "Copia",
+        "encryptNew": "Cifra la libreria",
+        "encryptNewHint": "Si decide quando questo dispositivo crea la libreria nel cloud. Lascialo attivo, a meno che tu non voglia file leggibili da chiunque abbia accesso alla cartella.",
+        "enterKey": "Chiave di recupero di un altro dispositivo",
+        "useKey": "Usa chiave",
+        "invalidKey": "Questa non è una chiave di recupero di SmartChef.",
+        "keySaved": "Chiave salvata. Sincronizzo…"
+      },
       "engine": {
         "label": "Motore di sincronizzazione",
         "git": "Classico (git)",

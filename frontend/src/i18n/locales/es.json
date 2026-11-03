@@ -1646,6 +1646,19 @@
         "save": "Guardar y sincronizar",
         "saving": "Conectando…"
       },
+      "encryption": {
+        "label": "Cifrado",
+        "hint": "Tu nube guarda esta biblioteca cifrada. Cada dispositivo necesita esta clave de recuperación, que va en el archivo de configuración. Guarda una copia en un lugar seguro: sin ella, la copia sincronizada no se puede leer.",
+        "show": "Mostrar clave de recuperación",
+        "hide": "Ocultar",
+        "copy": "Copiar",
+        "encryptNew": "Cifrar la biblioteca",
+        "encryptNewHint": "Se decide cuando este dispositivo crea la biblioteca en la nube. Déjalo activado salvo que quieras que cualquiera con acceso a la carpeta pueda leer los archivos.",
+        "enterKey": "Clave de recuperación de otro dispositivo",
+        "useKey": "Usar clave",
+        "invalidKey": "Esa no es una clave de recuperación de SmartChef.",
+        "keySaved": "Clave guardada. Sincronizando…"
+      },
       "engine": {
         "label": "Motor de sincronización",
         "git": "Clásico (git)",

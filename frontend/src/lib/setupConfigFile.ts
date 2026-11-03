@@ -82,6 +82,8 @@ export interface SetupFilePayload {
     engine?: 'git' | 'v2';
     /** Only in 'webdav' mode. The app password travels like the git token. */
     webdav?: { url: string; username: string; password: string } | null;
+    /** The sync v2 library key, as its recovery code, when there is one. */
+    libraryKey?: string | null;
   };
 }
 

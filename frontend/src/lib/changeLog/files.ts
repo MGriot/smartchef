@@ -18,6 +18,8 @@ export interface StoreFormat {
   version: number;
   libraryId: string;
   createdAt: string;
+  /** Present when every other file is encrypted (lib/changeLog/libraryStore.ts). */
+  encryption?: { scheme: string; keyId: string };
 }
 
 /** devices/<id>/head.json: rewritten by its device after every push. */
@@ -55,7 +57,24 @@ export const paths = {
   segment: (device: string, from: number, to: number) => `devices/${device}/log/${segmentName(from, to)}`,
   blobs: 'blobs',
   blob: (name: string) => `blobs/${name}`,
+  snapshots: 'snapshots',
+  /** A snapshot is two files: the small meta (what it covers, read to
+   *  decide) and the body (every row, read only when it is used). */
+  snapshotMeta: (id: string) => `snapshots/${id}.meta.json`,
+  snapshotBody: (id: string) => `snapshots/${id}.json.gz`,
 };
+
+/** Sortable by time, unique per device: `20261103T071500Z-<device>`. */
+export function snapshotId(createdAt: string, device: string): string {
+  return `${createdAt.replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}-${device}`;
+}
+
+export interface SnapshotMeta {
+  id: string;
+  device: string;
+  createdAt: string;
+  covers: Record<string, number>;
+}
 
 async function pipe(bytes: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {
   const out = new Response(new Blob([Uint8Array.from(bytes)]).stream().pipeThrough(stream));

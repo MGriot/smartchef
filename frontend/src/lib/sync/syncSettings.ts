@@ -130,6 +130,35 @@ export async function setSyncEngine(engine: SyncEngine): Promise<void> {
   engineCache = engine;
 }
 
+// Sync v2 library key (lib/changeLog/libraryStore.ts). On this device only,
+// like the tokens above; other devices get it from the Setup File or the
+// recovery key. Losing every copy of it loses access to the store's
+// contents — each device still holds its own full library locally.
+const LIBRARY_KEY_KEY = 'smartchef.sync.libraryKey';
+const ENCRYPT_NEW_KEY = 'smartchef.sync.encryptNewLibrary';
+
+export async function getLibraryKey(): Promise<Uint8Array | null> {
+  const { value } = await Preferences.get({ key: LIBRARY_KEY_KEY });
+  if (!value) return null;
+  const { parseRecoveryKey } = await import('../changeLog/libraryStore');
+  return parseRecoveryKey(value);
+}
+
+export async function setLibraryKey(key: Uint8Array | null): Promise<void> {
+  if (!key) { await Preferences.remove({ key: LIBRARY_KEY_KEY }); return; }
+  const { formatRecoveryKey } = await import('../changeLog/libraryStore');
+  await Preferences.set({ key: LIBRARY_KEY_KEY, value: formatRecoveryKey(key) });
+}
+
+/** Whether a library this device creates is encrypted. On unless turned off. */
+export async function getEncryptNewLibrary(): Promise<boolean> {
+  return (await Preferences.get({ key: ENCRYPT_NEW_KEY })).value !== 'off';
+}
+
+export async function setEncryptNewLibrary(on: boolean): Promise<void> {
+  await Preferences.set({ key: ENCRYPT_NEW_KEY, value: on ? 'on' : 'off' });
+}
+
 // WebDAV (sync v2 only). Same storage bar as the git token above: plain
 // on-device Preferences, on this device only, never synced. An app
 // password, not the account password, is what the settings ask for.

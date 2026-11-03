@@ -115,6 +115,21 @@ describe('git store', () => {
     expect(read(await b.get('blobs/abc.webp'))).toBe('img');
   });
 
+  it('removes a file, and a folder left empty with it', async () => {
+    const a = device('A');
+    await a.begin();
+    await a.put('devices/A/log/1-2.json.gz', text('old'));
+    await a.put('devices/A/head.json', text('{}'));
+    await a.put('snapshots/s1.meta.json', text('{}'));
+    await a.finish();
+    await a.begin();
+    await a.remove!('devices/A/log/1-2.json.gz');
+    await a.remove!('snapshots/s1.meta.json');
+    expect(await a.get('devices/A/log/1-2.json.gz')).toBeNull();
+    await a.finish();
+    expect(serverFiles()).toEqual(['devices/A/head.json']);
+  });
+
   it('a cycle with nothing to write makes no commit', async () => {
     const a = device('A');
     await a.begin();

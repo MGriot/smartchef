@@ -1646,6 +1646,19 @@
         "save": "Enregistrer et synchroniser",
         "saving": "Connexion…"
       },
+      "encryption": {
+        "label": "Chiffrement",
+        "hint": "Votre cloud stocke cette bibliothèque chiffrée. Chaque appareil a besoin de cette clé de récupération, incluse dans le fichier de configuration. Gardez-en une copie en lieu sûr : sans elle, la copie synchronisée est illisible.",
+        "show": "Afficher la clé de récupération",
+        "hide": "Masquer",
+        "copy": "Copier",
+        "encryptNew": "Chiffrer la bibliothèque",
+        "encryptNewHint": "Décidé quand cet appareil crée la bibliothèque dans le cloud. Laissez activé, sauf si vous voulez des fichiers lisibles par quiconque accède au dossier.",
+        "enterKey": "Clé de récupération d'un autre appareil",
+        "useKey": "Utiliser la clé",
+        "invalidKey": "Ce n'est pas une clé de récupération SmartChef.",
+        "keySaved": "Clé enregistrée. Synchronisation…"
+      },
       "engine": {
         "label": "Moteur de synchronisation",
         "git": "Classique (git)",

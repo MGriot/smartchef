@@ -47,13 +47,16 @@ export interface SetupFileDestination {
  *  The sync folder itself is not portable and is left out on purpose — see
  *  the header of setupConfigFile.ts. */
 export async function buildSetupPayload(deviceName?: string | null): Promise<SetupFilePayload> {
-  const { getSyncEngine, getWebDavConfig } = await import('./sync/syncSettings');
-  const [mode, interval, gitRemote, engine, webdav] = await Promise.all([
+  const [{ getSyncEngine, getWebDavConfig, getLibraryKey }, { formatRecoveryKey }] = await Promise.all([
+    import('./sync/syncSettings'), import('./changeLog/libraryStore'),
+  ]);
+  const [mode, interval, gitRemote, engine, webdav, libraryKey] = await Promise.all([
     getSyncMode(),
     getSyncInterval(),
     getGitRemoteConfig(),
     getSyncEngine(),
     getWebDavConfig(),
+    getLibraryKey(),
   ]);
   return {
     exportedAt: new Date().toISOString(),
@@ -71,6 +74,7 @@ export async function buildSetupPayload(deviceName?: string | null): Promise<Set
         : null,
       engine,
       webdav: mode === 'webdav' && webdav ? webdav : null,
+      libraryKey: libraryKey ? formatRecoveryKey(libraryKey) : null,
     },
   };
 }
@@ -132,6 +136,11 @@ export async function applySetupPayload(payload: SetupFilePayload): Promise<Appl
   if (payload.sync.webdav) {
     const { setWebDavConfig } = await import('./sync/syncSettings');
     await setWebDavConfig(payload.sync.webdav);
+  }
+  if (payload.sync.libraryKey) {
+    const [{ setLibraryKey }, { parseRecoveryKey }] = await Promise.all([import('./sync/syncSettings'), import('./changeLog/libraryStore')]);
+    const key = parseRecoveryKey(payload.sync.libraryKey);
+    if (key) await setLibraryKey(key);
   }
   // The library's other devices sync with v2: this one joins them. A device
   // being set up has nothing of its own to publish yet, so no whole-library

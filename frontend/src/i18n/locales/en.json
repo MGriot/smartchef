@@ -1646,6 +1646,19 @@
         "save": "Save and sync",
         "saving": "Connecting…"
       },
+      "encryption": {
+        "label": "Encryption",
+        "hint": "Your cloud stores this library encrypted. Every device needs this recovery key, which the Setup File carries. Keep a copy somewhere safe: without it, the synced copy cannot be read.",
+        "show": "Show recovery key",
+        "hide": "Hide",
+        "copy": "Copy",
+        "encryptNew": "Encrypt the library",
+        "encryptNewHint": "Decided when this device creates the library in the cloud. Leave on unless you want the files readable by anyone with access to the folder.",
+        "enterKey": "Recovery key from another device",
+        "useKey": "Use key",
+        "invalidKey": "That is not a SmartChef recovery key.",
+        "keySaved": "Key saved. Syncing…"
+      },
       "engine": {
         "label": "Sync engine",
         "git": "Classic (git)",

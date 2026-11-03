@@ -200,6 +200,85 @@ describe('sync v2 through a shared store', () => {
     }
   });
 
+  it('syncs a recipe and its photo through an encrypted store that never sees either in the clear', async () => {
+    const { openLibraryStore } = await import('../lib/changeLog/libraryStore');
+    let key: Uint8Array | null = null;
+    const ring = { get: async () => key, set: async (k: Uint8Array) => { key = k; }, encryptNew: async () => true };
+    const photo = new TextEncoder().encode('PHOTO-BYTES-1234');
+    const photoPath = await hashName(photo, 'jpg');
+    A.images.set(photoPath, photo);
+
+    let m = await on(A);
+    await m.conflicts.createEntity('recipe', 'r1', { title: 'Pane segreto', cover_image_url: photoPath });
+    await m.log.recordEntityChange('recipe', 'r1', (await recipeRow(m, 'r1'))!, 'A');
+    const imagesOf = (d: Device): ImageFs => imageFsOf(d);
+    await m.v2.syncOnceV2(openLibraryStore(store, ring), { device: 'A', policy: 'ask', images: imagesOf(A) });
+
+    const everything = [...store.files.values()].map((b) => new TextDecoder('latin1').decode(b)).join('|');
+    expect(everything).not.toContain('Pane segreto');
+    expect(everything).not.toContain('PHOTO-BYTES');
+    expect(everything).not.toContain(photoPath.slice(7, 30));
+
+    m = await on(B);
+    const report = await m.v2.syncOnceV2(openLibraryStore(store, ring), { device: 'B', policy: 'ask', images: imagesOf(B) });
+    expect(report).toMatchObject({ imagesDownloaded: 1, failed: [] });
+    expect((await recipeRow(m, 'r1'))!.title).toBe('Pane segreto');
+    expect(B.images.get(photoPath)).toEqual(photo);
+  });
+
+  it('a new device starts from a snapshot; old segments are compacted once everyone has read them', async () => {
+    const C = newDevice('C');
+    const tune = { snapshotEveryChanges: 3, retentionMs: 0 };
+    // B already belongs to the library, so A must wait for it to read.
+    let m = await on(B);
+    await m.v2.syncOnceV2(store, { device: 'B', policy: 'ask', ...tune });
+    m = await on(A);
+    for (let i = 0; i < 3; i++) {
+      await m.conflicts.createEntity('recipe', `r${i}`, { title: `Ricetta ${i}` });
+      await m.log.recordEntityChange('recipe', `r${i}`, (await recipeRow(m, `r${i}`))!, 'A');
+    }
+    const first = await m.v2.syncOnceV2(store, { device: 'A', policy: 'ask', ...tune });
+    expect(first.snapshotWritten).toBe(true);
+    expect(first.segmentsCompacted).toBe(0);
+    expect([...store.files.keys()].filter((k) => k.startsWith('snapshots/'))).toHaveLength(2);
+
+    // B reads A's segments (it is new, so it starts from the snapshot).
+    m = await on(B);
+    const onB = await m.v2.syncOnceV2(store, { device: 'B', policy: 'ask', ...tune });
+    expect(onB).toMatchObject({ caughtUpFromSnapshot: true, failed: [], incompleteDevices: [] });
+    expect((await m.db.query(`SELECT id FROM recipes WHERE id LIKE 'r%'`)).length).toBe(3);
+
+    // B's head now says it read all of A, so A may drop what the snapshot covers.
+    m = await on(A);
+    const compacted = await m.v2.syncOnceV2(store, { device: 'A', policy: 'ask', ...tune });
+    expect(compacted.segmentsCompacted).toBeGreaterThan(0);
+    expect(await store.list(paths.log('A'))).toEqual([]);
+
+    // A later edit is a fresh segment after the compacted range.
+    await edit(m, 'r1', { title: 'Ricetta uno' });
+    await m.v2.syncOnceV2(store, { device: 'A', policy: 'ask', ...tune });
+
+    // C arrives after the compaction: snapshot, then the segment after it.
+    m = await on(C);
+    const onC = await m.v2.syncOnceV2(store, { device: 'C', policy: 'ask', ...tune });
+    expect(onC).toMatchObject({ caughtUpFromSnapshot: true, failed: [], incompleteDevices: [] });
+    expect((await recipeRow(m, 'r0'))!.title).toBe('Ricetta 0');
+    expect((await recipeRow(m, 'r1'))!.title).toBe('Ricetta uno');
+  });
+
+  it('never compacts what another device has not read yet', async () => {
+    const tune = { snapshotEveryChanges: 1, retentionMs: 0 };
+    let m = await on(B);
+    await m.v2.syncOnceV2(store, { device: 'B', policy: 'ask', ...tune }); // B exists, has read nothing of A
+    m = await on(A);
+    await m.conflicts.createEntity('recipe', 'r1', { title: 'Pane' });
+    await m.log.recordEntityChange('recipe', 'r1', (await recipeRow(m, 'r1'))!, 'A');
+    await m.v2.syncOnceV2(store, { device: 'A', policy: 'ask', ...tune });
+    const again = await m.v2.syncOnceV2(store, { device: 'A', policy: 'ask', ...tune });
+    expect(again.segmentsCompacted).toBe(0);
+    expect((await store.list(paths.log('A'))).length).toBeGreaterThan(0);
+  });
+
   it('refuses a store written by a newer format', async () => {
     const { plainJson } = await import('../lib/changeLog/files');
     await store.put(paths.format, plainJson.encode({ format: 'smartchef-sync', version: 99, libraryId: 'x', createdAt: '' }));

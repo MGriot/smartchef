@@ -63,7 +63,8 @@ export function createGitStore(opts: GitStoreOptions): LifecycleStore {
   const gitdir = opts.gitdir ?? `${dir}/.git`;
   const author = opts.author ?? { name: 'SmartChef', email: 'sync@smartchef.local' };
   let tip: string | null = null;
-  const pending = new Map<string, Uint8Array>();
+  /** Queued writes; null queues a deletion. */
+  const pending = new Map<string, Uint8Array | null>();
 
   async function ensureRepo(): Promise<void> {
     try {
@@ -84,9 +85,9 @@ export function createGitStore(opts: GitStoreOptions): LifecycleStore {
   }
 
   /** A new root tree: `base` (a tree oid, or none) with `files` written in. */
-  async function writeTreeWith(base: string | null, files: Map<string, Uint8Array>): Promise<string> {
-    const here = new Map<string, Uint8Array>();
-    const below = new Map<string, Map<string, Uint8Array>>();
+  async function writeTreeWith(base: string | null, files: Map<string, Uint8Array | null>): Promise<string> {
+    const here = new Map<string, Uint8Array | null>();
+    const below = new Map<string, Map<string, Uint8Array | null>>();
     for (const [path, data] of files) {
       const slash = path.indexOf('/');
       if (slash < 0) { here.set(path, data); continue; }
@@ -100,12 +101,16 @@ export function createGitStore(opts: GitStoreOptions): LifecycleStore {
       for (const e of tree as TreeEntry[]) entries.set(e.path, e);
     }
     for (const [name, data] of here) {
+      if (data === null) { entries.delete(name); continue; }
       entries.set(name, { mode: '100644', path: name, type: 'blob', oid: await git.writeBlob({ fs, dir, gitdir, blob: data }) });
     }
     for (const [name, sub] of below) {
       const existing = entries.get(name);
       const oid = await writeTreeWith(existing?.type === 'tree' ? existing.oid : null, sub);
-      entries.set(name, { mode: '040000', path: name, type: 'tree', oid });
+      // A folder whose last file was deleted goes too: git has no empty trees.
+      const { tree } = await git.readTree({ fs, dir, gitdir, oid });
+      if (tree.length === 0) entries.delete(name);
+      else entries.set(name, { mode: '040000', path: name, type: 'tree', oid });
     }
     return git.writeTree({ fs, dir, gitdir, tree: [...entries.values()] });
   }
@@ -138,14 +143,18 @@ export function createGitStore(opts: GitStoreOptions): LifecycleStore {
     async list(prefix) {
       const names = new Set((await treeAt(prefix.replace(/\/+$/, '')))?.map((e) => e.path) ?? []);
       const dirPrefix = prefix.replace(/\/+$/, '') + '/';
-      for (const path of pending.keys()) {
-        if (path.startsWith(dirPrefix)) names.add(path.slice(dirPrefix.length).split('/')[0]);
+      for (const [path, data] of pending) {
+        if (!path.startsWith(dirPrefix)) continue;
+        const rest = path.slice(dirPrefix.length);
+        if (data === null && !rest.includes('/')) names.delete(rest);
+        else if (data !== null) names.add(rest.split('/')[0]);
       }
       return [...names].sort();
     },
 
     async get(path) {
       const queued = pending.get(path);
+      if (queued === null) return null;
       if (queued) return new Uint8Array(queued);
       if (!tip) return null;
       try {
@@ -158,6 +167,10 @@ export function createGitStore(opts: GitStoreOptions): LifecycleStore {
 
     async put(path, data) {
       pending.set(path, new Uint8Array(data));
+    },
+
+    async remove(path) {
+      pending.set(path, null);
     },
 
     async finish() {
