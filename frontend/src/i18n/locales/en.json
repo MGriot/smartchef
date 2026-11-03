@@ -1635,6 +1635,16 @@
       "couldNotSaveGitRemote": "Could not save git remote settings",
       "autoResolvedFields_one": "{{count}} difference settled automatically.",
       "autoResolvedFields_other": "{{count}} differences settled automatically.",
+      "engine": {
+        "label": "Sync engine",
+        "git": "Classic (git)",
+        "gitHint": "The engine SmartChef has always used.",
+        "v2": "New engine (beta)",
+        "v2Hint": "Each device keeps a log of its own changes: faster, and nothing to lock. Every device of the library should switch.",
+        "v2NeedsFolder": "Works with a Sync Folder for now; git servers come next.",
+        "switching": "Switching: publishing the whole library once…",
+        "confirmSwitch": "Switch this device to the new sync engine? It syncs once with the classic engine, then publishes the whole library in the new format. Switch every device of this library, one at a time."
+      },
       "conflictPolicy": {
         "label": "When both devices change the same thing",
         "newest": "Keep the newest edit",

@@ -37,6 +37,7 @@ import { packLooseObjectsAfterPush } from './gitPacking';
 import { fetchGitRemote, pushGitRemote } from './gitRemoteTransport';
 import {
   getSyncMode,
+  getSyncEngine,
   getGitRemoteConfig,
   getSyncIntervalMinutes,
   getConflictPolicy,
@@ -182,7 +183,15 @@ function author() {
  *  recipes.local.ts/ingredients.local.ts. One file per row (not per entity
  *  type) so a git diff on a single recipe is meaningful and two recipes
  *  edited at once don't collide in the same file. */
-export function writeEntityFile(type: EntityType, id: string, data: Record<string, unknown>): Promise<void> {
+export async function writeEntityFile(type: EntityType, id: string, data: Record<string, unknown>): Promise<void> {
+  // Sync v2: the change log is the only record; no Hidden Clone, no commit.
+  if ((await getSyncEngine()) === 'v2') {
+    const entityType = DIR_TO_ENTITY_TYPE[type];
+    if (!entityType) return;
+    await recordChangeIfEnabled(entityType, id, data);
+    await recordSynced(entityType, id, data.updated_at);
+    return;
+  }
   return serialize(async () => {
     const { dir } = await ensureHiddenCloneInitialized();
     // A field still waiting on the user is committed with the other
@@ -367,7 +376,7 @@ export async function hasConfiguredRemote(): Promise<boolean> {
   }
 }
 
-async function getConfiguredRemoteTransport(): Promise<RemoteTransport | null> {
+export async function getConfiguredRemoteTransport(): Promise<RemoteTransport | null> {
   if (isElectron()) {
     try {
       return await createElectronRemoteTransport();
@@ -1030,6 +1039,10 @@ async function repairUnitRefs(): Promise<void> {
 }
 
 export async function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
+  if ((await getSyncEngine()) === 'v2') {
+    const { syncNowV2 } = await import('./syncV2Runner');
+    return syncNowV2();
+  }
   await reserializeOnceForPortableIds();
   await repairUnitRefs();
   await publishDatabaseAheadOfRepo();

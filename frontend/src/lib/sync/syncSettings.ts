@@ -111,6 +111,23 @@ export async function setSyncMode(mode: SyncMode): Promise<void> {
   await Preferences.set({ key: MODE_KEY, value: mode });
 }
 
+/** Which engine moves the data: the git Hidden Clone, or the per-device
+ *  change log (docs/plans/2026-11-01-sync-v2-change-log.md). Per device;
+ *  lib/sync/syncV2Runner.ts switchToSyncV2() is the only way in. */
+export type SyncEngine = 'git' | 'v2';
+const ENGINE_KEY = 'smartchef.sync.engine';
+let engineCache: SyncEngine | null = null;
+
+export async function getSyncEngine(): Promise<SyncEngine> {
+  if (engineCache === null) engineCache = (await Preferences.get({ key: ENGINE_KEY })).value === 'v2' ? 'v2' : 'git';
+  return engineCache;
+}
+
+export async function setSyncEngine(engine: SyncEngine): Promise<void> {
+  await Preferences.set({ key: ENGINE_KEY, value: engine });
+  engineCache = engine;
+}
+
 export interface GitRemoteConfig {
   url: string;
   username: string | null;

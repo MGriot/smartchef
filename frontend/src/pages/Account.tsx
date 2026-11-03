@@ -258,6 +258,10 @@ function FolderSyncCard() {
   // for every device that has not made one of its own. Defaults to
   // 'device', which is how every existing install already behaves.
   const [policyScope, setPolicyScope] = useState<SettingScope>('device');
+  // Sync v2 (docs/plans/2026-11-01-sync-v2-change-log.md): which engine
+  // this device syncs with, and whether a switch is running.
+  const [syncEngine, setSyncEngineState] = useState<'git' | 'v2'>('git');
+  const [switchingEngine, setSwitchingEngine] = useState(false);
   // "Replace with synced data" — preview first, then an explicit confirm.
   const [replacePreview, setReplacePreview] = useState<ReplacePreview | null>(null);
   const [preparingReplace, setPreparingReplace] = useState(false);
@@ -292,6 +296,8 @@ function FolderSyncCard() {
     ]);
     setSyncModeState(mode);
     setConflictPolicyState(policy);
+    const { getSyncEngine } = await import('../lib/sync/syncSettings');
+    setSyncEngineState(await getSyncEngine());
     setPolicyScope(overridden ? 'device' : 'all-devices');
     setIntervalValueState(interval.value);
     setIntervalUnitState(interval.unit);
@@ -493,6 +499,28 @@ function FolderSyncCard() {
       setError(err instanceof Error ? err.message : t('account.folderSync.couldNotRepair'));
     } finally {
       setRepairing(false);
+    }
+  };
+
+  const handleSyncEngineChange = async (engine: 'git' | 'v2') => {
+    if (engine === syncEngine) return;
+    if (engine === 'v2' && !window.confirm(t('account.folderSync.engine.confirmSwitch'))) return;
+    setSwitchingEngine(true);
+    setError(null);
+    try {
+      const runner = await import('../lib/sync/syncV2Runner');
+      if (engine === 'v2') {
+        const r = await runner.switchToSyncV2();
+        setResult(r);
+        setLastSyncAt(r.lastSyncAt);
+      } else {
+        await runner.switchBackToGit();
+      }
+      setSyncEngineState(engine);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('account.folderSync.syncFailed'));
+    } finally {
+      setSwitchingEngine(false);
     }
   };
 
@@ -962,6 +990,36 @@ function FolderSyncCard() {
             ))}
           </div>
           <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.settingScope.hint')}</p>
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.engine.label')}</label>
+          <div role="radiogroup" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(['git', 'v2'] as const).map((engine) => {
+              const active = syncEngine === engine;
+              const unavailable = engine === 'v2' && syncMode === 'git-remote' && !active;
+              return (
+                <button
+                  key={engine}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={switchingEngine || syncing || unavailable}
+                  onClick={() => void handleSyncEngineChange(engine)}
+                  className={`text-left rounded-2xl border-2 p-3 transition-colors disabled:opacity-50 ${active ? 'border-primary bg-primary/5' : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'}`}
+                >
+                  <span className="flex items-center gap-2 text-sm font-black text-zinc-900 dark:text-zinc-100">
+                    <span className="material-symbols-outlined text-[18px] text-primary">{engine === 'git' ? 'history' : 'bolt'}</span>
+                    {t(`account.folderSync.engine.${engine}`)}
+                  </span>
+                  <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                    {unavailable ? t('account.folderSync.engine.v2NeedsFolder') : t(`account.folderSync.engine.${engine}Hint`)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {switchingEngine && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5">{t('account.folderSync.engine.switching')}</p>}
         </div>
 
         <div>

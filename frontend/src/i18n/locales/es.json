@@ -1635,6 +1635,16 @@
       "couldNotSaveGitRemote": "No se pudieron guardar los ajustes del git remoto",
       "autoResolvedFields_one": "{{count}} diferencia resuelta automáticamente.",
       "autoResolvedFields_other": "{{count}} diferencias resueltas automáticamente.",
+      "engine": {
+        "label": "Motor de sincronización",
+        "git": "Clásico (git)",
+        "gitHint": "El motor que SmartChef ha usado siempre.",
+        "v2": "Motor nuevo (beta)",
+        "v2Hint": "Cada dispositivo guarda un registro de sus propios cambios: más rápido y sin bloqueos. Todos los dispositivos de la biblioteca deberían cambiar.",
+        "v2NeedsFolder": "Por ahora funciona con una carpeta de sincronización; los servidores git llegarán pronto.",
+        "switching": "Cambiando: publicando toda la biblioteca una vez…",
+        "confirmSwitch": "¿Cambiar este dispositivo al motor de sincronización nuevo? Primero sincroniza una vez con el motor clásico y luego publica toda la biblioteca en el formato nuevo. Cambia todos los dispositivos de la biblioteca, uno por uno."
+      },
       "conflictPolicy": {
         "label": "Cuando ambos dispositivos cambian lo mismo",
         "newest": "Gana la edición más reciente",

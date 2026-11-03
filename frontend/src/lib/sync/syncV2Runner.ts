@@ -1,0 +1,152 @@
+// ════════════════════════════════════════════════════════════════════════
+// SmartChef — running sync v2 in the app, and moving a device onto it
+// (docs/plans/2026-11-01-sync-v2-change-log.md, phases 2–3)
+//
+// gitSync.syncNow() hands over to syncNowV2() once this device's engine is
+// 'v2' (syncSettings.ts getSyncEngine), so every existing trigger — start-
+// up, the interval, resume, the Sync Now button — runs the new cycle with
+// no change of its own, and the result keeps the SyncResult shape the
+// status banner and Account page already read.
+//
+// Moving onto v2 (switchToSyncV2):
+//   1. one last git sync, so this device starts from what the others have;
+//   2. the change log is switched on and the engine set to 'v2';
+//   3. the whole library is re-serialized once — every entity through
+//      writeEntityFile(), which now records it — so the log starts with a
+//      full picture of this device rather than only future edits;
+//   4. a first v2 cycle publishes it and reads any device that moved first.
+// Devices move one at a time; values every device already agrees on are
+// equal and merge silently, so the first v2 cycles only settle what the
+// git era had not.
+//
+// The store is the same Sync Folder the git era uses, under its own
+// `smartchef-v2/` root (lib/changeLog/store.ts). A git server as the store
+// is phase 4; until then a device in git-remote mode cannot switch.
+// ════════════════════════════════════════════════════════════════════════
+
+import { Preferences } from '@capacitor/preferences';
+import { storeFromTransport, type SyncStore } from '../changeLog/store';
+import { defaultImageFs } from '../localImages';
+import { getConflictPolicy, getSyncMode, setSyncEngine } from './syncSettings';
+import { reportSyncFinished, reportSyncStarted, LAST_SYNC_KEY } from './syncStatus';
+import type { SyncResult } from './gitSync';
+
+export class SyncV2UnavailableError extends Error {}
+
+/** The store this device syncs through, or null when none is set up. */
+export async function getV2Store(): Promise<SyncStore | null> {
+  if ((await getSyncMode()) === 'git-remote') {
+    throw new SyncV2UnavailableError('The new sync engine works with a Sync Folder for now; a git server is coming next.');
+  }
+  const { getConfiguredRemoteTransport } = await import('./gitSync');
+  const transport = await getConfiguredRemoteTransport();
+  return transport ? storeFromTransport(transport) : null;
+}
+
+export async function syncNowV2(): Promise<SyncResult> {
+  const { getDeviceId, getDeviceName } = await import('./gitSync');
+  const { syncOnceV2 } = await import('../../services/syncV2.local');
+  const lastSyncAt = new Date().toISOString();
+  const result: SyncResult = {
+    applied: 0, appliedByType: {}, committed: false, lastSyncAt, conflicts: 0, autoResolved: 0,
+    pushedObjects: 0, pulledObjects: 0, failedEntities: [], stuck: 0, entityScanCounts: {},
+  };
+
+  await publishRowsAhead();
+  const store = await getV2Store();
+  if (!store) return result;
+
+  reportSyncStarted();
+  try {
+    const report = await syncOnceV2(store, {
+      device: await getDeviceId(), deviceName: await getDeviceName(), policy: await getConflictPolicy(), images: defaultImageFs(),
+    });
+    result.applied = report.pulledChanges;
+    result.conflicts = report.conflicts;
+    result.pushedObjects = report.pushedChanges + report.imagesUploaded;
+    result.pulledObjects = report.pulledChanges + report.imagesDownloaded;
+    result.failedEntities = report.failed;
+    if (report.incompleteDevices.length > 0) {
+      console.info(`SmartChef: still waiting on part of the log of ${report.incompleteDevices.length} device(s) — the next sync continues`);
+    }
+    await Preferences.set({ key: LAST_SYNC_KEY, value: lastSyncAt });
+  } finally {
+    reportSyncFinished(result.applied);
+  }
+
+  try {
+    const { autoResolvePendingConflicts } = await import('../../services/conflicts.local');
+    result.autoResolved = (await autoResolvePendingConflicts(await getConflictPolicy())).resolved;
+  } catch (err) {
+    console.warn('SmartChef: auto-resolving pending conflicts failed:', err);
+  }
+  try {
+    const { importLegacySettingsOnce, refreshSettingsAfterSync } = await import('../../services/settings.local');
+    await importLegacySettingsOnce();
+    await refreshSettingsAfterSync();
+  } catch (err) {
+    console.warn('SmartChef: refreshing synced settings failed:', err);
+  }
+  return result;
+}
+
+/** Rows changed without going through writeEntityFile (bulk SQL, a merge
+ *  tool) are recorded before the cycle, so they travel in it. */
+async function publishRowsAhead(): Promise<void> {
+  try {
+    const { publishRowsAheadOfRepo } = await import('../../services/syncReconcile.local');
+    await publishRowsAheadOfRepo();
+  } catch (err) {
+    console.warn('SmartChef: recording local changes before sync failed:', err);
+  }
+}
+
+/** Every entity, once, through writeEntityFile() — which records it into
+ *  the change log once the engine is 'v2'. */
+export async function recordWholeLibrary(): Promise<void> {
+  const [ingredients, { resyncAllRecipes }, { resyncAllTags }, { resyncAllTechniques }, { resyncAllProfiles }, { resyncAllSettings }] = await Promise.all([
+    import('../../services/ingredients.local'),
+    import('../../services/recipes.local'),
+    import('../../services/tags.local'),
+    import('../../services/techniques.local'),
+    import('../../services/profiles.local'),
+    import('../../services/settings.local'),
+  ]);
+  await resyncAllSettings();
+  await ingredients.resyncAllCategories();
+  await ingredients.resyncAllUnits();
+  await resyncAllTags();
+  await ingredients.resyncAllTools();
+  await resyncAllTechniques();
+  await ingredients.resyncAllIngredients();
+  await resyncAllProfiles();
+  await resyncAllRecipes();
+}
+
+/** Moves this device onto sync v2. See the header for the steps. */
+export async function switchToSyncV2(): Promise<SyncResult> {
+  if ((await getSyncMode()) === 'git-remote') {
+    throw new SyncV2UnavailableError('The new sync engine works with a Sync Folder for now; a git server is coming next.');
+  }
+  const gitSync = await import('./gitSync');
+  try {
+    await gitSync.syncNow();
+  } catch (err) {
+    // A last git sync is a courtesy, not a requirement: the v2 merge settles
+    // anything the git era had not.
+    console.warn('SmartChef: last git sync before switching failed:', err);
+  }
+  const { setChangeLogEnabled } = await import('../../services/changeLog.local');
+  await setChangeLogEnabled(true);
+  await setSyncEngine('v2');
+  await recordWholeLibrary();
+  return syncNowV2();
+}
+
+/** Back to the git engine on this device. The change log is kept (and
+ *  stops recording), so switching forward again resumes where it was. */
+export async function switchBackToGit(): Promise<void> {
+  const { setChangeLogEnabled } = await import('../../services/changeLog.local');
+  await setSyncEngine('git');
+  await setChangeLogEnabled(false);
+}
