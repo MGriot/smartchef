@@ -1,0 +1,1 @@
+New sync engine (beta), in Account > Folder Sync: faster, with nothing to lock, encrypted by default, and it also syncs through WebDAV (Nextcloud and others) besides a folder or a git server.
