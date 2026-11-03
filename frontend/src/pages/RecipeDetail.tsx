@@ -3196,7 +3196,9 @@ const RecipeDetail: React.FC = () => {
   const handleExportRecipe = async () => {
     setShowExportMenu(false);
     try {
-      const res = await apiFetch(`/api/share/recipes/${id}/export`);
+      // Standalone writes the share file another library can import
+      // (services/recipeShare.local.ts); a server keeps its own bundle.
+      const res = await apiFetch(`/api/share/recipes/${id}/${isStandalone ? 'copy' : 'export'}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('errors.exportFailed'));
       downloadTextFile(JSON.stringify(json.data, null, 2), `${recipeSlug}.smartchef.json`, 'application/json');

@@ -914,6 +914,7 @@
     "ingredientsAndSteps": "Ingredienti ({{ingCount}}) · {{stepCount}} passaggi",
     "createAndReview": "Crea e rivedi ricetta",
     "notValidJson": "Quel file non è un JSON valido.",
+    "notShareFile": "Questo file non è una ricetta condivisa da SmartChef.",
     "importFailed": "Importazione fallita",
     "failedToCreateRecipe": "Impossibile creare ricetta",
     "originalRecipe": "Ricetta originale",

@@ -451,6 +451,33 @@ async function dispatchShare(segments: string[], method: string, init?: RequestI
     return { status: 200, data: bundle };
   }
 
+  // "Send a copy" (recipeShare.local.ts): what the recipe page exports in
+  // standalone mode, and the one file shape its importer reads.
+  if (kind === 'recipes' && id && action === 'copy' && method === 'GET') {
+    const exists = await share.exportRecipe(id);
+    if (!exists) return { status: 404, error: i18n.t('errors.recipeNotFound') };
+    const { buildShareFile } = await import('./recipeShare.local');
+    const { getDeviceName } = await import('../lib/sync/gitSync');
+    return { status: 200, data: await buildShareFile([id], await getDeviceName().catch(() => null)) };
+  }
+
+  if (kind === 'recipes' && id === 'import-bundle' && method === 'POST') {
+    const body = parseBody(init);
+    const { importShareFile, isShareFile } = await import('./recipeShare.local');
+    if (!isShareFile(body)) return { status: 400, error: i18n.t('import.notShareFile') };
+    const report = await importShareFile(body);
+    // The import screen's shape (RecipeImport.tsx BundleImportResult).
+    return {
+      status: 200,
+      data: {
+        recipeIds: report.recipes.map((r) => r.id),
+        matchedIngredients: report.items.ingredients.map((i) => ({ ingredientName: i.name, isNew: i.isNew, confidence: 1 })),
+        matchedTools: [...report.items.tools, ...report.items.techniques].map((i) => ({ toolName: i.name, isNew: i.isNew })),
+        warnings: [],
+      },
+    };
+  }
+
   return NOT_HANDLED;
 }
 
