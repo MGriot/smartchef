@@ -7,6 +7,7 @@ import { useStore } from '../store/app.store';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import ConflictsCard from '../components/sync/ConflictResolver';
+import SharedCookbooksCard from '../components/sync/SharedCookbooks';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 // Module-level helpers below take `t` as a parameter rather than reaching
 // for a singleton: they are plain functions, not components, so there is no
@@ -2926,6 +2927,7 @@ export default function Account() {
         <div className="xl:col-span-7 space-y-6 sm:space-y-8 min-w-0">
           <FolderSyncCard />
           <SyncCard />
+          {standalone && <SharedCookbooksCard />}
           {standalone && <ConflictsCard />}
           {isNative() && !standalone && <OfflineDownloadsCard />}
           {!standalone && account?.role === 'admin' && <ManageUsersCard />}

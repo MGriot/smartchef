@@ -49,6 +49,9 @@ export interface GitStoreOptions {
   author?: { name: string; email: string };
   /** Commit message, e.g. naming the device. */
   message?: string;
+  /** The branch the store lives on; V2_BRANCH unless a shared cookbook
+   *  keeps its own beside the library's. */
+  branch?: string;
 }
 
 export interface LifecycleStore extends SyncStore {
@@ -60,6 +63,7 @@ type TreeEntry = { mode: string; path: string; oid: string; type: 'blob' | 'tree
 
 export function createGitStore(opts: GitStoreOptions): LifecycleStore {
   const { fs, dir } = opts;
+  const LOCAL_REF = `refs/heads/${opts.branch ?? V2_BRANCH}`;
   const gitdir = opts.gitdir ?? `${dir}/.git`;
   const author = opts.author ?? { name: 'SmartChef', email: 'sync@smartchef.local' };
   let tip: string | null = null;
@@ -70,7 +74,7 @@ export function createGitStore(opts: GitStoreOptions): LifecycleStore {
     try {
       await git.resolveRef({ fs, dir, gitdir, ref: 'HEAD', depth: 1 });
     } catch {
-      await git.init({ fs, dir, gitdir, defaultBranch: V2_BRANCH });
+      await git.init({ fs, dir, gitdir, defaultBranch: opts.branch ?? V2_BRANCH });
     }
   }
 

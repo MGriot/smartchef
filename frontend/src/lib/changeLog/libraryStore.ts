@@ -109,7 +109,7 @@ interface SealedBlob { name: string; data: string }
 /** The library behind `inner`, created when the store is empty. begin()
  *  reads format.json (after the inner store's own begin, e.g. a git fetch)
  *  and decides plain or encrypted; every call after that goes through. */
-export function openLibraryStore(inner: SyncStore, keyring: Keyring): SyncStore & { format(): StoreFormat | null } {
+export function openLibraryStore(inner: SyncStore, keyring: Keyring, libraryId?: string): SyncStore & { format(): StoreFormat | null } {
   let cipher: Cipher | null = null;
   let format: StoreFormat | null = null;
 
@@ -141,7 +141,7 @@ export function openLibraryStore(inner: SyncStore, keyring: Keyring): SyncStore 
           await keyring.set(key);
         }
         format = {
-          format: 'smartchef-sync', version: FORMAT_VERSION, libraryId: crypto.randomUUID(), createdAt: new Date().toISOString(),
+          format: 'smartchef-sync', version: FORMAT_VERSION, libraryId: libraryId ?? crypto.randomUUID(), createdAt: new Date().toISOString(),
           ...(key ? { encryption: { scheme: SCHEME, keyId: await keyIdOf(key) } } : {}),
         };
         await inner.put(paths.format, plainJson.encode(format));

@@ -26,6 +26,11 @@
 //
 // Off by default (setChangeLogEnabled): until the migration phase, git sync
 // is still what moves data, and recording only costs bridge calls.
+//
+// Scopes: every function takes the log it works on — '' (the default) for
+// this library's own store, or a shared cookbook's id. Each scope is a
+// separate log, with its own sequence numbers, cursors and winners, synced
+// with its own store (services/sharedCookbooks.local.ts).
 // ════════════════════════════════════════════════════════════════════════
 
 import { Preferences } from '@capacitor/preferences';
@@ -79,19 +84,19 @@ interface FieldStateRow { path: string; value: string | null; hlc: string; devic
 const decode = (text: string | null): unknown => (text === null ? null : JSON.parse(text));
 const encode = (value: unknown): string | null => (value === null || value === undefined ? null : JSON.stringify(value));
 
-async function loadState(entityType: string, entityId: string): Promise<Map<string, PathState>> {
+async function loadState(entityType: string, entityId: string, scope: string): Promise<Map<string, PathState>> {
   const rows = await query<FieldStateRow>(
-    `SELECT path, value, hlc, device, seq FROM field_state WHERE entity_type = $1 AND entity_id = $2`,
-    [entityType, entityId],
+    `SELECT path, value, hlc, device, seq FROM field_state WHERE scope = $1 AND entity_type = $2 AND entity_id = $3`,
+    [scope, entityType, entityId],
   );
   return new Map(rows.map((r) => [r.path, { value: decode(r.value), hlc: r.hlc, device: r.device, seq: Number(r.seq) }]));
 }
 
-async function writeState(entityType: string, entityId: string, path: string, s: PathState): Promise<void> {
+async function writeState(entityType: string, entityId: string, path: string, s: PathState, scope: string): Promise<void> {
   await query(
-    `INSERT INTO field_state (entity_type, entity_id, path, value, hlc, device, seq) VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT(entity_type, entity_id, path) DO UPDATE SET value = excluded.value, hlc = excluded.hlc, device = excluded.device, seq = excluded.seq`,
-    [entityType, entityId, path, encode(s.value), s.hlc, s.device, s.seq],
+    `INSERT INTO field_state (scope, entity_type, entity_id, path, value, hlc, device, seq) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT(scope, entity_type, entity_id, path) DO UPDATE SET value = excluded.value, hlc = excluded.hlc, device = excluded.device, seq = excluded.seq`,
+    [scope, entityType, entityId, path, encode(s.value), s.hlc, s.device, s.seq],
   );
 }
 
@@ -99,8 +104,8 @@ async function writeState(entityType: string, entityId: string, path: string, s:
 
 /** Records what a save changed. Returns how many paths changed (0 when the
  *  save was a no-op re-write, which most re-serializations are). */
-export async function recordEntityChange(entityType: string, entityId: string, entity: Record<string, unknown>, device: string): Promise<number> {
-  const state = await loadState(entityType, entityId);
+export async function recordEntityChange(entityType: string, entityId: string, entity: Record<string, unknown>, device: string, scope = ''): Promise<number> {
+  const state = await loadState(entityType, entityId, scope);
   const recorded = new Map([...state].map(([path, s]) => [path, s.value]));
   // A field waiting on the user still shows this device's value while the
   // log already holds the other device's: recording it now would publish
@@ -109,16 +114,16 @@ export async function recordEntityChange(entityType: string, entityId: string, e
   const changes = diffEntity(recorded, entity).filter((ch) => !pending.has(pathInfo(ch.path).field));
   if (changes.length === 0) return 0;
   const c = await clockFor(device);
-  const last = await queryOne<{ seq: number | null }>(`SELECT MAX(seq) AS seq FROM change_log`);
+  const last = await queryOne<{ seq: number | null }>(`SELECT MAX(seq) AS seq FROM change_log WHERE scope = $1`, [scope]);
   let seq = Number(last?.seq ?? 0);
   for (const change of changes) {
     seq += 1;
     const hlc = c.tick();
     await query(
-      `INSERT INTO change_log (seq, hlc, entity_type, entity_id, path, value) VALUES ($1, $2, $3, $4, $5, $6)`,
-      [seq, hlc, entityType, entityId, change.path, encode(change.value)],
+      `INSERT INTO change_log (scope, seq, hlc, entity_type, entity_id, path, value) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [scope, seq, hlc, entityType, entityId, change.path, encode(change.value)],
     );
-    await writeState(entityType, entityId, change.path, { value: change.value, hlc, device, seq });
+    await writeState(entityType, entityId, change.path, { value: change.value, hlc, device, seq }, scope);
   }
   return changes.length;
 }
@@ -143,20 +148,20 @@ export interface Segment {
 }
 
 /** How far this device has applied each other device's log. */
-export async function readCursors(): Promise<Record<string, number>> {
-  const rows = await query<{ device: string; seq: number }>(`SELECT device, seq FROM sync_cursor`);
+export async function readCursors(scope = ''): Promise<Record<string, number>> {
+  const rows = await query<{ device: string; seq: number }>(`SELECT device, seq FROM sync_cursor WHERE scope = $1`, [scope]);
   return Object.fromEntries(rows.map((r) => [r.device, Number(r.seq)]));
 }
 
 /** This device's changes after `afterSeq`, ready to hand to another device. */
-export async function buildSegment(device: string, afterSeq = 0): Promise<Segment> {
+export async function buildSegment(device: string, afterSeq = 0, scope = ''): Promise<Segment> {
   const rows = await query<{ seq: number; hlc: string; entity_type: string; entity_id: string; path: string; value: string | null }>(
-    `SELECT seq, hlc, entity_type, entity_id, path, value FROM change_log WHERE seq > $1 ORDER BY seq`,
-    [afterSeq],
+    `SELECT seq, hlc, entity_type, entity_id, path, value FROM change_log WHERE scope = $1 AND seq > $2 ORDER BY seq`,
+    [scope, afterSeq],
   );
   return {
     device,
-    seen: await readCursors(),
+    seen: await readCursors(scope),
     changes: rows.map((r) => ({
       seq: Number(r.seq), hlc: r.hlc, entityType: r.entity_type, entityId: r.entity_id, path: r.path, value: decode(r.value),
     })),
@@ -164,6 +169,50 @@ export async function buildSegment(device: string, afterSeq = 0): Promise<Segmen
 }
 
 // ── Applying another device's changes ──────────────────────────────────
+
+/** What applying one entity's incoming changes writes into the real tables. */
+export interface EntityWrite {
+  entityType: string;
+  entityId: string;
+  /** The winning values to write onto an existing entity (fields waiting
+   *  on the user left out). */
+  applied: Record<string, unknown>;
+  /** Everything known about the entity — what a new one is created from. */
+  everything: Record<string, unknown>;
+  /** Fields the user has to settle (the "ask" policy). */
+  conflicts: Array<{ fieldName: string; baseValue: null; localValue: unknown; remoteValue: unknown }>;
+  remoteUpdatedAt: string | null;
+}
+
+/** Writes an EntityWrite. A shared cookbook supplies its own, which
+ *  translates the cookbook's ids into this library's first. */
+export type EntityWriter = (write: EntityWrite) => Promise<void>;
+
+export interface ApplyOptions {
+  device: string;
+  policy: ConflictPolicy;
+  /** The log being applied to: '' (this library) or a cookbook id. */
+  scope?: string;
+  writer?: EntityWriter;
+}
+
+/** The library's own write: the same createEntity()/applyEntityMergeResult()
+ *  the git merge uses. */
+export async function writeEntity(w: EntityWrite): Promise<void> {
+  const { entityType, entityId, remoteUpdatedAt } = w;
+  if (Object.keys(w.applied).length > 0 || w.conflicts.length === 0) {
+    if (await entityExists(entityType, entityId)) {
+      if (Object.keys(w.applied).length > 0) await applyEntityMergeResult(entityType, entityId, { applied: w.applied, conflicts: [] }, { remoteUpdatedAt });
+    } else if (entityType === 'recipe' && typeof w.everything.cookbook_id === 'string' && w.everything.title === undefined) {
+      // A recipe in a shared cookbook: the library's own log carries only
+      // its personal fields, and the cookbook creates it
+      // (sharedCookbooks.local.ts), taking those from field_state.
+    } else if (Object.keys(w.everything).length > 0) {
+      await createEntity(entityType, entityId, remoteUpdatedAt ? { ...w.everything, created_at: remoteUpdatedAt, updated_at: remoteUpdatedAt } : w.everything);
+    }
+  }
+  if (w.conflicts.length > 0) await applyEntityMergeResult(entityType, entityId, { applied: {}, conflicts: w.conflicts }, { remoteUpdatedAt });
+}
 
 export interface ApplyReport {
   applied: number;
@@ -175,10 +224,11 @@ export interface ApplyReport {
 /** Applies another device's segment. Safe to repeat: changes at or below
  *  the cursor for that device are skipped, and an already-applied change
  *  carries the same stamp as what is stored, which decide() ignores. */
-export async function applySegment(segment: Segment, opts: { device: string; policy: ConflictPolicy }): Promise<ApplyReport> {
+export async function applySegment(segment: Segment, opts: ApplyOptions): Promise<ApplyReport> {
   const report: ApplyReport = { applied: 0, ignored: 0, conflicts: 0, failed: [] };
   if (segment.device === opts.device) return report;
-  const cursors = await readCursors();
+  const scope = opts.scope ?? '';
+  const cursors = await readCursors(scope);
   const from = cursors[segment.device] ?? 0;
   const fresh = segment.changes.filter((c) => c.seq > from).sort((a, b) => a.seq - b.seq);
   if (fresh.length === 0) return report;
@@ -191,11 +241,15 @@ export async function applySegment(segment: Segment, opts: { device: string; pol
   // field_state already holds the winning values, so the next local save
   // or a repair pass can still write them.
   const top = fresh[fresh.length - 1].seq;
-  await query(
-    `INSERT INTO sync_cursor (device, seq) VALUES ($1, $2) ON CONFLICT(device) DO UPDATE SET seq = MAX(sync_cursor.seq, excluded.seq)`,
-    [segment.device, top],
-  );
+  await moveCursor(scope, segment.device, top);
   return report;
+}
+
+async function moveCursor(scope: string, device: string, seq: number): Promise<void> {
+  await query(
+    `INSERT INTO sync_cursor (scope, device, seq) VALUES ($1, $2, $3) ON CONFLICT(scope, device) DO UPDATE SET seq = MAX(sync_cursor.seq, excluded.seq)`,
+    [scope, device, seq],
+  );
 }
 
 /** A change together with the device that wrote it — a segment's changes
@@ -205,12 +259,12 @@ type AuthoredChange = SegmentChange & { device: string };
 /** Applies changes entity by entity, parents first. `seen` is how far the
  *  writer of these rows had read every device — what decides whether a
  *  change was made with the local value in view. */
-async function applyRows(rows: AuthoredChange[], seen: Record<string, number>, opts: { device: string; policy: ConflictPolicy }, report: ApplyReport): Promise<void> {
+async function applyRows(rows: AuthoredChange[], seen: Record<string, number>, opts: ApplyOptions, report: ApplyReport): Promise<void> {
   const c = await clockFor(opts.device);
   const byEntity = new Map<string, AuthoredChange[]>();
   for (const row of rows) {
     if (row.device === opts.device) continue; // our own change, coming back
-    const key = `${row.entityType}\u0000${row.entityId}`;
+    const key = `${row.entityType}::${row.entityId}`;
     if (!byEntity.has(key)) byEntity.set(key, []);
     byEntity.get(key)!.push(row);
   }
@@ -222,8 +276,9 @@ async function applyRows(rows: AuthoredChange[], seen: Record<string, number>, o
     try {
       // Every write lands on the row this id resolves to here — the same
       // aliasing the git merge applies (resolveAlias in conflicts.local.ts).
-      const entityId = await resolveAlias(entityType, changes[0].entityId);
-      const outcome = await applyEntityChanges(entityType, entityId, changes, seen, opts.policy, c);
+      // A cookbook's ids are the cookbook's own; its writer maps them.
+      const entityId = opts.writer ? changes[0].entityId : await resolveAlias(entityType, changes[0].entityId);
+      const outcome = await applyEntityChanges(entityType, entityId, changes, seen, opts, c);
       report.applied += outcome.applied;
       report.ignored += outcome.ignored;
       report.conflicts += outcome.conflicts;
@@ -234,9 +289,11 @@ async function applyRows(rows: AuthoredChange[], seen: Record<string, number>, o
 }
 
 async function applyEntityChanges(
-  entityType: string, entityId: string, changes: AuthoredChange[], seen: Record<string, number>, policy: ConflictPolicy, c: HlcClock,
+  entityType: string, entityId: string, changes: AuthoredChange[], seen: Record<string, number>, opts: ApplyOptions, c: HlcClock,
 ): Promise<{ applied: number; ignored: number; conflicts: number }> {
-  const state = await loadState(entityType, entityId);
+  const { policy } = opts;
+  const scope = opts.scope ?? '';
+  const state = await loadState(entityType, entityId, scope);
   const before = new Map([...state].map(([p, s]) => [p, s.value]));
   const touched = new Set<string>();
   /** Paths whose incoming value disagrees with a local one it never saw. */
@@ -254,7 +311,7 @@ async function applyEntityChanges(
     if (decision.action !== 'apply') { ignored += 1; continue; }
     const next: PathState = { value: change.value, hlc: change.hlc, device: change.device, seq: change.seq };
     state.set(change.path, next);
-    await writeState(entityType, entityId, change.path, next);
+    await writeState(entityType, entityId, change.path, next, scope);
     touched.add(field);
     applied += 1;
   }
@@ -267,32 +324,28 @@ async function applyEntityChanges(
   const remoteUpdatedAt = newestMs > 0 ? new Date(newestMs).toISOString() : null;
   const fields = new Set([...touched].filter((f) => allowed.has(f)));
   const after = new Map([...state].map(([p, s]) => [p, s.value]));
-  if (fields.size > 0) {
-    if (await entityExists(entityType, entityId)) {
-      // Under "ask" the local value stays on screen until the user picks:
-      // the field is recorded as a conflict and not overwritten here, the
-      // same as a three-way merge conflict today. field_state already holds
-      // the winner, so the pick (a new local change) is compared against it.
-      const values = assembleFields(after, new Set([...fields].filter((f) => !conflictedFields.has(f))));
-      if (Object.keys(values).length > 0) await applyEntityMergeResult(entityType, entityId, { applied: values, conflicts: [] }, { remoteUpdatedAt });
-    } else {
-      // A new entity: everything known about it, not only this segment's paths.
-      const everything = assembleFields(after);
-      const fieldsToCreate = Object.fromEntries(Object.entries(everything).filter(([k]) => allowed.has(k)));
-      await createEntity(entityType, entityId, remoteUpdatedAt ? { ...fieldsToCreate, created_at: remoteUpdatedAt, updated_at: remoteUpdatedAt } : fieldsToCreate);
-    }
-  }
+  if (fields.size === 0 && disputed.size === 0) return { applied, ignored, conflicts: 0 };
+  // Under "ask" the local value stays on screen until the user picks: the
+  // field is recorded as a conflict and not overwritten, the same as a
+  // three-way merge conflict today. field_state already holds the winner,
+  // so the pick (a new local change) is compared against it. A new entity
+  // is made from everything known about it, not only this segment's paths.
+  const write: EntityWrite = {
+    entityType, entityId, remoteUpdatedAt, conflicts: [],
+    applied: fields.size > 0 ? assembleFields(after, new Set([...fields].filter((f) => !conflictedFields.has(f)))) : {},
+    everything: fields.size > 0 ? Object.fromEntries(Object.entries(assembleFields(after)).filter(([k]) => allowed.has(k))) : {},
+  };
   if (disputed.size > 0) {
     // Shown as whole fields: this device's value, and the field as the
     // other device's changes would make it.
     const theirs = new Map(before);
     for (const [path, value] of disputed) theirs.set(path, value);
-    const conflicts = [...conflictedFields].map((fieldName) => {
+    write.conflicts = [...conflictedFields].map((fieldName) => {
       const only = new Set([fieldName]);
       return { fieldName, baseValue: null, localValue: assembleFields(before, only)[fieldName] ?? null, remoteValue: assembleFields(theirs, only)[fieldName] ?? null };
     });
-    await applyEntityMergeResult(entityType, entityId, { applied: {}, conflicts }, { remoteUpdatedAt });
   }
+  await (opts.writer ?? writeEntity)(write);
   return { applied, ignored, conflicts: conflictedFields.size };
 }
 
@@ -310,12 +363,13 @@ export interface Snapshot {
   rows: Array<[entityType: string, entityId: string, path: string, value: unknown, hlc: string, device: string, seq: number]>;
 }
 
-export async function buildSnapshot(device: string): Promise<Snapshot> {
-  const covers = await readCursors();
-  const own = await queryOne<{ seq: number | null }>(`SELECT MAX(seq) AS seq FROM change_log`);
+export async function buildSnapshot(device: string, scope = ''): Promise<Snapshot> {
+  const covers = await readCursors(scope);
+  const own = await queryOne<{ seq: number | null }>(`SELECT MAX(seq) AS seq FROM change_log WHERE scope = $1`, [scope]);
   covers[device] = Number(own?.seq ?? 0);
   const rows = await query<{ entity_type: string; entity_id: string; path: string; value: string | null; hlc: string; device: string; seq: number }>(
-    `SELECT entity_type, entity_id, path, value, hlc, device, seq FROM field_state ORDER BY entity_type, entity_id, path`,
+    `SELECT entity_type, entity_id, path, value, hlc, device, seq FROM field_state WHERE scope = $1 ORDER BY entity_type, entity_id, path`,
+    [scope],
   );
   return {
     device, createdAt: new Date().toISOString(), covers,
@@ -325,21 +379,24 @@ export async function buildSnapshot(device: string): Promise<Snapshot> {
 
 /** Applies a snapshot like a very large segment, then moves every cursor up
  *  to what it covers — the changes before that are in it. */
-export async function applySnapshot(snapshot: Snapshot, opts: { device: string; policy: ConflictPolicy }): Promise<ApplyReport> {
+export async function applySnapshot(snapshot: Snapshot, opts: ApplyOptions): Promise<ApplyReport> {
   const report: ApplyReport = { applied: 0, ignored: 0, conflicts: 0, failed: [] };
   const rows: AuthoredChange[] = snapshot.rows.map(([entityType, entityId, path, value, hlc, device, seq]) => ({ entityType, entityId, path, value, hlc, device, seq }));
   await applyRows(rows, snapshot.covers, opts, report);
   for (const [device, seq] of Object.entries(snapshot.covers)) {
     if (device === opts.device) continue;
-    await query(
-      `INSERT INTO sync_cursor (device, seq) VALUES ($1, $2) ON CONFLICT(device) DO UPDATE SET seq = MAX(sync_cursor.seq, excluded.seq)`,
-      [device, seq],
-    );
+    await moveCursor(opts.scope ?? '', device, seq);
   }
   return report;
 }
 
 /** Paths the log knows for an entity — for tests and the future history view. */
-export async function listFieldState(entityType: string, entityId: string): Promise<Map<string, PathState>> {
-  return loadState(entityType, entityId);
+export async function listFieldState(entityType: string, entityId: string, scope = ''): Promise<Map<string, PathState>> {
+  return loadState(entityType, entityId, scope);
+}
+
+/** Forgets a scope entirely — leaving a cookbook. */
+export async function dropScope(scope: string): Promise<void> {
+  if (!scope) throw new Error('dropScope: the library\'s own log cannot be dropped');
+  for (const table of ['change_log', 'field_state', 'sync_cursor']) await query(`DELETE FROM ${table} WHERE scope = $1`, [scope]);
 }

@@ -80,7 +80,7 @@ const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCode
 // ── Sending ──────────────────────────────────────────────────────────────
 
 /** The recipes and every sub-recipe they use, children first. */
-async function recipeClosure(rootIds: string[]): Promise<string[]> {
+export async function recipeClosure(rootIds: string[]): Promise<string[]> {
   const order: string[] = [];
   const seen = new Set<string>();
   async function visit(id: string) {
@@ -96,31 +96,29 @@ async function recipeClosure(rootIds: string[]): Promise<string[]> {
   return order;
 }
 
-export async function buildShareFile(rootRecipeIds: string[], sharedBy?: string | null): Promise<ShareFile> {
-  const [{ buildRecipeEntity }, { readExtraFields }, { defaultImageFs, isLocalImagePath }] = await Promise.all([
-    import('./recipes.local'), import('./syncExtras.local'), import('../lib/localImages'),
-  ]);
-  const recipes: Entity[] = [];
-  for (const id of await recipeClosure(rootRecipeIds)) {
-    const entity = await buildRecipeEntity(id);
-    if (entity && entity.sync_status !== 'deleted') recipes.push(entity);
-  }
+export type CatalogKind = 'ingredient' | 'tool' | 'technique';
 
-  const ingredientIds = new Set<string>();
-  const toolIds = new Set<string>();
-  const techniqueIds = new Set<string>();
-  const imagePaths = new Set<string>();
+/** What a set of recipe entities uses: catalog ids and photo paths. */
+export function referencesOf(recipes: Entity[]): { ingredients: Set<string>; tools: Set<string>; techniques: Set<string>; images: Set<string> } {
+  const out = { ingredients: new Set<string>(), tools: new Set<string>(), techniques: new Set<string>(), images: new Set<string>() };
   for (const r of recipes) {
-    for (const row of (r.ingredients as Entity[]) ?? []) if (typeof row.ingredient_id === 'string') ingredientIds.add(row.ingredient_id);
-    for (const id of parseIds(r.toolIds)) toolIds.add(id);
-    if (typeof r.cover_image_url === 'string') imagePaths.add(r.cover_image_url);
+    for (const row of (r.ingredients as Entity[]) ?? []) if (typeof row.ingredient_id === 'string') out.ingredients.add(row.ingredient_id);
+    for (const id of parseIds(r.toolIds)) out.tools.add(id);
+    if (typeof r.cover_image_url === 'string') out.images.add(r.cover_image_url);
     for (const s of (r.steps as Entity[]) ?? []) {
-      for (const id of [...parseIds(s.tool_ids), ...refsIn(s.description, 'tool')]) toolIds.add(id);
-      for (const id of [...parseIds(s.technique_ids), ...refsIn(s.description, 'tech')]) techniqueIds.add(id);
-      if (typeof s.image_url === 'string') imagePaths.add(s.image_url);
+      for (const id of [...parseIds(s.tool_ids), ...refsIn(s.description, 'tool')]) out.tools.add(id);
+      for (const id of [...parseIds(s.technique_ids), ...refsIn(s.description, 'tech')]) out.techniques.add(id);
+      if (typeof s.image_url === 'string') out.images.add(s.image_url);
     }
   }
+  return out;
+}
 
+/** The catalog rows behind those ids, as sync serializes them; an
+ *  ingredient's base ingredient comes along so a variety lands under it. */
+export async function loadCatalog(refs: { ingredients: Set<string>; tools: Set<string>; techniques: Set<string> }): Promise<{ ingredients: Entity[]; tools: Entity[]; techniques: Entity[] }> {
+  const { readExtraFields } = await import('./syncExtras.local');
+  const ingredientIds = new Set(refs.ingredients);
   const ingredients: Entity[] = [];
   const queue = [...ingredientIds];
   while (queue.length) {
@@ -130,7 +128,6 @@ export async function buildShareFile(rootRecipeIds: string[], sharedBy?: string 
     );
     if (!row) continue;
     ingredients.push({ ...row, ...(await readExtraFields('ingredient', id, row)) });
-    // A variety travels with its base ingredient, so it lands under it.
     if (typeof row.parent_ingredient_id === 'string' && !ingredientIds.has(row.parent_ingredient_id)) {
       ingredientIds.add(row.parent_ingredient_id);
       queue.push(row.parent_ingredient_id);
@@ -144,6 +141,52 @@ export async function buildShareFile(rootRecipeIds: string[], sharedBy?: string 
     }
     return out;
   };
+  return { ingredients, tools: await named('tools', 'tool', refs.tools), techniques: await named('techniques', 'technique', refs.techniques) };
+}
+
+/** A recipe entity with every catalog id it holds passed through `map` —
+ *  its ingredient rows, its tool set, and each step's tool/technique lists
+ *  and {{tool:…}}/{{tech:…}} references. An id `map` returns null for is
+ *  dropped from lists and left as it is elsewhere. */
+export function remapRecipeIds(r: Entity, map: (kind: CatalogKind, id: string) => string | null): Entity {
+  const mapIds = (value: unknown, kind: CatalogKind) => {
+    const mapped = parseIds(value).map((id) => map(kind, id)).filter((id): id is string => !!id);
+    return typeof value === 'string' ? JSON.stringify(mapped) : mapped;
+  };
+  const relink = (text: unknown) => String(text ?? '').replace(STEP_REF_RE, (whole, type: string, id: string, raw?: string) => {
+    if (type === 'ing') return whole;
+    const target = map(type === 'tool' ? 'tool' : 'technique', id.trim());
+    return target ? `{{${type}:${target}${raw !== undefined ? `|${raw}` : ''}}}` : whole;
+  });
+  const out: Entity = { ...r };
+  if (Array.isArray(r.ingredients)) {
+    out.ingredients = (r.ingredients as Entity[]).map((row) => ({
+      ...row,
+      ingredient_id: typeof row.ingredient_id === 'string' ? map('ingredient', row.ingredient_id) ?? row.ingredient_id : row.ingredient_id ?? null,
+    }));
+  }
+  if (Array.isArray(r.steps)) {
+    out.steps = (r.steps as Entity[]).map((s) => ({
+      ...s, description: s.description == null ? s.description : relink(s.description),
+      tool_ids: mapIds(s.tool_ids ?? '[]', 'tool'), technique_ids: mapIds(s.technique_ids ?? '[]', 'technique'),
+    }));
+  }
+  if (r.toolIds !== undefined) out.toolIds = mapIds(r.toolIds, 'tool');
+  return out;
+}
+
+export async function buildShareFile(rootRecipeIds: string[], sharedBy?: string | null): Promise<ShareFile> {
+  const [{ buildRecipeEntity }, { defaultImageFs, isLocalImagePath }] = await Promise.all([
+    import('./recipes.local'), import('../lib/localImages'),
+  ]);
+  const recipes: Entity[] = [];
+  for (const id of await recipeClosure(rootRecipeIds)) {
+    const entity = await buildRecipeEntity(id);
+    if (entity && entity.sync_status !== 'deleted') recipes.push(entity);
+  }
+  const refs = referencesOf(recipes);
+  const catalog = await loadCatalog(refs);
+  const imagePaths = refs.images;
 
   const images: Record<string, string> = {};
   const fs = defaultImageFs();
@@ -159,7 +202,7 @@ export async function buildShareFile(rootRecipeIds: string[], sharedBy?: string 
   return {
     kind: SHARE_KIND, version: SHARE_VERSION, sharedAt: new Date().toISOString(), sharedBy: sharedBy ?? null,
     rootRecipeIds: rootRecipeIds.filter((id) => recipes.some((r) => r.id === id)),
-    recipes, ingredients, tools: await named('tools', 'tool', toolIds), techniques: await named('techniques', 'technique', techniqueIds), images,
+    recipes, ingredients: catalog.ingredients, tools: catalog.tools, techniques: catalog.techniques, images,
   };
 }
 
@@ -179,7 +222,7 @@ export interface ShareImportReport {
 export interface ShareItem { name: string; isNew: boolean }
 
 /** Every normalized name a row of `table` answers to → its id. */
-async function nameIndex(kind: 'ingredient' | 'tool' | 'technique'): Promise<Map<string, string>> {
+export async function nameIndex(kind: CatalogKind): Promise<Map<string, string>> {
   const index = new Map<string, string>();
   const add = (name: unknown, id: string) => {
     if (typeof name !== 'string') return;
@@ -204,6 +247,15 @@ async function nameIndex(kind: 'ingredient' | 'tool' | 'technique'): Promise<Map
   return index;
 }
 
+/** Every name a shared catalog entity goes by: its name, plural, synonyms
+ *  and translations. */
+export function entityNames(e: Entity): string[] {
+  return [
+    e.name, e.plural_name, ...parseIds(e.synonyms),
+    ...((Array.isArray(e.translations) ? e.translations : []) as Entity[]).flatMap((t) => [t.translated_name, t.name, t.plural_translation]),
+  ].filter((n): n is string => typeof n === 'string' && !!n.trim());
+}
+
 /** The receiver's id for each shared entity: matched by any of its names,
  *  or created. */
 async function resolveEntities(
@@ -213,10 +265,7 @@ async function resolveEntities(
   const { createEntity } = await import('./conflicts.local');
   const index = await nameIndex(kind);
   const ids = new Map<string, string>();
-  const names = (e: Entity) => [
-    e.name, e.plural_name, ...parseIds(e.synonyms),
-    ...((Array.isArray(e.translations) ? e.translations : []) as Entity[]).flatMap((t) => [t.translated_name, t.name, t.plural_translation]),
-  ].filter((n): n is string => typeof n === 'string' && !!n.trim());
+  const names = entityNames;
   const key = kind === 'tool' ? 'tools' : kind === 'technique' ? 'techniques' : 'ingredients';
   // Bases before varieties, so a variety's parent already has its new id.
   const ordered = [...shared].sort((a, b) => Number(!!a.parent_ingredient_id) - Number(!!b.parent_ingredient_id));
@@ -271,30 +320,20 @@ export async function importShareFile(file: ShareFile): Promise<ShareImportRepor
       category_name: typeof e.category_name === 'string' && e.category_name.trim() ? e.category_name : 'Uncategorized',
     }));
 
-  const mapIds = (value: unknown, ids: Map<string, string>) => {
-    const mapped = parseIds(value).map((id) => ids.get(id)).filter((id): id is string => !!id);
-    return typeof value === 'string' ? JSON.stringify(mapped) : mapped;
-  };
-  const relink = (text: unknown) => String(text ?? '').replace(STEP_REF_RE, (whole, type: string, id: string, raw?: string) => {
-    if (type === 'ing') return whole;
-    const target = (type === 'tool' ? toolIds : techIds).get(id.trim());
-    return target ? `{{${type}:${target}${raw !== undefined ? `|${raw}` : ''}}}` : whole;
-  });
-
+  const byKind = { ingredient: ingIds, tool: toolIds, technique: techIds };
   const recipeIds = new Map<string, string>();
   const sender = file.sharedBy?.trim();
-  for (const r of file.recipes) {
+  for (const shared of file.recipes) {
     const id = crypto.randomUUID();
-    recipeIds.set(r.id as string, id);
-    const ingredients = ((r.ingredients as Entity[]) ?? []).map((row) => ({
+    recipeIds.set(shared.id as string, id);
+    const r = remapRecipeIds({ ingredients: [], steps: [], toolIds: [], ...shared }, (kind, x) => byKind[kind].get(x) ?? null);
+    const sharedRows = (shared.ingredients as Entity[]) ?? [];
+    const ingredients = ((r.ingredients as Entity[]) ?? []).map((row, i) => ({
       ...row, id: crypto.randomUUID(), recipe_id: id,
-      ingredient_id: typeof row.ingredient_id === 'string' ? ingIds.get(row.ingredient_id) ?? null : null,
+      ingredient_id: typeof sharedRows[i]?.ingredient_id === 'string' ? ingIds.get(sharedRows[i].ingredient_id as string) ?? null : null,
       sub_recipe_id: typeof row.sub_recipe_id === 'string' ? recipeIds.get(row.sub_recipe_id) ?? null : null,
     }));
-    const steps = ((r.steps as Entity[]) ?? []).map((s) => ({
-      ...s, id: crypto.randomUUID(), recipe_id: id, description: relink(s.description),
-      tool_ids: mapIds(s.tool_ids ?? '[]', toolIds), technique_ids: mapIds(s.technique_ids ?? '[]', techIds),
-    }));
+    const steps = ((r.steps as Entity[]) ?? []).map((s) => ({ ...s, id: crypto.randomUUID(), recipe_id: id }));
     const sources = [
       ...((typeof r.sources === 'string' ? JSON.parse(r.sources || '[]') : r.sources ?? []) as unknown[]),
       ...(sender ? [{ type: 'other', label: `Shared by ${sender}` }] : []),
@@ -307,7 +346,7 @@ export async function importShareFile(file: ShareFile): Promise<ShareImportRepor
     const now = new Date().toISOString();
     await createEntity('recipe', id, {
       ...fields, yield_unit_id: yieldUnit?.id ?? null, sync_status: 'local', rating: null, times_cooked: 0, created_at: now, updated_at: now,
-      sources: JSON.stringify(sources), ingredients, steps, toolIds: mapIds(r.toolIds, toolIds),
+      sources: JSON.stringify(sources), ingredients, steps, toolIds: r.toolIds,
     });
     created.push(['recipe', id]);
   }

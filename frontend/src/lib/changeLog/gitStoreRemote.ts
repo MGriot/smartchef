@@ -22,7 +22,7 @@ function isMissingBranch(err: unknown): boolean {
 }
 
 export function isomorphicGitRemote(
-  fs: git.PromiseFsClient | git.CallbackFsClient, dir: string, gitdir: string, config: GitRemoteConfig,
+  fs: git.PromiseFsClient | git.CallbackFsClient, dir: string, gitdir: string, config: GitRemoteConfig, branch = V2_BRANCH,
 ): GitRemoteOps {
   const credentials = gitBasicCredentials(config);
   const onAuth = credentials ? () => credentials : undefined;
@@ -34,7 +34,7 @@ export function isomorphicGitRemote(
       try {
         const result = await git.fetch({
           fs, http, dir, gitdir, url: config.url, corsProxy, remote: REMOTE,
-          ref: V2_BRANCH, remoteRef: V2_BRANCH, singleBranch: true, tags: false, onAuth,
+          ref: branch, remoteRef: branch, singleBranch: true, tags: false, onAuth,
         });
         return result.fetchHead ?? null;
       } catch (err) {
@@ -47,7 +47,7 @@ export function isomorphicGitRemote(
       try {
         const result = await git.push({
           fs, http, dir, gitdir, url: config.url, corsProxy, remote: REMOTE,
-          ref: V2_BRANCH, remoteRef: V2_BRANCH, onAuth,
+          ref: branch, remoteRef: branch, onAuth,
         });
         return result.ok ? 'ok' : 'rejected';
       } catch (err) {

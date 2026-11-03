@@ -44,6 +44,7 @@ import { createRecipeScaler } from '../lib/recipeScaling';
 import { difficultyKey, tidyNote } from '../lib/recipeReport';
 import ConverterPanel from '../components/ConverterPanel';
 import ShareLinkModal from '../components/ShareLinkModal';
+import { RecipeCookbookDialog } from '../components/sync/SharedCookbooks';
 import RecipeMergeModal from '../components/RecipeMergeModal';
 import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
@@ -460,6 +461,7 @@ const RecipeDetail: React.FC = () => {
   const [showShareLink, setShowShareLink] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [showCookbook, setShowCookbook] = useState(false);
   useEffect(() => {
     import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setIsStandalone);
   }, []);
@@ -3294,6 +3296,15 @@ const RecipeDetail: React.FC = () => {
             >
               {t('recipeDetail.exportAsJson')}
             </button>
+            {isStandalone && (
+              <button
+                onClick={() => { setShowExportMenu(false); setShowCookbook(true); }}
+                className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[18px]">menu_book</span>
+                {t('account.cookbooks.recipeMenuItem')}
+              </button>
+            )}
             <button
               onClick={handleExportForCookidoo}
               className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
@@ -3625,6 +3636,9 @@ const RecipeDetail: React.FC = () => {
           lang={contentLang}
           onMerged={(targetId) => { setShowMerge(false); navigate(`/recipe/${targetId}`); }}
         />
+      )}
+      {id && isStandalone && (
+        <RecipeCookbookDialog open={showCookbook} onClose={() => setShowCookbook(false)} recipeId={id} />
       )}
       {id && (
         <ShareLinkModal

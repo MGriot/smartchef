@@ -168,6 +168,15 @@ All requests go through `nativeHttpClient.ts`, so there are no CORS issues. OAut
   - Ingredients, units, tools and techniques used by shared recipes are synced inside the collection too, and mapped by name onto each member's own catalog, so a shared recipe never forces a duplicate "Farina".
   - Leaving a collection keeps a private copy. Removing a member means rotating the collection key and re-inviting the others. That is the only way to revoke access without a server, and it only blocks *future* changes.
   - Access is all-or-nothing within a collection. Per-person read-only roles would need a server and are out of scope.
+
+  **As built (v1.17.0)**, under the name **shared cookbooks** (the Gallery already has "collections", which are folders):
+  - Code: `services/sharedCookbooks.local.ts`; UI in `components/sync/SharedCookbooks.tsx` (Account card, and Share → "Shared cookbook…" on a recipe). Requires the new sync engine.
+  - The change-log tables have a `scope` column: `''` is the library, a cookbook id is that cookbook. A recipe in a joined cookbook records its content into the cookbook's scope only, and its personal fields (`rating`, `times_cooked`, `cookbook_id`) into the library's scope only. Recording content into both would give one edit two stamps on two paths, and the older path could overwrite a newer edit.
+  - Catalog ids: the cookbook uses the id of the member that published an entry first, with that member's definition. Arriving, a definition is matched by exact name (as "Send a copy" does) or created under the cookbook's id, so every device of a library makes the same row. `cookbook_map` keeps the pairing; later edits to another member's entry are ignored.
+  - Stores: WebDAV (files under `smartchef-cookbook-<id>/`) or a git repository (branch `smartchef-cookbook-<id>`). Folder and OAuth clouds are not offered yet.
+  - Invites use the Setup File's passphrase container. The Setup File carries every joined cookbook, so a library's other devices join together.
+  - A cookbook change that arrives before the recipe's move into the cookbook is held in `cookbook_pending` and written once the move arrives.
+  - Deleting a shared recipe deletes it for every member. Taking it out of the cookbook, or leaving, keeps a private copy.
 - **Offline and async come for free.** Changes queue in `change_log` with no limit on how long a device stays offline. When it comes back, its log is applied in HLC order, so an old phone that was in a drawer for a month cannot overwrite newer edits.
 - **History becomes better, not worse.** The log has every field change with its time and device. A recipe can show "what changed, when and on which device" and restore any earlier value. Today that history exists in git but the app cannot show it per recipe.
 - **Old history is compacted** (decision).

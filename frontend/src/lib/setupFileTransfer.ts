@@ -76,6 +76,7 @@ export async function buildSetupPayload(deviceName?: string | null): Promise<Set
       webdav: mode === 'webdav' && webdav ? webdav : null,
       libraryKey: libraryKey ? formatRecoveryKey(libraryKey) : null,
     },
+    cookbooks: await (await import('../services/sharedCookbooks.local')).listCookbooks(),
   };
 }
 
@@ -136,6 +137,10 @@ export async function applySetupPayload(payload: SetupFilePayload): Promise<Appl
   if (payload.sync.webdav) {
     const { setWebDavConfig } = await import('./sync/syncSettings');
     await setWebDavConfig(payload.sync.webdav);
+  }
+  if (Array.isArray(payload.cookbooks) && payload.cookbooks.length > 0) {
+    const { joinCookbooks } = await import('../services/sharedCookbooks.local');
+    await joinCookbooks(payload.cookbooks);
   }
   if (payload.sync.libraryKey) {
     const [{ setLibraryKey }, { parseRecoveryKey }] = await Promise.all([import('./sync/syncSettings'), import('./changeLog/libraryStore')]);

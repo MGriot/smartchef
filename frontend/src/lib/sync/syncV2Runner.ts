@@ -89,6 +89,20 @@ export async function syncNowV2(): Promise<SyncResult> {
     if (report.incompleteDevices.length > 0) {
       console.info(`SmartChef: still waiting on part of the log of ${report.incompleteDevices.length} device(s) — the next sync continues`);
     }
+    // Shared cookbooks after the library: a recipe's move into one arrives
+    // through the library's own log first.
+    const cookbooks = await import('../../services/sharedCookbooks.local');
+    if ((await cookbooks.listCookbooks()).length > 0) {
+      const results = await cookbooks.syncCookbooks({
+        device: await getDeviceId(), deviceName: await getDeviceName(), policy: await getConflictPolicy(), images: defaultImageFs(),
+      });
+      for (const r of results) {
+        if (!r.report) { console.warn(`SmartChef: syncing the shared cookbook "${r.name}" failed:`, r.error); continue; }
+        result.applied += r.report.pulledChanges;
+        result.conflicts += r.report.conflicts;
+        result.failedEntities.push(...r.report.failed);
+      }
+    }
     await Preferences.set({ key: LAST_SYNC_KEY, value: lastSyncAt });
   } finally {
     reportSyncFinished(result.applied);

@@ -85,6 +85,9 @@ export interface SetupFilePayload {
     /** The sync v2 library key, as its recovery code, when there is one. */
     libraryKey?: string | null;
   };
+  /** The shared cookbooks this device has joined, invites included
+   *  (services/sharedCookbooks.local.ts). */
+  cookbooks?: unknown[];
 }
 
 interface SetupFileEnvelope {
@@ -163,12 +166,18 @@ async function deriveKey(passphrase: string, salt: Uint8Array, iterations: numbe
 /** The bytes bound into the ciphertext's authentication tag: the header this
  *  file claims to have. A file whose magic or version was edited fails to
  *  authenticate rather than being read under the wrong rules. */
-function additionalData(version: number): Uint8Array {
-  return utf8(`${SETUP_FILE_MAGIC}/${version}`);
+function additionalData(version: number, magic = SETUP_FILE_MAGIC): Uint8Array {
+  return utf8(`${magic}/${version}`);
 }
 
 /** Encrypts `payload` into the text written to disk. */
 export async function encodeSetupFile(payload: SetupFilePayload, passphrase: string): Promise<string> {
+  return sealWithPassphrase(payload, passphrase, SETUP_FILE_MAGIC);
+}
+
+/** Any JSON value in the Setup File's container, under its own magic — the
+ *  same container carries a shared cookbook's invite. */
+export async function sealWithPassphrase(payload: unknown, passphrase: string, magic: string): Promise<string> {
   if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
     throw new SetupFileError('wrong-passphrase', i18n.t('setupFile.errors.passphraseTooShort', { count: MIN_PASSPHRASE_LENGTH }));
   }
@@ -179,14 +188,14 @@ export async function encodeSetupFile(payload: SetupFilePayload, passphrase: str
     {
       name: 'AES-GCM',
       iv: buf(iv),
-      additionalData: buf(additionalData(SETUP_FILE_VERSION)),
+      additionalData: buf(additionalData(SETUP_FILE_VERSION, magic)),
     },
     key,
     buf(utf8(JSON.stringify(payload))),
   );
 
   const envelope: SetupFileEnvelope = {
-    magic: SETUP_FILE_MAGIC,
+    magic,
     v: SETUP_FILE_VERSION,
     kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: PBKDF2_ITERATIONS, salt: toBase64(salt) },
     cipher: 'AES-GCM',
@@ -199,7 +208,7 @@ export async function encodeSetupFile(payload: SetupFilePayload, passphrase: str
   return `${JSON.stringify(envelope, null, 2)}\n`;
 }
 
-function parseEnvelope(text: string): SetupFileEnvelope {
+function parseEnvelope(text: string, magic = SETUP_FILE_MAGIC): SetupFileEnvelope {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -207,7 +216,7 @@ function parseEnvelope(text: string): SetupFileEnvelope {
     throw new SetupFileError('not-a-setup-file', i18n.t('setupFile.errors.notSetupFile'));
   }
   const env = parsed as Partial<SetupFileEnvelope>;
-  if (!env || typeof env !== 'object' || env.magic !== SETUP_FILE_MAGIC) {
+  if (!env || typeof env !== 'object' || env.magic !== magic) {
     throw new SetupFileError('not-a-setup-file', i18n.t('setupFile.errors.notSetupFile'));
   }
   if (env.v !== SETUP_FILE_VERSION) {
@@ -253,7 +262,18 @@ function assertPayload(value: unknown): SetupFilePayload {
  *  indistinguishable to AES-GCM, so both surface as 'wrong-passphrase'
  *  rather than pretending to tell them apart. */
 export async function decodeSetupFile(text: string, passphrase: string): Promise<SetupFilePayload> {
-  const env = parseEnvelope(text);
+  const value = await openWithPassphrase(text, passphrase, SETUP_FILE_MAGIC);
+  try {
+    return assertPayload(value);
+  } catch (err) {
+    if (err instanceof SetupFileError) throw err;
+    throw new SetupFileError('corrupt', i18n.t('setupFile.errors.corrupt'));
+  }
+}
+
+/** Decrypts what sealWithPassphrase() wrote under `magic`. */
+export async function openWithPassphrase(text: string, passphrase: string, magic: string): Promise<unknown> {
+  const env = parseEnvelope(text, magic);
   const key = await deriveKey(passphrase, fromBase64(env.kdf.salt), env.kdf.iterations);
   let plaintext: ArrayBuffer;
   try {
@@ -261,7 +281,7 @@ export async function decodeSetupFile(text: string, passphrase: string): Promise
       {
         name: 'AES-GCM',
         iv: buf(fromBase64(env.iv)),
-        additionalData: buf(additionalData(env.v)),
+        additionalData: buf(additionalData(env.v, magic)),
       },
       key,
       buf(fromBase64(env.ct)),
@@ -270,9 +290,8 @@ export async function decodeSetupFile(text: string, passphrase: string): Promise
     throw new SetupFileError('wrong-passphrase', i18n.t('setupFile.errors.wrongPassphrase'));
   }
   try {
-    return assertPayload(JSON.parse(new TextDecoder().decode(plaintext)));
-  } catch (err) {
-    if (err instanceof SetupFileError) throw err;
+    return JSON.parse(new TextDecoder().decode(plaintext));
+  } catch {
     throw new SetupFileError('corrupt', i18n.t('setupFile.errors.corrupt'));
   }
 }

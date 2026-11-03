@@ -21,6 +21,10 @@
 //
 // Nothing here needs a lock or a retry: a cycle that stops halfway leaves
 // immutable files and cursors that the next cycle simply continues from.
+//
+// A shared cookbook is the same cycle against its own store, on its own
+// scope of the change log (`scope`), with a writer that maps its ids onto
+// this library's (services/sharedCookbooks.local.ts).
 // ════════════════════════════════════════════════════════════════════════
 
 import type { ConflictPolicy } from '../lib/structuredMerge';
@@ -31,7 +35,7 @@ import {
 } from '../lib/changeLog/files';
 import type { ImageFs } from '../lib/localImages';
 import { IMAGES_SUBDIR, hashBytes } from '../lib/localImages';
-import { applySegment, applySnapshot, buildSegment, buildSnapshot, readCursors, type Segment, type Snapshot } from './changeLog.local';
+import { applySegment, applySnapshot, buildSegment, buildSnapshot, readCursors, type EntityWriter, type Segment, type Snapshot } from './changeLog.local';
 import { snapshotId, type SnapshotMeta } from '../lib/changeLog/files';
 
 /** Changes per segment file: large enough that a busy day is one file,
@@ -58,6 +62,13 @@ export interface SyncV2Options {
   snapshotEveryChanges?: number;
   retentionMs?: number;
   now?: () => number;
+  /** The change-log scope this store syncs: '' (the library) or a cookbook id. */
+  scope?: string;
+  /** Writes incoming changes (a cookbook maps its ids first). */
+  writer?: EntityWriter;
+  /** The library id the store must hold — a cookbook refuses a store
+   *  that turns out to be another one. */
+  libraryId?: string;
 }
 
 export interface SyncV2Report {
@@ -76,17 +87,28 @@ export interface SyncV2Report {
   segmentsCompacted: number;
 }
 
-let running: Promise<SyncV2Report> | null = null;
+const running = new Map<string, Promise<SyncV2Report>>();
 
-/** One cycle. Concurrent calls share the cycle already running. */
+/** One cycle. Concurrent calls for the same scope share the cycle already running. */
 export function syncOnceV2(store: SyncStore, opts: SyncV2Options): Promise<SyncV2Report> {
-  if (!running) running = runCycle(store, opts).finally(() => { running = null; });
-  return running;
+  const scope = opts.scope ?? '';
+  let cycle = running.get(scope);
+  if (!cycle) {
+    cycle = runCycle(store, opts).finally(() => { running.delete(scope); });
+    running.set(scope, cycle);
+  }
+  return cycle;
 }
+
+const scopeOf = (opts: SyncV2Options) => opts.scope ?? '';
+const applyOpts = (opts: SyncV2Options) => ({ device: opts.device, policy: opts.policy, scope: scopeOf(opts), writer: opts.writer });
 
 async function runCycle(store: SyncStore, opts: SyncV2Options): Promise<SyncV2Report> {
   await store.begin?.();
   const format = await ensureFormat(store);
+  if (opts.libraryId && format.libraryId !== opts.libraryId) {
+    throw new Error('This place holds a different SmartChef library or cookbook.');
+  }
   const report: SyncV2Report = {
     libraryId: format.libraryId, pulledChanges: 0, pushedChanges: 0, conflicts: 0, failed: [],
     incompleteDevices: [], imagesUploaded: 0, imagesDownloaded: 0,
@@ -137,7 +159,7 @@ async function readHead(store: SyncStore, device: string): Promise<DeviceHead | 
 
 async function pull(store: SyncStore, opts: SyncV2Options, report: SyncV2Report): Promise<void> {
   const devices = (await store.list(paths.devices)).filter((d) => d !== opts.device);
-  const cursors = await readCursors();
+  const cursors = await readCursors(scopeOf(opts));
   for (const device of devices) {
     const head = await readHead(store, device);
     let cursor = cursors[device] ?? 0;
@@ -158,7 +180,7 @@ async function pull(store: SyncStore, opts: SyncV2Options, report: SyncV2Report)
       } catch {
         break; // a half-written file: read it next cycle
       }
-      const applied = await applySegment(segment, { device: opts.device, policy: opts.policy });
+      const applied = await applySegment(segment, applyOpts(opts));
       report.pulledChanges += applied.applied;
       report.conflicts += applied.conflicts;
       report.failed.push(...applied.failed);
@@ -175,7 +197,7 @@ type Heads = Map<string, DeviceHead>;
 async function push(store: SyncStore, opts: SyncV2Options, report: SyncV2Report): Promise<Heads> {
   const head = await readHead(store, opts.device);
   const published = head?.seq ?? 0;
-  const segment = await buildSegment(opts.device, published);
+  const segment = await buildSegment(opts.device, published, scopeOf(opts));
   let seq = published;
   const max = opts.segmentMaxChanges ?? SEGMENT_MAX_CHANGES;
   for (let i = 0; i < segment.changes.length; i += max) {
@@ -233,7 +255,7 @@ async function earliestSegment(store: SyncStore, device: string): Promise<number
 async function catchUpFromSnapshot(store: SyncStore, opts: SyncV2Options, report: SyncV2Report, metas: SnapshotMeta[]): Promise<void> {
   const newest = metas[metas.length - 1];
   if (!newest) return;
-  const cursors = await readCursors();
+  const cursors = await readCursors(scopeOf(opts));
   const others = Object.entries(newest.covers).filter(([d]) => d !== opts.device);
   const isNew = others.every(([d]) => !cursors[d]);
   let behind = false;
@@ -252,7 +274,7 @@ async function catchUpFromSnapshot(store: SyncStore, opts: SyncV2Options, report
   } catch {
     return; // a half-written body: the segments, or the next cycle
   }
-  const applied = await applySnapshot(snapshot, { device: opts.device, policy: opts.policy });
+  const applied = await applySnapshot(snapshot, applyOpts(opts));
   report.pulledChanges += applied.applied;
   report.conflicts += applied.conflicts;
   report.failed.push(...applied.failed);
@@ -266,11 +288,11 @@ async function maybeWriteSnapshot(store: SyncStore, opts: SyncV2Options, report:
   if (since < (opts.snapshotEveryChanges ?? SNAPSHOT_EVERY_CHANGES)) return;
   // Only from a device that has read everyone: a snapshot is a promise that
   // it includes what it says it covers.
-  const cursors = await readCursors();
+  const cursors = await readCursors(scopeOf(opts));
   for (const [device, head] of heads) {
     if (device !== opts.device && (cursors[device] ?? 0) < head.seq) return;
   }
-  const snapshot = await buildSnapshot(opts.device);
+  const snapshot = await buildSnapshot(opts.device, scopeOf(opts));
   const createdAt = new Date((opts.now ?? Date.now)()).toISOString();
   const meta: SnapshotMeta = { id: snapshotId(createdAt, opts.device), device: opts.device, createdAt, covers: snapshot.covers };
   // Body first: a meta is only ever visible once its body is there.

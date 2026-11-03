@@ -162,6 +162,8 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
       'rest_time_min', 'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url',
       'source_url', 'is_component', 'language_code', 'tags', 'regions', 'region_coords',
       'sources', 'creator_name', 'storage_instructions', 'tips',
+      // The shared cookbook it is in (services/sharedCookbooks.local.ts).
+      'cookbook_id',
       // The deletion marker ('local' | 'deleted'). Left out, a recipe
       // deleted on one device never disappeared anywhere else, and one that
       // arrived already deleted was created live.

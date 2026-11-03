@@ -221,7 +221,9 @@ async function recordChangeIfEnabled(entityType: string, id: string, data: Recor
   try {
     const log = await import('../../services/changeLog.local');
     if (!(await log.isChangeLogEnabled())) return;
-    await log.recordEntityChange(entityType, id, data, await getDeviceId());
+    // The library's own log, and a shared cookbook's for a recipe in one.
+    const { recordEntityEverywhere } = await import('../../services/sharedCookbooks.local');
+    await recordEntityEverywhere(entityType, id, data, await getDeviceId());
   } catch (err) {
     console.error(`SmartChef: change log could not record ${entityType} ${id}:`, err);
   }
