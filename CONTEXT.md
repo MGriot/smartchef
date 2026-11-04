@@ -17,12 +17,24 @@ Which transport a device's Sync Engine uses to reach other devices — **Folder 
 _Avoid_: sync backend, sync target, transport type (when the context already makes "of what" obvious — use "Sync Mode" for the setting itself)
 
 **Setup File**:
-A single encrypted file carrying the *portable* part of one device's sync configuration — Sync Mode, auto-sync interval, and the Git Remote URL/username/token — so a second device can be configured without retyping an access token. Encrypted with a passphrase the user chooses (AES-256-GCM over PBKDF2), in a format only this app parses. Deliberately does **not** contain the Sync Folder, which is a per-device native handle and would be meaningless elsewhere; see [ADR 0005](./docs/adr/0005-encrypted-setup-file.md).
+A single encrypted file carrying the *portable* part of one device's sync configuration — Sync Mode, auto-sync interval, the Git Remote URL/username/token or WebDAV login, the Sync Engine choice, the Library Key and joined Shared Cookbooks — so a second device can be configured without retyping an access token. Encrypted with a passphrase the user chooses (AES-256-GCM over PBKDF2), in a format only this app parses. Deliberately does **not** contain the Sync Folder, which is a per-device native handle and would be meaningless elsewhere; see [ADR 0005](./docs/adr/0005-encrypted-setup-file.md).
 _Avoid_: config file, backup (a Backup is the recipe library; a Setup File contains no recipes at all), credentials file
 
 **Sync Engine**:
-The component on each device that turns Local Storage changes into commits, pushes them to the Sync Folder, and pulls/merges other devices' commits back in.
+The component on each device that publishes Local Storage changes and applies other devices' changes. Two exist, chosen per device: the **classic** engine (commits in the Hidden Clone, merged with Structured Merge) and the **new** engine (a Change Log per device). Every device of a library should run the same one.
 _Avoid_: gitSync, mirror engine
+
+**Change Log**:
+The new Sync Engine's record of this device's own edits, one entry per changed field path with a hybrid-logical-clock stamp, published to the store as immutable segments. Other devices apply entries per path, newest stamp wins; an edit made without having seen the other one is a Conflict under the Ask policy. Each log has a **scope**: the library's own, or one per Shared Cookbook.
+_Avoid_: oplog, journal, history (History is what the user browses)
+
+**Library Key**:
+The 256-bit key the new Sync Engine encrypts a library's store with, shown to the user as a **recovery key**. Created by the first device that syncs; carried to others by the Setup File. Losing every copy makes the synced data unreadable.
+_Avoid_: password, passphrase (those protect a Setup File or an invite, not the library)
+
+**Shared Cookbook**:
+A set of recipes kept in sync between *separate* libraries through a store of its own, with its own key, joined with a passphrase-protected invite. Each library keeps its own catalog (ingredients, tools, techniques are matched by name onto its own rows) and its own personal fields (rating, times cooked). Not the Gallery's **collections**, which are folders inside one library.
+_Avoid_: shared collection, shared folder, group
 
 **Hidden Clone**:
 The private, app-managed git working copy each device's Sync Engine actually operates on — distinct from both Local Storage and the Sync Folder. Never seen directly by the user or by any external tool.

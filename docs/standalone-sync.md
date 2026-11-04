@@ -266,23 +266,25 @@ Standalone mode's own **Export Backup** button is intentionally not available �
 
 ### Folder Sync — converging multiple standalone devices
 
-Standalone devices never talk to each other directly, and never require both to be online at once. Local Storage — the live SQLite database + images every screen actually reads and writes — is always a fixed, per-platform location (`Documents/SmartChef` on Windows; a private app-data folder on Android), not something you pick. How devices actually exchange changes is a choice, set per device in Account → Folder Sync (or noted during first-run setup): **Folder mode** (the original design) or **Git Remote mode**.
+Standalone devices never talk to each other directly, and never require both to be online at once. Local Storage — the live SQLite database + images every screen actually reads and writes — is always a fixed, per-platform location (`Documents/SmartChef` on Windows; a private app-data folder on Android), not something you pick. How devices actually exchange changes is a choice, set per device in **Account → Sync & sharing** (or noted during first-run setup): **Folder mode** (the original design), **Git Remote mode**, or **WebDAV** (new sync engine only, see [below](#the-new-sync-engine)).
+
+> **Where the settings are.** Account is split into sections. Everything on this page lives under **Sync & sharing**, in a card grouped as **Status** (last sync, Sync Now, History), **Where your library syncs** (the mode and its login), **How it syncs** (engine, encryption, how often, conflict policy), **Your devices** (device name, other devices, Setup File) and a folded-away **Troubleshooting** (Resync All, Repair Local Data, Replace from Synced Data).
 
 **Folder mode** points at a *separate* location — a plain local folder, a mapped network drive/SMB share, or a folder already kept in sync by [Syncthing](https://syncthing.net), OneDrive, Google Drive, or Dropbox's desktop client. On Android this is the system's folder picker (Storage Access Framework) instead, which can point at the same kinds of targets via whichever apps expose a folder handle to it — Syncthing is the most reliable option here, since the mainstream cloud-storage Android apps don't genuinely keep an arbitrary folder two-way synced the way their desktop clients do.
 
 Under the hood, a Folder-mode Sync Folder is a **bare-style git remote** — it only ever holds git objects and refs, never a checked-out working tree. Each device keeps its own private **Hidden Clone** (a real git repository, invisible in the UI, distinct from both Local Storage and the Sync Folder) where every local change gets committed. Syncing pulls the Hidden Clone against the Sync Folder over a hand-rolled object/ref transport (isomorphic-git's own fetch/push only speak HTTP, and a Sync Folder is just files on disk) before ever pushing — never the other way around, so a device can't overwrite the shared ref before it's looked at what's actually there — then pushes with a compare-and-swap check so a concurrent write from another device is detected and retried, not silently clobbered. Object transfers run several at a time (not strictly one-by-one) to keep sync fast even against a transport with real per-call overhead, like Android's Storage Access Framework — and if a device's own folder listing ever looks incomplete (the Google Drive/Android case above), it automatically falls back to downloading a single git-bundle-format snapshot instead of enumerating objects one by one, rather than merging against a silently partial view.
 
-**Git Remote mode** points at a real git server instead — GitHub, GitLab, or self-hosted — reached over git's actual push/fetch protocol (Account → Folder Sync → Git Remote: repository URL, optional username, an access token). Unlike most git-in-the-browser tools, this doesn't need a CORS proxy for GitHub/GitLab — the request runs through native code (Electron's main process, or a small Android plugin), which was never subject to the browser's CORS policy in the first place, the same trick this app already uses for filesystem access. No file-sync tool is in the loop at all in this mode either way: the server owns atomic ref updates natively and always knows its own true object set, so the failure modes above (ref races, incomplete listings) don't apply. See [ADR 0004](adr/0004-git-remote-sync-mode.md) for the full story, including the public CORS-proxy dead end this replaced.
+**Git Remote mode** points at a real git server instead — GitHub, GitLab, or self-hosted — reached over git's actual push/fetch protocol (Account → Sync & sharing → Where your library syncs → Git Remote: repository URL, optional username, an access token). Unlike most git-in-the-browser tools, this doesn't need a CORS proxy for GitHub/GitLab — the request runs through native code (Electron's main process, or a small Android plugin), which was never subject to the browser's CORS policy in the first place, the same trick this app already uses for filesystem access. No file-sync tool is in the loop at all in this mode either way: the server owns atomic ref updates natively and always knows its own true object set, so the failure modes above (ref races, incomplete listings) don't apply. See [ADR 0004](adr/0004-git-remote-sync-mode.md) for the full story, including the public CORS-proxy dead end this replaced.
 
-Both modes run **Structured Merge** — a field-by-field three-way merge, not git's textual merge — to reconcile whatever changed on both sides since they last agreed. A field genuinely edited on both devices becomes a **Conflict**, surfaced in its own list (Account → Folder Sync) for you to resolve rather than silently auto-picked; everything else about that sync still finishes normally. Covers recipes (steps, ingredients, ingredient groups, tagged techniques included), ingredients, tools, tags, cooking techniques, and household profiles — deletions propagate as tombstones the same way any other edit does. Device-record tracking ("Known Devices") is Folder-mode-only for now; Git Remote mode doesn't show it.
+Both modes run **Structured Merge** — a field-by-field three-way merge, not git's textual merge — to reconcile whatever changed on both sides since they last agreed. A field genuinely edited on both devices becomes a **Conflict**, surfaced in its own list (**Needs your attention**, at the top of Account → Sync & sharing) for you to resolve rather than silently auto-picked; everything else about that sync still finishes normally. Covers recipes (steps, ingredients, ingredient groups, tagged techniques included), ingredients, tools, tags, cooking techniques, and household profiles — deletions propagate as tombstones the same way any other edit does. Device-record tracking ("Known Devices") is Folder-mode-only for now; Git Remote mode doesn't show it.
 
-Once two devices are pointed at the same Sync Folder or git remote — however it got that way — Account → **Sync Now** pushes local changes and pulls in whatever changed elsewhere; a recipe created on one device shows up on the other the next time both sync. How often that happens automatically (besides on app resume and a manual Sync Now) is also configurable there, per device — a value plus a unit (minutes/hours/days/weeks/months, e.g. "every 3 days"), not just minutes. The full commit history is browsable on either device at Account → Folder Sync → **History**. See [`CONTEXT.md`](./CONTEXT.md) for the full glossary of these terms and [`docs/adr/`](adr/) for the architecture decisions behind them.
+Once two devices are pointed at the same Sync Folder or git remote — however it got that way — Account → **Sync Now** pushes local changes and pulls in whatever changed elsewhere; a recipe created on one device shows up on the other the next time both sync. How often that happens automatically (besides on app resume and a manual Sync Now) is also configurable there, per device — a value plus a unit (minutes/hours/days/weeks/months, e.g. "every 3 days"), not just minutes. The full commit history is browsable on either device at Account → Sync & sharing → **History**. See [`CONTEXT.md`](./CONTEXT.md) for the full glossary of these terms and [`docs/adr/`](adr/) for the architecture decisions behind them.
 
 ### Setup Files — configuring a second device
 
 Pointing the *second* device at the same place as the first means reproducing what the first one already knows, and in Git Remote mode that includes an access token: forty-odd characters of opaque base62, typed on a phone. A **Setup File** carries it instead.
 
-Account → Folder Sync → **Export Setup File** asks for a passphrase and writes one file containing this device's Sync Mode, its auto-sync interval, and its repository URL, username and access token. On the other device, choose **"I have a setup file"** on the first-run screen (or Account → Folder Sync → **Use a Setup File** later), pick the file, type the same passphrase, and the sync settings are filled in. In Git Remote mode the app then goes straight on to look for profiles the other devices have already synced, so the new device lands on "pick who you are" rather than being asked to invent a duplicate profile.
+Account → Sync & sharing → Your devices → **Export Setup File** asks for a passphrase and writes one file containing this device's Sync Mode, its auto-sync interval, its repository URL, username and access token (or WebDAV login), the sync engine, the library's encryption key and every shared cookbook it has joined. On the other device, choose **"I have a setup file"** on the first-run screen (or **Use a Setup File** in the same place later), pick the file, type the same passphrase, and the sync settings are filled in. In Git Remote mode the app then goes straight on to look for profiles the other devices have already synced, so the new device lands on "pick who you are" rather than being asked to invent a duplicate profile.
 
 Three things worth knowing:
 
@@ -291,5 +293,42 @@ Three things worth knowing:
 - **It contains no recipes.** A Setup File is configuration only; Backup & Restore is what moves a library.
 
 The file is a real secret for as long as it exists, and it is not deleted after import — configuring several devices from one file is the normal case — so delete it yourself when you are done.
+
+### The new sync engine
+
+Since v1.15 each device can sync with one of two engines, chosen in **Account → Sync & sharing → How it syncs → Sync engine**. Every device of a library should use the same one.
+
+| | Classic (git) | New engine |
+|---|---|---|
+| How it works | Every save becomes a commit in the Hidden Clone; a sync fetches, merges whole entity files and pushes | Each device keeps a small log of its own changes (one entry per changed field); a sync reads only what other devices added since last time and publishes its own |
+| Speed | Slows as the library grows; a first sync of a large library on Android takes thousands of native calls | A change is one or two small files; a new device starts from a snapshot of the whole library |
+| Where it syncs | Sync Folder or git server | Sync Folder, git server (its own `smartchef-v2` branch) or **WebDAV** (Nextcloud, ownCloud, Koofr, a NAS…) |
+| Privacy | Readable by anyone who can open the folder or repository | **Encrypted by default** with a library key (AES-GCM); photos are stored under keyed names |
+| Shared cookbooks | No | Yes |
+| History | Full git history | Every field change with its time and device; segments older than six months that every device has read are folded into snapshots |
+
+Conflicts follow the same rules in both: the newest edit to a field wins, and with the **Ask me** policy a field changed on two devices that had not seen each other's edit waits in *Needs your attention*.
+
+**Switching.** Make a backup first (Data & storage → Backup & Restore). Pick *New engine* on one device: it syncs once with the classic engine, publishes the whole library in the new format, then syncs with it. Do the other devices one at a time. Switching back is possible (except on WebDAV, which only the new engine speaks).
+
+**The encryption key.** With encryption on, the first device to sync creates the library key. **How it syncs → Encryption** shows it as a recovery key to copy somewhere safe; the Setup File carries it to new devices. Without it, nobody — including you — can read the synced copy. A library created with encryption off stays readable.
+
+The design, and why it replaces the git-based merge, is in [`docs/plans/2026-11-01-sync-v2-change-log.md`](plans/2026-11-01-sync-v2-change-log.md).
+
+### Shared cookbooks — recipes in sync with other people
+
+A **shared cookbook** keeps recipes in sync, both ways, between *separate* libraries — yours and a partner's, a family's, a friend's — while each library keeps its own ingredients, tools, ratings and settings. It needs the new sync engine.
+
+1. **Create:** Account → Sync & sharing → **Shared cookbooks → New cookbook**. It lives in a place every member can write to: a **WebDAV folder** (a Nextcloud public link with edit rights works for everyone without sharing your own login) or a **git repository** with the members as collaborators (the cookbook gets its own branch). Encrypted by default.
+2. **Invite:** **Invite** saves a `.scinvite` file protected by a passphrase. It carries the cookbook's key and the storage login, so send the file one way and the passphrase another.
+3. **Join:** the other person uses **Join with an invite**, picks the file, types the passphrase, and may replace the storage login with their own.
+4. **Share a recipe:** on the recipe, **Share → Shared cookbook…**. Sub-recipes go in with it.
+
+What each library keeps to itself:
+
+- **Its catalog.** A shared recipe's ingredients, tools and techniques are matched by exact name, translation, synonym or plural to the receiving library's own; a new one is created only when nothing matches, under the same id on every device of that library, so no duplicates appear.
+- **Personal fields.** Rating and times cooked sync only between a library's own devices.
+
+Edits made at the same time by two members go through the same conflict rules as two of your own devices. **Taking a recipe out**, or **leaving** the cookbook, keeps a private copy; **deleting** a shared recipe deletes it for every member. Removing a member means starting a new cookbook — with no server, a key already handed out cannot be taken back. Each of your devices joins separately, or all at once through the Setup File.
 
 ---
