@@ -298,6 +298,11 @@ export function withTransaction<T>(fn: (client: LocalClient) => Promise<T>): Pro
 //     denormalized TEXT column (standalone mode has no accounts table,
 //     just the one local display-name profile — see lib/standalone.ts)
 
+// NEVER put a semicolon in a comment in the SQL below. The Electron SQLite
+// plugin splits a script on every ";" before running it, comments
+// included, so the rest of the comment line runs as SQL. v1.17.0 shipped
+// one and failed to open any library on Windows. db/schemaSql.test.ts
+// runs this script through the plugin's own transform.
 const SCHEMA_SQL = `
 -- Household members sharing this standalone library — see lib/standalone.ts
 -- and services/profiles.local.ts. Synced like any other entity (writeEntityFile
@@ -313,7 +318,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   name        TEXT NOT NULL,
   avatar_url  TEXT,
   -- 'admin' | 'user'. First profile ever created on a fresh library becomes
-  -- admin automatically (see createProfile() in profiles.local.ts); a UX
+  -- admin automatically (see createProfile() in profiles.local.ts), a UX
   -- guardrail against accidental deletion/promotion mistakes, not a real
   -- security boundary — standalone mode has no auth layer to enforce it.
   -- Backfilled onto pre-existing local DBs via addColumnIfMissing() below.
@@ -857,7 +862,7 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 );
 -- cookbook_map: a shared cookbook's id for an ingredient, tool or
 -- technique → the row of this library's own catalog it stands for. Each
--- library keeps its own catalog; a shared recipe is written here with
+-- library keeps its own catalog, and a shared recipe is written here with
 -- these rows and published with the cookbook's ids.
 CREATE TABLE IF NOT EXISTS cookbook_map (
   scope       TEXT NOT NULL,
