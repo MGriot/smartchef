@@ -1,0 +1,1 @@
+Reorganised settings: Account is now split into Sync & sharing, Profile, Appearance & languages, AI & sources, and Data & storage, and the sync settings are grouped with plain explanations.
