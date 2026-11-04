@@ -1,0 +1,1 @@
+Fixes the Windows app failing to open the library after updating to 1.17 or 1.18 ("near a: syntax error").

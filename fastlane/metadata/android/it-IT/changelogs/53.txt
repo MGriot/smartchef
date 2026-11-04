@@ -1,0 +1,1 @@
+Corregge l’app Windows che non riusciva ad aprire la libreria dopo l’aggiornamento a 1.17 o 1.18 ("near a: syntax error").
