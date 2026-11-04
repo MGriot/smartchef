@@ -1551,10 +1551,10 @@
       "languageLabel": "Language"
     },
     "folderSync": {
-      "heading": "Folder Sync",
+      "heading": "Sync between your devices",
       "syncHeading": "Sync",
-      "subtitle": "Choose how this device exchanges changes with your others — a plain synced folder, or a real git server.",
-      "subtitleCrossRef": "This is how offline devices reach each other; to move the library onto a server instead (or back off one), see \"{{card}}\".",
+      "subtitle": "Your devices exchange changes through a place you choose: a synced folder, a WebDAV server or a git server. No SmartChef account is needed.",
+      "subtitleCrossRef": "To move the library onto a SmartChef server instead, see \"{{card}}\" in Data & storage.",
       "adminOnlyNote": "Only an admin profile can change where this library syncs to, its credentials, or its devices.",
       "lastSyncedAt": "Last synced {{when}}",
       "neverSynced": "Never synced yet",
@@ -1624,10 +1624,10 @@
       "syncFailed": "Sync failed",
       "resyncAll": "Resync All",
       "resyncing": "Resyncing…",
-      "resyncAllHint": "Re-serializes every recipe, ingredient, tool, tag, technique, and profile this device has and pushes them all — use after updating if something looks missing on the other end, not needed for routine syncing",
+      "resyncAllHint": "Sends everything on this device to the others again. Use it if something is missing on another device after an update; everyday syncing never needs it.",
       "repairLocalData": "Repair Local Data",
       "repairing": "Repairing…",
-      "repairHint": "Re-applies this device's own sync history onto its local data — fixes an item whose ingredients/steps/tools went missing after syncing, without needing anything from another device",
+      "repairHint": "Rebuilds this device’s recipes from its own sync history. Use it if a recipe lost its ingredients, steps or tools after a sync; it needs nothing from other devices.",
       "history": "History",
       "couldNotResync": "Could not resync all data",
       "couldNotRepair": "Could not repair local data",
@@ -1663,9 +1663,9 @@
       "engine": {
         "label": "Sync engine",
         "git": "Classic (git)",
-        "gitHint": "The engine SmartChef has always used.",
-        "v2": "New engine (beta)",
-        "v2Hint": "Each device keeps a log of its own changes: faster, and nothing to lock. Every device of the library should switch.",
+        "gitHint": "Every change becomes a git commit. Proven, but it slows down as the library grows, and works only with a folder or a git server.",
+        "v2": "New engine",
+        "v2Hint": "Each device keeps a small log of its own changes: much faster, works with WebDAV too, and adds encryption and shared cookbooks. Still new: switch every device, one at a time, and keep a backup until they have all synced.",
         "switching": "Switching: publishing the whole library once…",
         "confirmSwitch": "Switch this device to the new sync engine? It syncs once with the classic engine, then publishes the whole library in the new format. Switch every device of this library, one at a time."
       },
@@ -1678,7 +1678,7 @@
       },
       "replace": {
         "title": "Replace this device with the synced data",
-        "hint": "Discards this device’s library and takes the Sync Folder’s (or git remote’s) exactly — like \"git reset --hard\". Use it when this device has drifted and you don’t want to merge.",
+        "hint": "Throws away this device’s library and takes the synced copy exactly as it is. Use it when this device has drifted and you don’t want to merge.",
         "button": "Replace with synced data",
         "checking": "Checking the synced data…",
         "replacing": "Replacing…",
@@ -1720,7 +1720,7 @@
       "label": "Setup File",
       "exportButton": "Export Setup File",
       "importButton": "Use a Setup File",
-      "hint": "Everything on this card except the sync folder itself — the mode, the interval, and the repository URL, username and access token — in one passphrase-encrypted file, so setting up your next device doesn't mean typing a token on a phone keyboard.",
+      "hint": "Everything another device needs to join this library — where it syncs, the login or token, the encryption key and your shared cookbooks — in one passphrase-protected file. Only the sync folder itself has to be chosen again on each device.",
       "applied": "Applied: {{what}}",
       "appliedFolderMode": "Folder mode",
       "appliedNeedsFolder": "— now choose this device’s sync folder above."
@@ -1916,6 +1916,50 @@
       "added_other": "Added, with {{count}} recipes in all (its sub-recipes too). They will reach the other members on the next sync.",
       "removed": "Taken out. It stays here as your own recipe; the other members keep theirs.",
       "takeOut": "Take it out of the cookbook"
+    },
+    "syncGroups": {
+      "status": {
+        "title": "Status"
+      },
+      "where": {
+        "title": "Where your library syncs",
+        "hint": "The place your devices meet. Pick one; every device of the library must use the same place."
+      },
+      "how": {
+        "title": "How it syncs",
+        "hint": "The sync engine, how often it runs, and what happens when two devices change the same thing."
+      },
+      "devices": {
+        "title": "Your devices",
+        "hint": "This device’s name, the others syncing with it, and the Setup File that adds a new device in one step."
+      },
+      "troubleshooting": {
+        "title": "Troubleshooting",
+        "hint": "Only when something looks wrong: re-publish, repair, or replace this device’s library."
+      }
+    },
+    "sections": {
+      "label": "Settings sections",
+      "sync": {
+        "label": "Sync & sharing",
+        "hint": "Keep this library the same on all your devices, and share recipes with other people."
+      },
+      "profile": {
+        "label": "Profile",
+        "hint": "Who is cooking: your name and picture, and the other people using this app."
+      },
+      "appearance": {
+        "label": "Appearance & languages",
+        "hint": "Theme, colours, and the languages for the app and for your recipes."
+      },
+      "ai": {
+        "label": "AI & sources",
+        "hint": "The AI that reads, checks and translates recipes, and the websites Discover suggests recipes from."
+      },
+      "data": {
+        "label": "Data & storage",
+        "hint": "Backups of your library, and where it is kept: on this device or on a server."
+      }
     }
   },
   "connect": {
@@ -1940,7 +1984,7 @@
     "setupAppliedGitNoToken": "Syncing through {{url}} — no access token was included, so you may need to add one later.",
     "setupAppliedFolder": "Folder mode. A folder can’t travel in a setup file, so pick this device’s own below.",
     "syncTitle": "Sync across your devices",
-    "syncHint": "Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder), or connect directly to a git server (GitHub, GitLab, self-hosted). Skip this for now — you can always set it up later from Account → Folder Sync.",
+    "syncHint": "Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder), or connect directly to a git server (GitHub, GitLab, self-hosted). Skip this for now — you can always set it up later from Account → Sync & sharing.",
     "remove": "Remove",
     "repoUrl": "Repository URL",
     "repoUrlHint": "An empty private repo works fine.",
@@ -1959,7 +2003,7 @@
     "skipped": "Skipped ✓",
     "skip": "Skip for now",
     "probeOnlyProfiles": "Only the profiles are fetched now — your recipes download in the background once you're in.",
-    "tokenChangeLater": "You can change it later in Account → Folder Sync.",
+    "tokenChangeLater": "You can change it later in Account → Sync & sharing.",
     "probeFailedTitle": "Couldn't read this library",
     "probeFailedHint": "If other devices already share it, go back and check the address and token rather than creating a profile here — a new profile made now would be a second copy of someone the library may already have.",
     "pickProfile": "This library already has profiles — pick who you are, or create a new one.",
@@ -2013,7 +2057,7 @@
     "created": "Setup file created",
     "savedTo": "Saved to {{location}}",
     "savedAs": "Saved as {{fileName}} wherever your browser puts downloads.",
-    "createdHint": "Move it to your other device however you like, then choose it there — on first run, or from Account → Folder Sync. You will need the same passphrase to open it, and there is no way to recover it, so keep it somewhere you trust.",
+    "createdHint": "Move it to your other device however you like, then choose it there — on first run, or from Account → Sync & sharing. You will need the same passphrase to open it, and there is no way to recover it, so keep it somewhere you trust.",
     "exportIntro": "The file holds this device's sync mode, how often it syncs, and — in Git Remote mode — the repository URL, username and access token. It is encrypted with the passphrase you choose here: only SmartChef can read the format, and only this passphrase can unlock it.",
     "passphrase": "Passphrase",
     "passphraseHint": "At least {{count}} characters.",

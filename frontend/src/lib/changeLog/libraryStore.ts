@@ -149,9 +149,9 @@ export function openLibraryStore(inner: SyncStore, keyring: Keyring, libraryId?:
       cipher = null;
       if (format.encryption) {
         const key = await keyring.get();
-        if (!key) throw new LibraryKeyError('This library is encrypted. Import the Setup File from one of its devices, or enter its recovery key in Account → Folder Sync.', 'missing');
+        if (!key) throw new LibraryKeyError('This library is encrypted. Import the Setup File from one of its devices, or enter its recovery key in Account → Sync & sharing.', 'missing');
         if ((await keyIdOf(key)) !== format.encryption.keyId) {
-          throw new LibraryKeyError('The recovery key on this device does not open this library. Enter the right one in Account → Folder Sync.', 'wrong');
+          throw new LibraryKeyError('The recovery key on this device does not open this library. Enter the right one in Account → Sync & sharing.', 'wrong');
         }
         cipher = await cipherFor(key);
       }

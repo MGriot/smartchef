@@ -51,7 +51,7 @@ export class WebDavError extends Error {
 
 function describe(status: number, action: string): WebDavError {
   if (status === 401 || status === 403) {
-    return new WebDavError(`The WebDAV server refused the username or app password (${status}) while trying to ${action}. Check them in Account → Folder Sync.`, status);
+    return new WebDavError(`The WebDAV server refused the username or app password (${status}) while trying to ${action}. Check them in Account → Sync & sharing.`, status);
   }
   if (status === 507) return new WebDavError('The WebDAV server is out of space.', status);
   return new WebDavError(`The WebDAV server answered ${status} while trying to ${action}.`, status);

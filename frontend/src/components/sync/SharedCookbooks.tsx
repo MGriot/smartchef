@@ -353,7 +353,7 @@ export default function SharedCookbooksCard() {
           </p>
         )}
         <div className="flex flex-wrap gap-2 pt-2">
-          <button type="button" onClick={() => setShowCreate(true)} className="px-4 py-2 bg-zinc-900 text-white rounded-xl font-black text-xs">
+          <button type="button" onClick={() => setShowCreate(true)} className="px-4 py-2 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-xl font-black text-xs">
             {t('account.cookbooks.new')}
           </button>
           <button type="button" onClick={() => setShowJoin(true)} className="px-4 py-2 rounded-xl font-black text-xs border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300">

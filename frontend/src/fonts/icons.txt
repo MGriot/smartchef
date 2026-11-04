@@ -339,7 +339,6 @@ speed
 sql
 square
 stack
-stacks
 star
 stars
 start

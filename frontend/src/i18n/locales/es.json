@@ -1551,10 +1551,10 @@
       "languageLabel": "Idioma"
     },
     "folderSync": {
-      "heading": "Sincronización por carpeta",
+      "heading": "Sincronización entre dispositivos",
       "syncHeading": "Sincronización",
-      "subtitle": "Elige cómo intercambia los cambios este dispositivo con los demás: una simple carpeta sincronizada o un servidor git real.",
-      "subtitleCrossRef": "Así es como se alcanzan entre sí los dispositivos sin conexión; para mover la biblioteca a un servidor (o traerla de vuelta), consulta «{{card}}».",
+      "subtitle": "Tus dispositivos intercambian cambios a través de un lugar que eliges: una carpeta sincronizada, un servidor WebDAV o un servidor git. No hace falta una cuenta de SmartChef.",
+      "subtitleCrossRef": "Para llevar la biblioteca a un servidor SmartChef, consulta \"{{card}}\" en Datos y almacenamiento.",
       "adminOnlyNote": "Solo un perfil administrador puede cambiar dónde se sincroniza esta biblioteca, sus credenciales o sus dispositivos.",
       "lastSyncedAt": "Última sincronización {{when}}",
       "neverSynced": "Nunca sincronizado",
@@ -1624,10 +1624,10 @@
       "syncFailed": "La sincronización ha fallado",
       "resyncAll": "Resincronizar todo",
       "resyncing": "Resincronizando…",
-      "resyncAllHint": "Vuelve a serializar cada receta, ingrediente, utensilio, etiqueta, técnica y perfil de este dispositivo y los envía todos: útil tras una actualización si algo parece faltar en el otro extremo, no hace falta para la sincronización habitual",
+      "resyncAllHint": "Vuelve a enviar todo lo que hay en este dispositivo a los demás. Úsalo si después de una actualización falta algo en otro dispositivo; la sincronización diaria no lo necesita.",
       "repairLocalData": "Reparar datos locales",
       "repairing": "Reparando…",
-      "repairHint": "Vuelve a aplicar el historial de sincronización de este dispositivo sobre sus datos locales: arregla un elemento al que le faltan ingredientes/pasos/utensilios tras sincronizar, sin necesitar nada de otro dispositivo",
+      "repairHint": "Reconstruye las recetas de este dispositivo a partir de su propio historial de sincronización. Úsalo si una receta perdió ingredientes, pasos o utensilios tras sincronizar; no necesita nada de otros dispositivos.",
       "history": "Historial",
       "couldNotResync": "No se pudieron resincronizar todos los datos",
       "couldNotRepair": "No se pudieron reparar los datos locales",
@@ -1663,9 +1663,9 @@
       "engine": {
         "label": "Motor de sincronización",
         "git": "Clásico (git)",
-        "gitHint": "El motor que SmartChef ha usado siempre.",
-        "v2": "Motor nuevo (beta)",
-        "v2Hint": "Cada dispositivo guarda un registro de sus propios cambios: más rápido y sin bloqueos. Todos los dispositivos de la biblioteca deberían cambiar.",
+        "gitHint": "Cada cambio se convierte en un commit de git. Probado, pero se ralentiza a medida que crece la biblioteca y solo funciona con una carpeta o un servidor git.",
+        "v2": "Motor nuevo",
+        "v2Hint": "Cada dispositivo guarda un pequeño registro de sus propios cambios: mucho más rápido, también funciona con WebDAV y añade cifrado y recetarios compartidos. Aún es nuevo: cambia cada dispositivo, de uno en uno, y guarda una copia de seguridad hasta que todos se hayan sincronizado.",
         "switching": "Cambiando: publicando toda la biblioteca una vez…",
         "confirmSwitch": "¿Cambiar este dispositivo al motor de sincronización nuevo? Primero sincroniza una vez con el motor clásico y luego publica toda la biblioteca en el formato nuevo. Cambia todos los dispositivos de la biblioteca, uno por uno."
       },
@@ -1678,7 +1678,7 @@
       },
       "replace": {
         "title": "Sustituir este dispositivo por los datos sincronizados",
-        "hint": "Descarta la biblioteca de este dispositivo y toma exactamente la de la carpeta de sincronización (o del repositorio git) — como «git reset --hard». Úsalo cuando este dispositivo se ha desviado y no quieres fusionar.",
+        "hint": "Descarta la biblioteca de este dispositivo y toma la copia sincronizada tal cual. Úsalo cuando este dispositivo se haya desviado y no quieras fusionar.",
         "button": "Sustituir por los datos sincronizados",
         "checking": "Comprobando los datos sincronizados…",
         "replacing": "Sustituyendo…",
@@ -1720,7 +1720,7 @@
       "label": "Archivo de configuración",
       "exportButton": "Exportar archivo de configuración",
       "importButton": "Usar un archivo de configuración",
-      "hint": "Todo lo de esta tarjeta salvo la propia carpeta de sincronización —el modo, el intervalo y la URL del repositorio, el nombre de usuario y el token de acceso— en un único archivo cifrado con una frase de contraseña, para que configurar tu siguiente dispositivo no signifique teclear un token en el móvil.",
+      "hint": "Todo lo que otro dispositivo necesita para unirse a esta biblioteca — dónde se sincroniza, el acceso o token, la clave de cifrado y tus recetarios compartidos — en un solo archivo protegido con frase de paso. Solo la carpeta de sincronización hay que elegirla de nuevo en cada dispositivo.",
       "applied": "Aplicado: {{what}}",
       "appliedFolderMode": "Modo carpeta",
       "appliedNeedsFolder": "— ahora elige arriba la carpeta de sincronización de este dispositivo."
@@ -1916,6 +1916,50 @@
       "added_other": "Añadidas {{count}} recetas en total (también sus subrecetas). Llegarán a los demás miembros en la próxima sincronización.",
       "removed": "Quitada. Se queda aquí como receta tuya; los demás miembros conservan la suya.",
       "takeOut": "Quitar del recetario"
+    },
+    "syncGroups": {
+      "status": {
+        "title": "Estado"
+      },
+      "where": {
+        "title": "Dónde se sincroniza tu biblioteca",
+        "hint": "El lugar donde se encuentran tus dispositivos. Elige uno; todos los dispositivos de la biblioteca deben usar el mismo."
+      },
+      "how": {
+        "title": "Cómo se sincroniza",
+        "hint": "El motor de sincronización, cada cuánto se ejecuta y qué pasa cuando dos dispositivos cambian lo mismo."
+      },
+      "devices": {
+        "title": "Tus dispositivos",
+        "hint": "El nombre de este dispositivo, los demás que se sincronizan con él y el archivo de configuración para añadir uno nuevo en un paso."
+      },
+      "troubleshooting": {
+        "title": "Solución de problemas",
+        "hint": "Solo si algo va mal: vuelve a publicar, repara o sustituye la biblioteca de este dispositivo."
+      }
+    },
+    "sections": {
+      "label": "Secciones de ajustes",
+      "sync": {
+        "label": "Sincronización y uso compartido",
+        "hint": "Mantén esta biblioteca igual en todos tus dispositivos y comparte recetas con otras personas."
+      },
+      "profile": {
+        "label": "Perfil",
+        "hint": "Quién cocina: tu nombre y tu imagen, y las demás personas que usan la app."
+      },
+      "appearance": {
+        "label": "Apariencia e idiomas",
+        "hint": "Tema, colores e idiomas de la app y de tus recetas."
+      },
+      "ai": {
+        "label": "IA y fuentes",
+        "hint": "La IA que lee, revisa y traduce recetas, y los sitios de los que Descubrir sugiere recetas."
+      },
+      "data": {
+        "label": "Datos y almacenamiento",
+        "hint": "Copias de seguridad de tu biblioteca y dónde se guarda: en este dispositivo o en un servidor."
+      }
     }
   },
   "connect": {

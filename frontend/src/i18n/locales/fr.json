@@ -1551,10 +1551,10 @@
       "languageLabel": "Langue"
     },
     "folderSync": {
-      "heading": "Synchronisation par dossier",
+      "heading": "Synchronisation entre appareils",
       "syncHeading": "Synchronisation",
-      "subtitle": "Choisissez comment cet appareil échange ses modifications avec les autres — un simple dossier synchronisé, ou un vrai serveur git.",
-      "subtitleCrossRef": "C’est ainsi que les appareils hors ligne se rejoignent ; pour déplacer la bibliothèque vers un serveur (ou la ramener), voyez « {{card}} ».",
+      "subtitle": "Vos appareils échangent leurs modifications via un endroit que vous choisissez : un dossier synchronisé, un serveur WebDAV ou un serveur git. Aucun compte SmartChef n’est nécessaire.",
+      "subtitleCrossRef": "Pour déplacer plutôt la bibliothèque sur un serveur SmartChef, voir « {{card}} » dans Données et stockage.",
       "adminOnlyNote": "Seul un profil administrateur peut changer la destination de synchronisation de cette bibliothèque, ses identifiants ou ses appareils.",
       "lastSyncedAt": "Dernière synchronisation {{when}}",
       "neverSynced": "Jamais synchronisé",
@@ -1624,10 +1624,10 @@
       "syncFailed": "Échec de la synchronisation",
       "resyncAll": "Tout resynchroniser",
       "resyncing": "Resynchronisation…",
-      "resyncAllHint": "Resérialise chaque recette, ingrédient, ustensile, étiquette, technique et profil de cet appareil et les envoie tous — utile après une mise à jour si quelque chose semble manquer de l’autre côté, inutile pour la synchronisation courante",
+      "resyncAllHint": "Renvoie aux autres appareils tout ce qui se trouve sur celui-ci. À utiliser si, après une mise à jour, il manque quelque chose sur un autre appareil ; la synchronisation habituelle n’en a pas besoin.",
       "repairLocalData": "Réparer les données locales",
       "repairing": "Réparation…",
-      "repairHint": "Réapplique l’historique de synchronisation de cet appareil à ses données locales — répare un élément dont les ingrédients/étapes/ustensiles ont disparu après une synchronisation, sans rien exiger d’un autre appareil",
+      "repairHint": "Reconstruit les recettes de cet appareil à partir de son propre historique de synchronisation. À utiliser si une recette a perdu ses ingrédients, étapes ou ustensiles après une synchronisation ; rien n’est demandé aux autres appareils.",
       "history": "Historique",
       "couldNotResync": "Impossible de resynchroniser toutes les données",
       "couldNotRepair": "Impossible de réparer les données locales",
@@ -1663,9 +1663,9 @@
       "engine": {
         "label": "Moteur de synchronisation",
         "git": "Classique (git)",
-        "gitHint": "Le moteur que SmartChef a toujours utilisé.",
-        "v2": "Nouveau moteur (bêta)",
-        "v2Hint": "Chaque appareil tient un journal de ses propres modifications : plus rapide, sans verrou. Tous les appareils de la bibliothèque devraient basculer.",
+        "gitHint": "Chaque modification devient un commit git. Éprouvé, mais il ralentit quand la bibliothèque grandit, et ne fonctionne qu’avec un dossier ou un serveur git.",
+        "v2": "Nouveau moteur",
+        "v2Hint": "Chaque appareil tient un petit journal de ses propres modifications : bien plus rapide, fonctionne aussi avec WebDAV, et ajoute le chiffrement et les livres de recettes partagés. Encore récent : passez chaque appareil, un par un, et gardez une sauvegarde jusqu’à ce qu’ils se soient tous synchronisés.",
         "switching": "Bascule en cours : publication de toute la bibliothèque une fois…",
         "confirmSwitch": "Basculer cet appareil vers le nouveau moteur de synchronisation ? Il synchronise d'abord une fois avec le moteur classique, puis publie toute la bibliothèque au nouveau format. Basculez tous les appareils de la bibliothèque, un par un."
       },
@@ -1678,7 +1678,7 @@
       },
       "replace": {
         "title": "Remplacer cet appareil par les données synchronisées",
-        "hint": "Abandonne la bibliothèque de cet appareil et reprend exactement celle du dossier de synchronisation (ou du dépôt git) — comme « git reset --hard ». À utiliser quand cet appareil a divergé et que vous ne voulez pas fusionner.",
+        "hint": "Abandonne la bibliothèque de cet appareil et prend la copie synchronisée telle quelle. À utiliser quand cet appareil a divergé et que vous ne voulez pas fusionner.",
         "button": "Remplacer par les données synchronisées",
         "checking": "Vérification des données synchronisées…",
         "replacing": "Remplacement…",
@@ -1720,7 +1720,7 @@
       "label": "Fichier de configuration",
       "exportButton": "Exporter un fichier de configuration",
       "importButton": "Utiliser un fichier de configuration",
-      "hint": "Tout ce qui figure sur cette carte sauf le dossier de synchronisation lui-même — le mode, l’intervalle, ainsi que l’URL du dépôt, le nom d’utilisateur et le jeton d’accès — dans un seul fichier chiffré par phrase secrète, pour que configurer votre prochain appareil ne veuille pas dire taper un jeton au clavier du téléphone.",
+      "hint": "Tout ce dont un autre appareil a besoin pour rejoindre cette bibliothèque — où elle se synchronise, l’identifiant ou le jeton, la clé de chiffrement et vos livres de recettes partagés — dans un seul fichier protégé par une phrase secrète. Seul le dossier de synchronisation doit être choisi à nouveau sur chaque appareil.",
       "applied": "Appliqué : {{what}}",
       "appliedFolderMode": "Mode dossier",
       "appliedNeedsFolder": "— choisissez maintenant le dossier de synchronisation de cet appareil ci-dessus."
@@ -1916,6 +1916,50 @@
       "added_other": "{{count}} recettes ajoutées au total (avec ses sous-recettes). Elles parviendront aux autres membres à la prochaine synchronisation.",
       "removed": "Retirée. Elle reste ici comme votre recette ; les autres membres gardent la leur.",
       "takeOut": "Retirer du livre"
+    },
+    "syncGroups": {
+      "status": {
+        "title": "État"
+      },
+      "where": {
+        "title": "Où se synchronise votre bibliothèque",
+        "hint": "L’endroit où vos appareils se retrouvent. Choisissez-en un ; tous les appareils de la bibliothèque doivent utiliser le même."
+      },
+      "how": {
+        "title": "Comment elle se synchronise",
+        "hint": "Le moteur de synchronisation, sa fréquence, et ce qui se passe quand deux appareils modifient la même chose."
+      },
+      "devices": {
+        "title": "Vos appareils",
+        "hint": "Le nom de cet appareil, les autres qui se synchronisent avec lui, et le fichier de configuration pour en ajouter un nouveau en une étape."
+      },
+      "troubleshooting": {
+        "title": "Dépannage",
+        "hint": "Seulement si quelque chose ne va pas : republier, réparer ou remplacer la bibliothèque de cet appareil."
+      }
+    },
+    "sections": {
+      "label": "Sections des réglages",
+      "sync": {
+        "label": "Synchronisation et partage",
+        "hint": "Gardez cette bibliothèque identique sur tous vos appareils, et partagez des recettes avec d’autres personnes."
+      },
+      "profile": {
+        "label": "Profil",
+        "hint": "Qui cuisine : votre nom et votre image, et les autres personnes qui utilisent l’app."
+      },
+      "appearance": {
+        "label": "Apparence et langues",
+        "hint": "Thème, couleurs, et langues de l’app et de vos recettes."
+      },
+      "ai": {
+        "label": "IA et sources",
+        "hint": "L’IA qui lit, vérifie et traduit les recettes, et les sites d’où Découvrir propose des recettes."
+      },
+      "data": {
+        "label": "Données et stockage",
+        "hint": "Les sauvegardes de votre bibliothèque, et où elle est conservée : sur cet appareil ou sur un serveur."
+      }
     }
   },
   "connect": {

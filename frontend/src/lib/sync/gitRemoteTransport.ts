@@ -123,9 +123,9 @@ export function describeTransportError(err: unknown, action: 'fetch' | 'push'): 
     return new Error(
       action === 'push'
         ? 'The git server rejected this device’s credentials, so nothing has been uploaded. Reading a public ' +
-          `repository needs no token, but writing to one does. ${badTokenHint} Fix it in Account → Folder Sync.`
+          `repository needs no token, but writing to one does. ${badTokenHint} Fix it in Account → Sync & sharing.`
         : `The git server rejected this device’s credentials. ${badTokenHint} Add a personal access token with ` +
-          'write access in Account → Folder Sync.'
+          'write access in Account → Sync & sharing.'
     );
   }
   if (status === 403) {
