@@ -1,0 +1,1 @@
+Aggiornamenti di sicurezza per tutti i componenti. Corregge un errore di sincronizzazione che, dopo una reinstallazione, poteva pubblicare ricette senza attrezzi e ingredienti senza categoria.
