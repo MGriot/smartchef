@@ -349,6 +349,29 @@ describe('two devices syncing through one Sync Folder', { timeout: 60_000 }, () 
     expect((await recipeRow(api, 'r1'))?.title).toBe('Mini cheesecake (A)');
   });
 
+  it('a fresh Hidden Clone beside a full library republishes complete files, not just the merged fields', async () => {
+    // A reinstall that clears app data but keeps Documents/SmartChef (or a
+    // copied database): the library and its sync settings are there, the
+    // Hidden Clone and device id are not. On 2026-11-05 this pushed recipe
+    // files without their id, created_at or toolNames, and ingredient files
+    // without their category, to every device.
+    const a = await newDevice('a');
+    let api = await on(a);
+    await createRecipe(api, 'r1', { title: 'Pane', description: 'Lievitato.' });
+    await api.syncNow();
+    const createdAt = (await recipeRow(api, 'r1'))?.created_at;
+    expect(createdAt).toBeTruthy();
+
+    const b: Device = { ...(await newDevice('b')), db: a.db, prefs: new Map([...a.prefs, ['smartchef.sync.deviceId', 'device-b']]) };
+    api = await on(b);
+    await api.syncNow();
+
+    api = await on(a);
+    await api.syncNow();
+    const file = JSON.parse(await nodeFs.readFile(nodePath.join(a.root, 'clone', 'recipes', 'r1.json'), 'utf8'));
+    expect(file).toMatchObject({ id: 'r1', title: 'Pane', created_at: createdAt });
+  });
+
   it('devices that never shared history converge without conflicts on identical content and fill each other’s gaps', async () => {
     // The real-world upgrade case: two devices each hold the same library
     // (imported separately, or synced under the old single-parent commits),
