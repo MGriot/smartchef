@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { query, queryOne, withTransaction } from "../db/pool";
 import { listCatalog } from "../services/catalogList.service";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 import { z } from "zod";
 
 export const ingredientsRouter = Router();

@@ -5,7 +5,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne } from "../db/pool";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 import type { LLMParseResult, UUID } from "@shared/types/index";
 
 interface DBIngredient { id: UUID; name: string; category_id: UUID; plural_name: string | null; }

@@ -13,7 +13,7 @@ import { Router, Request, Response } from "express";
 import multer from "multer";
 import sharp from "sharp";
 import path from "path";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 import { UPLOAD_DIR } from "../services/uploadDir";
 
 export const uploadsRouter = Router();

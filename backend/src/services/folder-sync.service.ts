@@ -14,7 +14,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { PoolClient } from "pg";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 import { query, withTransaction } from "../db/pool";
 import { DEVICE_ID, DEVICE_NAME } from "./device-identity.service";
 import { computeAutoTagNames, unionTagNames } from "./tags.service";

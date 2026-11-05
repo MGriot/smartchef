@@ -10,7 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 
 const DEVICE_DATA_DIR = process.env.DEVICE_DATA_DIR ?? "/app/device";
 const DEVICE_ID_FILE = path.join(DEVICE_DATA_DIR, "device-id.txt");
