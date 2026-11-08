@@ -1,0 +1,1 @@
+L'importazione mostra ora perché il nome AI dell'ingrediente non è riuscito, con un pulsante Riprova.

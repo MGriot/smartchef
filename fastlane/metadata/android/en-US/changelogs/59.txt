@@ -1,0 +1,1 @@
+Recipe import now shows why AI ingredient naming failed, with a Retry button.
