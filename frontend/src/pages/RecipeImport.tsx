@@ -1145,6 +1145,12 @@ export default function RecipeImport() {
     const suggestedName = suggestion?.name ?? name;
     const newName = newRowName(resolution, suggestedName);
     const namingBusy = kind === 'ingredient' && namingPending.has(index);
+    // The English catalog name stays the one created, but the user's own
+    // language is shown beside it so the row is recognizable at a glance.
+    // Only while the name is the AI's (an edited name is translated on create).
+    const preferredTranslation = contentLang && contentLang !== 'en' && suggestion && newName === suggestion.name
+      ? suggestion.translations.find((tr) => tr.lang === contentLang)?.text?.trim() || null
+      : null;
     return (
       <div key={`${kind}-${index}`} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 bg-zinc-50/50 dark:bg-zinc-900/50">
         <div className="flex items-start justify-between gap-2 mb-2">
@@ -1186,7 +1192,7 @@ export default function RecipeImport() {
                 }
               }}
             />
-            <span className="text-amber-700 font-bold">{t('import.createNew', { name: newName })}</span>
+            <span className="text-amber-700 font-bold">{t('import.createNew', { name: preferredTranslation ? `${newName} (${preferredTranslation})` : newName })}</span>
           </label>
           {resolution?.choice === 'new' && (
             <div className="mt-1 space-y-1">
