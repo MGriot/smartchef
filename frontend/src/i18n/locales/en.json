@@ -1392,6 +1392,7 @@
     "hiddenHint": "Hidden languages are only out of the pickers. Nothing written in them was deleted, and showing one again brings it straight back."
   },
   "account": {
+    "about": { "heading": "About", "version": "Version" },
     "sync": {
       "nothingChanged": "Nothing changed — already up to date."
     },

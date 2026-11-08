@@ -7,6 +7,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 import "./i18n";
 import { isNative } from "./lib/api";
+import { restorePreferences } from "./lib/prefsBackup";
 
 // isomorphic-git (standalone mode's Folder Sync, lib/sync/gitSync.ts)
 // references the Node.js `Buffer` global directly — never imports it,
@@ -62,10 +63,14 @@ if (!isNative()) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </React.StrictMode>
-);
+// Settings the desktop app's storage lost (token, AI keys) are put back
+// before anything reads them.
+restorePreferences().finally(() => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>
+  );
+});

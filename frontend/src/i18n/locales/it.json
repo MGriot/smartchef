@@ -1392,6 +1392,7 @@
     "hiddenHint": "Le lingue nascoste spariscono solo dai selettori. Nulla di scritto in quelle lingue è stato eliminato, e mostrandone una torna subito tutto al suo posto."
   },
   "account": {
+    "about": { "heading": "Informazioni", "version": "Versione" },
     "sync": {
       "nothingChanged": "Nessuna modifica — è già tutto aggiornato."
     },

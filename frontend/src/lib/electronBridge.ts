@@ -39,6 +39,10 @@ declare global {
       saveFile: (suggestedName: string, contents: string | Uint8Array, options?: ElectronSaveOptions) => Promise<string | null>;
       /** Absent from a preload older than the recipe report. */
       printToPdf?: (suggestedName: string, options?: ElectronPrintToPdfOptions) => Promise<string | null>;
+      /** Absent from a preload older than the preferences backup. */
+      readPrefsBackup?: () => Promise<Record<string, string>>;
+      setPrefsBackup?: (key: string, value: string | null) => Promise<void>;
+      getAppVersion?: () => Promise<string>;
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
       geocode: (q: string, limit?: number, shape?: boolean) => Promise<GeocodeResult[]>;

@@ -30,7 +30,7 @@ import { Preferences } from '@capacitor/preferences';
 import { gitfs } from '../gitfs';
 import { gitCache, resetGitCache } from './gitCache';
 import { isElectron } from '../electronBridge';
-import { ensureHiddenCloneInitialized, resetHiddenCloneInitFlag } from './hiddenClone';
+import { ensureHiddenCloneInitialized, isBrokenIndexError, removeBrokenIndex, resetHiddenCloneInitFlag } from './hiddenClone';
 import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_NAME, type RemoteTransport, type TransferProgress } from './gitObjectTransport';
 import { writeBundleIfStale, tryCatchUpFromBundle } from './gitBundleTransport';
 import { packLooseObjectsAfterPush } from './gitPacking';
@@ -1066,6 +1066,20 @@ export async function syncNow(onProgress?: (progress: TransferProgress) => void)
   return result;
 }
 
+/** One cycle, run again once if a damaged .git/index in the clone failed it.
+ *  The index is only a cache, so dropping it is safe; left alone it failed
+ *  every cycle for good. */
+async function syncNowHealingIndex(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
+  try {
+    return await syncNowInternal(onProgress);
+  } catch (err) {
+    const { gitdir } = await ensureHiddenCloneInitialized();
+    if (!isBrokenIndexError(err) || !(await removeBrokenIndex(gitdir))) throw err;
+    resetGitCache();
+    return syncNowInternal(onProgress);
+  }
+}
+
 function syncNowSerialized(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
   return serialize(async () => {
     reportSyncStarted();
@@ -1077,7 +1091,7 @@ function syncNowSerialized(onProgress?: (progress: TransferProgress) => void): P
     resetGitCache();
     let applied = 0;
     try {
-      const result = await syncNowInternal(onProgress);
+      const result = await syncNowHealingIndex(onProgress);
       applied = result.applied;
       return result;
     } finally {

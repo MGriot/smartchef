@@ -17,6 +17,11 @@ require('./rt/electron-rt');
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('smartchefElectron', {
   pickSyncFolder: () => ipcRenderer.invoke('smartchef-pick-sync-folder'),
+  // Durable copy of the Preferences (GitHub token, AI keys) — see the
+  // `smartchef-prefs-*` handlers in electron/src/index.ts.
+  readPrefsBackup: () => ipcRenderer.invoke('smartchef-prefs-read'),
+  setPrefsBackup: (key: string, value: string | null) => ipcRenderer.invoke('smartchef-prefs-set', key, value),
+  getAppVersion: () => ipcRenderer.invoke('smartchef-app-version'),
   // Native save dialog for the encrypted Setup File and every other export
   // (frontend/src/lib/fileExport.ts) — see the `smartchef-save-file`
   // handler in electron/src/index.ts for why the renderer's own

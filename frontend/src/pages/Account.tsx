@@ -2829,6 +2829,24 @@ const ACCOUNT_SECTIONS = [
 ] as const;
 type AccountTab = typeof ACCOUNT_SECTIONS[number]['id'];
 
+/** Which build this is — the desktop app asks Electron for the installed
+ *  version, every other platform shows the one baked in at build time. */
+function AboutCard() {
+  const { t } = useTranslation();
+  const [version, setVersion] = useState<string>(__APP_VERSION__);
+  useEffect(() => {
+    window.smartchefElectron?.getAppVersion?.().then((v) => { if (v) setVersion(v); }).catch(() => {});
+  }, []);
+  return (
+    <section className="border-t border-zinc-100 dark:border-zinc-800 pt-6">
+      <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.about.heading')}</h2>
+      <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+        {t('account.about.version')}: <span className="font-black text-zinc-900 dark:text-zinc-100">{version}</span>
+      </p>
+    </section>
+  );
+}
+
 export default function Account() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -3024,6 +3042,7 @@ export default function Account() {
           <>
             <BackupCard />
             <StorageModeCard />
+            <AboutCard />
           </>
         )}
       </div>

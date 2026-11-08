@@ -106,6 +106,46 @@ app.on('activate', async function () {
 
 // Place all ipc or other electron api calls and custom functionality under this line
 
+// ── Preferences backup ──────────────────────────────────────────────
+// @capacitor/preferences runs on Chromium's localStorage here, which lives
+// in userData/Local Storage. A new version, a reinstall, or a locked LevelDB
+// can leave that empty, and with it the GitHub token and the AI keys
+// (they are per-device and deliberately not synced). Every
+// CapacitorStorage.* write is mirrored to this plain JSON file, and
+// frontend/src/lib/prefsBackup.ts restores whatever localStorage lost.
+const prefsBackupPath = () => path.join(app.getPath('userData'), 'preferences-backup.json');
+let prefsBackup: Record<string, string> | null = null;
+
+function loadPrefsBackup(): Record<string, string> {
+  if (prefsBackup) return prefsBackup;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(prefsBackupPath(), 'utf8'));
+    prefsBackup = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    prefsBackup = {};
+  }
+  return prefsBackup!;
+}
+
+function savePrefsBackup(): void {
+  const file = prefsBackupPath();
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(prefsBackup ?? {}), 'utf8');
+  fs.renameSync(tmp, file);
+}
+
+ipcMain.handle('smartchef-prefs-read', () => loadPrefsBackup());
+
+ipcMain.handle('smartchef-prefs-set', (_event, key: string, value: string | null) => {
+  if (typeof key !== 'string' || !key.startsWith('CapacitorStorage.')) return;
+  const data = loadPrefsBackup();
+  if (value === null) delete data[key];
+  else data[key] = String(value);
+  savePrefsBackup();
+});
+
+ipcMain.handle('smartchef-app-version', () => app.getVersion());
+
 // SmartChef: native folder picker for the git-based sync feature — see
 // frontend/src/lib/gitfs.ts. Desktop has no Storage Access Framework
 // restriction (unlike Android, which uses a fixed Documents/SmartChef

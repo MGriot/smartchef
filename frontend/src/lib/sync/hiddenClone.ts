@@ -39,6 +39,37 @@ export interface HiddenCloneDirs {
 
 let initDone = false;
 
+/** The staging index is only a cache of what git last saw, rebuilt from the
+ *  commit and the files, but isomorphic-git refuses to run on a damaged one
+ *  ("Index file is empty (.git/index)") and nothing else ever replaces it,
+ *  so sync stayed stuck for good (a crash or an interrupted write leaves it
+ *  empty). Removes it when it is empty or cut short; git then starts from no
+ *  index and the next commit rewrites it. Returns whether it removed one. */
+export async function removeBrokenIndex(gitdir: string): Promise<boolean> {
+  const file = `${gitdir}/index`;
+  try {
+    const stat = await gitfs.promises.stat(file);
+    // A real index has a 12-byte header and a 20-byte checksum at least.
+    if (stat.size >= 32) return false;
+  } catch {
+    return false; // no index at all is fine
+  }
+  try {
+    await gitfs.promises.unlink(file);
+    console.warn('SmartChef: removed an empty .git/index from the sync clone');
+    return true;
+  } catch (err) {
+    console.warn('SmartChef: could not remove the broken .git/index:', err);
+    return false;
+  }
+}
+
+/** Whether an error is isomorphic-git reading a damaged index. */
+export function isBrokenIndexError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return /index file is empty|index file smaller than expected|\.git\/index/i.test(message);
+}
+
 /** Idempotent within a session (the initDone guard) — safe to call before
  *  every operation that touches the Hidden Clone, same pattern as the old
  *  design's gitSync.ts initSyncRepo(). Unlike that function, this never
@@ -54,6 +85,7 @@ export async function ensureHiddenCloneInitialized(): Promise<HiddenCloneDirs> {
   const gitdir = `${dir}/.git`;
   if (initDone) return { dir, gitdir };
 
+  await removeBrokenIndex(gitdir);
   let hasGit = true;
   try {
     await git.resolveRef({ fs: gitfs, dir, gitdir, ref: 'HEAD' });
