@@ -5,6 +5,7 @@ import { useStore } from '../store/app.store';
 import { useLanguages, useUiAndContentLanguage } from '../hooks/useLanguages';
 import OfflineBanner from './OfflineBanner';
 import CoverImage from './CoverImage';
+import CreateImportMenu from './CreateImportMenu';
 
 type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags' | 'seasonality';
 
@@ -26,8 +27,8 @@ interface AppLayoutProps {
 // and one on a map, so they belong next to each other rather than at
 // opposite ends. Then the week in the order it actually happens: plan it,
 // shop for it, log what you cooked. The two maintenance surfaces come last,
-// since Import is occasional (the header's Create Recipe covers the common
-// case) and Library is upkeep rather than daily use.
+// since Library is upkeep rather than daily use. (Import lives in the header's
+// "+" chooser, next to Create.)
 //
 // `secondary` is about horizontal budget, not importance. Eight links, a
 // Create Recipe button, a language picker and an avatar need roughly 1340px
@@ -50,7 +51,6 @@ const NAV_LINKS: { to: string; labelKey: string; secondary?: boolean }[] = [
   { to: '/shopping', labelKey: 'nav.shoppingList' },
   { to: '/discover', labelKey: 'nav.discover', secondary: true },
   { to: '/history', labelKey: 'nav.history', secondary: true },
-  { to: '/import', labelKey: 'nav.import', secondary: true },
   { to: '/library/ingredients', labelKey: 'nav.library', secondary: true },
 ];
 
@@ -163,14 +163,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           {/* Icon-only until xl, where the label fits without squeezing the
               nav. `title` carries the same text for a hover or long-press. */}
           {!hideCreateButton && (
-            <Link
-              to="/recipe/new"
-              title={t('nav.createRecipe')}
-              className="hidden sm:flex items-center gap-1.5 px-3 xl:px-4 py-2 bg-primary text-white rounded-full font-bold text-xs shadow-sm shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95 whitespace-nowrap"
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              <span className="hidden xl:inline">{t('nav.createRecipe')}</span>
-            </Link>
+            <CreateImportMenu variant="header" />
           )}
           <select
             value={contentLang}
@@ -224,13 +217,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
               ))}
             </select>
           </label>
-          <Link
-            to="/recipe/new"
-            className="flex items-center gap-3 px-4 py-3 bg-primary text-white rounded-xl font-bold text-sm mb-2"
-          >
-            <span className="material-symbols-outlined text-[20px]">add</span>
-            {t('nav.createRecipe')}
-          </Link>
+          <CreateImportMenu variant="menu" />
           {NAV_LINKS.map((link) => (
             <Link key={link.to} to={link.to} className={isActive(link.to) ? ACTIVE_LINK : IDLE_LINK}>
               {t(link.labelKey)}
