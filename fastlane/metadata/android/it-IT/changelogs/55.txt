@@ -1,0 +1,1 @@
+Corregge la sincronizzazione bloccata da un file indice vuoto, conserva token GitHub e chiavi AI negli aggiornamenti su Windows e mostra la versione dell'app in Account.
