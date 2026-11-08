@@ -7,32 +7,30 @@
 // from inventing anything live in lib/recipeCheck.ts.
 // ════════════════════════════════════════════════════════════════════════
 
-import i18n from '../i18n';
-import { callConfiguredProvider, repairTruncatedJson } from './llmParser.local';
+import { callConfiguredProvider, LONG_AI_TIMEOUT_MS, parseJsonObject } from './llmParser.local';
 import {
   buildCheckRequest, buildCheckSystemPrompt, interpretCheckResponse,
   type CheckCatalog, type CheckDraft, type CheckResult,
 } from '../lib/recipeCheck';
 import type { IngredientMismatch } from '../lib/recipeConsistency';
+import { buildMergeRequest, buildMergeSystemPrompt, interpretMergeResponse } from '../lib/recipeMerge';
 import {
   buildFixRequest, buildFixSystemPrompt, interpretFixResponse,
   type MismatchFixResult, type MismatchSide,
 } from '../lib/recipeMismatchFix';
 
-function parseJsonObject(raw: string): any {
-  const match = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
-  if (!match) throw new Error(i18n.t('errors.noJsonFromModel'));
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return JSON.parse(repairTruncatedJson(match[0]));
-  }
-}
-
 export async function checkRecipeWithAi(draft: CheckDraft, catalog: CheckCatalog): Promise<CheckResult> {
   const request = buildCheckRequest(draft, catalog);
-  const raw = await callConfiguredProvider(JSON.stringify(request), buildCheckSystemPrompt(catalog));
+  const raw = await callConfiguredProvider(JSON.stringify(request), buildCheckSystemPrompt(catalog), undefined, { timeoutMs: LONG_AI_TIMEOUT_MS });
   return interpretCheckResponse(parseJsonObject(raw), draft, catalog);
+}
+
+/** "Merge text with AI": the draft plus a text the user pasted; back come
+ *  the changes that text supports, checked against it in lib/recipeMerge.ts. */
+export async function mergeTextWithAi(draft: CheckDraft, text: string, catalog: CheckCatalog): Promise<CheckResult> {
+  const request = buildMergeRequest(draft, text, catalog);
+  const raw = await callConfiguredProvider(JSON.stringify(request), buildMergeSystemPrompt(catalog), undefined, { timeoutMs: LONG_AI_TIMEOUT_MS });
+  return interpretMergeResponse(parseJsonObject(raw), draft, text, catalog);
 }
 
 /** The second call of the mismatch flow: the user said which side of the
@@ -45,6 +43,6 @@ export async function resolveMismatchWithAi(
   mismatch: IngredientMismatch,
 ): Promise<MismatchFixResult> {
   const request = buildFixRequest(side, draft, catalog, mismatch);
-  const raw = await callConfiguredProvider(JSON.stringify(request), buildFixSystemPrompt(side));
+  const raw = await callConfiguredProvider(JSON.stringify(request), buildFixSystemPrompt(side), undefined, { timeoutMs: LONG_AI_TIMEOUT_MS });
   return interpretFixResponse(side, parseJsonObject(raw), draft, catalog, mismatch);
 }

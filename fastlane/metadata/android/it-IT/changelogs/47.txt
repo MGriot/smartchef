@@ -1,0 +1,1 @@
+"Controlla la ricetta con l'AI" e "Unisci testo con l'AI" ora compilano i tempi di preparazione, cottura e riposo (anche sommando le durate dei passaggi e leggendo "1 ora e 30 minuti") e propongono una difficoltà.

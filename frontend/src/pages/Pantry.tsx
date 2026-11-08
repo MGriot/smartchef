@@ -1,3 +1,4 @@
+import { parseQuantityStrict } from '../lib/ingredientAmount';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -100,7 +101,7 @@ export default function Pantry() {
           ingredientId: newIngredientId,
           // Blank means "I have some" — the matcher treats that as enough,
           // and demanding a weight is what stops anyone keeping a pantry.
-          quantity: newQuantity.trim() ? Number(newQuantity.replace(',', '.')) : null,
+          quantity: parseQuantityStrict(newQuantity) ?? null,
           unitId: newUnitId || null,
         }),
       });
@@ -215,7 +216,7 @@ export default function Pantry() {
               <div className="grid grid-cols-2 gap-3">
                 <Field label={t('pantry.quantityOptional')} hint={t('pantry.quantityHint')}>
                   <input
-                    type="number" step="any" min="0" value={newQuantity}
+                    type="text" inputMode="decimal" value={newQuantity}
                     onChange={(e) => setNewQuantity(e.target.value)}
                     className="sc-field"
                   />

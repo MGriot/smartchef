@@ -1,8 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { readFileSync } from "node:fs";
+
+const appVersion: string = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   plugins: [
     react(),
     VitePWA({
@@ -61,6 +65,12 @@ export default defineConfig({
     }),
   ],
   base: "/",
+  build: {
+    // Vite 8 raised its default to Chrome 111. Android runs the bundle in
+    // the system WebView, which can lag behind on older phones, so keep
+    // the target Vite 5 shipped with.
+    target: ["es2020", "edge88", "firefox78", "chrome87", "safari14"],
+  },
   server: {
     proxy: {
       "/api": { target: "http://localhost:3000", changeOrigin: true },

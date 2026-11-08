@@ -1,0 +1,1 @@
+A new page opens at the top instead of where the last one was scrolled; the recipe photo header fits long titles and many tags on a phone and stays readable over light photos; the translation editor lists every ingredient with its name in that language; Merge text with AI waits up to 4 minutes and explains a timeout instead of failing silently.

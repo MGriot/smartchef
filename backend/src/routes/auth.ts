@@ -8,7 +8,7 @@
 
 import { Router, Request, Response } from "express";
 import { query, queryOne } from "../db/pool";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";

@@ -56,6 +56,7 @@ export interface ReportIngredientInput {
   quantity: number | null;
   quantityText?: string | null;
   unitSymbol?: string | null;
+  densityGPerMl?: number | null;
   isOptional?: boolean;
   notes?: string | null;
   translatedNotes?: string | null;
@@ -180,6 +181,8 @@ export interface ReportSubstitute {
 export interface ReportIngredient {
   name: string;
   amount: string;
+  /** "≈ 120 g" for a volume amount with a known density. */
+  weight: string | null;
   optional: boolean;
   note: string | null;
   /** Set when this row is a recipe used as an ingredient AND that recipe
@@ -342,6 +345,7 @@ function buildIngredientGroups(
     groups[groups.length - 1].items.push({
       name: label(ing),
       amount: scaler.formatAmount(ing.quantity, ing.unitSymbol, ing.quantityText),
+      weight: scaler.weightHint(ing.quantity, ing.unitSymbol, ing.densityGPerMl),
       optional: !!ing.isOptional,
       note: nonEmpty(tidyNote(ing.translatedNotes || ing.notes)),
       componentAnchor: ing.subRecipeId && printedComponents.has(ing.subRecipeId) ? anchorFor(ing.subRecipeId) : null,

@@ -1,3 +1,7 @@
+import MarkdownHint from '../components/MarkdownHint';
+import MarkdownText from '../components/MarkdownText';
+import QuantityInput from '../components/QuantityInput';
+import { formatQuantity, formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -6,7 +10,7 @@ import AddToCollectionPicker from '../components/AddToCollectionPicker';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { useStore } from '../store/app.store';
-import { listLanguages, languageLabel } from '../lib/languages';
+import { languageLabel } from '../lib/languages';
 import { useLanguages } from '../hooks/useLanguages';
 import { useFileExport } from '../hooks/useFileExport';
 import { slugForFilename } from '../lib/fileExport';
@@ -15,7 +19,10 @@ import Autocomplete from '../components/Autocomplete';
 import StepEditor, { StepIngredientAmount } from '../components/StepEditor';
 import RecipeSourcesEditor, { RecipeSourceEntry, SOURCE_TYPE_META } from '../components/RecipeSourcesEditor';
 import ImageUrlInput from '../components/ImageUrlInput';
-import TranslationsEditor, { TranslationEntry } from '../components/TranslationsEditor';
+import type { TranslationEntry } from '../components/TranslationsEditor';
+import TranslationLanguageBar from '../components/TranslationLanguageBar';
+import RecipeTranslationPanel from '../components/RecipeTranslationPanel';
+import { applyMachineTranslation, completeness, languagesIn, libraryNameIn, machineTranslationInput, withoutLanguage, type TranslatableDraft } from '../lib/recipeTranslationDraft';
 import TagPicker from '../components/TagPicker';
 import { pickIngredientName } from '../lib/ingredientDisplay';
 import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/recipeDraftCoercion';
@@ -37,15 +44,18 @@ import { createRecipeScaler } from '../lib/recipeScaling';
 import { difficultyKey, tidyNote } from '../lib/recipeReport';
 import ConverterPanel from '../components/ConverterPanel';
 import ShareLinkModal from '../components/ShareLinkModal';
+import { RecipeCookbookDialog } from '../components/sync/SharedCookbooks';
 import RecipeMergeModal from '../components/RecipeMergeModal';
 import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
 import CoverImage, { ResolvedImage } from '../components/CoverImage';
 import { apiFetch, isNative } from '../lib/api';
+import { tagTextColor } from '../lib/tagColor';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
 import { buildCookidooExport, type CookidooExport } from '../lib/cookidooExport';
 import RecipeAiReviewDialog from '../components/RecipeAiReviewDialog';
+import RecipeMergeTextDialog from '../components/RecipeMergeTextDialog';
 import { applyCheckChanges, type CheckChange, type CheckResult, type ResolvedApplyInput } from '../lib/recipeCheck';
 import type { MismatchSide } from '../lib/recipeMismatchFix';
 import { resolveRegions } from '../lib/importLinking';
@@ -69,6 +79,7 @@ interface Ingredient {
   quantityText?: string | null;
   unitId: string | null;
   unitSymbol?: string | null;
+  densityGPerMl?: number | null;
   isOptional: boolean;
   notes: string | null;
   translatedNotes?: string | null;
@@ -245,6 +256,23 @@ interface RecipeNutritionResult {
 /* ═══════════════════════════════════════════════════════════════════════
    HELPERS
    ═══════════════════════════════════════════════════════════════════════ */
+/** An ingredient row's name, linked to what it is: a recipe used as an
+ *  ingredient opens that recipe, a library ingredient opens its card in
+ *  the Library (whose Edit button covers editing). A row with neither —
+ *  free text — stays plain. */
+function IngredientNameLink({ ing, className, children }: {
+  ing: { ingredientId?: string | null; subRecipeId?: string | null };
+  className: string;
+  children: React.ReactNode;
+}) {
+  const to = ing.subRecipeId ? `/recipe/${ing.subRecipeId}` : ing.ingredientId ? `/library/ingredients?view=${ing.ingredientId}` : null;
+  if (!to) return <span className={className}>{children}</span>;
+  return (
+    <Link to={to} className={`${className} underline decoration-dotted decoration-zinc-300 dark:decoration-zinc-600 underline-offset-4 hover:text-primary hover:decoration-primary`}>
+      {children}
+    </Link>
+  );
+}
 // Recipe actions inside FloatingActionBar: 44px touch targets instead of the
 // header's bare 20px icons.
 const BAR_BUTTON = 'w-11 h-11 justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800';
@@ -276,7 +304,7 @@ const popoverLayer = (inBar: boolean, node: React.ReactNode) =>
  *  recipe's own base servings. (View mode's formatAmount() is the one that
  *  scales to the slider and restates in the reader's measurement system.) */
 const formatEditorAmount = (qty: number, unitSymbol?: string | null): string =>
-  `${qty % 1 === 0 ? qty : Number(qty.toFixed(2))}${unitSymbol ? ` ${unitSymbol}` : ''}`;
+  formatQuantityWithUnit(qty, unitSymbol);
 
 const uniqueNames = (values: Array<string | null | undefined>): string[] => {
   const out: string[] = [];
@@ -344,9 +372,9 @@ const SubIngredientList: React.FC<{
             const scaled = ing.quantity ? ((ing.quantity * servings) / baseServings) : null;
             return (
               <div key={i} className="flex justify-between text-sm text-zinc-500 dark:text-zinc-400 py-1">
-                <span>{ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaled) : ing.subRecipeTitle}</span>
+                <IngredientNameLink ing={ing} className="">{ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaled) : ing.subRecipeTitle}</IngredientNameLink>
                 <span className="text-zinc-400 dark:text-zinc-500 font-medium">
-                  {scaled !== null ? scaled % 1 === 0 ? scaled : scaled.toFixed(1) : ''} {ing.unitSymbol || ing.quantityText || ''}
+                  {scaled !== null ? formatQuantity(scaled, ing.unitSymbol) : ''} {ing.unitSymbol || ing.quantityText || ''}
                 </span>
               </div>
             );
@@ -433,6 +461,7 @@ const RecipeDetail: React.FC = () => {
   const [showShareLink, setShowShareLink] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [showCookbook, setShowCookbook] = useState(false);
   useEffect(() => {
     import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setIsStandalone);
   }, []);
@@ -463,6 +492,16 @@ const RecipeDetail: React.FC = () => {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<CheckResult | null>(null);
+  // The review dialog serves both "Check with AI" and "Merge text with AI".
+  const [aiMode, setAiMode] = useState<'check' | 'merge'>('check');
+  const [mergeTextOpen, setMergeTextOpen] = useState(false);
+  // The language the editor is writing in: null = the recipe's own, a code
+  // = that translation (components/RecipeTranslationPanel.tsx). Languages
+  // just added from the bar are listed before they hold any text.
+  const [editLang, setEditLang] = useState<string | null>(null);
+  // The hero shows three tags and a "+N" chip that opens the rest.
+  const [heroTagsOpen, setHeroTagsOpen] = useState(false);
+  const [addedLangs, setAddedLangs] = useState<string[]>([]);
   const [ingredientEntryTypes, setIngredientEntryTypes] = useState<Record<number, 'ingredient' | 'recipe'>>({});
   // Which ingredient/step cards are folded down to a one-line summary, and
   // whether the two editors are folded whole. A long recipe is ~20 cards of
@@ -598,32 +637,34 @@ const RecipeDetail: React.FC = () => {
   };
 
   /* ── AI recipe translation ──────────────────────────────────────── */
-  // English is the app's base language, never a translation target.
-  const [aiTranslateLang, setAiTranslateLang] = useState(listLanguages().find(l => l.code !== 'en')?.code || '');
   const [aiTranslating, setAiTranslating] = useState(false);
   const [aiTranslateError, setAiTranslateError] = useState<string | null>(null);
 
-  // If the target language ever matches the recipe's own written language
-  // (e.g. once `recipe` finishes loading after this state's initial guess),
-  // bump to the next different language rather than offering a no-op translate.
-  useEffect(() => {
-    const baseLang = recipe?.language_code || draft.language_code;
-    if (baseLang && aiTranslateLang === baseLang) {
-      setAiTranslateLang(listLanguages().find(l => l.code !== baseLang && l.code !== 'en')?.code || aiTranslateLang);
-    }
-  }, [recipe?.language_code, draft.language_code]);
-
-  const handleAiTranslate = async () => {
+  /** Fills the empty fields of `targetLang` in the editor's draft. In
+   *  standalone mode the translation comes back unsaved (translate-preview)
+   *  and only blanks are filled, so nothing the user wrote is replaced; a
+   *  server translates and saves in one go, as it always has. */
+  const handleAiTranslate = async (targetLang: string) => {
     if (!id) return;
-    const langLabel = languageLabel(aiTranslateLang);
-    if (!window.confirm(t('recipeDetail.aiTranslateConfirm', { lang: langLabel }))) return;
     setAiTranslating(true);
     setAiTranslateError(null);
     try {
+      if (isStandalone) {
+        const res = await apiFetch('/api/recipes/translate-preview', {
+          method: 'POST',
+          body: JSON.stringify({ input: machineTranslationInput(draft), lang: targetLang }),
+          timeoutMs: 650_000,
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.translationFailed'));
+        setDraft(prev => applyMachineTranslation(prev as TranslatableDraft, targetLang, json.data) as Partial<Recipe>);
+        return;
+      }
+      if (!window.confirm(t('recipeDetail.aiTranslateConfirm', { lang: languageLabel(targetLang) }))) return;
       // LLM translation of a full recipe (title/description/steps/notes) can take
       // several minutes on local CPU-only Ollama inference — same ceiling as
       // RecipeImport.tsx's parse call, just above the backend's own 600s cap.
-      const res = await apiFetch(`/api/recipes/${id}/translate/${aiTranslateLang}`, { method: 'POST', timeoutMs: 650_000 });
+      const res = await apiFetch(`/api/recipes/${id}/translate/${targetLang}`, { method: 'POST', timeoutMs: 650_000 });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('errors.translationFailed'));
       await fetchRecipe();
@@ -674,7 +715,7 @@ const RecipeDetail: React.FC = () => {
   // The scaling itself lives in lib/recipeScaling.ts, shared with the
   // printed report so paper and screen never disagree on an amount.
   const {
-    scaleNum, servingsScale, formatAmount,
+    scaleNum, servingsScale, formatAmount, weightHint,
     stepTextIngredientsFor, stepIngredientList,
   } = createRecipeScaler({
     ingredients: recipe?.ingredients || [],
@@ -1033,9 +1074,9 @@ const RecipeDetail: React.FC = () => {
                         {step.translatedTitle || step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
                       </h3>
                       <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
-                      <p className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4 break-words">
+                      <div className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4 break-words">
                         <RenderStepText text={step.translatedDescription || step.description} ingredients={sectionIngredients} tools={sectionTools} techniques={stepTextTechniques} scale={servingsScale} />
-                      </p>
+                      </div>
 
                       {(step.stepIngredients || []).length > 0 && (
                         <ul className="mb-4 space-y-1">
@@ -1137,7 +1178,7 @@ const RecipeDetail: React.FC = () => {
                             <span className="material-symbols-outlined text-sm text-[18px]">lightbulb</span>
                             <span className="text-[10px] uppercase font-bold tracking-wider">{t('recipeDetail.chefsNote')}</span>
                           </div>
-                          <p className="text-sm text-zinc-300 dark:text-zinc-600 italic">{step.notes}</p>
+                          <MarkdownText text={step.notes} className="text-sm text-zinc-300 dark:text-zinc-600 italic" />
                         </div>
                       )}
 
@@ -1235,9 +1276,9 @@ const RecipeDetail: React.FC = () => {
                       {step.translatedTitle || step.title || t('recipeDetail.stepNumber', { number: step.stepNumber })}
                     </h3>
                     <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-2xl mb-4" />
-                    <p className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4 break-words">
+                    <div className="text-zinc-300 dark:text-zinc-600 leading-relaxed text-[15px] mb-4 break-words">
                       <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredientsFor(step)} tools={stepTextTools} techniques={stepTextTechniques} scale={servingsScale} />
-                    </p>
+                    </div>
 
                     {/* Kitchen mode gets a checklist, not a row of chips:
                         with both hands busy the question is "have I put the
@@ -1341,7 +1382,7 @@ const RecipeDetail: React.FC = () => {
                           <span className="material-symbols-outlined text-sm text-[18px]">lightbulb</span>
                           <span className="text-[10px] uppercase font-bold tracking-wider">{t('recipeDetail.chefsNote')}</span>
                         </div>
-                        <p className="text-sm text-zinc-300 dark:text-zinc-600 italic">{step.translatedNotes || step.notes}</p>
+                        <MarkdownText text={step.translatedNotes || step.notes} className="text-sm text-zinc-300 dark:text-zinc-600 italic" />
                       </div>
                     )}
 
@@ -1499,11 +1540,16 @@ const RecipeDetail: React.FC = () => {
         enterRawTextMode();
       }
     };
+    const editBaseLang = draft.language_code || recipe.language_code || 'en';
+    const editLangs = [...new Set([...languagesIn(draft as TranslatableDraft), ...addedLangs, ...(editLang ? [editLang] : [])])]
+      .filter(l => l !== editBaseLang);
+
     /** "Check with AI": sends the draft as it is right now (unsaved edits
      *  included) and opens the review. Nothing changes until the user ticks
      *  and applies — see lib/recipeCheck.ts for why the answer can be trusted. */
     const runAiCheck = async () => {
       if (rawTextMode && !applyRawText()) return;
+      setAiMode('check');
       setAiOpen(true);
       setAiLoading(true);
       setAiError(null);
@@ -1521,7 +1567,7 @@ const RecipeDetail: React.FC = () => {
               title: draft.title, description: draft.description, tips: draft.tips,
               storage_instructions: draft.storage_instructions, source_url: draft.source_url,
               servings: draft.servings, prep_time_min: draft.prep_time_min, cook_time_min: draft.cook_time_min,
-              rest_time_min: draft.rest_time_min, yield_amount: draft.yield_amount, yield_unit_id: draft.yield_unit_id,
+              rest_time_min: draft.rest_time_min, difficulty: draft.difficulty, yield_amount: draft.yield_amount, yield_unit_id: draft.yield_unit_id,
               tags: draft.tags, regions: draft.regions, ingredients: draft.ingredients, steps: draft.steps,
             },
             catalog: { tools: allTools, techniques: allTechniques, units: allUnits, tagNames },
@@ -1533,6 +1579,48 @@ const RecipeDetail: React.FC = () => {
         setAiResult(json.data as CheckResult);
       } catch (err) {
         setAiError(err instanceof Error ? err.message : t('recipeDetail.aiCheck.failed'));
+      } finally {
+        setAiLoading(false);
+      }
+    };
+
+    /** "Merge text with AI": what a pasted text adds to the draft, reviewed
+     *  in the same dialog as the check — see lib/recipeMerge.ts. */
+    const runAiMerge = async (text: string) => {
+      if (rawTextMode && !applyRawText()) return;
+      setMergeTextOpen(false);
+      setAiMode('merge');
+      setAiOpen(true);
+      setAiLoading(true);
+      setAiError(null);
+      setAiResult(null);
+      try {
+        let tagNames: string[] = [];
+        try {
+          const tagRes = await apiFetch('/api/tags');
+          tagNames = ((await tagRes.json()).data || []).map((tg: { name: string }) => tg.name);
+        } catch { /* the merge works without the tag catalog */ }
+        const res = await apiFetch('/api/recipes/ai-merge', {
+          method: 'POST',
+          body: JSON.stringify({
+            text,
+            draft: {
+              title: draft.title, description: draft.description, tips: draft.tips,
+              storage_instructions: draft.storage_instructions, source_url: draft.source_url,
+              servings: draft.servings, prep_time_min: draft.prep_time_min, cook_time_min: draft.cook_time_min,
+              rest_time_min: draft.rest_time_min, difficulty: draft.difficulty, yield_amount: draft.yield_amount, yield_unit_id: draft.yield_unit_id,
+              tags: draft.tags, regions: draft.regions, ingredients: draft.ingredients, steps: draft.steps,
+              tools: draft.tools, techniques: draft.techniques, sources: draft.sources,
+            },
+            catalog: { tools: allTools, techniques: allTechniques, units: allUnits, tagNames },
+          }),
+          timeoutMs: 300_000,
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || t('recipeDetail.aiMerge.failed'));
+        setAiResult(json.data as CheckResult);
+      } catch (err) {
+        setAiError(err instanceof Error ? err.message : t('recipeDetail.aiMerge.failed'));
       } finally {
         setAiLoading(false);
       }
@@ -1950,6 +2038,20 @@ const RecipeDetail: React.FC = () => {
             {label(t('recipeDetail.aiCheck.button'))}
           </button>
       );
+      // Runs on the device's own AI key, like the check (localRouter only).
+      const mergeTextBtn = isStandalone ? (
+          <button
+            key="ai-merge"
+            onClick={() => setMergeTextOpen(true)}
+            disabled={saving || aiLoading}
+            title={t('recipeDetail.aiMerge.button')}
+            aria-label={t('recipeDetail.aiMerge.button')}
+            className={`${base} flex items-center gap-2 text-primary hover:bg-primary/10 font-bold text-sm transition-all disabled:opacity-50`}
+          >
+            <span className="material-symbols-outlined text-[20px]">post_add</span>
+            {label(t('recipeDetail.aiMerge.button'))}
+          </button>
+      ) : null;
       const rawBtn = (
           <button
             key="raw"
@@ -1978,7 +2080,8 @@ const RecipeDetail: React.FC = () => {
       );
       // The fan seats the first action straight up from its button, so the
       // primary one leads there; the header keeps Save at the right edge.
-      return inBar ? [saveBtn, aiBtn, rawBtn, deleteBtn] : [aiBtn, rawBtn, deleteBtn, saveBtn];
+      return (inBar ? [saveBtn, aiBtn, mergeTextBtn, rawBtn, deleteBtn] : [aiBtn, mergeTextBtn, rawBtn, deleteBtn, saveBtn])
+        .filter((b): b is JSX.Element => b !== null);
     };
 
     return (
@@ -2010,7 +2113,35 @@ const RecipeDetail: React.FC = () => {
           onApply={applyAiChanges}
           onResolveMismatch={resolveAiMismatch}
           onDismissMismatch={() => setAiResult((prev) => prev && { ...prev, mismatch: null })}
+          {...(aiMode === 'merge' ? {
+            title: t('recipeDetail.aiMerge.reviewTitle'),
+            subtitle: t('recipeDetail.aiMerge.reviewSubtitle'),
+            loadingText: t('recipeDetail.aiMerge.merging'),
+          } : {})}
         />
+        <RecipeMergeTextDialog open={mergeTextOpen} onClose={() => setMergeTextOpen(false)} onSubmit={runAiMerge} />
+
+        {!rawTextMode && (
+          <TranslationLanguageBar
+            baseLang={editBaseLang}
+            active={editLang}
+            langs={editLangs}
+            languages={languages}
+            progress={lang => completeness(draft as TranslatableDraft, lang)}
+            onSelect={setEditLang}
+            onAdd={lang => { setAddedLangs(prev => [...new Set([...prev, lang])]); setEditLang(lang); }}
+            onRemove={lang => {
+              setDraft(prev => withoutLanguage(prev as TranslatableDraft, lang) as Partial<Recipe>);
+              setAddedLangs(prev => prev.filter(l => l !== lang));
+              setEditLang(null);
+            }}
+            onAiFill={id ? handleAiTranslate : undefined}
+            aiBusy={aiTranslating}
+          />
+        )}
+        {aiTranslateError && !rawTextMode && (
+          <p className="max-w-7xl mx-auto px-6 mt-3 text-sm text-red-600 font-medium">{aiTranslateError}</p>
+        )}
 
         {rawTextMode ? (
           <main className="max-w-4xl mx-auto px-6 py-10 space-y-4">
@@ -2025,6 +2156,25 @@ const RecipeDetail: React.FC = () => {
               className="w-full h-[70vh] rounded-3xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 font-mono text-xs leading-relaxed focus:ring-2 focus:ring-primary/20 focus:outline-none"
             />
           </main>
+        ) : editLang ? (
+          <RecipeTranslationPanel
+            draft={draft as TranslatableDraft}
+            lang={editLang}
+            langLabel={languageLabel(editLang)}
+            onChange={next => setDraft(next as Partial<Recipe>)}
+            ingredientNames={(draft.ingredients || []).map(i => {
+              const lib = i.ingredientId ? allIngredients.find(a => a.id === i.ingredientId) : undefined;
+              return {
+                original: i.ingredientName || i.subRecipeTitle || '',
+                translated: lib ? libraryNameIn(lib.translations, editLang) : null,
+                amount: i.quantity != null ? formatEditorAmount(i.quantity, i.unitSymbol) : '',
+                translatable: !!i.ingredientId,
+              };
+            })}
+            stepIngredients={(draft.ingredients || []).map(i => ({ sortOrder: i.sortOrder, name: i.ingredientName || i.subRecipeTitle || '', quantity: '' }))}
+            stepTools={stepTextTools}
+            stepTechniques={stepTextTechniques}
+          />
         ) : (
         <main className="max-w-7xl mx-auto px-6 py-10">
           {/* Two columns: what you actually edit on the left, everything
@@ -2048,7 +2198,6 @@ const RecipeDetail: React.FC = () => {
                       >
                         {languages.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                       </select>
-                      <a href="#translations-section" className="text-primary font-bold hover:underline whitespace-nowrap">{t('recipeDetail.addTitleTranslation')}</a>
                     </span>
                   </div>
                   {/* A textarea so a long title wraps instead of being clipped. */}
@@ -2069,6 +2218,7 @@ const RecipeDetail: React.FC = () => {
                     className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[150px] max-h-[50vh] overflow-y-auto"
                     placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
                   />
+                  <MarkdownHint />
                 </label>
               </div>
 
@@ -2328,9 +2478,9 @@ const RecipeDetail: React.FC = () => {
                         </div>
                         <div className="col-span-5 @lg:col-span-3">
                           <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.qty')}</label>
-                          <input
-                            type="number" step="any" value={ing.quantity || ''}
-                            onChange={e => updateIngredient(idx, 'quantity', parseFloat(e.target.value))}
+                          <QuantityInput
+                            value={ing.quantity} unitSymbol={ing.unitSymbol}
+                            onChange={v => updateIngredient(idx, 'quantity', v)}
                             className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
                           />
                         </div>
@@ -2393,16 +2543,6 @@ const RecipeDetail: React.FC = () => {
                             <p className="text-[9px] text-sky-600 dark:text-sky-500 font-bold mt-1">{t('recipeDetail.substituteHint')}</p>
                           )}
                         </div>
-                        <details className="col-span-12">
-                          <summary className="cursor-pointer text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 select-none">{t('recipeDetail.ingredientTranslationsOptional')}</summary>
-                          <TranslationsEditor
-                            translations={ing.translations || []}
-                            onChange={translations => updateIngredient(idx, 'translations', translations)}
-                            showTitleDescription={false}
-                            notesLabel={t('recipeDetail.chefsNoteIngredientPlaceholder')}
-                            compact
-                          />
-                        </details>
                       </div>
                       </>
                       )}
@@ -2526,17 +2666,6 @@ const RecipeDetail: React.FC = () => {
                           className="flex-1 min-w-0 border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
                         />
                       </div>
-                      <details className="mt-3">
-                        <summary className="cursor-pointer text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 select-none">{t('recipeDetail.stepTranslationsOptional')}</summary>
-                        <TranslationsEditor
-                          translations={step.translations || []}
-                          onChange={translations => updateStep(idx, 'translations', translations)}
-                          titleLabel={t('recipeDetail.stepTitle')}
-                          descriptionLabel={t('recipeDetail.stepDescription')}
-                          notesLabel={t('recipeDetail.chefsNote')}
-                          compact
-                        />
-                      </details>
                       <AutoTextarea
                         value={step.notes || ''}
                         onChange={e => updateStep(idx, 'notes', e.target.value)}
@@ -2707,9 +2836,9 @@ const RecipeDetail: React.FC = () => {
                                         </>
                                       ) : (
                                         <>
-                                          <input
-                                            type="number" step="any" value={ref!.quantity ?? ''}
-                                            onChange={e => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', e.target.value ? parseFloat(e.target.value) : null)}
+                                          <QuantityInput
+                                            value={ref!.quantity} unitSymbol={ref!.unitSymbol || ing.unitSymbol}
+                                            onChange={v => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', v)}
                                             className="flex-1 min-w-0 max-w-[6rem] border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
                                           />
                                           <select
@@ -2771,6 +2900,7 @@ const RecipeDetail: React.FC = () => {
                     className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[110px] max-h-[40vh] overflow-y-auto"
                     placeholder={t('recipeDetail.tipsPlaceholder')}
                   />
+                  <MarkdownHint />
                 </label>
               </div>
             </div>
@@ -2957,40 +3087,6 @@ const RecipeDetail: React.FC = () => {
                 />
               </div>
 
-              {/* Translations */}
-              <div id="translations-section" className="order-[12] xl:order-none bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_2px_12px_rgba(0,0,0,0.04)] scroll-mt-24">
-                <details>
-                <summary className="cursor-pointer font-headline font-bold text-lg select-none">{t('recipeDetail.translations')}</summary>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2 mb-6">{t('recipeDetail.translationsHint')}</p>
-                <TranslationsEditor
-                  translations={draft.translations || []}
-                  onChange={translations => updateDraft('translations', translations)}
-                />
-                <div className="mt-6 pt-6 border-t border-zinc-100 dark:border-zinc-800">
-                  <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.aiTranslate')}</span>
-                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-3">{t('recipeDetail.aiTranslateHint')}</p>
-                  <div className="flex items-center gap-3">
-                    <select
-                      value={aiTranslateLang}
-                      onChange={e => setAiTranslateLang(e.target.value)}
-                      className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl px-4 py-3 font-medium text-sm focus:ring-2 focus:ring-primary/20"
-                    >
-                      {languages.filter(l => l.code !== 'en').map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={handleAiTranslate}
-                      disabled={aiTranslating || !aiTranslateLang}
-                      className="px-5 py-3 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
-                    >
-                      {aiTranslating && <span className="material-symbols-outlined text-base animate-spin">sync</span>}
-                      {aiTranslating ? t('recipeDetail.aiTranslating') : t('recipeDetail.aiTranslateButton')}
-                    </button>
-                  </div>
-                  {aiTranslateError && <p className="mt-3 text-sm text-red-600 font-medium">{aiTranslateError}</p>}
-                </div>
-                </details>
-              </div>
             </aside>
           </div>
         </main>
@@ -3102,7 +3198,9 @@ const RecipeDetail: React.FC = () => {
   const handleExportRecipe = async () => {
     setShowExportMenu(false);
     try {
-      const res = await apiFetch(`/api/share/recipes/${id}/export`);
+      // Standalone writes the share file another library can import
+      // (services/recipeShare.local.ts); a server keeps its own bundle.
+      const res = await apiFetch(`/api/share/recipes/${id}/${isStandalone ? 'copy' : 'export'}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('errors.exportFailed'));
       downloadTextFile(JSON.stringify(json.data, null, 2), `${recipeSlug}.smartchef.json`, 'application/json');
@@ -3198,6 +3296,15 @@ const RecipeDetail: React.FC = () => {
             >
               {t('recipeDetail.exportAsJson')}
             </button>
+            {isStandalone && (
+              <button
+                onClick={() => { setShowExportMenu(false); setShowCookbook(true); }}
+                className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[18px]">menu_book</span>
+                {t('account.cookbooks.recipeMenuItem')}
+              </button>
+            )}
             <button
               onClick={handleExportForCookidoo}
               className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
@@ -3328,7 +3435,7 @@ const RecipeDetail: React.FC = () => {
           <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold leading-tight">{recipe.translated_title || recipe.title}</h1>
             {(recipe.translated_description || recipe.description) && (
-              <p className="mt-1 text-sm">{recipe.translated_description || recipe.description}</p>
+              <MarkdownText text={recipe.translated_description || recipe.description} className="mt-1 text-sm" />
             )}
             <p className="mt-2 text-xs">
               {[
@@ -3349,32 +3456,45 @@ const RecipeDetail: React.FC = () => {
 
       {/* ── Hero Image ─────────────────────────────────────────── */}
       <div className="max-w-7xl mx-auto px-6 pt-8 no-print">
-        <div className="relative h-[360px] md:h-[400px] rounded-3xl overflow-hidden">
+        {/* A minimum height, not a fixed one: on a phone a long title plus
+            the description, author and language picker used to push the
+            tags out of the top of a 360px box, where they were clipped. */}
+        <div className="relative min-h-[360px] md:min-h-[400px] flex flex-col justify-between rounded-3xl overflow-hidden">
           <CoverImage
-            className="w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-cover"
             src={recipe.cover_image_url}
             alt={recipe.translated_title || recipe.title}
             fallbackSrc="https://images.unsplash.com/photo-1495521821757-a1efb6729352?q=80&w=2000"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-          <div className="absolute bottom-8 left-8 right-8">
-            {((recipe.tags_display && recipe.tags_display.length > 0) || recipe.tags?.[0]) && (
-              <div className="flex flex-wrap gap-1.5 mb-3">
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/50 to-black/10" />
+          {/* Tags sit at the top of the photo, in the flow rather than
+              absolutely placed, so a tall title block below can never run
+              under them. A dark top edge keeps them readable on a light
+              photo. */}
+          <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/40 to-transparent" />
+          {((recipe.tags_display && recipe.tags_display.length > 0) || recipe.tags?.[0]) && (
+              <div className="relative flex flex-wrap gap-1.5 p-6 pb-0 md:p-8 md:pb-0">
                 {recipe.tags_display && recipe.tags_display.length > 0 ? (
                   <>
-                    {recipe.tags_display.slice(0, 3).map((tag, i) => (
+                    {(heroTagsOpen ? recipe.tags_display : recipe.tags_display.slice(0, 3)).map((tag, i) => (
                       <span
                         key={i}
-                        className="inline-block px-3 py-1 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full"
-                        style={{ backgroundColor: tag.color || '#3f3f46' }}
+                        className="inline-block max-w-full truncate px-3 py-1 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full ring-1 ring-white/20"
+                        style={{ backgroundColor: tag.color || '#3f3f46', color: tagTextColor(tag.color || '#3f3f46') }}
                       >
                         {tag.translated_name}
                       </span>
                     ))}
                     {recipe.tags_display.length > 3 && (
-                      <span className="inline-block px-3 py-1 bg-black/40 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full">
-                        +{recipe.tags_display.length - 3}
-                      </span>
+                      <button
+                        type="button"
+                        aria-expanded={heroTagsOpen}
+                        aria-label={t(heroTagsOpen ? 'gallery.showFewerTags' : 'gallery.showAllTags')}
+                        onClick={() => setHeroTagsOpen(o => !o)}
+                        className="inline-block px-3 py-1 bg-black/50 hover:bg-black/70 text-white text-[10px] font-bold uppercase tracking-[0.15em] rounded-full ring-1 ring-white/20"
+                      >
+                        {heroTagsOpen ? '−' : `+${recipe.tags_display.length - 3}`}
+                      </button>
                     )}
                   </>
                 ) : (
@@ -3383,12 +3503,11 @@ const RecipeDetail: React.FC = () => {
                   </span>
                 )}
               </div>
-            )}
-            <h1 className="text-4xl md:text-6xl font-headline font-extrabold text-white leading-none">{recipe.translated_title || recipe.title}</h1>
+          )}
+          <div className="relative min-w-0 mt-auto p-6 md:p-8 [text-shadow:0_1px_8px_rgba(0,0,0,0.5)]">
+            <h1 lang={shownLang || undefined} className="text-3xl sm:text-4xl md:text-6xl font-headline font-extrabold text-white leading-tight md:leading-none break-words hyphens-auto">{recipe.translated_title || recipe.title}</h1>
             {(recipe.translated_description || recipe.description) && (
-              <p className="mt-3 text-white/80 text-sm font-medium max-w-2xl leading-relaxed">
-                {recipe.translated_description || recipe.description}
-              </p>
+              <MarkdownText text={recipe.translated_description || recipe.description} className="mt-3 text-white/90 text-sm font-medium max-w-2xl leading-relaxed line-clamp-3 md:line-clamp-none" />
             )}
             {recipe.creator_name && (
               <div className="flex items-center gap-2 mt-3">
@@ -3517,6 +3636,9 @@ const RecipeDetail: React.FC = () => {
           lang={contentLang}
           onMerged={(targetId) => { setShowMerge(false); navigate(`/recipe/${targetId}`); }}
         />
+      )}
+      {id && isStandalone && (
+        <RecipeCookbookDialog open={showCookbook} onClose={() => setShowCookbook(false)} recipeId={id} />
       )}
       {id && (
         <ShareLinkModal
@@ -3656,9 +3778,17 @@ const RecipeDetail: React.FC = () => {
                         {ing.subRecipeId && (
                           <span className="material-symbols-outlined text-primary text-[18px]">package_2</span>
                         )}
-                        <span className={`text-sm ${ing.subRecipeId ? 'font-bold text-zinc-800 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'}`}>
-                          {ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaleNum(ing.quantity)) : ing.subRecipeTitle}
-                        </span>
+                        <IngredientNameLink
+                          ing={ing}
+                          className={`text-sm ${ing.subRecipeId ? 'font-bold text-zinc-800 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'}`}
+                        >
+                          {ing.ingredientName ? pickIngredientName(ing.ingredientName, ing.ingredientPluralName, scaleNum(ing.quantity)) : ing.subRecipeTitle || (
+                            // Neither an ingredient nor a recipe: the import
+                            // lost its name. Said, so it can be fixed in the
+                            // editor, rather than an amount with no name.
+                            <span className="italic text-zinc-400 dark:text-zinc-500">{t('recipeDetail.unnamedIngredient')}</span>
+                          )}
+                        </IngredientNameLink>
                         {/* Said out loud rather than left to the cook to
                             infer from a note: this is also the flag the
                             pantry matcher discounts, so someone wondering
@@ -3670,8 +3800,13 @@ const RecipeDetail: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <span className="text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">
+                      <span className="flex flex-col items-end text-sm text-zinc-500 dark:text-zinc-400 font-semibold tabular-nums">
                         {formatAmount(ing.quantity, ing.unitSymbol, ing.quantityText)}
+                        {weightHint(ing.quantity, ing.unitSymbol, ing.densityGPerMl) && (
+                          <span className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500" title={t('recipeDetail.weightFromDensity')}>
+                            {weightHint(ing.quantity, ing.unitSymbol, ing.densityGPerMl)}
+                          </span>
+                        )}
                       </span>
                     </div>
                     {tidyNote(ing.translatedNotes || ing.notes) && (
@@ -3681,9 +3816,9 @@ const RecipeDetail: React.FC = () => {
                       <div key={`alt-${altIdx}`} className="flex items-center justify-between gap-3 py-2 pl-8 pr-3 -mt-1">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="shrink-0 text-[9px] font-black uppercase tracking-wider text-sky-600 dark:text-sky-500">{t('recipeDetail.orInstead')}</span>
-                          <span className="text-sm text-zinc-600 dark:text-zinc-400 truncate">
+                          <IngredientNameLink ing={alt} className="text-sm text-zinc-600 dark:text-zinc-400 truncate">
                             {alt.ingredientName ? pickIngredientName(alt.ingredientName, alt.ingredientPluralName, scaleNum(alt.quantity)) : alt.subRecipeTitle}
-                          </span>
+                          </IngredientNameLink>
                         </div>
                         <span className="text-sm text-zinc-400 dark:text-zinc-500 font-semibold tabular-nums shrink-0">
                           {formatAmount(alt.quantity, alt.unitSymbol, alt.quantityText)}
@@ -3774,9 +3909,9 @@ const RecipeDetail: React.FC = () => {
                     </h4>
                     <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800 group-hover:border-primary/15 transition-colors">
                       <ResolvedImage src={step.imageUrl} className="w-full max-h-64 object-cover rounded-xl mb-4" />
-                      <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 mb-4">
+                      <div className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 mb-4">
                         <RenderStepText text={step.translatedDescription || step.description} ingredients={stepTextIngredientsFor(step)} tools={stepTextTools} techniques={stepTextTechniques} scale={servingsScale} />
-                      </p>
+                      </div>
 
                       {stepIngredientList(step).length > 0 && (
                         <div className="flex flex-wrap gap-2 mb-4">
@@ -3814,7 +3949,7 @@ const RecipeDetail: React.FC = () => {
           {recipe.storage_instructions && (
             <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
               <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.storageInstructions')}</h3>
-              <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{recipe.storage_instructions}</p>
+              <MarkdownText text={recipe.storage_instructions} className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400" />
             </div>
           )}
 
@@ -3867,7 +4002,7 @@ const RecipeDetail: React.FC = () => {
             {recipe.tips && (
               <div className="bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-[0_1px_8px_rgba(0,0,0,0.04)] border border-zinc-100 dark:border-zinc-800">
                 <h3 className="font-headline font-bold text-lg mb-5">{t('recipeDetail.tips')}</h3>
-                <p className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{recipe.tips}</p>
+                <MarkdownText text={recipe.tips} className="text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400" />
               </div>
             )}
             {recipe.sources && recipe.sources.length > 0 && (

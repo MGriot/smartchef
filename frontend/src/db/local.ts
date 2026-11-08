@@ -298,6 +298,11 @@ export function withTransaction<T>(fn: (client: LocalClient) => Promise<T>): Pro
 //     denormalized TEXT column (standalone mode has no accounts table,
 //     just the one local display-name profile — see lib/standalone.ts)
 
+// NEVER put a semicolon in a comment in the SQL below. The Electron SQLite
+// plugin splits a script on every ";" before running it, comments
+// included, so the rest of the comment line runs as SQL. v1.17.0 shipped
+// one and failed to open any library on Windows. db/schemaSql.test.ts
+// runs this script through the plugin's own transform.
 const SCHEMA_SQL = `
 -- Household members sharing this standalone library — see lib/standalone.ts
 -- and services/profiles.local.ts. Synced like any other entity (writeEntityFile
@@ -313,7 +318,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   name        TEXT NOT NULL,
   avatar_url  TEXT,
   -- 'admin' | 'user'. First profile ever created on a fresh library becomes
-  -- admin automatically (see createProfile() in profiles.local.ts); a UX
+  -- admin automatically (see createProfile() in profiles.local.ts), a UX
   -- guardrail against accidental deletion/promotion mistakes, not a real
   -- security boundary — standalone mode has no auth layer to enforce it.
   -- Backfilled onto pre-existing local DBs via addColumnIfMissing() below.
@@ -392,6 +397,11 @@ CREATE TABLE IF NOT EXISTS ingredients (
   -- everywhere (never a regression for ingredients nobody filled this in
   -- for). Backfilled via addColumnIfMissing() below.
   plural_name    TEXT,
+  -- Optional grams per millilitre, so a volume amount ("1 cup flour") can
+  -- also be shown as a weight. Same column as Postgres's
+  -- 001_initial_schema.sql. NULL = unknown, no weight shown. Backfilled via
+  -- addColumnIfMissing() below.
+  density_g_per_ml REAL,
   sync_status    TEXT DEFAULT 'local',
   created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at     TEXT DEFAULT CURRENT_TIMESTAMP
@@ -809,6 +819,66 @@ CREATE TABLE IF NOT EXISTS sync_repair (
   PRIMARY KEY (entity_type, entity_id)
 );
 
+-- Sync v2 (docs/plans/2026-11-01-sync-v2-change-log.md,
+-- services/changeLog.local.ts). Local-only bookkeeping.
+--
+-- Every row has a scope: '' for this library's own store, a cookbook id
+-- for a shared cookbook (services/sharedCookbooks.local.ts). Each scope is a
+-- separate log with its own sequence numbers, cursors and winners. Tables
+-- from before scopes are rebuilt by migrateChangeLogScopes() below.
+--
+-- change_log: this device's own changes, in the order it made them. seq is
+-- the device's sequence number other devices count it by.
+CREATE TABLE IF NOT EXISTS change_log (
+  scope       TEXT NOT NULL DEFAULT '',
+  seq         INTEGER NOT NULL,
+  hlc         TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id   TEXT NOT NULL,
+  path        TEXT NOT NULL,
+  value       TEXT,
+  PRIMARY KEY (scope, seq)
+);
+-- field_state: per path of every entity, the value that won and the change
+-- that wrote it (its stamp, author and the author's seq) — what an
+-- incoming change is compared with.
+CREATE TABLE IF NOT EXISTS field_state (
+  scope       TEXT NOT NULL DEFAULT '',
+  entity_type TEXT NOT NULL,
+  entity_id   TEXT NOT NULL,
+  path        TEXT NOT NULL,
+  value       TEXT,
+  hlc         TEXT NOT NULL,
+  device      TEXT NOT NULL,
+  seq         INTEGER NOT NULL,
+  PRIMARY KEY (scope, entity_type, entity_id, path)
+);
+-- sync_cursor: how far this device has applied each other device's log.
+CREATE TABLE IF NOT EXISTS sync_cursor (
+  scope  TEXT NOT NULL DEFAULT '',
+  device TEXT NOT NULL,
+  seq    INTEGER NOT NULL,
+  PRIMARY KEY (scope, device)
+);
+-- cookbook_map: a shared cookbook's id for an ingredient, tool or
+-- technique → the row of this library's own catalog it stands for. Each
+-- library keeps its own catalog, and a shared recipe is written here with
+-- these rows and published with the cookbook's ids.
+CREATE TABLE IF NOT EXISTS cookbook_map (
+  scope       TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  remote_id   TEXT NOT NULL,
+  local_id    TEXT NOT NULL,
+  PRIMARY KEY (scope, entity_type, remote_id)
+);
+-- cookbook_pending: shared recipes whose cookbook changes arrived while
+-- the recipe wasn't in that cookbook here (see sharedCookbooks.local.ts).
+CREATE TABLE IF NOT EXISTS cookbook_pending (
+  scope     TEXT NOT NULL,
+  recipe_id TEXT NOT NULL,
+  PRIMARY KEY (scope, recipe_id)
+);
+
 -- An id another device published that this device resolved onto one of its
 -- own rows: the same real-world tool/tag/technique/category created
 -- independently on two devices before they had portable ids, so each minted
@@ -898,6 +968,36 @@ async function addColumnIfMissing(db: SQLiteDBConnection, table: string, column:
   if (!exists) {
     await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddlType}`);
   }
+}
+
+// The change-log tables shipped (v1.14.6) before they had a scope column,
+// and a primary key cannot be altered in place: each is rebuilt once, its
+// rows becoming the library's own scope ''.
+async function migrateChangeLogScopes(db: SQLiteDBConnection): Promise<void> {
+  const info = await db.query(`PRAGMA table_info(change_log)`);
+  if ((info.values ?? []).some((row: { name?: string }) => row.name === 'scope')) return;
+  await db.execute(`
+    ALTER TABLE change_log RENAME TO change_log_unscoped;
+    ALTER TABLE field_state RENAME TO field_state_unscoped;
+    ALTER TABLE sync_cursor RENAME TO sync_cursor_unscoped;
+    CREATE TABLE change_log (
+      scope TEXT NOT NULL DEFAULT '', seq INTEGER NOT NULL, hlc TEXT NOT NULL, entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL, path TEXT NOT NULL, value TEXT, PRIMARY KEY (scope, seq)
+    );
+    CREATE TABLE field_state (
+      scope TEXT NOT NULL DEFAULT '', entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, path TEXT NOT NULL, value TEXT,
+      hlc TEXT NOT NULL, device TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (scope, entity_type, entity_id, path)
+    );
+    CREATE TABLE sync_cursor (scope TEXT NOT NULL DEFAULT '', device TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (scope, device));
+    INSERT INTO change_log (scope, seq, hlc, entity_type, entity_id, path, value)
+      SELECT '', seq, hlc, entity_type, entity_id, path, value FROM change_log_unscoped;
+    INSERT INTO field_state (scope, entity_type, entity_id, path, value, hlc, device, seq)
+      SELECT '', entity_type, entity_id, path, value, hlc, device, seq FROM field_state_unscoped;
+    INSERT INTO sync_cursor (scope, device, seq) SELECT '', device, seq FROM sync_cursor_unscoped;
+    DROP TABLE change_log_unscoped;
+    DROP TABLE field_state_unscoped;
+    DROP TABLE sync_cursor_unscoped;
+  `);
 }
 
 async function hasForeignKeyTo(db: SQLiteDBConnection, table: string, refTable: string): Promise<boolean> {
@@ -1082,6 +1182,7 @@ export async function initLocalSchema(): Promise<void> {
       if (earliestId) await db.execute(`UPDATE profiles SET role='admin' WHERE id='${earliestId}'`);
     }
     await addColumnIfMissing(db, 'ingredients', 'plural_name', 'TEXT');
+    await addColumnIfMissing(db, 'ingredients', 'density_g_per_ml', 'REAL');
     await addColumnIfMissing(db, 'sync_conflicts', 'local_updated_at', 'TEXT');
     await addColumnIfMissing(db, 'sync_conflicts', 'remote_updated_at', 'TEXT');
     await addColumnIfMissing(db, 'ingredient_translations', 'plural_translation', 'TEXT');
@@ -1097,6 +1198,9 @@ export async function initLocalSchema(): Promise<void> {
     await addColumnIfMissing(db, 'menus', 'courses', "TEXT NOT NULL DEFAULT '[]'");
     await addColumnIfMissing(db, 'menu_items', 'course_id', 'TEXT');
     await addColumnIfMissing(db, 'menu_items', 'sort_order', 'INTEGER NOT NULL DEFAULT 0');
+    // The shared cookbook a recipe is in (services/sharedCookbooks.local.ts).
+    await addColumnIfMissing(db, 'recipes', 'cookbook_id', 'TEXT');
+    await migrateChangeLogScopes(db);
     await dropDanglingForeignKeys(db);
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {

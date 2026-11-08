@@ -1,0 +1,1 @@
+Nuovo motore di sincronizzazione (beta), in Account > Sincronizzazione: più veloce, senza blocchi, cifrato per impostazione predefinita, e sincronizza anche via WebDAV (Nextcloud e altri) oltre che con una cartella o un server git.

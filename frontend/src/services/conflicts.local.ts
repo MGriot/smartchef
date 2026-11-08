@@ -162,6 +162,8 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
       'rest_time_min', 'rating', 'yield_amount', 'yield_unit_id', 'cover_image_url',
       'source_url', 'is_component', 'language_code', 'tags', 'regions', 'region_coords',
       'sources', 'creator_name', 'storage_instructions', 'tips',
+      // The shared cookbook it is in (services/sharedCookbooks.local.ts).
+      'cookbook_id',
       // The deletion marker ('local' | 'deleted'). Left out, a recipe
       // deleted on one device never disappeared anywhere else, and one that
       // arrived already deleted was created live.
@@ -180,6 +182,8 @@ const ENTITY_CONFIG: Record<string, EntityConfig> = {
       'image_urls', 'seasonal_months',
       // Left out of sync until ADR 0006's whole-library pass.
       'synonyms', 'plural_name', 'parent_ingredient_id',
+      // Volume → weight; another device drops it without this entry.
+      'density_g_per_ml',
       // Deletion marker — see recipe.
       'sync_status',
     ]),

@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.util.Iterator;
 import java.util.List;
@@ -179,6 +180,34 @@ public class GitHttpPlugin extends Plugin {
         return bytes;
     }
 
+    /** HttpURLConnection only accepts the seven HTTP/1.1 methods and throws
+     *  ProtocolException for WebDAV's PROPFIND and MKCOL, which sync v2's
+     *  WebDAV store needs (lib/changeLog/webdavStore.ts). The standard
+     *  workaround: set the protected "method" field directly — on the
+     *  connection, and on the delegate an HTTPS connection wraps. */
+    private static void setMethod(HttpURLConnection conn, String method) throws java.net.ProtocolException {
+        try {
+            conn.setRequestMethod(method);
+            return;
+        } catch (java.net.ProtocolException unsupported) {
+            try {
+                java.lang.reflect.Field field = HttpURLConnection.class.getDeclaredField("method");
+                field.setAccessible(true);
+                field.set(conn, method);
+                try {
+                    java.lang.reflect.Field delegateField = conn.getClass().getDeclaredField("delegate");
+                    delegateField.setAccessible(true);
+                    Object delegate = delegateField.get(conn);
+                    if (delegate instanceof HttpURLConnection) field.set(delegate, method);
+                } catch (NoSuchFieldException noDelegate) {
+                    // Plain HTTP: no wrapper to reach into.
+                }
+            } catch (ReflectiveOperationException e) {
+                throw unsupported;
+            }
+        }
+    }
+
     @PluginMethod
     public void request(PluginCall call) {
         HttpURLConnection conn = null;
@@ -189,10 +218,14 @@ public class GitHttpPlugin extends Plugin {
 
             URL url = new URL(call.getString("url"));
             conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod(call.getString("method", "GET"));
+            setMethod(conn, call.getString("method", "GET"));
             conn.setInstanceFollowRedirects(true);
             conn.setConnectTimeout(30000);
-            conn.setReadTimeout(60000);
+            // A caller may raise the read ceiling: an AI call that rewrites a
+            // whole recipe can take minutes, and a fixed 60s ended it with a
+            // bare "Read timed out". optLong, not call.getLong(): getLong()
+            // ignores a JS number that arrives as an Integer.
+            conn.setReadTimeout((int) Math.max(1000, Math.min(Integer.MAX_VALUE, call.getData().optLong("timeoutMs", 60000))));
 
             JSObject headers = call.getObject("headers", new JSObject());
             Iterator<String> keys = headers.keys();
@@ -258,7 +291,9 @@ public class GitHttpPlugin extends Plugin {
                 //noinspection ResultOfMethodCallIgnored
                 spill.delete();
             }
-            call.reject(e.getMessage(), e);
+            // A code the renderer can tell apart from "unreachable", so it
+            // can say in words that the server was simply too slow.
+            call.reject(e.getMessage(), e instanceof SocketTimeoutException ? "TIMEOUT" : null, e);
         } finally {
             if (conn != null) conn.disconnect();
         }

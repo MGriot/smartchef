@@ -78,6 +78,7 @@ export interface Snapshot {
     imageUrls?: string[]; tagIds?: string[]; deletedAt?: string | null;
     caloriesKcal?: number | null; proteinG?: number | null; carbsG?: number | null; fatG?: number | null;
     fiberG?: number | null; sugarG?: number | null; sodiumMg?: number | null; seasonalMonths?: number[];
+    densityGPerMl?: number | null;
     translations?: Array<{ lang: string; text: string }>;
   }>;
   tools?: Array<{
@@ -289,6 +290,7 @@ export async function exportSnapshot(): Promise<Snapshot> {
     caloriesKcal: i.calories_kcal as number | null, proteinG: i.protein_g as number | null, carbsG: i.carbs_g as number | null, fatG: i.fat_g as number | null,
     fiberG: i.fiber_g as number | null, sugarG: i.sugar_g as number | null, sodiumMg: i.sodium_mg as number | null,
     seasonalMonths: JSON.parse((i.seasonal_months as string) ?? '[]'),
+    densityGPerMl: (i.density_g_per_ml as number | null) ?? null,
     translations: (ingredientTranslations.get(i.id as string) ?? []).map(t => ({ lang: t.language_code, text: t.translated_name })),
   }));
 
@@ -385,6 +387,7 @@ export async function importSnapshot(snapshot: Snapshot): Promise<ImportSummary>
       imageUrls: ing.imageUrls, tagIds: ing.tagIds?.map(id => tagIdRemap.get(id) ?? id), translations: ing.translations,
       caloriesKcal: ing.caloriesKcal, proteinG: ing.proteinG, carbsG: ing.carbsG, fatG: ing.fatG,
       fiberG: ing.fiberG, sugarG: ing.sugarG, sodiumMg: ing.sodiumMg, seasonalMonths: ing.seasonalMonths,
+      densityGPerMl: ing.densityGPerMl,
     };
     if (await existsById('ingredients', ing.id)) {
       await ingredientsLocal.updateIngredient(ing.id, input);

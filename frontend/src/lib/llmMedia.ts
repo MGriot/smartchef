@@ -57,13 +57,6 @@ export const PROVIDER_LABEL: Record<LlmProvider, string> = {
   ollama: 'Ollama',
 };
 
-export const KIND_LABEL: Record<MediaKind, string> = {
-  image: 'images',
-  document: 'PDFs',
-  audio: 'audio',
-  video: 'video',
-};
-
 /** Base64 inflates by ~4/3, and every provider has a request ceiling in the
  *  tens of megabytes for an inline payload. Checked before the upload
  *  rather than after, because the failure otherwise arrives minutes into

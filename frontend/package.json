@@ -1,6 +1,6 @@
 {
   "name": "smartchef-frontend",
-  "version": "1.13.2",
+  "version": "1.19.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -29,28 +29,24 @@
     "@fontsource/inter": "^5.3.0",
     "@fontsource/manrope": "^5.3.0",
     "buffer": "^5.7.1",
-    "clsx": "^2.1.0",
-    "date-fns": "^3.3.1",
     "i18n-iso-countries": "^7.14.0",
     "i18next": "^23.10.0",
     "isomorphic-git": "^1.41.4",
     "leaflet": "^1.9.4",
-    "lucide-react": "^0.383.0",
     "material-symbols": "^0.46.0",
     "pdfjs-dist": "^4.10.38",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-i18next": "^14.1.0",
     "react-icons": "^5.6.0",
-    "react-query": "^3.39.3",
-    "react-router-dom": "^6.30.6",
+    "react-router-dom": "^7.18.5",
     "tesseract.js": "^5.1.1",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
+    "@capacitor/assets": "^4.0.0",
     "@capacitor/cli": "^8.5.0",
     "@tailwindcss/container-queries": "^0.1.1",
     "@tailwindcss/forms": "^0.5.11",
@@ -58,13 +54,21 @@
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
     "@types/topojson-client": "^3.1.5",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.4.17",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
-    "vite": "^5.0.12",
-    "vite-plugin-pwa": "^0.20.0",
-    "vitest": "^4.1.10"
+    "vite": "^8.3.6",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^4.1.12"
+  },
+  "overrides": {
+    "workbox-build": {
+      "glob": "^14.0.3"
+    },
+    "xcode": {
+      "uuid": "^11.1.1"
+    }
   }
 }

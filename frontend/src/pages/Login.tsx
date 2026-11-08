@@ -175,6 +175,42 @@ export default function Login({ hasAccount, onAuthenticated, onChangeStorage }: 
     </div>
   );
 
+  // Setup and self sign-up create an account the same way; only the submit
+  // handler and the button wording differ.
+  const newAccountFields = (
+    <>
+      <div>
+        <label className="sc-label mb-2">{t('login.yourName')}</label>
+        <input
+          type="text" autoFocus value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t('login.namePlaceholder')}
+          className="sc-field"
+        />
+      </div>
+      <div>
+        <label className="sc-label mb-2">{t('login.username')}</label>
+        <input
+          type="text" autoCapitalize="none" value={username}
+          onChange={(e) => setUsername(e.target.value.toLowerCase())}
+          placeholder={t('login.usernamePlaceholder')}
+          className="sc-field"
+        />
+      </div>
+      <div>
+        <label className="sc-label mb-2">{t('login.password')}</label>
+        <input
+          type="password" value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={t('login.atLeastFourChars')}
+          className="sc-field"
+        />
+      </div>
+      {avatarField}
+    </>
+  );
+  const newAccountIncomplete = submitting || !name || !username || password.length < 4;
+
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center p-6 font-outfit">
       <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-[40px] shadow-sm border border-zinc-100 dark:border-zinc-800 p-10">
@@ -188,37 +224,10 @@ export default function Login({ hasAccount, onAuthenticated, onChangeStorage }: 
         {/* ── First run: mint the admin ─────────────────────────────── */}
         {!hasAccount && (
           <form onSubmit={handleSetup} className="space-y-5">
-            <div>
-              <label className="sc-label mb-2">{t('login.yourName')}</label>
-              <input
-                type="text" autoFocus value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={t('login.namePlaceholder')}
-                className="sc-field"
-              />
-            </div>
-            <div>
-              <label className="sc-label mb-2">{t('login.username')}</label>
-              <input
-                type="text" autoCapitalize="none" value={username}
-                onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                placeholder={t('login.usernamePlaceholder')}
-                className="sc-field"
-              />
-            </div>
-            <div>
-              <label className="sc-label mb-2">{t('login.password')}</label>
-              <input
-                type="password" value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={t('login.atLeastFourChars')}
-                className="sc-field"
-              />
-            </div>
-            {avatarField}
+            {newAccountFields}
             <button
               type="submit"
-              disabled={submitting || !name || !username || password.length < 4}
+              disabled={newAccountIncomplete}
               className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
             >
               {submitting ? t('login.settingUp') : t('login.setUpSmartChef')}
@@ -331,37 +340,10 @@ export default function Login({ hasAccount, onAuthenticated, onChangeStorage }: 
         {/* ── Self sign-up ─────────────────────────────────────────── */}
         {hasAccount && view === 'register' && (
           <form onSubmit={handleRegister} className="space-y-5">
-            <div>
-              <label className="sc-label mb-2">{t('login.yourName')}</label>
-              <input
-                type="text" autoFocus value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={t('login.namePlaceholder')}
-                className="sc-field"
-              />
-            </div>
-            <div>
-              <label className="sc-label mb-2">{t('login.username')}</label>
-              <input
-                type="text" autoCapitalize="none" value={username}
-                onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                placeholder={t('login.usernamePlaceholder')}
-                className="sc-field"
-              />
-            </div>
-            <div>
-              <label className="sc-label mb-2">{t('login.password')}</label>
-              <input
-                type="password" value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={t('login.atLeastFourChars')}
-                className="sc-field"
-              />
-            </div>
-            {avatarField}
+            {newAccountFields}
             <button
               type="submit"
-              disabled={submitting || !name || !username || password.length < 4}
+              disabled={newAccountIncomplete}
               className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
             >
               {submitting ? t('login.signingUp') : t('login.createAccount')}

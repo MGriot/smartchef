@@ -22,9 +22,12 @@ rest of the app is built around.
 **It works with no server at all.** [Standalone
 mode](docs/standalone-sync.md) keeps the whole library in a local database
 on the device. If you want it on a second device, it replicates through a
-folder you already sync (Syncthing, Dropbox, a USB stick) or through a
-private git remote — merging field by field, not last-write-wins, so two
-people editing two different things do not overwrite each other.
+folder you already sync (Syncthing, Dropbox, a USB stick), a private git
+remote or a WebDAV server like Nextcloud — merging field by field, so two
+people editing two different things do not overwrite each other. The new
+sync engine encrypts the synced copy, and **shared cookbooks** keep chosen
+recipes in sync with other people's libraries, each keeping its own
+ingredients and ratings.
 
 **Importing does not mean retyping.** Paste a URL, a photo of a cookbook
 page, a PDF, or a voice note of someone dictating, and the model turns it
@@ -32,6 +35,14 @@ into a structured recipe — matched against the ingredients your library
 already knows, so you do not end up with four spellings of "tomato". A
 local model through Ollama works offline; Anthropic, Gemini and OpenAI work
 if you would rather. See [Getting recipes in](docs/importing.md).
+
+**It reads the way you cook.** Type an amount as `1 1/2`, `½` or `1,5`
+and it is shown back the way the unit is spoken — “1 ½ cups”, “250 g” —
+even after you double the portions; give an ingredient its weight per
+millilitre and every cup of it also shows grams. Descriptions and steps
+take **Markdown**, and a pasted note, comment or second version of a
+dish can be merged into the recipe by the AI, sources included, one
+reviewed change at a time.
 
 **Your data stays yours.** No account required, no telemetry, no cloud.
 Backups are plain JSON. API keys never leave the device they were typed on,
@@ -116,9 +127,9 @@ carry substitutes, which scale and convert like the thing they replace.
 | Guide | What it covers |
 |---|---|
 | [Running as a server](docs/server-setup.md) | Docker and manual setup, health checks, admin access, common problems |
-| [Standalone mode and sync](docs/standalone-sync.md) | No-server mode, Sync Folders, git remotes, conflicts, profiles |
+| [Standalone mode and sync](docs/standalone-sync.md) | No-server mode, Sync Folders, git remotes, WebDAV, the new sync engine and encryption, shared cookbooks, conflicts, profiles |
 | [The Android app](docs/android.md) | Installing, Tailscale, building the APK |
-| [Getting recipes in, and out](docs/importing.md) | Import from URL/photo/voice, the pantry, sharing a single recipe |
+| [Getting recipes in, and out](docs/importing.md) | Import from URL/photo/voice, the pantry, sharing a single recipe or sending a copy to another library |
 | [How it is put together](docs/architecture.md) | Project layout, API routes, the Matrioska engine, the MCP server |
 | [What works today](docs/status.md) | Feature-by-feature status |
 | [Android TV](docs/android-tv-evaluation.md) | An assessment of what TV support would take |

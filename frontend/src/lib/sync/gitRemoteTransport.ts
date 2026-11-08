@@ -94,14 +94,14 @@ async function ensureRemoteConfigured(dir: string, gitdir: string, config: GitRe
 /** isomorphic-git's refusal of a non-fast-forward push: the client-side
  *  ancestry check (PushRejectedError), or the server's own ref-update
  *  failure reported back through GitPushError. */
-function isPushRejection(err: unknown): boolean {
+export function isPushRejection(err: unknown): boolean {
   const e = err as { code?: string; data?: { reason?: string }; message?: string } | null;
   if (!e) return false;
   if (e.code === 'PushRejectedError') return true;
   return e.code === 'GitPushError' && /non-fast-forward|fetch first|rejected/i.test(`${e.data?.reason ?? ''} ${e.message ?? ''}`);
 }
 
-function describeTransportError(err: unknown, action: 'fetch' | 'push'): Error {
+export function describeTransportError(err: unknown, action: 'fetch' | 'push'): Error {
   const status =
     typeof err === 'object' && err !== null && 'data' in err
       ? (err as { data?: { statusCode?: number } }).data?.statusCode
@@ -123,9 +123,9 @@ function describeTransportError(err: unknown, action: 'fetch' | 'push'): Error {
     return new Error(
       action === 'push'
         ? 'The git server rejected this device’s credentials, so nothing has been uploaded. Reading a public ' +
-          `repository needs no token, but writing to one does. ${badTokenHint} Fix it in Account → Folder Sync.`
+          `repository needs no token, but writing to one does. ${badTokenHint} Fix it in Account → Sync & sharing.`
         : `The git server rejected this device’s credentials. ${badTokenHint} Add a personal access token with ` +
-          'write access in Account → Folder Sync.'
+          'write access in Account → Sync & sharing.'
     );
   }
   if (status === 403) {

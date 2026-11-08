@@ -1,5 +1,5 @@
-import React from 'react';
 import { STEP_REF_RE, parseRefParams, scaleAmountText } from '../lib/stepRefs';
+import MarkdownText from './MarkdownText';
 
 export interface StepTextIngredientCtx {
   sortOrder: number;
@@ -30,6 +30,7 @@ interface RenderStepTextProps {
   /** Current servings ÷ the recipe's own, for a `q=` amount the step has
    *  no stepIngredients row to take a scaled figure from. */
   scale?: number;
+  className?: string;
 }
 
 const BADGE_STYLE: Record<string, string> = {
@@ -53,14 +54,10 @@ const BADGE_STYLE: Record<string, string> = {
  *  own servings while the list under the step followed the slider. The
  *  scaled row amount wins whenever there is one, and a lone `q=` is scaled
  *  by its leading number. */
-export default function RenderStepText({ text, ingredients, tools, techniques, scale = 1 }: RenderStepTextProps) {
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let key = 0;
-  STEP_REF_RE.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = STEP_REF_RE.exec(text))) {
-    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+export default function RenderStepText({ text, ingredients, tools, techniques, scale = 1, className }: RenderStepTextProps) {
+  const renderToken = (token: string, key: number) => {
+    const match = new RegExp(STEP_REF_RE.source).exec(token);
+    if (!match) return token;
     const [, type, rawId, rawParams] = match;
     const id = rawId.trim();
     const params = parseRefParams(rawParams);
@@ -81,13 +78,13 @@ export default function RenderStepText({ text, ingredients, tools, techniques, s
       const tech = techniques.find(t => t.id === id);
       label = (params.alias || tech?.name || '[technique]') + (params.free ? ` (${params.free})` : '');
     }
-    parts.push(
-      <strong key={key++} className={`font-bold underline decoration-2 underline-offset-2 ${BADGE_STYLE[type]}`}>
+    return (
+      <strong key={key} className={`font-bold underline decoration-2 underline-offset-2 ${BADGE_STYLE[type]}`}>
         {label}
       </strong>
     );
-    lastIndex = STEP_REF_RE.lastIndex;
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return <>{parts}</>;
+  };
+  // Step text is Markdown too (lib/markdown.ts); the references are set
+  // aside before parsing, so an alias can never turn into markup.
+  return <MarkdownText text={text} tokenRe={STEP_REF_RE} renderToken={renderToken} className={className} />;
 }

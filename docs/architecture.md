@@ -39,7 +39,6 @@ smartchef/
 │   │   │   ├── backup.ts               # Manual whole-library backup export/import
 │   │   │   ├── cook-log.ts             # Cook-history calendar (GET /cook-log?from=&to=)
 │   │   │   ├── geocode.ts              # Nominatim proxy for free-text region geocoding
-│   │   │   ├── sync.ts                 # Legacy CRDT/vector-clock P2P endpoints — see "Multi-device sync" below
 │   │   │   └── uploads.ts              # Image uploads (multer + sharp)
 │   │   ├── services/
 │   │   │   ├── matrioska.engine.ts     # ⭐ Recursive portion scaling across nested sub-recipes (incl. weight/volume-based sub-recipe yield)
@@ -52,8 +51,7 @@ smartchef/
 │   │   │   ├── pantry.service.ts       # Pantry rows + "what can I cook?" matching
 │   │   │   ├── importCatalog.service.ts # Library names for the import prompt to reuse instead of coining fresh wording (standalone twin: frontend/src/services/importCatalog.local.ts)
 │   │   │   ├── folder-sync.service.ts  # Whole-library snapshot export/merge (multi-device sync + backups)
-│   │   │   ├── device-identity.service.ts
-│   │   │   └── crdt/vector-clock.ts    # Legacy — not wired into any write path, kept for the old sync.ts routes
+│   │   │   └── device-identity.service.ts
 │   │   └── index.ts                    # Express entry point
 │   └── Dockerfile
 ├── mcp/
@@ -122,7 +120,7 @@ All routes below live under `/api` and (aside from `/api/auth/*`) require an aut
 | Base path | Covers |
 |-----------|--------|
 | `/api/auth` | First-run setup, username/password login, logout, account settings (incl. LLM provider config), admin-only user management (`/users`) |
-| `/api/recipes` | CRUD, `?q=&tag=&tags=&ingredientCategories=&regions=&difficulty=&sort=&seasonalOnly=&seasonalMonth=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/:id/translate/:lang` (AI translation), `/:id/collections`, `/parse` (AI import), `/filter-by-pantry` (which recipes the pantry can cover, resolved through nested sub-recipes) |
+| `/api/recipes` | `/ai-check`, `/ai-merge` (merge a pasted text into the editor's draft) and `/translate-preview` (AI translation returned unsaved) are standalone-only, answered by `localRouter.ts`; `?q=&tag=&tags=&ingredientCategories=&regions=&difficulty=&sort=&seasonalOnly=&seasonalMonth=`, `/:id/portions?servings=N` (Matrioska), `/:id/cook-sequence`, `/:id/nutrition`, `/:id/rating`, `/:id/cooked`, `/:id/translate/:lang` (AI translation), `/:id/collections`, `/parse` (AI import), `/filter-by-pantry` (which recipes the pantry can cover, resolved through nested sub-recipes) |
 | `/api/ingredients` | Ingredients (incl. `seasonalMonths`), `/categories`, nested `/api/units`, `/api/tools` |
 | `/api/techniques` | Cooking techniques library |
 | `/api/tags` | Managed tag catalog |
@@ -136,9 +134,16 @@ All routes below live under `/api` and (aside from `/api/auth/*`) require an aut
 | `/api/backup` | Manual whole-library backup export/import |
 | `/api/cook-log` | Cook-history calendar (`GET ?from=&to=`), backing the "I cooked this" log |
 | `/api/geocode` | Server-side Nominatim proxy for free-text region geocoding (cached) |
-| `/api/sync` | Legacy CRDT/vector-clock P2P endpoints — see [Multi-device sync](#-multi-device-sync) |
 | `/api/uploads` | Image uploads |
 | `/health` | DB + Ollama status (no auth required) |
+
+---
+
+## Quantities, density and recipe text
+
+- **Quantities** are stored as plain decimals (`REAL` / `NUMERIC(10,4)`). The editor accepts fractions and mixed numbers (`lib/ingredientAmount.ts` `parseQuantityStrict`), and every display chooses its form after scaling (`formatQuantity`: kitchen fractions for spoons, cups and pieces, decimals for g/ml), so the same 1.5 reads “1 ½ cup” and “1.5 kg”.
+- **Density** (`ingredients.density_g_per_ml`) existed in Postgres from the start; standalone gained the column in 1.14 (`addColumnIfMissing`) and it is on the ingredient sync allowlist (`conflicts.local.ts`). An update that omits it leaves it alone (`CASE WHEN` in both routes), so older callers cannot wipe it. `lib/unitConvert.ts` `toGrams()` converts a volume through it; the recipe scaler's `weightHint()` turns that into the small “≈ 120 g” line.
+- **Markdown** in recipe text is a deliberately small subset parsed by `lib/markdown.ts` and rendered by `components/MarkdownText.tsx` as React elements — there is no `dangerouslySetInnerHTML` anywhere, so text arriving by sync, share or import can never inject markup. `RenderStepText` passes the step-reference regex so `{{ing:N}}` tokens are swapped for placeholders before parsing and rendered as references afterwards.
 
 ---
 

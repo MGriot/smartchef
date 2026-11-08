@@ -1,0 +1,1 @@
+I tag di una ricetta stanno in cima alla foto e "+N" apre gli altri; i tag chiari hanno lettere scure; la scheda dell'ingrediente sta nello schermo del telefono e, se è vuota, spiega come aggiungere dettagli.

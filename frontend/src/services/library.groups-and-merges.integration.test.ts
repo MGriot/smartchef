@@ -326,3 +326,71 @@ describe('merging a cooking technique', () => {
     expect((res?.data as { recipesUpdated: number }).recipesUpdated).toBe(2);
   });
 });
+
+describe('deleting a tag', () => {
+  // A tag lives on recipes as a name inside the JSON `tags` array, so
+  // deleting one means rewriting every recipe that carries it, matched the
+  // way the UI shows it: trimmed, case-insensitive, in any language.
+  async function seedTaggedRecipes(tagsById: Record<string, string[]>) {
+    const { query } = await import('../db/local');
+    const { createRecipe } = await import('./recipes.local');
+    for (const [id, tags] of Object.entries(tagsById)) {
+      await createRecipe({ id, title: id, servings: 2, ingredients: [], steps: [] } as never, 'Matteo');
+      // Set directly: createRecipe() folds case variants of one name
+      // together, and the variants are the point here.
+      await query('UPDATE recipes SET tags=$1 WHERE id=$2', [tags, id]);
+    }
+  }
+
+  async function tagsOf(id: string): Promise<string[]> {
+    const { queryOne } = await import('../db/local');
+    const row = await queryOne<{ tags: string }>('SELECT tags FROM recipes WHERE id=$1', [id]);
+    return JSON.parse(row!.tags);
+  }
+
+  it('strips a custom tag from every recipe, ignoring case and padding', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedTaggedRecipes({
+      'r-1': ['Pasta', 'Veloce'],
+      'r-2': [' PASTA ', 'Dolce'],
+      'r-3': ['Pastasciutta'],
+    });
+    const { deleteCustomTag } = await import('./tags.local');
+
+    expect(await deleteCustomTag('pasta')).toEqual({ recipesUpdated: 2 });
+    expect(await tagsOf('r-1')).toEqual(['Veloce']);
+    expect(await tagsOf('r-2')).toEqual(['Dolce']);
+    // A longer name that merely contains the tag is a different tag.
+    expect(await tagsOf('r-3')).toEqual(['Pastasciutta']);
+  });
+
+  it('matches accented capitals, which SQLite LIKE does not fold', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedTaggedRecipes({ 'r-1': ['Été', 'Facile'], 'r-2': ['ÉTÉ'] });
+    const { deleteCustomTag } = await import('./tags.local');
+
+    expect(await deleteCustomTag('été')).toEqual({ recipesUpdated: 2 });
+    expect(await tagsOf('r-1')).toEqual(['Facile']);
+    expect(await tagsOf('r-2')).toEqual([]);
+  });
+
+  it('matches a name that JSON has to escape', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedTaggedRecipes({ 'r-1': ['Mamma"s', 'Veloce'] });
+    const { deleteCustomTag } = await import('./tags.local');
+
+    expect(await deleteCustomTag('mamma"s')).toEqual({ recipesUpdated: 1 });
+    expect(await tagsOf('r-1')).toEqual(['Veloce']);
+  });
+
+  it('strips a deleted catalog tag by its name', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedTags();
+    await seedTaggedRecipes({ 'r-1': ['dolce', 'Salato'], 'r-2': ['Salato'] });
+    const { deleteTag } = await import('./tags.local');
+
+    expect(await deleteTag('tag-sweet')).toEqual({ recipesUpdated: 1 });
+    expect(await tagsOf('r-1')).toEqual(['Salato']);
+    expect(await tagsOf('r-2')).toEqual(['Salato']);
+  });
+});

@@ -11,19 +11,8 @@
 // provider Account → AI Provider has selected answers these too.
 // ════════════════════════════════════════════════════════════════════════
 
-import i18n from '../i18n';
-import { callConfiguredProvider, repairTruncatedJson } from './llmParser.local';
+import { callConfiguredProvider, parseJsonObject } from './llmParser.local';
 import { languageLabel } from '../lib/languages';
-
-function parseJsonObject(raw: string): any {
-  const match = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
-  if (!match) throw new Error(i18n.t('errors.noJsonFromModel'));
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return JSON.parse(repairTruncatedJson(match[0]));
-  }
-}
 
 // ── Recipe translation ──────────────────────────────────────────────────
 
@@ -234,6 +223,8 @@ export interface NutritionPer100g {
   fiberG: number | null;
   sugarG: number | null;
   sodiumMg: number | null;
+  /** Not per 100 g: grams per millilitre, for volume → weight. */
+  densityGPerMl: number | null;
 }
 
 export interface IngredientTidyItem {
@@ -303,15 +294,18 @@ export function buildIngredientTidyPrompt(ctx: TidyPromptContext): string {
     sections.push(
       `"category": the aisle this ingredient belongs in, copied EXACTLY from this list, or null if none fits: ` +
       `${ctx.categoryNames.length ? ctx.categoryNames.map((c) => `"${c}"`).join(', ') : '(no categories)'}.\n` +
-      `"tags": every tag from this list that applies to the ingredient (diet, allergens, kind of food…), copied EXACTLY; ` +
-      `never invent a tag: ${ctx.tagNames.length ? ctx.tagNames.map((c) => `"${c}"`).join(', ') : '(no tags)'}.\n` +
-      `"wrongTags": tags the item has today that do NOT apply (e.g. "Vegan" on butter). Empty array if none.`,
+      `"tags": ONLY what the ingredient contains (allergens, meat, fish…) or the diets it fits, from this list, copied ` +
+      `EXACTLY; usually 0-3, never invent a tag: ${ctx.tagNames.length ? ctx.tagNames.map((c) => `"${c}"`).join(', ') : '(no tags)'}.\n` +
+      `"wrongTags": tags the item has today that do NOT apply (e.g. "Vegan" on butter), including any tag that describes ` +
+      `a dish rather than a food (course, cuisine, occasion). Empty array if none.`,
     );
   }
   if (aspects.nutrition) {
     sections.push(
       `"nutrition": typical values per 100 g of the raw/as-sold ingredient, as in a standard food composition table: ` +
-      `{"kcal": number, "protein": grams, "carbs": grams, "fat": grams, "fiber": grams, "sugar": grams, "sodium": milligrams}. ` +
+      `{"kcal": number, "protein": grams, "carbs": grams, "fat": grams, "fiber": grams, "sugar": grams, "sodium": milligrams, ` +
+      `"density": grams per millilitre as measured in a cup or spoon (water 1, flour about 0.53, sugar about 0.85, oil about ` +
+      `0.92), null for things nobody measures by volume (a whole egg, a chicken breast)}. ` +
       `Correct values on file that are clearly wrong. Use null for a value you cannot estimate reasonably (e.g. a spice ` +
       `blend whose composition varies).`,
     );
@@ -344,10 +338,13 @@ export function buildIngredientTidyPrompt(ctx: TidyPromptContext): string {
  *  100 g, and table salt is ~39 g of sodium. */
 const NUTRITION_LIMITS: Record<keyof NutritionPer100g, number> = {
   caloriesKcal: 900, proteinG: 100, carbsG: 100, fatG: 100, fiberG: 100, sugarG: 100, sodiumMg: 40000,
+  // Lightest kitchen powders (cocoa, flakes) ~0.1; honey ~1.4; nothing a
+  // recipe measures in a cup is denser than 3.
+  densityGPerMl: 3,
 };
 const NUTRITION_KEYS: Array<[keyof NutritionPer100g, string]> = [
   ['caloriesKcal', 'kcal'], ['proteinG', 'protein'], ['carbsG', 'carbs'], ['fatG', 'fat'],
-  ['fiberG', 'fiber'], ['sugarG', 'sugar'], ['sodiumMg', 'sodium'],
+  ['fiberG', 'fiber'], ['sugarG', 'sugar'], ['sodiumMg', 'sodium'], ['densityGPerMl', 'density'],
 ];
 
 function cleanNutrition(raw: unknown): NutritionPer100g | undefined {
@@ -358,7 +355,11 @@ function cleanNutrition(raw: unknown): NutritionPer100g | undefined {
   for (const [key, alias] of NUTRITION_KEYS) {
     const value = source[alias] ?? source[key];
     const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
-    if (Number.isFinite(n) && n >= 0 && n <= NUTRITION_LIMITS[key]) {
+    if (key === 'densityGPerMl') {
+      // Two decimals: flour's 0.53 rounded to 0.5 is a 6 % error per cup.
+      out[key] = Number.isFinite(n) && n >= 0.1 && n <= NUTRITION_LIMITS[key] ? Math.round(n * 100) / 100 : null;
+      if (out[key] !== null) any = true;
+    } else if (Number.isFinite(n) && n >= 0 && n <= NUTRITION_LIMITS[key]) {
       out[key] = Math.round(n * 10) / 10;
       any = true;
     } else {

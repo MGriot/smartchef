@@ -333,7 +333,11 @@ export async function mergeRemoteIntoLocal(
         for (const conflict of settledPending) await deleteConflict(conflict.id);
         if (outcome.appliedFields.length > 0) result.entitiesUpdated++;
         if (outcome.appliedFields.length > 0 || outcome.conflictsRecorded > 0 || settledPending.length > 0 || republish) {
-          const finalFields: Record<string, unknown> = { ...healed.local, ...merged.applied };
+          // No file on this side (a fresh Hidden Clone beside a library that
+          // already holds the row): the merge only returns mergeable fields,
+          // so start from the complete remote file. Every remote field was
+          // applied anyway, since an empty local side loses every comparison.
+          const finalFields: Record<string, unknown> = { ...(localJson === null ? healed.remote : {}), ...healed.local, ...merged.applied };
           if (outcome.appliedFields.length > 0) finalFields.updated_at = laterTimestamp(localUpdatedAt, remoteUpdatedAt) ?? finalFields.updated_at;
           // Fields now in conflict go into the tree as the remote's value
           // until the user picks — see overlayPendingConflicts().

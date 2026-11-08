@@ -1,0 +1,1 @@
+Ricettari condivisi: ricette sincronizzate in entrambe le direzioni tra librerie separate, tramite una cartella WebDAV o un repository git. Ogni libreria tiene i propri ingredienti e voti. Richiede il nuovo motore di sincronizzazione.

@@ -1,0 +1,1 @@
+Send a copy of a recipe to someone else: Export saves a file with the recipe and its photos, and Import > File adds it to their library, matching ingredients and tools they already have.

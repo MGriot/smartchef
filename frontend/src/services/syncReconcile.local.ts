@@ -22,7 +22,7 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { query, queryOne } from '../db/local';
-import { getEntityTable, resyncEntityToGit, forceApplyEntity, getEntityDisplayName } from './conflicts.local';
+import { getEntityTable, resyncEntityToGit, forceApplyEntity, getEntityDisplayName, resolveAlias } from './conflicts.local';
 import { unitSymbolsFromSteps } from '../lib/sync/referenceHeal';
 
 /** Every synced entity type, in the order writes must happen: categories
@@ -289,12 +289,6 @@ export async function retryStuckEntities(): Promise<number> {
   return rows.length;
 }
 
-/** Drops one stuck entity entirely: the user has decided they do not want
- *  it here. It will be re-offered if another device republishes it. */
-export async function forgetStuckEntity(entityType: string, entityId: string): Promise<void> {
-  await query(`DELETE FROM sync_repair WHERE entity_type = $1 AND entity_id = $2`, [entityType, entityId]);
-}
-
 /** Ids of the rows this device holds, per type. */
 async function localIds(entityType: string): Promise<Set<string>> {
   const info = getEntityTable(entityType);
@@ -327,7 +321,15 @@ export async function pullRepoIntoDatabase(
     const have = await localIds(entityType);
     const wanted = new Set(repairs.filter((r) => r.entity_type === entityType).map((r) => r.entity_id));
     if (entityType !== 'unit') {
-      for (const id of headIds.get(entityType) ?? []) if (!have.has(id)) wanted.add(id);
+      for (const id of headIds.get(entityType) ?? []) {
+        if (have.has(id)) continue;
+        // An aliased id is a row this device holds under its own id. Its old
+        // file stays in HEAD forever, and force-applying it every sync wrote
+        // that stale copy over the live row — a deleted tag came back with
+        // deleted_at = null. Real changes to it still arrive through the merge.
+        if (have.has(await resolveAlias(entityType, id))) continue;
+        wanted.add(id);
+      }
     }
     const entries: Array<{ entityId: string; json: Record<string, unknown> | null }> = [];
     for (const entityId of wanted) entries.push({ entityId, json: await readHead(entityType, entityId).catch(() => null) });

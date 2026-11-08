@@ -85,6 +85,34 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
       return { status: 502, error: err instanceof Error ? err.message : 'AI check failed' };
     }
   }
+  // The editor's language bar: an AI translation of the unsaved draft,
+  // returned rather than saved, so the editor fills only the empty fields
+  // and the user checks it before saving — see lib/recipeTranslationDraft.ts.
+  if (id === 'translate-preview') {
+    if (method !== 'POST' || sub) return NOT_HANDLED;
+    const body = parseBody(init) ?? {};
+    if (!body.input || typeof body.lang !== 'string' || !body.lang) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    try {
+      const { translateRecipeContent } = await import('./aiTasks.local');
+      return { status: 200, data: await translateRecipeContent(body.input, body.lang) };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI translation failed' };
+    }
+  }
+  // The editor's "Merge text with AI": what a pasted text adds to the
+  // unsaved draft, each change quoting that text — see lib/recipeMerge.ts.
+  if (id === 'ai-merge') {
+    if (method !== 'POST' || sub) return NOT_HANDLED;
+    const body = parseBody(init) ?? {};
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!body.draft || !body.catalog || !text) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    try {
+      const { mergeTextWithAi } = await import('./recipeCheck.local');
+      return { status: 200, data: await mergeTextWithAi(body.draft, text, body.catalog) };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI merge failed' };
+    }
+  }
   if (id === 'parse') {
     if (method !== 'POST') return NOT_HANDLED;
     const body = parseBody(init) ?? {};
@@ -421,6 +449,33 @@ async function dispatchShare(segments: string[], method: string, init?: RequestI
     const bundle = await share.exportRecipe(id);
     if (!bundle) return { status: 404, error: i18n.t('errors.recipeNotFound') };
     return { status: 200, data: bundle };
+  }
+
+  // "Send a copy" (recipeShare.local.ts): what the recipe page exports in
+  // standalone mode, and the one file shape its importer reads.
+  if (kind === 'recipes' && id && action === 'copy' && method === 'GET') {
+    const exists = await share.exportRecipe(id);
+    if (!exists) return { status: 404, error: i18n.t('errors.recipeNotFound') };
+    const { buildShareFile } = await import('./recipeShare.local');
+    const { getDeviceName } = await import('../lib/sync/gitSync');
+    return { status: 200, data: await buildShareFile([id], await getDeviceName().catch(() => null)) };
+  }
+
+  if (kind === 'recipes' && id === 'import-bundle' && method === 'POST') {
+    const body = parseBody(init);
+    const { importShareFile, isShareFile } = await import('./recipeShare.local');
+    if (!isShareFile(body)) return { status: 400, error: i18n.t('import.notShareFile') };
+    const report = await importShareFile(body);
+    // The import screen's shape (RecipeImport.tsx BundleImportResult).
+    return {
+      status: 200,
+      data: {
+        recipeIds: report.recipes.map((r) => r.id),
+        matchedIngredients: report.items.ingredients.map((i) => ({ ingredientName: i.name, isNew: i.isNew, confidence: 1 })),
+        matchedTools: [...report.items.tools, ...report.items.techniques].map((i) => ({ toolName: i.name, isNew: i.isNew })),
+        warnings: [],
+      },
+    };
   }
 
   return NOT_HANDLED;

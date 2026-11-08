@@ -1,0 +1,1 @@
+"Check recipe with AI" and "Merge text with AI" now fill in prep, cook and rest times (adding up the steps' durations too, and reading "1 h 30 min") and suggest a difficulty.

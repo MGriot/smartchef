@@ -1,0 +1,1 @@
+Security updates for every component. Fixes a sync bug that, after reinstalling, could publish recipes without their tools and ingredients without their category.

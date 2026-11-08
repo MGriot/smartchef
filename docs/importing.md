@@ -82,6 +82,22 @@ Loosen the filter to see near-misses and what's short.
 
 ---
 
+## 📨 Sending a copy to another SmartChef library
+
+Works everywhere, standalone included. On a recipe, **Share → Export
+recipe** saves a `.smartchef.json` file: the recipe, its sub-recipes, the
+ingredients, tools and techniques it uses, and its photos. The other person
+opens **Import → File** and gets it as **their own** recipe:
+
+- ingredients, tools and techniques are matched by name, translation,
+  synonym or plural to the ones they already have, and created only when
+  nothing matches — exact matching, so "Farina 0" never silently becomes
+  "Farina di riso";
+- references inside the steps point at their own tools and techniques;
+- rating and times cooked start fresh, and "Shared by …" is added as a source;
+- later edits on either side stay separate. To keep a recipe in sync with
+  someone instead, put it in a [shared cookbook](standalone-sync.md#shared-cookbooks--recipes-in-sync-with-other-people).
+
 ## 🔗 Sharing a recipe with someone who has no account
 
 Server mode only, and deliberately: a public URL needs a server that is

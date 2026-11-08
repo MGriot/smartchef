@@ -1,3 +1,4 @@
+import { stripMarkdown } from '../lib/markdown';
 import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect, useRef } from 'react';
 import { getSyncStatus, subscribeSyncStatus, hasEverCompletedSync } from '../lib/sync/syncStatus';
@@ -10,6 +11,7 @@ import RecipeCardMenu from '../components/RecipeCardMenu';
 import { useStore } from '../store/app.store';
 import { useIsWideViewport } from '../hooks/useMediaQuery';
 import { apiFetch } from '../lib/api';
+import { tagTextColor } from '../lib/tagColor';
 import { useFileExport } from '../hooks/useFileExport';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
@@ -808,7 +810,7 @@ const Home: React.FC = () => {
                               // carries ~150 of these, which is a real cost on
                               // a phone GPU and free on a desktop one.
                               className={badgeClass}
-                              style={!badge.bg ? { backgroundColor: badge.color || '#3f3f46' } : undefined}
+                              style={!badge.bg ? { backgroundColor: badge.color || '#3f3f46', color: tagTextColor(badge.color || '#3f3f46') } : undefined}
                             >
                               {badge.label}
                             </span>
@@ -825,7 +827,7 @@ const Home: React.FC = () => {
                       </h3>
                       {!dense && (recipe.translated_description || recipe.description) && (
                         <p className="text-zinc-500 dark:text-zinc-400 text-sm mb-2 line-clamp-2">
-                          {recipe.translated_description || recipe.description}
+                          {stripMarkdown(recipe.translated_description || recipe.description)}
                         </p>
                       )}
                       {recipe.creator_name && (

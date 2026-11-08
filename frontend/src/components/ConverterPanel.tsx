@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Modal from './Modal';
 import { Field, FormSection } from './Form';
 import {
   celsiusToFahrenheit,
-  fahrenheitToCelsius,
   celsiusToGasMark,
   roundOvenTemperature,
   tinScaleFactor,

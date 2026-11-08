@@ -27,6 +27,27 @@ const scalerAt = (servings: number, displaySystem: 'metric' | 'imperial' = 'metr
     fallbackName: 'Ingredient',
   });
 
+describe('createRecipeScaler — weight hint from density', () => {
+  const milk: ScalerIngredient = { sortOrder: 5, ingredientName: 'milk', quantity: 1, unitSymbol: 'cup', densityGPerMl: 1.03 };
+  const scaler = (servings: number, displaySystem: 'metric' | 'imperial' = 'metric') =>
+    createRecipeScaler({ ingredients: [milk], steps: [], baseServings: 4, servings, displaySystem, fallbackName: 'x' });
+
+  it('shows grams under a volume amount, scaled with it', () => {
+    expect(scaler(4).weightHint(1, 'cup', 1.03)).toBe('≈ 244 g');
+    expect(scaler(8).weightHint(1, 'cup', 1.03)).toBe('≈ 487 g');
+  });
+
+  it('switches to ounces for imperial readers', () => {
+    expect(scaler(4, 'imperial').weightHint(1, 'cup', 1.03)).toBe('≈ 8.6 oz');
+  });
+
+  it('shows nothing for weights, pieces or unknown density', () => {
+    expect(scaler(4).weightHint(200, 'g', 1)).toBeNull();
+    expect(scaler(4).weightHint(1, 'cup', null)).toBeNull();
+    expect(scaler(4).weightHint(null, 'cup', 1)).toBeNull();
+  });
+});
+
 describe('createRecipeScaler — amounts', () => {
   it('scales by servings ÷ base servings', () => {
     const s = scalerAt(8);
@@ -35,11 +56,13 @@ describe('createRecipeScaler — amounts', () => {
     expect(s.formatAmount(600, 'g')).toBe('1200 g');
   });
 
-  it('keeps one decimal for fractional results, none for whole ones', () => {
+  it('picks the display form after scaling: fractions for pieces and cups, decimals for grams', () => {
     const s = scalerAt(3);
-    expect(s.scale(3)).toBe('2.3');
+    expect(s.scale(3)).toBe('2 ¼');
     expect(s.scale(4)).toBe('3');
-    expect(s.formatAmount(3, 'pz')).toBe('2.3 pz');
+    expect(s.formatAmount(3, 'pz')).toBe('2 ¼ pz');
+    expect(s.formatAmount(3, 'g')).toBe('2.25 g');
+    expect(s.scale(3.2)).toBe('2.4');
   });
 
   it('restates in the reader\'s system where a conversion exists', () => {
@@ -53,6 +76,17 @@ describe('createRecipeScaler — amounts', () => {
     expect(s.formatAmount(3, 'pz')).toBe('3 pz');
     expect(s.formatAmount(null, null, 'a pinch')).toBe('a pinch');
     expect(s.formatAmount(2, null, 'cloves')).toBe('2 cloves');
+  });
+
+  it('shows a to-taste unit alone, with or without a number', () => {
+    const s = scalerAt(8);
+    expect(s.formatAmount(1, 'q.b.')).toBe('q.b.');
+    expect(s.formatAmount(null, 'q.b.')).toBe('q.b.');
+  });
+
+  it('never shows a negative amount', () => {
+    const s = scalerAt(4);
+    expect(s.formatAmount(-0.5, 'tbsp')).toBe('½ tbsp');
   });
 
   it('does not scale when the base servings are unknown', () => {

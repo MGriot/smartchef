@@ -21,7 +21,9 @@
 import { Preferences } from '@capacitor/preferences';
 import type { ConflictPolicy } from '../structuredMerge';
 
-export type SyncMode = 'folder' | 'git-remote';
+/** 'webdav' exists only for sync v2 (lib/changeLog/webdavStore.ts): picking
+ *  it moves the device onto the v2 engine. */
+export type SyncMode = 'folder' | 'git-remote' | 'webdav';
 
 const MODE_KEY = 'smartchef.sync.mode';
 const GIT_REMOTE_URL_KEY = 'smartchef.sync.gitRemote.url';
@@ -104,11 +106,80 @@ export async function setConflictPolicy(policy: ConflictPolicy, scope: SettingSc
 
 export async function getSyncMode(): Promise<SyncMode> {
   const { value } = await Preferences.get({ key: MODE_KEY });
-  return value === 'git-remote' ? 'git-remote' : 'folder';
+  return value === 'git-remote' || value === 'webdav' ? value : 'folder';
 }
 
 export async function setSyncMode(mode: SyncMode): Promise<void> {
   await Preferences.set({ key: MODE_KEY, value: mode });
+}
+
+/** Which engine moves the data: the git Hidden Clone, or the per-device
+ *  change log (docs/plans/2026-11-01-sync-v2-change-log.md). Per device;
+ *  lib/sync/syncV2Runner.ts switchToSyncV2() is the only way in. */
+export type SyncEngine = 'git' | 'v2';
+const ENGINE_KEY = 'smartchef.sync.engine';
+let engineCache: SyncEngine | null = null;
+
+export async function getSyncEngine(): Promise<SyncEngine> {
+  if (engineCache === null) engineCache = (await Preferences.get({ key: ENGINE_KEY })).value === 'v2' ? 'v2' : 'git';
+  return engineCache;
+}
+
+export async function setSyncEngine(engine: SyncEngine): Promise<void> {
+  await Preferences.set({ key: ENGINE_KEY, value: engine });
+  engineCache = engine;
+}
+
+// Sync v2 library key (lib/changeLog/libraryStore.ts). On this device only,
+// like the tokens above; other devices get it from the Setup File or the
+// recovery key. Losing every copy of it loses access to the store's
+// contents — each device still holds its own full library locally.
+const LIBRARY_KEY_KEY = 'smartchef.sync.libraryKey';
+const ENCRYPT_NEW_KEY = 'smartchef.sync.encryptNewLibrary';
+
+export async function getLibraryKey(): Promise<Uint8Array | null> {
+  const { value } = await Preferences.get({ key: LIBRARY_KEY_KEY });
+  if (!value) return null;
+  const { parseRecoveryKey } = await import('../changeLog/libraryStore');
+  return parseRecoveryKey(value);
+}
+
+export async function setLibraryKey(key: Uint8Array | null): Promise<void> {
+  if (!key) { await Preferences.remove({ key: LIBRARY_KEY_KEY }); return; }
+  const { formatRecoveryKey } = await import('../changeLog/libraryStore');
+  await Preferences.set({ key: LIBRARY_KEY_KEY, value: formatRecoveryKey(key) });
+}
+
+/** Whether a library this device creates is encrypted. On unless turned off. */
+export async function getEncryptNewLibrary(): Promise<boolean> {
+  return (await Preferences.get({ key: ENCRYPT_NEW_KEY })).value !== 'off';
+}
+
+export async function setEncryptNewLibrary(on: boolean): Promise<void> {
+  await Preferences.set({ key: ENCRYPT_NEW_KEY, value: on ? 'on' : 'off' });
+}
+
+// WebDAV (sync v2 only). Same storage bar as the git token above: plain
+// on-device Preferences, on this device only, never synced. An app
+// password, not the account password, is what the settings ask for.
+const WEBDAV_URL_KEY = 'smartchef.sync.webdav.url';
+const WEBDAV_USERNAME_KEY = 'smartchef.sync.webdav.username';
+const WEBDAV_PASSWORD_KEY = 'smartchef.sync.webdav.password';
+
+export interface WebDavSettings { url: string; username: string; password: string }
+
+export async function getWebDavConfig(): Promise<WebDavSettings | null> {
+  const [{ value: url }, { value: username }, { value: password }] = await Promise.all([
+    Preferences.get({ key: WEBDAV_URL_KEY }), Preferences.get({ key: WEBDAV_USERNAME_KEY }), Preferences.get({ key: WEBDAV_PASSWORD_KEY }),
+  ]);
+  return url ? { url, username: username ?? '', password: password ?? '' } : null;
+}
+
+/** `password` undefined keeps the saved one (leave-blank-to-keep). */
+export async function setWebDavConfig(config: { url: string; username: string; password?: string }): Promise<void> {
+  await Preferences.set({ key: WEBDAV_URL_KEY, value: config.url });
+  await Preferences.set({ key: WEBDAV_USERNAME_KEY, value: config.username });
+  if (config.password !== undefined) await Preferences.set({ key: WEBDAV_PASSWORD_KEY, value: config.password });
 }
 
 export interface GitRemoteConfig {
@@ -269,14 +340,6 @@ export async function getSyncInterval(): Promise<SyncInterval> {
   }
 
   return DEFAULT_SYNC_INTERVAL;
-}
-
-export async function hasSyncIntervalOverride(): Promise<boolean> {
-  const [{ value: rawValue }, { value: rawUnit }] = await Promise.all([
-    Preferences.get({ key: INTERVAL_VALUE_KEY }),
-    Preferences.get({ key: INTERVAL_UNIT_KEY }),
-  ]);
-  return !!(rawValue && rawUnit && isSyncIntervalUnit(rawUnit));
 }
 
 export async function setSyncInterval(interval: SyncInterval, scope: SettingScope = 'device'): Promise<void> {

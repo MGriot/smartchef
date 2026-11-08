@@ -1,0 +1,1 @@
+Fixes sync getting stuck on an empty index file, keeps the GitHub token and AI keys across updates on Windows, and shows the app version under Account.

@@ -105,6 +105,7 @@ describe('a remote-created ingredient survives createEntity() -> listIngredients
       seasonal_months: '[]',
       synonyms: '[]',
       parent_ingredient_id: null,
+      density_g_per_ml: 0.53,
       sync_status: 'local',
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-01T00:00:00.000Z',
@@ -124,6 +125,17 @@ describe('a remote-created ingredient survives createEntity() -> listIngredients
     const found = list.find((i: any) => i.id === 'remote-ingredient-1');
     expect(found).toBeDefined();
     expect((found as { name: string } | undefined)?.name).toBe('Farina 00');
+    // Density rides along: without it on ENTITY_CONFIG's allowlist the
+    // other device silently dropped it.
+    expect((raw as { density_g_per_ml: number | null }).density_g_per_ml).toBe(0.53);
+
+    // An update that never mentions density (backup import, AI tidy) must
+    // not wipe it; an explicit null clears it.
+    const { updateIngredient } = await import('./ingredients.local');
+    await updateIngredient('remote-ingredient-1', { name: 'Farina 00', categoryId: foreignCategoryId });
+    expect((await queryOne<{ density_g_per_ml: number | null }>('SELECT density_g_per_ml FROM ingredients WHERE id=$1', ['remote-ingredient-1']))?.density_g_per_ml).toBe(0.53);
+    await updateIngredient('remote-ingredient-1', { name: 'Farina 00', categoryId: foreignCategoryId, densityGPerMl: null });
+    expect((await queryOne<{ density_g_per_ml: number | null }>('SELECT density_g_per_ml FROM ingredients WHERE id=$1', ['remote-ingredient-1']))?.density_g_per_ml).toBeNull();
   });
 
   it('writes a synced recipe_ingredients row whose unit_id is another device\'s (dangling) unit', async () => {

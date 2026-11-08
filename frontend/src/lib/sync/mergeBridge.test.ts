@@ -158,6 +158,25 @@ describe('mergeRemoteIntoLocal', () => {
     ]);
   });
 
+  it('keeps the whole remote file when the item is in the database but this device has no file for it yet', async () => {
+    // A fresh Hidden Clone beside a library that already holds the item:
+    // a reinstall that cleared app data, or a copied database. The local
+    // side is empty, so only mergeable fields come back from the merge.
+    // Writing just those back once dropped every other key (ingredient
+    // categories, recipe tool names, ids) and pushed that to every device.
+    dbEntities.recipe.set('r1', { id: 'r1', title: 'Old title', servings: 4 });
+    trees['local'] = { 'categories/cat-x.json': { name: 'X' } };
+    trees['remote'] = {
+      'recipes/r1.json': { id: 'r1', title: 'Pane', servings: 4, toolNames: { 'tool-oven': 'Oven' }, created_at: '2026-08-20 12:28:03' },
+    };
+    trees[baseKey('local', 'remote')] = {};
+
+    const result = await mergeRemoteIntoLocal('/dir', '/dir/.git', 'local', 'remote');
+
+    const written = result.touchedEntities.find((t) => t.entityId === 'r1')?.finalFields;
+    expect(written).toMatchObject({ id: 'r1', title: 'Pane', toolNames: { 'tool-oven': 'Oven' }, created_at: '2026-08-20 12:28:03' });
+  });
+
   it('fast-forwards a field that only changed on the remote for an entity that already exists locally', async () => {
     dbEntities.recipe.set('r1', { id: 'r1', title: 'Lasagna', servings: 4 });
     trees[baseKey('local', 'remote')] = { 'recipes/r1.json': { title: 'Lasagna', servings: 4 } };

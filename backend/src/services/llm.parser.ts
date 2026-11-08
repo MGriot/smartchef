@@ -106,10 +106,12 @@ Regole:
 - isOptional (negli ingredienti) è true quando la ricetta presenta quell'ingrediente come facoltativo o a piacere (es. "facoltativo", "se gradito", "optional", "per guarnire", "q.b. a piacere"); altrimenti false. Non dedurlo dal fatto che una quantità sia vaga
 - techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step, con nomi brevi e IN INGLESE (es. "Sauté", "Braise"), stesso criterio di "tools"
 - tools (negli step) è l'elenco degli strumenti che QUEL passaggio usa, con gli stessi nomi IN INGLESE usati nell'elenco "tools" principale (che deve contenerli tutti). Elenca TUTTI gli strumenti realmente usati in quel passaggio, e solo quelli
+- tags descrive il PIATTO, non gli ingredienti: portata (es. "Primo", "Dolce"), cucina, occasione, stagione, metodo di cottura principale, dieta. MAI il nome di un ingrediente o di un suo componente (niente "Pomodoro", "Manzo", "Basilico"). Al massimo 5, brevi; meglio pochi e pertinenti che molti
 - regions è l'origine geografica del piatto: un oggetto per luogo, con country = codice paese ISO 3166-1 alpha-2 maiuscolo (es. "IT", "FR") oppure null, e place = regione o città più specifica (es. "Toscana", "Napoli") oppure null. Compila SOLO se la fonte indica l'origine o il piatto è chiaramente tipico di un luogo; altrimenti lascia l'array vuoto. Non inventare
 - ingredients (negli step) è l'elenco degli ingredienti che QUEL passaggio usa. Il campo name deve essere copiato ESATTAMENTE come compare nella lista "ingredients" principale, altrimenti il collegamento viene scartato. Metti quantity/unit SOLO quando il passaggio usa una parte dichiarata dell'ingrediente (es. "metà dello zucchero" su 100 g -> quantity 50, unit "g"); se il passaggio usa semplicemente l'ingrediente, lascia quantity e unit a null. Elenca TUTTI gli ingredienti che quel passaggio nomina o usa, anche al plurale o con un nome più breve (es. "le uova" per "Uova", "il burro" per "Burro morbido") e nessun altro; non inventarne di assenti dalla lista principale
 - mentions (negli step) dice DOVE il testo di QUEL passaggio nomina ciascun ingrediente, strumento o tecnica elencati in quel passaggio: kind, name (lo stesso nome usato nell'elenco "ingredients", "tools" o "techniques" di quel passaggio) e text (le parole ESATTE come compaiono nel campo description di quel passaggio, copiate carattere per carattere, es. "cipollotti", "nel forno", "sbattere"). Una voce per ogni elemento elencato nel passaggio, sulla sua prima occorrenza nel testo; se il testo non lo nomina letteralmente (lo usa soltanto) non aggiungere la voce. Non inventare parole assenti dal testo
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
+- quantity non è mai negativa. Per un intervallo (es. "1/2-1 cucchiaio", "2-3 uova") usa il valore minore in quantity e scrivi l'intervallo in notes
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
 - NON INVENTARE MAI DATI: servings, tempi, yield, tag, regions, quantità e durate degli step vanno riportati SOLO se compaiono nel contenuto (anche in forma equivalente: "1 ora" = 60 minuti). Non stimarli e non usare conoscenza culinaria generica per riempirli: se non sono dichiarati, null
@@ -835,7 +837,11 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
     difficulty: ["easy", "medium", "hard", "expert"].includes(parsed.difficulty)
       ? parsed.difficulty
       : "medium",
-    tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+    // Dish tags only, and few — see the "tags" rule in the prompt. The cap
+    // holds even when a model ignores it.
+    tags: Array.isArray(parsed.tags)
+      ? parsed.tags.filter((tag: unknown): tag is string => typeof tag === 'string' && tag.trim().length > 0).slice(0, 5)
+      : [],
     tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t: unknown) => typeof t === "string") : [],
     regions: Array.isArray(parsed.regions)
       ? parsed.regions
@@ -856,7 +862,8 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
           // it against the catalog actually sent before anything acts on it.
           catalogName:
             typeof ing.catalogName === "string" && ing.catalogName.trim() ? ing.catalogName.trim() : null,
-          quantity: typeof ing.quantity === "number" ? ing.quantity : undefined,
+          // Math.abs: a range ("½-1 tbsp") has come back as -0.5 before.
+          quantity: typeof ing.quantity === "number" && Number.isFinite(ing.quantity) ? Math.abs(ing.quantity) : undefined,
           quantityText: ing.quantityText ?? undefined,
           unit: ing.unit ?? undefined,
           notes: ing.notes ?? undefined,
@@ -881,7 +888,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
                 .filter((u: any) => u && typeof u.name === "string")
                 .map((u: any) => ({
                   name: u.name as string,
-                  quantity: typeof u.quantity === "number" ? u.quantity : null,
+                  quantity: typeof u.quantity === "number" && Number.isFinite(u.quantity) ? Math.abs(u.quantity) : null,
                   unit: typeof u.unit === "string" ? u.unit : null,
                 }))
             : [],

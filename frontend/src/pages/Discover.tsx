@@ -117,7 +117,7 @@ export default function Discover() {
         {sources.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-700 p-10 text-center">
             <p className="text-zinc-500 dark:text-zinc-400 font-medium">{t('discover.noSources')}</p>
-            <Link to="/account" className="inline-block mt-4 font-bold text-primary hover:underline">{t('discover.manageSources')}</Link>
+            <Link to="/account?tab=ai" className="inline-block mt-4 font-bold text-primary hover:underline">{t('discover.manageSources')}</Link>
           </div>
         ) : (
           <>

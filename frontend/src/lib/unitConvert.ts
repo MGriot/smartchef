@@ -93,6 +93,17 @@ export function convert(value: number, from: string, to: string): number | null 
   return (value * a.toBase) / b.toBase;
 }
 
+/** A volume amount as grams, through the ingredient's density (g/ml).
+ *  Null when the unit isn't a volume (grams are already a weight, pieces
+ *  have no volume) or the density is unknown — callers then show nothing
+ *  rather than a guess. */
+export function toGrams(value: number, symbol: string | null | undefined, densityGPerMl: number | null | undefined): number | null {
+  if (!densityGPerMl || densityGPerMl <= 0 || !Number.isFinite(value)) return null;
+  const unit = lookupUnit(symbol);
+  if (!unit || unit.dimension !== 'volume') return null;
+  return value * unit.toBase * densityGPerMl;
+}
+
 /** Ladders, largest first, for picking a readable unit. */
 const LADDERS: Record<Dimension, Record<MeasurementSystem, string[]>> = {
   mass: { metric: ['kg', 'g'], imperial: ['lb', 'oz'] },

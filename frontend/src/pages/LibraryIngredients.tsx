@@ -1,5 +1,6 @@
+import MarkdownText from '../components/MarkdownText';
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import { CollapseAllButton, GroupToggle, SortSelect, ViewToggle } from '../components/LibraryViewControls';
@@ -53,6 +54,11 @@ export default function LibraryIngredients() {
   // is what a fresh install should look like.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [viewingIng, setViewingIng] = useState<any>(null);
+  // A recipe's ingredient list links here as ?view=<id>: that ingredient's
+  // card opens on arrival, and closing it goes back to the recipe.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [openedFromLink, setOpenedFromLink] = useState(false);
   const [mergingIng, setMergingIng] = useState<any>(null);
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [mergeQuery, setMergeQuery] = useState('');
@@ -65,7 +71,7 @@ export default function LibraryIngredients() {
   // Ingredient form
   const [editingIng, setEditingIng] = useState<any>(null);
   const emptyNutrition = { caloriesKcal: '', proteinG: '', carbsG: '', fatG: '', fiberG: '', sugarG: '', sodiumMg: '' };
-  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], seasonalMonths: [] as number[], synonyms: [] as string[], parentIngredientId: null as string | null, nutrition: { ...emptyNutrition } });
+  const [form, setForm] = useState({ name: '', categoryId: '', description: '', icon: 'egg', imageUrls: [] as string[], tagIds: [] as string[], seasonalMonths: [] as number[], synonyms: [] as string[], parentIngredientId: null as string | null, density: '' as string | number, nutrition: { ...emptyNutrition } });
   const [parentQuery, setParentQuery] = useState('');
   const [translations, setTranslations] = useState<{lang: string, text: string}[]>([]);
   // AI naming (standalone mode only — the routes live in localRouter.ts).
@@ -116,6 +122,20 @@ export default function LibraryIngredients() {
     }
   };
 
+  useEffect(() => {
+    const id = searchParams.get('view');
+    if (!id || loading) return;
+    // Replaced, not pushed, so Back from here is the recipe again.
+    setSearchParams({}, { replace: true });
+    const target = ingredients.find(i => i.id === id);
+    if (target) { setViewingIng(target); setOpenedFromLink(true); }
+  }, [searchParams, loading, ingredients, setSearchParams]);
+
+  const closeViewing = () => {
+    setViewingIng(null);
+    if (openedFromLink) { setOpenedFromLink(false); navigate(-1); }
+  };
+
   const toggleTagFilter = (tagId: string) => {
     setActiveTagFilters(f => f.includes(tagId) ? f.filter(x => x !== tagId) : [...f, tagId]);
   };
@@ -163,6 +183,7 @@ export default function LibraryIngredients() {
         seasonalMonths: ing.seasonal_months || [],
         synonyms: ing.synonyms || [],
         parentIngredientId: ing.parent_ingredient_id ?? null,
+        density: ing.density_g_per_ml ?? '',
         nutrition: {
           caloriesKcal: ing.calories_kcal ?? '',
           proteinG: ing.protein_g ?? '',
@@ -187,6 +208,7 @@ export default function LibraryIngredients() {
         seasonalMonths: [],
         synonyms: [],
         parentIngredientId: null,
+        density: '',
         nutrition: { ...emptyNutrition },
       });
       setTranslations([]);
@@ -212,7 +234,10 @@ export default function LibraryIngredients() {
       Object.entries(form.nutrition).map(([k, v]) => [k, v === '' ? undefined : parseFloat(String(v))])
     );
 
-    const { nutrition, ...formRest } = form;
+    // Blank density is an explicit "unknown" (null), so clearing the field
+    // actually clears it rather than leaving the old value in place.
+    const densityGPerMl = form.density === '' ? null : parseFloat(String(form.density).replace(',', '.'));
+    const { nutrition, density, ...formRest } = form;
     const url = editingIng ? `/api/ingredients/${editingIng.id}` : '/api/ingredients';
     const method = editingIng ? 'PUT' : 'POST';
     // A new ingredient saved without translations gets them from the AI
@@ -223,7 +248,7 @@ export default function LibraryIngredients() {
       const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formRest, ...nutritionFields, translations: cleanTranslations, ...(autoTranslate ? { autoTranslate: true } : {}) }),
+        body: JSON.stringify({ ...formRest, ...nutritionFields, densityGPerMl: Number.isFinite(densityGPerMl) ? densityGPerMl : null, translations: cleanTranslations, ...(autoTranslate ? { autoTranslate: true } : {}) }),
         ...(autoTranslate ? { timeoutMs: 650_000 } : {}),
       });
       const result = await res.json();
@@ -875,7 +900,7 @@ export default function LibraryIngredients() {
             description={t('library.ingredients.sectionClassificationHint')}
           >
             <Field label={t('library.ingredients.tags')}>
-              <TagPicker by="id" value={form.tagIds} onChange={tagIds => setForm({ ...form, tagIds })} />
+              <TagPicker by="id" scope="ingredient" value={form.tagIds} onChange={tagIds => setForm({ ...form, tagIds })} />
             </Field>
             <Field
               label={t('library.ingredients.varietyOfLabel')}
@@ -974,6 +999,18 @@ export default function LibraryIngredients() {
                 </label>
               ))}
             </div>
+          </FormSection>
+
+          <FormSection title={t('library.ingredients.density')} description={t('library.ingredients.densityHint')}>
+            <label className="block max-w-[12rem]">
+              <span className="sc-label mb-1">{t('library.ingredients.densityUnit')}</span>
+              <input
+                type="text" inputMode="decimal" placeholder="1"
+                value={form.density}
+                onChange={e => setForm({ ...form, density: e.target.value })}
+                className="sc-field"
+              />
+            </label>
           </FormSection>
 
           <FormSection
@@ -1196,11 +1233,11 @@ export default function LibraryIngredients() {
       {viewingIng && (
         <IngredientDetailModal
           ing={viewingIng}
-          onClose={() => setViewingIng(null)}
+          onClose={closeViewing}
           onViewImage={(url, name) => setPreviewImage({ url, name })}
-          onEdit={() => { setViewingIng(null); handleOpenModal(viewingIng); }}
-          onMerge={() => { setViewingIng(null); setMergingIng(viewingIng); setMergeTargetId(''); setMergeQuery(''); }}
-          onDelete={() => { setViewingIng(null); handleDelete(viewingIng.id); }}
+          onEdit={() => { setViewingIng(null); setOpenedFromLink(false); handleOpenModal(viewingIng); }}
+          onMerge={() => { setViewingIng(null); setOpenedFromLink(false); setMergingIng(viewingIng); setMergeTargetId(''); setMergeQuery(''); }}
+          onDelete={() => { setViewingIng(null); setOpenedFromLink(false); handleDelete(viewingIng.id); }}
           onOpenVariety={(id) => {
             const target = ingredients.find(i => i.id === id);
             if (target) setViewingIng(target);
@@ -1234,6 +1271,8 @@ function IngredientDetailModal({
     [t('library.ingredients.sugar'), ing.sugar_g, 'g'],
     [t('library.ingredients.sodium'), ing.sodium_mg, 'mg'],
   ].filter(([, v]) => v !== null && v !== undefined) as Array<[string, unknown, string]>;
+  const hasDetails = !!(ing.parent_name || ing.description || nutritionRows.length > 0 || ing.density_g_per_ml != null
+    || ing.seasonal_months?.length > 0 || ing.tags?.length > 0 || ing.synonyms?.length > 0 || ing.translations?.length > 0);
 
   return (
     <Modal
@@ -1273,32 +1312,47 @@ function IngredientDetailModal({
           )}
         </div>
       }
+      // Four actions on a phone-wide footer squeezed every label until
+      // they overflowed their pills and Edit wrapped its icon onto a second
+      // line. Below `sm` the two secondary actions are icon squares, like
+      // Delete, and Edit takes the rest of the row.
       footer={
         <>
+          <ModalDeleteButton onClick={onDelete} label={t('common.delete')} />
           <Link
             to={`/?q=${encodeURIComponent(ing.name)}`}
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 py-3.5 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            title={t('library.ingredients.recipes')}
+            aria-label={t('library.ingredients.recipes')}
+            className="flex shrink-0 sm:flex-1 h-[52px] w-[52px] sm:w-auto items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
           >
             <span className="material-symbols-outlined text-lg">search</span>
-            {t('library.ingredients.recipes')}
+            <span className="hidden sm:inline">{t('library.ingredients.recipes')}</span>
           </Link>
           <button
             type="button"
             onClick={onMerge}
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 py-3.5 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            title={t('library.ingredients.merge')}
+            aria-label={t('library.ingredients.merge')}
+            className="flex shrink-0 sm:flex-1 h-[52px] w-[52px] sm:w-auto items-center justify-center gap-2 rounded-2xl bg-zinc-100 dark:bg-zinc-800 font-bold text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-700"
           >
             <span className="material-symbols-outlined text-lg">call_merge</span>
-            {t('library.ingredients.merge')}
+            <span className="hidden sm:inline">{t('library.ingredients.merge')}</span>
           </button>
-          <ModalDeleteButton onClick={onDelete} label={t('common.delete')} />
           <ModalSubmitButton type="button" onClick={onEdit}>
-            <span className="material-symbols-outlined mr-1.5 align-middle text-lg">edit</span>
-            {t('common.edit')}
+            <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+              <span className="material-symbols-outlined text-lg">edit</span>
+              {t('common.edit')}
+            </span>
           </ModalSubmitButton>
         </>
       }
     >
       <div className="space-y-7">
+        {/* An ingredient with nothing recorded used to open onto an empty
+            band between two rules, which read as a broken dialog. */}
+        {!hasDetails && (
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('library.ingredients.noDetails')}</p>
+        )}
         {(ing.parent_name || ing.description) && (
           <div className="space-y-2">
             {ing.parent_name && (
@@ -1310,7 +1364,7 @@ function IngredientDetailModal({
               </button>
             )}
             {ing.description && (
-              <p className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">{ing.description}</p>
+              <MarkdownText text={ing.description} className="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400" />
             )}
           </div>
         )}
@@ -1328,6 +1382,18 @@ function IngredientDetailModal({
                 </div>
               ))}
             </div>
+          </FormSection>
+        )}
+
+        {ing.density_g_per_ml != null && (
+          <FormSection title={t('library.ingredients.density')}>
+            <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+              {Number(ing.density_g_per_ml)}
+              <span className="ml-0.5 text-[10px] font-bold text-zinc-400 dark:text-zinc-500">g/ml</span>
+              <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">
+                {t('library.ingredients.densityExample', { grams: Math.round(Number(ing.density_g_per_ml) * 240) })}
+              </span>
+            </p>
           </FormSection>
         )}
 

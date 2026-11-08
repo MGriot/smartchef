@@ -12,7 +12,7 @@ import { computeAutoTagNames, unionTagNames } from "../services/tags.service";
 import { parseRecipeWithLLM, translateRecipeContent, fetchUrlHtml, MediaNotSupportedError } from "../services/llm.parser";
 import { filterByPantry } from "../services/pantry.service";
 import { proposeIngredientMatches, proposeToolMatches, proposeTechniqueMatches } from "../services/ingredient.matcher";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 
 export const recipeRouter = Router();
 
@@ -101,7 +101,7 @@ const CreateRecipeSchema = z.object({
   // Keyed by lowercased region label — coords for free-text regions
   // (e.g. "sardinia") resolved via /api/geocode; country entries don't
   // need this, their centroid comes from the static countries.ts list.
-  regionCoords: z.record(z.object({ lat: z.number(), lng: z.number() })).default({}),
+  regionCoords: z.record(z.string(), z.object({ lat: z.number(), lng: z.number() })).default({}),
   coverImageUrl: z.string().nullable().optional(),
   sourceUrl: z.string().nullable().optional(),
   sources: z.array(RecipeSourceSchema).default([]),
@@ -334,6 +334,7 @@ recipeRouter.get("/:id", async (req: Request, res: Response) => {
               'quantity', ri.quantity,
               'quantityText', ri.quantity_text,
               'unitSymbol', u.symbol, 'unitId', ri.unit_id,
+              'densityGPerMl', i.density_g_per_ml,
               'isOptional', ri.is_optional,
               'notes', ri.notes,
               'groupName', ri.group_name,

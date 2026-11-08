@@ -31,6 +31,7 @@ import { findUnusedIngredients, interpretMismatch, type IngredientMismatch } fro
 import { matchUnitId } from './fuzzyMatch';
 import { isCountryCode } from './countries';
 import { editDistance } from './wordDiff';
+import { durationsIn, sumStepDurations } from './aiTiming';
 
 // ── Shapes ──────────────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ export interface CheckDraft {
   prep_time_min?: number;
   cook_time_min?: number;
   rest_time_min?: number;
+  difficulty?: string | null;
   yield_amount?: number | null;
   yield_unit_id?: string | null;
   tags?: string[];
@@ -90,11 +92,19 @@ export interface CheckDraft {
   steps?: CheckDraftStep[];
   tools?: CheckNamedEntity[];
   techniques?: CheckNamedEntity[];
+  sources?: CheckSource[];
 }
 
-export type CheckGroup = 'text' | 'ingredients' | 'steps' | 'links' | 'fields' | 'tags' | 'regions';
+export interface CheckSource { type: 'url' | 'book' | 'video' | 'other'; label?: string; url?: string }
 
-export type TextTarget = 'title' | 'description' | 'tips' | 'storage' | 'ingredientName' | 'stepTitle' | 'stepText';
+export type CheckGroup = 'text' | 'ingredients' | 'steps' | 'links' | 'fields' | 'tags' | 'regions' | 'sources';
+
+export type TimeField = 'prep_time_min' | 'cook_time_min' | 'rest_time_min';
+
+export const DIFFICULTIES = ['easy', 'medium', 'hard', 'expert'] as const;
+export type Difficulty = typeof DIFFICULTIES[number];
+
+export type TextTarget ='title' | 'description' | 'tips' | 'storage' | 'ingredientName' | 'stepTitle' | 'stepText';
 
 interface ChangeBase {
   id: string;
@@ -115,7 +125,15 @@ export type CheckChange =
     })
   | (ChangeBase & { type: 'ingredientQty'; index: number; label: string; quantity: number; unitId: string | null; unitSymbol: string | null; before: string; after: string })
   | (ChangeBase & { type: 'stepDuration'; index: number; durationMin: number; before: string; after: string })
-  | (ChangeBase & { type: 'field'; field: 'servings' | 'prep_time_min' | 'cook_time_min' | 'rest_time_min'; value: number; before: string; after: string })
+  | (ChangeBase & {
+      type: 'field'; field: TimeField | 'servings'; value: number; before: string; after: string;
+      /** A time the recipe never states as such: the sum of these steps'
+       *  durations (indexes), added up here, not by the model. */
+      fromSteps?: number[];
+    })
+  /** Estimated by the model from the steps and techniques, as import does —
+   *  so it carries no evidence. */
+  | (ChangeBase & { type: 'difficulty'; value: Difficulty; before: Difficulty | null })
   | (ChangeBase & { type: 'yield'; amount: number; unitId: string; unitSymbol: string; before: string; after: string })
   | (ChangeBase & { type: 'tag'; name: string })
   | (ChangeBase & { type: 'region'; country: string | null; place: string | null; label: string })
@@ -133,7 +151,12 @@ export type CheckChange =
     })
   | (ChangeBase & { type: 'ingredientRemove'; index: number; label: string })
   | (ChangeBase & { type: 'stepRewrite'; index: number; text: string; before: string; after: string })
-  | (ChangeBase & { type: 'stepRemove'; index: number; label: string });
+  | (ChangeBase & { type: 'stepRemove'; index: number; label: string })
+  // The three below come from "Merge text with AI" (lib/recipeMerge.ts):
+  // information a pasted text has and the recipe lacks.
+  | (ChangeBase & { type: 'stepAdd'; title: string | null; text: string; durationMin: number | null; after: string })
+  | (ChangeBase & { type: 'textAppend'; target: 'description' | 'tips' | 'storage'; text: string; before: string; after: string })
+  | (ChangeBase & { type: 'sourceAdd'; source: CheckSource; label: string });
 
 export interface CheckResult {
   changes: CheckChange[];
@@ -199,9 +222,11 @@ export function numbersIn(s: string): number[] {
 const close = (a: number, b: number) => Math.abs(a - b) <= 1e-6 + Math.abs(b) * 0.005;
 
 /** True when `value` is a number the quote actually states — as written, or
- *  as the minutes of an hour count / the grams of a kilo / the ml of a litre. */
+ *  as the minutes of an hour count / the grams of a kilo / the ml of a litre,
+ *  or as a duration written in hours and minutes ("1 ora e 30 minuti" → 90). */
 export function numberSupportedBy(value: number, evidence: string): boolean {
-  return numbersIn(evidence).some((n) => [n, n * 60, n * 1000, n / 1000].some((c) => close(value, c)));
+  return numbersIn(evidence).some((n) => [n, n * 60, n * 1000, n / 1000].some((c) => close(value, c)))
+    || durationsIn(evidence).some((m) => close(value, m));
 }
 
 /** The evidence is accepted only if it is a real, non-trivial quote. */
@@ -226,6 +251,7 @@ export function buildCheckRequest(draft: CheckDraft, cat: CheckCatalog) {
       prepTimeMin: draft.prep_time_min || null,
       cookTimeMin: draft.cook_time_min || null,
       restTimeMin: draft.rest_time_min || null,
+      difficulty: draft.difficulty || null,
       yield: draft.yield_amount ? { amount: draft.yield_amount, unit: cat.units.find((u) => u.id === draft.yield_unit_id)?.symbol ?? null } : null,
       tags: draft.tags ?? [],
       regions: draft.regions ?? [],
@@ -272,24 +298,26 @@ export function buildCheckSystemPrompt(cat: CheckCatalog): string {
   const list = (names: string[]) => (names.length ? names.map((n) => `"${n}"`).join(', ') : '(none)');
   return `You audit ONE recipe from a recipe-management app. You receive its fields, its ingredient list (each with an index "i"), and its steps (each with an index "i" and plain text).
 
-ABSOLUTE RULE — NEVER INVENT DATA. Use only what the recipe itself literally says. Do not use cooking knowledge to supply typical quantities, times, servings, yields, tags or places. If the recipe does not state it, return null / leave it out. A smaller correct answer is always better than a larger guessed one. If you are unsure, return nothing.
+ABSOLUTE RULE — NEVER INVENT DATA. Use only what the recipe itself literally says. Do not use cooking knowledge to supply typical quantities, times, servings, yields, tags or places. If the recipe does not state it, return null / leave it out. A smaller correct answer is always better than a larger guessed one. If you are unsure, return nothing. The only two exceptions are "difficulty" and times added up from the steps' own durations (rule 4).
 
-Every proposal (except "typos", "links" and "mismatch", which carry their own "quote") MUST carry "evidence": a quote copied CHARACTER FOR CHARACTER from the recipe (title, description, tips, storage, an ingredient line, a step text or title), at most 25 words, that states the fact. Proposals without an exact quote are discarded automatically. Every number you propose must appear in its quote.
+Every proposal (except "typos", "links", "mismatch" and "difficulty", and times added up from steps) MUST carry "evidence": a quote copied CHARACTER FOR CHARACTER from the recipe (title, description, tips, storage, an ingredient line, a step text or title), at most 25 words, that states the fact. Proposals without an exact quote are discarded automatically. Every number you propose must appear in its quote.
 
 Do this, in order:
 1. "typos": spelling and typing mistakes only (misspelt words, doubled letters, missing accents or apostrophes, a missing or extra space, wrong capital letter). {"target": "title"|"description"|"tips"|"storage"|"ingredientName"|"stepTitle"|"stepText", "i": ingredient/step index or null, "before": the mistaken words copied exactly (1 to 4 words), "after": the same words corrected}. NEVER reword, rephrase, translate, change a number or unit, change style, or fix grammar that is merely informal. Keep the author's language and voice. The text stays exactly as it is apart from the mistaken word itself.
 2. "ingredients": correct an ingredient's quantity ONLY when it is plainly a slip of the pen: the recipe states the whole amount of that very ingredient elsewhere (e.g. a step says "add 200 g of flour" while the list says 20 or nothing). {"i", "quantity": number, "unit": string|null, "evidence"}. Never use a partial amount ("half the sugar", "the rest of the butter", an amount used in just one stage). Do not change the unit of a row that already has one. Do not touch rows that are consistent.
 3. "steps": [{"i", "durationMin": number, "evidence": string}] — minutes, ONLY when the step text states a duration ("cook 20 minutes", "rest 1 hour" → 60).
-4. "servings", "prepTimeMin", "cookTimeMin", "restTimeMin": each {"value": number, "evidence": string} or null. Only when the recipe states it ("serves 4", "bake 30 minutes"). Do not add up or estimate.
+4. "servings", "prepTimeMin", "cookTimeMin", "restTimeMin": each {"value": number, "evidence": string} or null, when the recipe states it ("serves 4", "bake 30 minutes", "1 hour 30 minutes" → 90). For the three times only, when the recipe states no overall time of that kind, add up the steps instead: {"value": the sum in minutes, "fromSteps": [the indexes "i" of the steps you added]} — the steps' "durationMin", or the durations you propose in "steps" above. Hands-on work (chopping, mixing, kneading, shaping) → prepTimeMin; time on the heat or in the oven → cookTimeMin; waiting (resting, rising, marinating, chilling) → restTimeMin. A step counts in one of the three at most. Never include a step with no stated duration, never estimate one.
+   "totalTimeMin": {"value": number, "evidence": string} or null — only when the recipe states an overall time ("ready in 1 hour", "total time 45 min").
+   "difficulty": "easy"|"medium"|"hard"|"expert" — estimate it from the number of steps and the techniques used. The recipe's current one is in "recipe.difficulty"; null when that already fits.
 5. "yield": {"amount": number, "unit": string, "evidence": string} or null — the finished quantity, only when stated ("makes 12 cookies", "about 1 litre").
-6. "tags": [{"name": string, "evidence": string}] — only attributes the recipe states or plainly names (e.g. the title says "vegan", an ingredient list shows no meat only if the text says vegetarian). Prefer existing tags: ${list(cat.tagNames)}. Max 6.
+6. "tags": [{"name": string, "evidence": string}] — only attributes the recipe states or plainly names (e.g. the title says "vegan", an ingredient list shows no meat only if the text says vegetarian). Tags describe the DISH (course, cuisine, occasion, season, main cooking method, diet), never an ingredient — no "Tomato", "Beef", "Basil". Prefer existing tags: ${list(cat.tagNames)}. Max 5.
 7. "regions": [{"country": ISO 3166-1 alpha-2 or null, "place": string|null, "evidence": string}] — only a place the recipe's text, title or source URL names as the dish's origin ("alla romana", "Sicilian", a .it recipe-site domain is NOT enough).
 8. "links": [{"i": step index, "kind": "ing"|"tool"|"tech", "target": the ingredient's index "i" (a number) for "ing", or the name EXACTLY as written in the catalog lists below for "tool"/"tech", "quote": the words copied CHARACTER FOR CHARACTER from that step's text, 1 to 4 words}] — every place a step's text names an ingredient of the list, a tool or a cooking technique of the catalogs that is not already linked. Each step has "linked": the words already linked there; never repeat those. One entry per thing per step (its first mention). Only things the text literally names — never one it merely implies. Catalog tools: ${list(cat.tools.map(labelOf))}. Catalog techniques: ${list(cat.techniques.map(labelOf))}.
 9. "mismatch": does the ingredient list describe the same recipe as the steps? {"unlisted": [{"name": the ingredient as the step calls it, "step": step index, "quote": the step's own words naming it, copied CHARACTER FOR CHARACTER, at most 12 words}], "summary": one short sentence in the recipe's language} — ONLY ingredients (not tools, not plain water or ice) that a step names or uses and the ingredient list does not have, in any wording ("burro" matches "Burro morbido"; a step that says "the dough" is not a missing ingredient). null when nothing is missing. Do not guess: if the steps could be using a listed ingredient under another name, leave it out.
 10. "warnings": short notes on other inconsistencies you noticed but could not resolve from the text. Do not repeat what "mismatch" already says. Write them in the recipe's language.
 
 Respond EXCLUSIVELY with JSON:
-{"typos":[],"ingredients":[],"steps":[],"servings":null,"prepTimeMin":null,"cookTimeMin":null,"restTimeMin":null,"yield":null,"tags":[],"regions":[],"links":[],"mismatch":null,"warnings":[]}`;
+{"typos":[],"ingredients":[],"steps":[],"servings":null,"prepTimeMin":null,"cookTimeMin":null,"restTimeMin":null,"totalTimeMin":null,"difficulty":null,"yield":null,"tags":[],"regions":[],"links":[],"mismatch":null,"warnings":[]}`;
 }
 
 // ── What comes back ─────────────────────────────────────────────────────
@@ -360,6 +388,68 @@ export function isDigitSlip(prev: number, next: number): boolean {
   const a = String(prev).replace('.', '');
   const b = String(next).replace('.', '');
   return editDistance(a, b) <= 1 || [...a].sort().join('') === [...b].sort().join('');
+}
+
+const TIME_KEYS: Array<[TimeField, string]> = [['prep_time_min', 'prepTimeMin'], ['cook_time_min', 'cookTimeMin'], ['rest_time_min', 'restTimeMin']];
+
+/** Servings, the three times and the difficulty, shared by Check and Merge —
+ *  they differ only in where a quote must come from (`quoted`). A time is
+ *  either stated (its quote proves the number) or the sum of named steps'
+ *  durations, which is redone here: the steps' own, or the ones `earlier`
+ *  changes of this same answer give them. A stated total with no cook time
+ *  becomes the cook time, as import does for a page that gives only a total. */
+export function interpretFieldsAndTimes(
+  parsed: any, draft: CheckDraft, earlier: CheckChange[], quoted: (evidence: unknown) => evidence is string, id: (p: string) => string,
+): CheckChange[] {
+  const out: CheckChange[] = [];
+  const stated = (entry: any): { value: number; evidence: string } | null => {
+    const value = num(entry?.value);
+    const evidence = str(entry?.evidence);
+    return value != null && value <= 10000 && quoted(evidence) && numberSupportedBy(value, evidence) ? { value: Math.round(value), evidence } : null;
+  };
+  const push = (field: TimeField | 'servings', value: number, evidence: string, fromSteps?: number[]) => {
+    const current = draft[field] || null;
+    if (current === value) return;
+    out.push({
+      id: id('field'), group: 'fields', type: 'field', field, value, kind: current ? 'fix' : 'fill',
+      before: current ? String(current) : '—', after: String(value), evidence, ...(fromSteps ? { fromSteps } : {}),
+    });
+  };
+
+  const servings = stated(parsed?.servings);
+  if (servings) push('servings', servings.value, servings.evidence);
+
+  const durations = (draft.steps ?? []).map((s) => s.durationMin);
+  for (const c of earlier) if (c.type === 'stepDuration' && c.index < durations.length) durations[c.index] = c.durationMin;
+  const usedSteps = new Set<number>();
+  const proposed: Partial<Record<TimeField, number>> = {};
+  for (const [field, key] of TIME_KEYS) {
+    const entry = parsed?.[key];
+    const s = stated(entry);
+    if (s) { proposed[field] = s.value; push(field, s.value, s.evidence); continue; }
+    const steps: unknown = entry?.fromSteps;
+    const sum = sumStepDurations(durations, steps);
+    if (sum == null || sum > 10000 || (steps as number[]).some((i) => usedSteps.has(i))) continue;
+    // The model's own figure has to agree with the sum, or it was adding up something else.
+    const value = num(entry?.value);
+    if (value != null && Math.round(value) !== sum) continue;
+    (steps as number[]).forEach((i) => usedSteps.add(i));
+    proposed[field] = sum;
+    push(field, sum, '', [...(steps as number[])].sort((a, b) => a - b));
+  }
+
+  const total = stated(parsed?.totalTimeMin);
+  if (total && proposed.cook_time_min == null && !draft.cook_time_min) {
+    const cook = total.value - (proposed.prep_time_min ?? draft.prep_time_min ?? 0) - (proposed.rest_time_min ?? draft.rest_time_min ?? 0);
+    if (cook > 0) push('cook_time_min', cook, total.evidence);
+  }
+
+  const level = typeof parsed?.difficulty === 'string' ? parsed.difficulty.trim().toLowerCase() : null;
+  const before = (DIFFICULTIES as readonly string[]).includes(draft.difficulty ?? '') ? (draft.difficulty as Difficulty) : null;
+  if (level && (DIFFICULTIES as readonly string[]).includes(level) && level !== (before ?? 'medium')) {
+    out.push({ id: id('difficulty'), group: 'fields', type: 'difficulty', kind: before ? 'fix' : 'fill', value: level as Difficulty, before, evidence: '' });
+  }
+  return out;
 }
 
 /**
@@ -470,21 +560,8 @@ export function interpretCheckResponse(parsed: any, draft: CheckDraft, cat: Chec
     }
   }
 
-  // 3 ── Portions and times
-  const fields: Array<['servings' | 'prep_time_min' | 'cook_time_min' | 'rest_time_min', string]> = [
-    ['servings', 'servings'], ['prep_time_min', 'prepTimeMin'], ['cook_time_min', 'cookTimeMin'], ['rest_time_min', 'restTimeMin'],
-  ];
-  for (const [field, key] of fields) {
-    const entry = parsed?.[key];
-    const value = num(entry?.value);
-    if (value == null || !evidenceHolds(entry?.evidence, corpus) || !numberSupportedBy(value, entry.evidence)) continue;
-    const current = draft[field] ?? 0;
-    if (current === value) continue;
-    changes.push({
-      id: id('field'), group: 'fields', type: 'field', field, value, kind: current ? 'fix' : 'fill',
-      before: current ? String(current) : '—', after: String(value), evidence: entry.evidence.trim(),
-    });
-  }
+  // 3 ── Portions, times and difficulty
+  changes.push(...interpretFieldsAndTimes(parsed, draft, changes, (e) => evidenceHolds(e, corpus), id));
 
   // 4 ── Yield
   const y = parsed?.yield;
@@ -506,7 +583,7 @@ export function interpretCheckResponse(parsed: any, draft: CheckDraft, cat: Chec
   // 5 ── Tags
   const haveTags = new Set((draft.tags ?? []).map((t) => t.toLowerCase()));
   const byLower = new Map(cat.tagNames.map((t) => [t.toLowerCase(), t]));
-  for (const t of (Array.isArray(parsed?.tags) ? parsed.tags : []).slice(0, 6)) {
+  for (const t of (Array.isArray(parsed?.tags) ? parsed.tags : []).slice(0, 5)) {
     const raw = str(t?.name);
     if (!raw || !evidenceHolds(t.evidence, corpus)) continue;
     const name = byLower.get(raw.toLowerCase()) ?? raw;
@@ -672,6 +749,7 @@ export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: Check
         if (steps[c.index]) steps[c.index].durationMin = c.durationMin;
         break;
       case 'field': next[c.field] = c.value; break;
+      case 'difficulty': next.difficulty = c.value; break;
       case 'yield': next.yield_amount = c.amount; next.yield_unit_id = c.unitId; next.yield_unit_symbol = c.unitSymbol; break;
       case 'tag': if (!tags.some((t) => t.toLowerCase() === c.name.toLowerCase())) tags.push(c.name); break;
       case 'link': {
@@ -696,7 +774,14 @@ export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: Check
         }
         break;
       }
-      case 'region': case 'ingredientAdd': case 'ingredientRemove': case 'stepRewrite': case 'stepRemove': break;
+      case 'textAppend': {
+        const key = c.target === 'storage' ? 'storage_instructions' : c.target;
+        const current = (next[key] ?? '').trim();
+        next[key] = current ? `${current}\n\n${c.text}` : c.text;
+        break;
+      }
+      case 'region': case 'ingredientAdd': case 'ingredientRemove': case 'stepRewrite': case 'stepRemove':
+      case 'stepAdd': case 'sourceAdd': break;
     }
   }
 
@@ -718,6 +803,25 @@ export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: Check
       relinkStep(steps[c.index], ingredients, draft);
     }
   }
+
+  // New steps go at the end, after the rewrites, and are linked like one.
+  for (const c of changes) {
+    if (c.type !== 'stepAdd') continue;
+    const step = {
+      id: '', stepNumber: steps.length + 1, title: c.title ?? '', description: c.text, durationMin: c.durationMin,
+      toolIds: [], techniqueIds: [], notes: '', imageUrl: null, stepIngredients: [], translations: [],
+    };
+    relinkStep(step, ingredients, draft);
+    steps.push(step);
+  }
+
+  const sources = [...(draft.sources ?? [])];
+  for (const c of changes) {
+    if (c.type !== 'sourceAdd') continue;
+    const dup = sources.some((s) => (c.source.url && s.url === c.source.url) || (!c.source.url && !!s.label && s.label.toLowerCase() === (c.source.label ?? '').toLowerCase()));
+    if (!dup) sources.push(c.source);
+  }
+  if (changes.some((c) => c.type === 'sourceAdd')) next.sources = sources;
 
   // Removals shift indexes: highest first, so the ones still to come hold.
   for (const at of changes.flatMap((c) => (c.type === 'ingredientRemove' ? [c.index] : [])).sort((a, b) => b - a)) {

@@ -1,3 +1,6 @@
+import MarkdownHint from '../components/MarkdownHint';
+import QuantityInput from '../components/QuantityInput';
+import { formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { formatDurationWith } from '../lib/duration';
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -14,7 +17,6 @@ import RegionPicker from '../components/RegionPicker';
 import RegionsMap from '../components/RegionsMap';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { useStore } from '../store/app.store';
-import { listLanguages, languageLabel } from '../lib/languages';
 import { useLanguages } from '../hooks/useLanguages';
 import { apiFetch } from '../lib/api';
 import { coerceIngredients, coerceSteps, coerceNamedEntities } from '../lib/recipeDraftCoercion';
@@ -95,7 +97,7 @@ interface LibraryIngredient {
  *  summaries — plain and unscaled, since the editor works in the recipe's
  *  own base servings. */
 const formatEditorAmount = (qty: number, unitSymbol?: string | null): string =>
-  `${qty % 1 === 0 ? qty : Number(qty.toFixed(2))}${unitSymbol ? ` ${unitSymbol}` : ''}`;
+  formatQuantityWithUnit(qty, unitSymbol);
 
 /** De-duplicates and tidies candidate names for the "show as" suggestions
  *  on an inline step reference, keeping the first spelling of each. */
@@ -826,6 +828,7 @@ const RecipeCreate: React.FC = () => {
               className="w-full border-none bg-zinc-50 dark:bg-zinc-900 rounded-xl p-4 text-sm resize-none focus:ring-2 focus:ring-primary/20 min-h-[80px] max-h-[50vh] overflow-y-auto"
               placeholder={t('recipeDetail.shortDescriptionPlaceholder')}
             />
+            <MarkdownHint />
           </label>
           <label className="block mb-6">
             <span className="text-xs uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-bold mb-2 block">{t('recipeDetail.storageInstructions')}</span>
@@ -1255,9 +1258,9 @@ const RecipeCreate: React.FC = () => {
                   </div>
                   <div className="col-span-5 @lg:col-span-3">
                     <label className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1">{t('recipeDetail.qty')}</label>
-                    <input
-                      type="number" step="any" value={ing.quantity || ''}
-                      onChange={e => updateIngredient(idx, 'quantity', parseFloat(e.target.value))}
+                    <QuantityInput
+                      value={ing.quantity} unitSymbol={ing.unitSymbol}
+                      onChange={v => updateIngredient(idx, 'quantity', v)}
                       className="w-full border-none bg-white dark:bg-zinc-900 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
@@ -1594,9 +1597,9 @@ const RecipeCreate: React.FC = () => {
                                   </>
                                 ) : (
                                   <>
-                                    <input
-                                      type="number" step="any" value={ref!.quantity ?? ''}
-                                      onChange={e => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', e.target.value ? parseFloat(e.target.value) : null)}
+                                    <QuantityInput
+                                      value={ref!.quantity} unitSymbol={ref!.unitSymbol || ing.unitSymbol}
+                                      onChange={v => updateStepIngredientAmount(idx, ing.sortOrder, 'quantity', v)}
                                       className="flex-1 min-w-0 max-w-[6rem] border-none bg-white dark:bg-zinc-900 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-primary/20"
                                     />
                                     <select

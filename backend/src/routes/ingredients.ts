@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { query, queryOne, withTransaction } from "../db/pool";
-import { v4 as uuidv4 } from "uuid";
+import { listCatalog } from "../services/catalogList.service";
+import { randomUUID as uuidv4 } from "crypto";
 import { z } from "zod";
 
 export const ingredientsRouter = Router();
@@ -177,23 +178,9 @@ unitsRouter.get("/", async (req: Request, res: Response) => {
 
 // GET /tools
 toolsRouter.get("/", async (req: Request, res: Response) => {
-  const { lang, q } = req.query;
-  const params: unknown[] = [];
-  if (lang) params.push(lang);
-  if (q) params.push(`%${q}%`);
-  const rows = await query(
-    `SELECT t.*, ${lang ? "tt.name" : "NULL"} AS translated_name,
-            COALESCE(
-              (SELECT json_agg(json_build_object('lang', tr.language_code, 'name', tr.name, 'description', tr.description))
-               FROM tool_translations tr WHERE tr.tool_id = t.id),
-              '[]'::json
-            ) AS translations
-     FROM tools t
-     ${lang ? "LEFT JOIN tool_translations tt ON tt.tool_id = t.id AND LOWER(tt.language_code) = LOWER($1)" : ""}
-     WHERE t.deleted_at IS NULL
-       ${q ? `AND (t.name ILIKE $${params.length} OR EXISTS (SELECT 1 FROM unnest(t.synonyms) syn WHERE syn ILIKE $${params.length}))` : ""}
-     ORDER BY t.category, t.name`,
-    params
+  const rows = await listCatalog(
+    { table: "tools", translationTable: "tool_translations", foreignKey: "tool_id", withDescription: true, orderBy: "t.category, t.name" },
+    req.query.lang, req.query.q,
   );
   res.json({ data: rows });
 });
@@ -246,6 +233,9 @@ const IngredientSchema = z.object({
   synonyms: z.array(z.string()).optional(),
   // "This is a variety of" — see db/migrations/036_ingredient_parent.sql.
   parentIngredientId: z.string().uuid().optional().nullable(),
+  // Grams per millilitre, for showing a volume amount as a weight too.
+  // Omitted on update = leave as is; null clears it.
+  densityGPerMl: z.number().positive().max(10).optional().nullable(),
   ...NutritionFieldsSchema,
 });
 
@@ -269,12 +259,12 @@ ingredientsRouter.post("/", async (req: Request, res: Response) => {
   await query(
     `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
        calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months,
-       synonyms, parent_ingredient_id, plural_name)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+       synonyms, parent_ingredient_id, plural_name, density_g_per_ml)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
     [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
      d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
-     d.synonyms ?? [], d.parentIngredientId ?? null, d.pluralName || null]
+     d.synonyms ?? [], d.parentIngredientId ?? null, d.pluralName || null, d.densityGPerMl ?? null]
   );
 
   if (d.translations && d.translations.length > 0) {
@@ -314,12 +304,14 @@ ingredientsRouter.put("/:id", async (req: Request, res: Response) => {
   await query(
     `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,
        calories_kcal=$6, protein_g=$7, carbs_g=$8, fat_g=$9, fiber_g=$10, sugar_g=$11, sodium_mg=$12,
-       seasonal_months=$13, synonyms=$14, parent_ingredient_id=$15, plural_name=$16, updated_at=now()
+       seasonal_months=$13, synonyms=$14, parent_ingredient_id=$15, plural_name=$16,
+       density_g_per_ml=CASE WHEN $18 THEN $19::numeric ELSE density_g_per_ml END, updated_at=now()
      WHERE id=$17`,
     [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
      d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
-     d.synonyms ?? [], parentIngredientId, d.pluralName || null, id]
+     d.synonyms ?? [], parentIngredientId, d.pluralName || null, id,
+     d.densityGPerMl !== undefined, d.densityGPerMl ?? null]
   );
 
   if (d.translations) {

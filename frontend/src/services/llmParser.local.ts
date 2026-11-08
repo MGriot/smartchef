@@ -96,6 +96,26 @@ const CLOUD_TIMEOUT_MS = 60_000;
 /** CPU-only local inference does not — the backend allows 600s for the
  *  same call, and RecipeImport.tsx's own apiFetch ceiling is 650s. */
 const OLLAMA_TIMEOUT_MS = 600_000;
+/** ...except when the answer is a whole recipe. Check, merge and the
+ *  mismatch fix send the full draft and get up to 4096 tokens back, which a
+ *  thinking model can take minutes over; at 60s "Merge text with AI" timed
+ *  out on long pastes. */
+export const LONG_AI_TIMEOUT_MS = 240_000;
+
+export interface ProviderCallOptions {
+  /** Ceiling for one cloud request; defaults to CLOUD_TIMEOUT_MS. Ollama
+   *  keeps its own, longer one either way. */
+  timeoutMs?: number;
+}
+
+const PROVIDER_NAMES: Record<string, string> = { anthropic: 'Claude', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama' };
+
+/** Android's plugin rejects a timeout with code TIMEOUT; Electron's IPC
+ *  handler with "Request to <host> timed out". */
+function isTimeoutError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  return e?.code === 'TIMEOUT' || /timed out/i.test(e?.message ?? '');
+}
 
 // ── The extraction contract ─────────────────────────────────────────────
 // Copied verbatim from backend/src/services/llm.parser.ts's SYSTEM_PROMPT_BASE.
@@ -175,10 +195,12 @@ Regole:
 - isOptional (negli ingredienti) è true quando la ricetta presenta quell'ingrediente come facoltativo o a piacere (es. "facoltativo", "se gradito", "optional", "per guarnire", "q.b. a piacere"); altrimenti false. Non dedurlo dal fatto che una quantità sia vaga
 - techniques (negli step) è l'elenco delle tecniche di cottura riconosciute in quello step, con nomi brevi e IN INGLESE (es. "Sauté", "Braise"), stesso criterio di "tools"
 - tools (negli step) è l'elenco degli strumenti che QUEL passaggio usa, con gli stessi nomi IN INGLESE usati nell'elenco "tools" principale (che deve contenerli tutti). Elenca TUTTI gli strumenti realmente usati in quel passaggio, e solo quelli
+- tags descrive il PIATTO, non gli ingredienti: portata (es. "Primo", "Dolce"), cucina, occasione, stagione, metodo di cottura principale, dieta. MAI il nome di un ingrediente o di un suo componente (niente "Pomodoro", "Manzo", "Basilico"). Al massimo 5, brevi; meglio pochi e pertinenti che molti
 - regions è l'origine geografica del piatto: un oggetto per luogo, con country = codice paese ISO 3166-1 alpha-2 maiuscolo (es. "IT", "FR") oppure null, e place = regione o città più specifica (es. "Toscana", "Napoli") oppure null. Compila SOLO se la fonte indica l'origine o il piatto è chiaramente tipico di un luogo; altrimenti lascia l'array vuoto. Non inventare
 - ingredients (negli step) è l'elenco degli ingredienti che QUEL passaggio usa. Il campo name deve essere copiato ESATTAMENTE come compare nella lista "ingredients" principale, altrimenti il collegamento viene scartato. Metti quantity/unit SOLO quando il passaggio usa una parte dichiarata dell'ingrediente (es. "metà dello zucchero" su 100 g -> quantity 50, unit "g"); se il passaggio usa semplicemente l'ingrediente, lascia quantity e unit a null. Elenca TUTTI gli ingredienti che quel passaggio nomina o usa, anche al plurale o con un nome più breve (es. "le uova" per "Uova", "il burro" per "Burro morbido") e nessun altro; non inventarne di assenti dalla lista principale
 - mentions (negli step) dice DOVE il testo di QUEL passaggio nomina ciascun ingrediente, strumento o tecnica elencati in quel passaggio: kind, name (lo stesso nome usato nell'elenco "ingredients", "tools" o "techniques" di quel passaggio) e text (le parole ESATTE come compaiono nel campo description di quel passaggio, copiate carattere per carattere, es. "cipollotti", "nel forno", "sbattere"). Una voce per ogni elemento elencato nel passaggio, sulla sua prima occorrenza nel testo; se il testo non lo nomina letteralmente (lo usa soltanto) non aggiungere la voce. Non inventare parole assenti dal testo
 - Se una quantità è vaga (es. "q.b.", "a piacere"), metti null in quantity e il testo in quantityText
+- quantity non è mai negativa. Per un intervallo (es. "1/2-1 cucchiaio", "2-3 uova") usa il valore minore in quantity e scrivi l'intervallo in notes
 - Normalizza le unità in italiano (grammi, ml, cucchiai, ecc.)
 - Stima la difficoltà basandoti sul numero di step e tecniche usate
 - NON INVENTARE MAI DATI: servings, tempi, yield, tag, regions, quantità e durate degli step vanno riportati SOLO se compaiono nel contenuto (anche in forma equivalente: "1 ora" = 60 minuti). Non stimarli e non usare conoscenza culinaria generica per riempirli: se non sono dichiarati, null
@@ -432,7 +454,7 @@ async function postWithRetry(
   }
 }
 
-async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
+async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
   // A media turn is content BLOCKS rather than a bare string; the image or
   // document goes first so the text that follows reads as an instruction
   // about it, which is what Anthropic's own guidance asks for.
@@ -463,7 +485,7 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
       // No temperature/top_p/top_k — current Claude models return HTTP 400
       // on any non-default sampling param.
     },
-    CLOUD_TIMEOUT_MS,
+    timeoutMs,
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('Anthropic', statusCode, text);
   const data = json as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
@@ -471,7 +493,7 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
   return data?.content?.find((b) => b.type === 'text')?.text ?? '';
 }
 
-async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
+async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
   // inlineData covers images, PDFs, audio AND video with one shape — the
   // reason Gemini is the fallback this file steers people to for a voice
   // note or a clip.
@@ -488,14 +510,14 @@ async function callGemini(content: string, apiKey: string, systemPrompt: string,
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ role: 'user', parts }],
     },
-    CLOUD_TIMEOUT_MS,
+    timeoutMs,
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('Gemini', statusCode, text);
   const data = json as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
   return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
-async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
+async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
   // OpenAI takes an image as a data URI in an image_url part rather than as
   // raw base64 — the one provider here that does.
   const userContent = media?.length
@@ -514,14 +536,14 @@ async function callOpenAI(content: string, apiKey: string, systemPrompt: string,
         { role: 'user', content: userContent },
       ],
     },
-    CLOUD_TIMEOUT_MS,
+    timeoutMs,
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('OpenAI', statusCode, text);
   const data = json as { choices?: Array<{ message?: { content?: string } }> };
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
-async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media?: ParseMedia[]): Promise<string> {
+async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
   const base = ollamaUrl.replace(/\/+$/, '');
   // Ollama attaches images as a base64 array on the message itself. Note
   // that it accepts this against ANY model: a text-only one silently drops
@@ -545,7 +567,7 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
         num_predict: 1500,
       },
     },
-    OLLAMA_TIMEOUT_MS,
+    Math.max(timeoutMs, OLLAMA_TIMEOUT_MS),
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('Ollama', statusCode, text);
   const data = json as { message?: { content?: string } };
@@ -556,7 +578,8 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
  *  a cloud provider selected with no key is a settings mistake the user
  *  needs told about, not a reason to silently spend a different provider's
  *  quota — same rule as the backend's callConfiguredProvider(). */
-export async function callConfiguredProvider(content: string, systemPrompt: string, media?: ParseMedia[]): Promise<string> {
+export async function callConfiguredProvider(content: string, systemPrompt: string, media?: ParseMedia[], opts: ProviderCallOptions = {}): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? CLOUD_TIMEOUT_MS;
   const settings = await getLlmSettings();
   // Checked before the key check on purpose: "Gemini can't do video" is
   // the more useful sentence than "no key saved" when both are true, since
@@ -566,17 +589,17 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
   const call = (model: string): Promise<string> => {
     if (settings.provider === 'anthropic') {
       if (!settings.keys.anthropic) throw new Error(i18n.t('errors.noApiKey', { provider: 'Anthropic' }));
-      return callAnthropic(content, settings.keys.anthropic, systemPrompt, model, media);
+      return callAnthropic(content, settings.keys.anthropic, systemPrompt, model, media, timeoutMs);
     }
     if (settings.provider === 'gemini') {
       if (!settings.keys.gemini) throw new Error(i18n.t('errors.noApiKey', { provider: 'Google Gemini' }));
-      return callGemini(content, settings.keys.gemini, systemPrompt, model, media);
+      return callGemini(content, settings.keys.gemini, systemPrompt, model, media, timeoutMs);
     }
     if (settings.provider === 'openai') {
       if (!settings.keys.openai) throw new Error(i18n.t('errors.noApiKey', { provider: 'OpenAI' }));
-      return callOpenAI(content, settings.keys.openai, systemPrompt, model, media);
+      return callOpenAI(content, settings.keys.openai, systemPrompt, model, media, timeoutMs);
     }
-    return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, model, media);
+    return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, model, media, timeoutMs);
   };
 
   const models = modelsFor(settings.provider, settings.models?.[settings.provider] ?? null, !!media?.length);
@@ -584,6 +607,13 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
     try {
       return await call(models[i]);
     } catch (err) {
+      // A raw "Read timed out" told the user nothing; say who was slow,
+      // for how long, and what helps. Not retried: a fallback model would
+      // most likely be just as slow on the same request.
+      if (isTimeoutError(err)) {
+        const seconds = Math.round((settings.provider === 'ollama' ? Math.max(timeoutMs, OLLAMA_TIMEOUT_MS) : timeoutMs) / 1000);
+        throw new Error(i18n.t('errors.aiTimedOut', { provider: PROVIDER_NAMES[settings.provider] ?? settings.provider, seconds }));
+      }
       // Only a model that is busy or gone is worth asking a different one;
       // a bad key or a refusal would fail exactly the same way twice.
       const retryable = err instanceof ProviderUnavailableError;
@@ -647,6 +677,18 @@ export function repairTruncatedJson(raw: string): string {
   return truncated;
 }
 
+/** The first JSON object in a model reply, repairing a truncated one. Shared
+ *  by the AI tasks (translation, naming, tidy) and "Check with AI". */
+export function parseJsonObject(raw: string): any {
+  const match = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
+  if (!match) throw new Error(i18n.t('errors.noJsonFromModel'));
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return JSON.parse(repairTruncatedJson(match[0]));
+  }
+}
+
 /** The parser's `yield`: a positive amount with a unit wording, or nothing. */
 function parseYield(raw: unknown): { amount: number; unit: string } | undefined {
   const r = raw as { amount?: unknown; unit?: unknown } | null;
@@ -697,7 +739,11 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
     difficulty: ['easy', 'medium', 'hard', 'expert'].includes(parsed.difficulty)
       ? parsed.difficulty
       : 'medium',
-    tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+    // Dish tags only, and few — see the "tags" rule in the prompt. The cap
+    // holds even when a model ignores it.
+    tags: Array.isArray(parsed.tags)
+      ? parsed.tags.filter((tag: unknown): tag is string => typeof tag === 'string' && tag.trim().length > 0).slice(0, 5)
+      : [],
     tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t: unknown) => typeof t === 'string') : [],
     regions: Array.isArray(parsed.regions)
       ? parsed.regions
@@ -718,7 +764,8 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
           // it against the catalog actually sent before anything acts on it.
           catalogName:
             typeof ing.catalogName === 'string' && ing.catalogName.trim() ? ing.catalogName.trim() : null,
-          quantity: typeof ing.quantity === 'number' ? ing.quantity : undefined,
+          // Math.abs: a range ("½-1 tbsp") has come back as -0.5 before.
+          quantity: typeof ing.quantity === 'number' && Number.isFinite(ing.quantity) ? Math.abs(ing.quantity) : undefined,
           quantityText: ing.quantityText ?? undefined,
           unit: ing.unit ?? undefined,
           notes: ing.notes ?? undefined,
@@ -743,7 +790,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
                 .filter((u: any) => u && typeof u.name === 'string')
                 .map((u: any) => ({
                   name: u.name as string,
-                  quantity: typeof u.quantity === 'number' ? u.quantity : null,
+                  quantity: typeof u.quantity === 'number' && Number.isFinite(u.quantity) ? Math.abs(u.quantity) : null,
                   unit: typeof u.unit === 'string' ? u.unit : null,
                 }))
             : [],

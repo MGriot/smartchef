@@ -1,0 +1,1 @@
+Shared cookbooks: recipes that stay in sync, both ways, between separate libraries, through a WebDAV folder or a git repository. Each library keeps its own ingredients and ratings. Needs the new sync engine.

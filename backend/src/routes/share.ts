@@ -19,7 +19,7 @@ import type { PoolClient } from "pg";
 import { query, queryOne, withTransaction } from "../db/pool";
 import { similarity } from "../services/ingredient.matcher";
 import { computeAutoTagNames, unionTagNames } from "../services/tags.service";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 
 export const shareRouter = Router();
 

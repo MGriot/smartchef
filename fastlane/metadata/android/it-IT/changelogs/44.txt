@@ -1,0 +1,1 @@
+I nomi degli ingredienti in una ricetta aprono la scheda dell'ingrediente nella Libreria (con Modifica), e una ricetta usata come ingrediente apre quella ricetta; le quantità non sono mai negative, "q.b." compare da solo e un ingrediente che ha perso il nome lo dice.

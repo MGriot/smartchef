@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import AppLayout from '../components/AppLayout';
 import ImageUrlInput from '../components/ImageUrlInput';
 import DiscoverSourcesCard from '../components/DiscoverSourcesCard';
@@ -7,6 +7,7 @@ import { useStore } from '../store/app.store';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import ConflictsCard from '../components/sync/ConflictResolver';
+import SharedCookbooksCard from '../components/sync/SharedCookbooks';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 // Module-level helpers below take `t` as a parameter rather than reaching
 // for a singleton: they are plain functions, not components, so there is no
@@ -198,6 +199,23 @@ function formatSyncInterval(interval: SyncInterval): string {
   return `${interval.value}${SYNC_INTERVAL_UNIT_ABBREV[interval.unit]}`;
 }
 
+/** One labelled group of settings inside a card: an icon, a title, one
+ *  sentence on what the group is for, then its controls. */
+function SettingsGroup({ icon, title, hint, children }: { icon: string; title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="border-t border-zinc-100 dark:border-zinc-800 pt-6 first:border-t-0 first:pt-0">
+      <div className="flex items-start gap-3 mb-4">
+        <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">{icon}</span>
+        <div>
+          <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-100">{title}</h3>
+          {hint && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{hint}</p>}
+        </div>
+      </div>
+      <div className="space-y-5">{children}</div>
+    </section>
+  );
+}
+
 function FolderSyncCard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -207,7 +225,12 @@ function FolderSyncCard() {
   // just this profile — only an admin profile may change them (mirrors the
   // same admin-only gating server mode already applies to Manage Users).
   const [isAdmin, setIsAdmin] = useState(false);
-  const [syncMode, setSyncModeState] = useState<'folder' | 'git-remote'>('folder');
+  const [syncMode, setSyncModeState] = useState<'folder' | 'git-remote' | 'webdav'>('folder');
+  const [webdavUrl, setWebdavUrl] = useState('');
+  const [webdavUsername, setWebdavUsername] = useState('');
+  const [webdavPassword, setWebdavPassword] = useState('');
+  const [webdavPasswordSaved, setWebdavPasswordSaved] = useState(false);
+  const [savingWebdav, setSavingWebdav] = useState(false);
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [gitRemoteUrl, setGitRemoteUrl] = useState('');
   const [gitRemoteUsername, setGitRemoteUsername] = useState('');
@@ -258,6 +281,17 @@ function FolderSyncCard() {
   // for every device that has not made one of its own. Defaults to
   // 'device', which is how every existing install already behaves.
   const [policyScope, setPolicyScope] = useState<SettingScope>('device');
+  // Sync v2 (docs/plans/2026-11-01-sync-v2-change-log.md): which engine
+  // this device syncs with, and whether a switch is running.
+  const [syncEngine, setSyncEngineState] = useState<'git' | 'v2'>('git');
+  const [switchingEngine, setSwitchingEngine] = useState(false);
+  // Sync v2 encryption: this device's recovery key (shown on request) and
+  // whether a library it creates is encrypted.
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [showRecoveryKey, setShowRecoveryKey] = useState(false);
+  const [recoveryKeyInput, setRecoveryKeyInput] = useState('');
+  const [recoveryKeyNote, setRecoveryKeyNote] = useState<string | null>(null);
+  const [encryptNew, setEncryptNewState] = useState(true);
   // "Replace with synced data" — preview first, then an explicit confirm.
   const [replacePreview, setReplacePreview] = useState<ReplacePreview | null>(null);
   const [preparingReplace, setPreparingReplace] = useState(false);
@@ -292,6 +326,8 @@ function FolderSyncCard() {
     ]);
     setSyncModeState(mode);
     setConflictPolicyState(policy);
+    const { getSyncEngine } = await import('../lib/sync/syncSettings');
+    setSyncEngineState(await getSyncEngine());
     setPolicyScope(overridden ? 'device' : 'all-devices');
     setIntervalValueState(interval.value);
     setIntervalUnitState(interval.unit);
@@ -367,6 +403,17 @@ function FolderSyncCard() {
 
       const mode = await getSyncMode();
       setSyncModeState(mode);
+      const { getSyncEngine, getWebDavConfig, getLibraryKey, getEncryptNewLibrary } = await import('../lib/sync/syncSettings');
+      setSyncEngineState(await getSyncEngine());
+      setEncryptNewState(await getEncryptNewLibrary());
+      const libraryKey = await getLibraryKey();
+      if (libraryKey) setRecoveryKey((await import('../lib/changeLog/libraryStore')).formatRecoveryKey(libraryKey));
+      const webdav = await getWebDavConfig();
+      if (webdav) {
+        setWebdavUrl(webdav.url);
+        setWebdavUsername(webdav.username);
+        setWebdavPasswordSaved(!!webdav.password);
+      }
       const gitRemoteConfig = await getGitRemoteConfig();
       if (gitRemoteConfig) {
         setGitRemoteUrl(gitRemoteConfig.url);
@@ -496,6 +543,50 @@ function FolderSyncCard() {
     }
   };
 
+  const handleSyncEngineChange = async (engine: 'git' | 'v2') => {
+    if (engine === syncEngine) return;
+    if (engine === 'v2' && !window.confirm(t('account.folderSync.engine.confirmSwitch'))) return;
+    setSwitchingEngine(true);
+    setError(null);
+    try {
+      const runner = await import('../lib/sync/syncV2Runner');
+      if (engine === 'v2') {
+        const r = await runner.switchToSyncV2();
+        setResult(r);
+        setLastSyncAt(r.lastSyncAt);
+      } else {
+        await runner.switchBackToGit();
+      }
+      setSyncEngineState(engine);
+      const { getLibraryKey } = await import('../lib/sync/syncSettings');
+      const libraryKey = await getLibraryKey();
+      if (libraryKey) setRecoveryKey((await import('../lib/changeLog/libraryStore')).formatRecoveryKey(libraryKey));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('account.folderSync.syncFailed'));
+    } finally {
+      setSwitchingEngine(false);
+    }
+  };
+
+  const handleSaveRecoveryKey = async () => {
+    const [{ parseRecoveryKey, formatRecoveryKey }, { setLibraryKey }] = await Promise.all([
+      import('../lib/changeLog/libraryStore'), import('../lib/sync/syncSettings'),
+    ]);
+    const key = parseRecoveryKey(recoveryKeyInput);
+    if (!key) { setRecoveryKeyNote(t('account.folderSync.encryption.invalidKey')); return; }
+    await setLibraryKey(key);
+    setRecoveryKey(formatRecoveryKey(key));
+    setRecoveryKeyInput('');
+    setRecoveryKeyNote(t('account.folderSync.encryption.keySaved'));
+    await handleSyncNow();
+  };
+
+  const handleEncryptNewChange = async (on: boolean) => {
+    setEncryptNewState(on);
+    const { setEncryptNewLibrary } = await import('../lib/sync/syncSettings');
+    await setEncryptNewLibrary(on);
+  };
+
   const handleConflictPolicyChange = async (policy: ConflictPolicy, scope: SettingScope = policyScope) => {
     setConflictPolicyState(policy);
     setPolicyScope(scope);
@@ -586,13 +677,41 @@ function FolderSyncCard() {
     }
   };
 
-  const handleSelectMode = async (mode: 'folder' | 'git-remote') => {
+  const handleSelectMode = async (mode: 'folder' | 'git-remote' | 'webdav') => {
     setSyncModeState(mode);
     setError(null);
     setConnectionTestResult(null);
+    // WebDAV is saved with its form (it needs a URL before it can sync).
+    if (mode === 'webdav') return;
     const { setSyncMode } = await import('../lib/sync/syncSettings');
     await setSyncMode(mode);
     if (mode === 'folder' && folderPath) await handleSyncNow();
+  };
+
+  /** WebDAV syncs only with sync v2, so saving it also moves this device
+   *  onto v2 when it isn't there yet. */
+  const handleSaveWebdav = async () => {
+    setSavingWebdav(true);
+    setError(null);
+    try {
+      const { setWebDavConfig, setSyncMode, getSyncEngine } = await import('../lib/sync/syncSettings');
+      await setWebDavConfig({ url: webdavUrl.trim(), username: webdavUsername.trim(), password: webdavPassword ? webdavPassword : undefined });
+      if (webdavPassword) { setWebdavPasswordSaved(true); setWebdavPassword(''); }
+      await setSyncMode('webdav');
+      if ((await getSyncEngine()) === 'v2') {
+        await handleSyncNow();
+      } else {
+        const runner = await import('../lib/sync/syncV2Runner');
+        const r = await runner.switchToSyncV2();
+        setResult(r);
+        setLastSyncAt(r.lastSyncAt);
+        setSyncEngineState('v2');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('account.folderSync.syncFailed'));
+    } finally {
+      setSavingWebdav(false);
+    }
   };
 
   const handleTestConnection = async () => {
@@ -715,7 +834,7 @@ function FolderSyncCard() {
         </div>
       </div>
 
-      <div className="space-y-5">
+      <div className="space-y-8">
         {pauseReason && (
           <p className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 rounded-xl px-4 py-3 flex items-start gap-2">
             <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
@@ -738,470 +857,628 @@ function FolderSyncCard() {
           </p>
         )}
 
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.syncMode')}</label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <SettingsGroup icon="sync" title={t('account.syncGroups.status.title')}>
+          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            <span className="font-bold">{t('account.folderSync.lastSync')}:</span>{' '}
+            {lastSyncAt ? new Date(lastSyncAt).toLocaleString(i18n.language) : t('account.folderSync.never')}
+          </p>
+          {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+          {resyncingAll && resyncProgress && (
+            <div className="space-y-1">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                {t('account.folderSync.resyncProgress', { phase: resyncProgress.phase, done: resyncProgress.done, total: resyncProgress.total })}
+              </p>
+              <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all bg-amber-500"
+                  style={{ width: `${resyncProgress.total ? Math.round((resyncProgress.done / resyncProgress.total) * 100) : 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {resyncingAll && !resyncProgress && !syncing && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{t('account.folderSync.preparingResync')}</p>
+          )}
+          {syncing && progress && (
+            <div className="space-y-1">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                {progress.phase === 'push' ? t('account.folderSync.uploading') : t('account.folderSync.downloading')}{' — '}
+                {t('account.folderSync.objectProgress', { done: progress.done, count: progress.total })}
+              </p>
+              <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${progress.phase === 'push' ? 'bg-primary' : 'bg-sky-500'}`}
+                  style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {!syncing && result && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+              {result.pushedObjects > 0 && `${t('account.folderSync.uploadedObjects', { count: result.pushedObjects })} `}
+              {result.pulledObjects > 0 && `${t('account.folderSync.downloadedObjects', { count: result.pulledObjects })} `}
+              {result.pushedObjects === 0 && result.pulledObjects === 0 && `${t('account.folderSync.nothingTransferred')} `}
+              {result.applied > 0
+                ? t('account.folderSync.appliedFromOthers', {
+                    what: formatAppliedByType(t, result.appliedByType) || t('account.folderSync.changeCount', { count: result.applied }),
+                  })
+                : t('account.folderSync.nothingNew')}
+              {result.committed ? ` ${t('account.folderSync.ownChangesCommitted')}` : ''}
+              {result.autoResolved > 0 ? ` ${t('account.folderSync.autoResolvedFields', { count: result.autoResolved })}` : ''}
+              {result.conflicts > 0 ? ` ${t('account.folderSync.fieldsNeedReview', { count: result.conflicts })}` : ''}
+            </p>
+          )}
+          {!syncing && result && result.failedEntities.length > 0 && (
+            <p className="text-xs text-amber-600 font-medium">
+              {t('account.folderSync.failedEntities', {
+                count: result.failedEntities.length,
+                types: result.failedEntities.map((f) => f.entityType).join(', '),
+              })}
+            </p>
+          )}
+          {stuckEntities.length > 0 && (
+            <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/60 dark:bg-red-950/20 p-3 space-y-2">
+              <p className="text-xs font-bold text-red-700 dark:text-red-400">
+                {t('account.folderSync.stuck.title', { count: stuckEntities.length })}
+              </p>
+              <ul className="space-y-1">
+                {stuckEntities.slice(0, 8).map((e) => (
+                  <li key={`${e.entityType}:${e.entityId}`} className="text-xs text-red-700/90 dark:text-red-300/90">
+                    <span className="font-medium">{t(`account.entityLabel.${e.entityType}`, { defaultValue: e.entityType })}</span>
+                    {e.displayName ? ` "${e.displayName}"` : ''} — {stuckReason(t, e.error)}
+                  </li>
+                ))}
+                {stuckEntities.length > 8 && (
+                  <li className="text-xs text-red-700/70 dark:text-red-300/70">
+                    {t('account.folderSync.stuck.andMore', { count: stuckEntities.length - 8 })}
+                  </li>
+                )}
+              </ul>
+              <button
+                onClick={handleRetryStuck}
+                disabled={retryingStuck}
+                className="text-xs font-bold text-red-700 dark:text-red-400 underline disabled:opacity-50"
+              >
+                {retryingStuck ? t('account.folderSync.stuck.retrying') : t('account.folderSync.stuck.tryAgain')}
+              </button>
+            </div>
+          )}
+          {!syncing && result && Object.keys(result.entityScanCounts).length > 0 && (
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">
+              {t('account.folderSync.scanCounts')} {formatScanCounts(result.entityScanCounts)}
+            </p>
+          )}
+          {!repairing && repairMessage && <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{repairMessage}</p>}
+          {replacing && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+              {replaceProgress
+                ? t('account.folderSync.replace.progress', { done: replaceProgress.done, total: replaceProgress.total })
+                : t('account.folderSync.replace.preparing')}
+            </p>
+          )}
+          {!replacing && replaceMessage && <p className="text-xs text-primary font-medium">{replaceMessage}</p>}
+          <div className="flex gap-3 flex-wrap">
             <button
               type="button"
-              onClick={() => handleSelectMode('folder')}
-              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'folder' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+              onClick={handleSyncNow}
+              disabled={syncing}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-2xl font-black text-sm hover:bg-zinc-800 dark:hover:bg-white transition-all active:scale-[0.98] disabled:opacity-50"
             >
-              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.modeFolder')}</p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                {electron
-                  ? t('account.folderSync.modeFolderHintDesktop')
-                  : t('account.folderSync.modeFolderHintAndroid')}
-              </p>
+              <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
+              {syncing ? t('account.folderSync.syncing') : t('account.folderSync.syncNow')}
             </button>
             <button
               type="button"
-              onClick={() => handleSelectMode('git-remote')}
-              className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'git-remote' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+              onClick={() => navigate('/sync-history')}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
             >
-              <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.modeGitRemote')}</p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{t('account.folderSync.modeGitRemoteHint')}</p>
+              <span className="material-symbols-outlined text-lg">history</span>
+              {t('account.folderSync.history')}
             </button>
           </div>
-        </div>
+        </SettingsGroup>
 
-        {syncMode === 'folder' ? (
-          <div className="flex gap-8 flex-wrap">
-            <div className="min-w-0">
-              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.syncFolder')}</p>
-              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? t('account.folderSync.noFolderChosen')}</p>
-            </div>
-            <div className="self-end">
+        <SettingsGroup icon="cloud" title={t('account.syncGroups.where.title')} hint={t('account.syncGroups.where.hint')}>
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.syncMode')}</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={handleChangeFolder}
-                disabled={choosingFolder}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
+                onClick={() => handleSelectMode('folder')}
+                className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'folder' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
               >
-                <span className="material-symbols-outlined text-base">folder_open</span>
-                {choosingFolder ? t('account.folderSync.choosing') : folderPath ? t('account.folderSync.changeFolder') : t('account.folderSync.chooseFolder')}
+                <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.modeFolder')}</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  {electron
+                    ? t('account.folderSync.modeFolderHintDesktop')
+                    : t('account.folderSync.modeFolderHintAndroid')}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectMode('git-remote')}
+                className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'git-remote' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+              >
+                <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.modeGitRemote')}</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{t('account.folderSync.modeGitRemoteHint')}</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectMode('webdav')}
+                className={`text-left p-4 rounded-2xl border transition-colors ${syncMode === 'webdav' ? 'border-primary bg-primary/5' : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+              >
+                <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.webdav.mode')}</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{t('account.folderSync.webdav.modeHint')}</p>
               </button>
             </div>
           </div>
-        ) : (
-          <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-5">
-            <div>
-              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.repositoryUrl')}</label>
-              <input
-                type="text"
-                value={gitRemoteUrl}
-                onChange={(e) => setGitRemoteUrl(e.target.value)}
-                placeholder="https://github.com/you/smartchef-sync.git"
-                className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
-              />
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
-                {t('account.folderSync.repositoryUrlHint')}
-              </p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+          {syncMode === 'webdav' ? (
+            <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-5">
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.username')}</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.webdav.url')}</label>
                 <input
-                  type="text"
-                  value={gitRemoteUsername}
-                  onChange={(e) => setGitRemoteUsername(e.target.value)}
-                  placeholder={t('account.folderSync.usernamePlaceholder')}
+                  type="url"
+                  value={webdavUrl}
+                  onChange={(e) => setWebdavUrl(e.target.value)}
+                  placeholder="https://cloud.example.com/remote.php/dav/files/you/SmartChef"
                   className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                 />
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.webdav.urlHint')}</p>
               </div>
-              <ProviderKeyInput
-                label={t('account.folderSync.accessToken')}
-                placeholder={t('account.folderSync.accessTokenPlaceholder')}
-                value={gitRemoteToken}
-                hasKey={gitRemoteTokenConfigured}
-                touched={gitRemoteTokenTouched}
-                onChange={(v, t) => { setGitRemoteToken(v); setGitRemoteTokenTouched(t); }}
-              />
-              {/* Advisory only — Save stays enabled. See tokenShape.ts for
-                  why a hard block would be the worse failure. */}
-              {tokenShapeProblem && (
-                <p className="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
-                  <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
-                  {tokenShapeProblem.message}
-                </p>
-              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.username')}</label>
+                  <input
+                    type="text"
+                    value={webdavUsername}
+                    onChange={(e) => setWebdavUsername(e.target.value)}
+                    autoComplete="username"
+                    className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.webdav.password')}</label>
+                  <input
+                    type="password"
+                    value={webdavPassword}
+                    onChange={(e) => setWebdavPassword(e.target.value)}
+                    autoComplete="new-password"
+                    placeholder={webdavPasswordSaved ? t('account.folderSync.webdav.passwordKept') : ''}
+                    className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">{t('account.folderSync.webdav.passwordHint')}</p>
+              <button
+                type="button"
+                onClick={handleSaveWebdav}
+                disabled={savingWebdav || !webdavUrl.trim() || !webdavUsername.trim() || (!webdavPassword && !webdavPasswordSaved)}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-xl font-black text-xs hover:bg-zinc-800 dark:hover:bg-white transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-base">cloud_sync</span>
+                {savingWebdav ? t('account.folderSync.webdav.saving') : t('account.folderSync.webdav.save')}
+              </button>
             </div>
-            {showCorsProxy ? (
+          ) : syncMode === 'folder' ? (
+            <div className="flex gap-8 flex-wrap">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.syncFolder')}</p>
+                <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate max-w-xs" title={folderPath ?? undefined}>{folderPath ?? t('account.folderSync.noFolderChosen')}</p>
+              </div>
+              <div className="self-end">
+                <button
+                  type="button"
+                  onClick={handleChangeFolder}
+                  disabled={choosingFolder}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-base">folder_open</span>
+                  {choosingFolder ? t('account.folderSync.choosing') : folderPath ? t('account.folderSync.changeFolder') : t('account.folderSync.chooseFolder')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900 rounded-2xl p-5">
               <div>
-                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.corsProxy')}</label>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.repositoryUrl')}</label>
                 <input
                   type="text"
-                  value={gitRemoteCorsProxy}
-                  onChange={(e) => setGitRemoteCorsProxy(e.target.value)}
-                  placeholder={t('account.folderSync.corsProxyPlaceholder')}
+                  value={gitRemoteUrl}
+                  onChange={(e) => setGitRemoteUrl(e.target.value)}
+                  placeholder="https://github.com/you/smartchef-sync.git"
                   className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
                 />
                 <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
-                  {t('account.folderSync.corsProxyHint')}
+                  {t('account.folderSync.repositoryUrlHint')}
                 </p>
               </div>
-            ) : (
-              <button type="button" onClick={() => setShowCorsProxy(true)} className="text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400">
-                {t('account.folderSync.corsProxyToggle')}
-              </button>
-            )}
-            {connectionTestResult && (
-              <p className={`text-xs font-medium flex items-start gap-2 ${TEST_RESULT_TONE[connectionTestResult.kind]}`}>
-                <span className="material-symbols-outlined text-[16px] shrink-0">{TEST_RESULT_ICON[connectionTestResult.kind]}</span>
-                {connectionTestResult.message}
-              </p>
-            )}
-            <div className="flex gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={handleTestConnection}
-                disabled={testingConnection || !gitRemoteUrl.trim()}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
-              >
-                <span className={`material-symbols-outlined text-base ${testingConnection ? 'animate-spin' : ''}`}>wifi_tethering</span>
-                {testingConnection ? t('account.folderSync.testing') : t('account.folderSync.testConnection')}
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveGitRemote}
-                disabled={savingGitRemote || !gitRemoteUrl.trim()}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-black text-xs hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
-              >
-                <span className="material-symbols-outlined text-base">{savingGitRemote ? 'sync' : 'save'}</span>
-                {savingGitRemote ? t('common.saving') : t('account.folderSync.saveAndSync')}
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.automaticSync')}</label>
-          <div className="flex items-center gap-2 flex-wrap">
-            {SYNC_INTERVAL_PRESETS.map((preset) => {
-              const active = intervalValue === preset.value && intervalUnit === preset.unit;
-              return (
-                <button
-                  key={`${preset.value}-${preset.unit}`}
-                  type="button"
-                  onClick={() => handleSaveInterval(preset.value, preset.unit)}
-                  disabled={savingInterval}
-                  className={`px-3 py-1.5 rounded-full text-xs font-black transition-colors disabled:opacity-50 ${active ? 'bg-zinc-900 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
-                >
-                  {formatSyncInterval(preset)}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.username')}</label>
+                  <input
+                    type="text"
+                    value={gitRemoteUsername}
+                    onChange={(e) => setGitRemoteUsername(e.target.value)}
+                    placeholder={t('account.folderSync.usernamePlaceholder')}
+                    className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
+                  />
+                </div>
+                <ProviderKeyInput
+                  label={t('account.folderSync.accessToken')}
+                  placeholder={t('account.folderSync.accessTokenPlaceholder')}
+                  value={gitRemoteToken}
+                  hasKey={gitRemoteTokenConfigured}
+                  touched={gitRemoteTokenTouched}
+                  onChange={(v, t) => { setGitRemoteToken(v); setGitRemoteTokenTouched(t); }}
+                />
+                {/* Advisory only — Save stays enabled. See tokenShape.ts for
+                    why a hard block would be the worse failure. */}
+                {tokenShapeProblem && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                    <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
+                    {tokenShapeProblem.message}
+                  </p>
+                )}
+              </div>
+              {showCorsProxy ? (
+                <div>
+                  <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.corsProxy')}</label>
+                  <input
+                    type="text"
+                    value={gitRemoteCorsProxy}
+                    onChange={(e) => setGitRemoteCorsProxy(e.target.value)}
+                    placeholder={t('account.folderSync.corsProxyPlaceholder')}
+                    className="w-full bg-white dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
+                  />
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
+                    {t('account.folderSync.corsProxyHint')}
+                  </p>
+                </div>
+              ) : (
+                <button type="button" onClick={() => setShowCorsProxy(true)} className="text-xs font-bold text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400">
+                  {t('account.folderSync.corsProxyToggle')}
                 </button>
-              );
-            })}
-            <div className="flex items-center gap-1.5 ml-1">
-              <input
-                type="number"
-                min={1}
-                value={intervalValue}
-                onChange={(e) => setIntervalValueState(Math.max(1, Number(e.target.value) || 1))}
-                onBlur={() => handleSaveInterval(intervalValue, intervalUnit)}
-                className="w-16 bg-zinc-50 dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold px-2 py-1.5 text-xs text-center"
-              />
-              <select
-                value={intervalUnit}
-                onChange={(e) => {
-                  const unit = e.target.value as SyncIntervalUnit;
-                  setIntervalUnitState(unit);
-                  handleSaveInterval(intervalValue, unit);
-                }}
-                disabled={savingInterval}
-                className="bg-zinc-50 dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold px-2 py-1.5 text-xs disabled:opacity-50"
-              >
-                <option value="minutes">{t('account.folderSync.unitMinutes')}</option>
-                <option value="hours">{t('account.folderSync.unitHours')}</option>
-                <option value="days">{t('account.folderSync.unitDays')}</option>
-                <option value="weeks">{t('account.folderSync.unitWeeks')}</option>
-                <option value="months">{t('account.folderSync.unitMonths')}</option>
-              </select>
-            </div>
-          </div>
-          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.automaticSyncHint')}</p>
-        </div>
-
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.conflictPolicy.label')}</label>
-          <div role="radiogroup" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {(['newest', 'ask'] as ConflictPolicy[]).map((policy) => {
-              const active = conflictPolicy === policy;
-              return (
+              )}
+              {connectionTestResult && (
+                <p className={`text-xs font-medium flex items-start gap-2 ${TEST_RESULT_TONE[connectionTestResult.kind]}`}>
+                  <span className="material-symbols-outlined text-[16px] shrink-0">{TEST_RESULT_ICON[connectionTestResult.kind]}</span>
+                  {connectionTestResult.message}
+                </p>
+              )}
+              <div className="flex gap-2 flex-wrap">
                 <button
-                  key={policy}
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={testingConnection || !gitRemoteUrl.trim()}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  <span className={`material-symbols-outlined text-base ${testingConnection ? 'animate-spin' : ''}`}>wifi_tethering</span>
+                  {testingConnection ? t('account.folderSync.testing') : t('account.folderSync.testConnection')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveGitRemote}
+                  disabled={savingGitRemote || !gitRemoteUrl.trim()}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-xl font-black text-xs hover:bg-zinc-800 dark:hover:bg-white transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-base">{savingGitRemote ? 'sync' : 'save'}</span>
+                  {savingGitRemote ? t('common.saving') : t('account.folderSync.saveAndSync')}
+                </button>
+              </div>
+            </div>
+          )}
+        </SettingsGroup>
+
+        <SettingsGroup icon="tune" title={t('account.syncGroups.how.title')} hint={t('account.syncGroups.how.hint')}>
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.engine.label')}</label>
+            <div role="radiogroup" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {(['git', 'v2'] as const).map((engine) => {
+                const active = syncEngine === engine;
+                return (
+                  <button
+                    key={engine}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    disabled={switchingEngine || syncing || (engine === 'git' && syncMode === 'webdav')}
+                    onClick={() => void handleSyncEngineChange(engine)}
+                    className={`text-left rounded-2xl border-2 p-3 transition-colors disabled:opacity-50 ${active ? 'border-primary bg-primary/5' : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'}`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-black text-zinc-900 dark:text-zinc-100">
+                      <span className="material-symbols-outlined text-[18px] text-primary">{engine === 'git' ? 'history' : 'bolt'}</span>
+                      {t(`account.folderSync.engine.${engine}`)}
+                    </span>
+                    <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                      {t(`account.folderSync.engine.${engine}Hint`)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {switchingEngine && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5">{t('account.folderSync.engine.switching')}</p>}
+          </div>
+
+          {syncEngine === 'v2' && (
+            <div>
+              <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.encryption.label')}</label>
+              {recoveryKey ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('account.folderSync.encryption.hint')}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="min-w-0 break-all rounded-xl bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-xs font-mono text-zinc-800 dark:text-zinc-200">
+                      {showRecoveryKey ? recoveryKey : '•'.repeat(24)}
+                    </code>
+                    <button type="button" onClick={() => setShowRecoveryKey((v) => !v)} className="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300">
+                      {showRecoveryKey ? t('account.folderSync.encryption.hide') : t('account.folderSync.encryption.show')}
+                    </button>
+                    {showRecoveryKey && (
+                      <button type="button" onClick={() => void navigator.clipboard?.writeText(recoveryKey)} className="px-3 py-1.5 rounded-full text-xs font-bold border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300">
+                        {t('account.folderSync.encryption.copy')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <label className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                  <input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={encryptNew} onChange={(e) => void handleEncryptNewChange(e.target.checked)} />
+                  <span>
+                    <span className="font-bold">{t('account.folderSync.encryption.encryptNew')}</span>
+                    <span className="block text-xs text-zinc-500 dark:text-zinc-400">{t('account.folderSync.encryption.encryptNewHint')}</span>
+                  </span>
+                </label>
+              )}
+              <div className="flex flex-wrap gap-2 mt-3">
+                <input
+                  type="text"
+                  value={recoveryKeyInput}
+                  onChange={(e) => { setRecoveryKeyInput(e.target.value); setRecoveryKeyNote(null); }}
+                  placeholder={t('account.folderSync.encryption.enterKey')}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="min-w-0 flex-1 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-mono px-3 py-2 text-xs"
+                />
+                <button type="button" onClick={() => void handleSaveRecoveryKey()} disabled={!recoveryKeyInput.trim()} className="px-4 py-2 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-xl font-black text-xs disabled:opacity-50">
+                  {t('account.folderSync.encryption.useKey')}
+                </button>
+              </div>
+              {recoveryKeyNote && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5">{recoveryKeyNote}</p>}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.automaticSync')}</label>
+            <div className="flex items-center gap-2 flex-wrap">
+              {SYNC_INTERVAL_PRESETS.map((preset) => {
+                const active = intervalValue === preset.value && intervalUnit === preset.unit;
+                return (
+                  <button
+                    key={`${preset.value}-${preset.unit}`}
+                    type="button"
+                    onClick={() => handleSaveInterval(preset.value, preset.unit)}
+                    disabled={savingInterval}
+                    className={`px-3 py-1.5 rounded-full text-xs font-black transition-colors disabled:opacity-50 ${active ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                  >
+                    {formatSyncInterval(preset)}
+                  </button>
+                );
+              })}
+              <div className="flex items-center gap-1.5 ml-1">
+                <input
+                  type="number"
+                  min={1}
+                  value={intervalValue}
+                  onChange={(e) => setIntervalValueState(Math.max(1, Number(e.target.value) || 1))}
+                  onBlur={() => handleSaveInterval(intervalValue, intervalUnit)}
+                  className="w-16 bg-zinc-50 dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold px-2 py-1.5 text-xs text-center"
+                />
+                <select
+                  value={intervalUnit}
+                  onChange={(e) => {
+                    const unit = e.target.value as SyncIntervalUnit;
+                    setIntervalUnitState(unit);
+                    handleSaveInterval(intervalValue, unit);
+                  }}
+                  disabled={savingInterval}
+                  className="bg-zinc-50 dark:bg-zinc-900 rounded-lg border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-bold px-2 py-1.5 text-xs disabled:opacity-50"
+                >
+                  <option value="minutes">{t('account.folderSync.unitMinutes')}</option>
+                  <option value="hours">{t('account.folderSync.unitHours')}</option>
+                  <option value="days">{t('account.folderSync.unitDays')}</option>
+                  <option value="weeks">{t('account.folderSync.unitWeeks')}</option>
+                  <option value="months">{t('account.folderSync.unitMonths')}</option>
+                </select>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.automaticSyncHint')}</p>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.conflictPolicy.label')}</label>
+            <div role="radiogroup" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {(['newest', 'ask'] as ConflictPolicy[]).map((policy) => {
+                const active = conflictPolicy === policy;
+                return (
+                  <button
+                    key={policy}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => handleConflictPolicyChange(policy)}
+                    className={`text-left rounded-2xl border-2 p-3 transition-colors ${active ? 'border-primary bg-primary/5' : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'}`}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-black text-zinc-900 dark:text-zinc-100">
+                      <span className="material-symbols-outlined text-[18px] text-primary">{policy === 'newest' ? 'auto_fix_high' : 'rule'}</span>
+                      {t(`account.folderSync.conflictPolicy.${policy}`)}
+                    </span>
+                    <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-1">{t(`account.folderSync.conflictPolicy.${policy}Hint`)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div role="radiogroup" aria-label={t('account.folderSync.settingScope.label')} className="flex flex-wrap gap-2 mt-2">
+              {(['device', 'all-devices'] as SettingScope[]).map((scope) => (
+                <button
+                  key={scope}
                   type="button"
                   role="radio"
-                  aria-checked={active}
-                  onClick={() => handleConflictPolicyChange(policy)}
-                  className={`text-left rounded-2xl border-2 p-3 transition-colors ${active ? 'border-primary bg-primary/5' : 'border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700'}`}
+                  aria-checked={policyScope === scope}
+                  onClick={() => void handleConflictPolicyChange(conflictPolicy, scope)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+                    policyScope === scope
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300'
+                  }`}
                 >
-                  <span className="flex items-center gap-2 text-sm font-black text-zinc-900 dark:text-zinc-100">
-                    <span className="material-symbols-outlined text-[18px] text-primary">{policy === 'newest' ? 'auto_fix_high' : 'rule'}</span>
-                    {t(`account.folderSync.conflictPolicy.${policy}`)}
-                  </span>
-                  <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-1">{t(`account.folderSync.conflictPolicy.${policy}Hint`)}</span>
+                  {t(`account.folderSync.settingScope.${scope === 'device' ? 'thisDevice' : 'allDevices'}`)}
                 </button>
-              );
-            })}
+              ))}
+            </div>
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.settingScope.hint')}</p>
           </div>
-          <div role="radiogroup" aria-label={t('account.folderSync.settingScope.label')} className="flex flex-wrap gap-2 mt-2">
-            {(['device', 'all-devices'] as SettingScope[]).map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                role="radio"
-                aria-checked={policyScope === scope}
-                onClick={() => void handleConflictPolicyChange(conflictPolicy, scope)}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
-                  policyScope === scope
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300'
-                }`}
-              >
-                {t(`account.folderSync.settingScope.${scope === 'device' ? 'thisDevice' : 'allDevices'}`)}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">{t('account.folderSync.settingScope.hint')}</p>
-        </div>
+        </SettingsGroup>
 
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.setupFile.label')}</label>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setExportingSetup(true)}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white rounded-xl font-black text-xs hover:bg-zinc-800 transition-all active:scale-[0.98]"
-            >
-              <span className="material-symbols-outlined text-base">lock</span>
-              {t('account.setupFile.exportButton')}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setSetupImported(null); setImportingSetup(true); }}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
-            >
-              <span className="material-symbols-outlined text-base">upload_file</span>
-              {t('account.setupFile.importButton')}
-            </button>
+        <SettingsGroup icon="devices" title={t('account.syncGroups.devices.title')} hint={t('account.syncGroups.devices.hint')}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.deviceName')}</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={deviceName}
+                onChange={(e) => setDeviceNameState(e.target.value)}
+                onBlur={handleSaveDeviceName}
+                placeholder={deviceId ?? ''}
+                className="flex-1 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
+              />
+              {savingName && <span className="material-symbols-outlined text-lg text-zinc-400 dark:text-zinc-500 animate-spin self-center">sync</span>}
+            </div>
           </div>
-          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
-            {t('account.setupFile.hint')}
-          </p>
-          {setupImported && (
-            <p className="text-xs font-bold text-primary mt-2">
-              {t('account.setupFile.applied', {
-                what: setupImported.mode === 'git-remote'
-                  ? `${t('account.folderSync.modeGitRemote')} — ${setupImported.remoteUrl}`
-                  : t('account.setupFile.appliedFolderMode'),
-              })}
-              {setupImported.needsSyncFolder && ` ${t('account.setupFile.appliedNeedsFolder')}`}
+
+          <div className="flex gap-8 flex-wrap self-end pb-1">
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.thisDevice')}</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{deviceId ?? '—'}</p>
+            </div>
+          </div>
+          </div>
+
+          {syncMode === 'folder' && devices.length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.knownDevices')}</p>
+              <div className="space-y-1.5">
+                {devices.map((d) => (
+                  <div key={d.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
+                    <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                      {d.deviceName}
+                      {d.deviceId === deviceId && <span className="text-zinc-400 dark:text-zinc-500 font-medium"> {t('account.folderSync.thisDeviceSuffix')}</span>}
+                    </span>
+                    <span className="text-xs text-zinc-400 dark:text-zinc-500">{formatRelativeTime(t, d.lastSyncAt)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {syncMode === 'git-remote' && (
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">
+              {t('account.folderSync.knownDevicesUnavailable')}
             </p>
           )}
-        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.deviceName')}</label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={deviceName}
-              onChange={(e) => setDeviceNameState(e.target.value)}
-              onBlur={handleSaveDeviceName}
-              placeholder={deviceId ?? ''}
-              className="flex-1 bg-zinc-50 dark:bg-zinc-900 rounded-xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium px-4 py-2.5 text-sm"
-            />
-            {savingName && <span className="material-symbols-outlined text-lg text-zinc-400 dark:text-zinc-500 animate-spin self-center">sync</span>}
+          <div>
+            <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.setupFile.label')}</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setExportingSetup(true)}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-xl font-black text-xs hover:bg-zinc-800 dark:hover:bg-white transition-all active:scale-[0.98]"
+              >
+                <span className="material-symbols-outlined text-base">lock</span>
+                {t('account.setupFile.exportButton')}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSetupImported(null); setImportingSetup(true); }}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
+              >
+                <span className="material-symbols-outlined text-base">upload_file</span>
+                {t('account.setupFile.importButton')}
+              </button>
+            </div>
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1.5">
+              {t('account.setupFile.hint')}
+            </p>
+            {setupImported && (
+              <p className="text-xs font-bold text-primary mt-2">
+                {t('account.setupFile.applied', {
+                  what: setupImported.mode === 'git-remote'
+                    ? `${t('account.folderSync.modeGitRemote')} — ${setupImported.remoteUrl}`
+                    : t('account.setupFile.appliedFolderMode'),
+                })}
+                {setupImported.needsSyncFolder && ` ${t('account.setupFile.appliedNeedsFolder')}`}
+              </p>
+            )}
           </div>
-        </div>
+        </SettingsGroup>
 
-        <div className="flex gap-8 flex-wrap self-end pb-1">
-          <div>
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.thisDevice')}</p>
-            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{deviceId ?? '—'}</p>
-          </div>
-          <div>
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-1">{t('account.folderSync.lastSync')}</p>
-            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{lastSyncAt ? new Date(lastSyncAt).toLocaleString(i18n.language) : t('account.folderSync.never')}</p>
-          </div>
-        </div>
-        </div>
-
-        {syncMode === 'folder' && devices.length > 0 && (
-          <div>
-            <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.knownDevices')}</p>
-            <div className="space-y-1.5">
-              {devices.map((d) => (
-                <div key={d.deviceId} className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
-                  <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300">
-                    {d.deviceName}
-                    {d.deviceId === deviceId && <span className="text-zinc-400 dark:text-zinc-500 font-medium"> {t('account.folderSync.thisDeviceSuffix')}</span>}
-                  </span>
-                  <span className="text-xs text-zinc-400 dark:text-zinc-500">{formatRelativeTime(t, d.lastSyncAt)}</span>
-                </div>
-              ))}
+        {/* Tools for when something went wrong, folded away so the everyday
+            settings above stay short. */}
+        <details className="group border-t border-zinc-100 dark:border-zinc-800 pt-6">
+          <summary className="flex items-start gap-3 cursor-pointer list-none">
+            <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">build</span>
+            <span className="flex-1">
+              <span className="block text-sm font-black text-zinc-900 dark:text-zinc-100">{t('account.syncGroups.troubleshooting.title')}</span>
+              <span className="block text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{t('account.syncGroups.troubleshooting.hint')}</span>
+            </span>
+            <span className="material-symbols-outlined text-zinc-400 transition-transform group-open:rotate-180">expand_more</span>
+          </summary>
+          <div className="space-y-5 mt-5">
+            <div className="space-y-3">
+              <div className="flex gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={handleResyncAll}
+                disabled={resyncingAll || syncing}
+                title={t('account.folderSync.resyncAllHint')}
+                className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-lg ${resyncingAll ? 'animate-spin' : ''}`}>refresh</span>
+                {resyncingAll ? t('account.folderSync.resyncing') : t('account.folderSync.resyncAll')}
+              </button>
+              <button
+                type="button"
+                onClick={handleRepairLocalStorage}
+                disabled={repairing || syncing || resyncingAll}
+                title={t('account.folderSync.repairHint')}
+                className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-lg ${repairing ? 'animate-spin' : ''}`}>build</span>
+                {repairing ? t('account.folderSync.repairing') : t('account.folderSync.repairLocalData')}
+              </button>
+              </div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400"><span className="font-bold">{t('account.folderSync.resyncAll')}:</span> {t('account.folderSync.resyncAllHint')}</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400"><span className="font-bold">{t('account.folderSync.repairLocalData')}:</span> {t('account.folderSync.repairHint')}</p>
+            </div>
+            {/* Deliberately apart from the everyday buttons above and styled as a
+                danger action: it discards this device's own library. */}
+            <div className="rounded-2xl border border-red-100 dark:border-red-900/40 bg-red-50/50 dark:bg-red-950/20 p-4 space-y-3">
+              <div>
+                <p className="text-sm font-black text-red-700 dark:text-red-300">{t('account.folderSync.replace.title')}</p>
+                <p className="text-xs text-red-700/80 dark:text-red-300/80 mt-1">{t('account.folderSync.replace.hint')}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handlePrepareReplace}
+                disabled={preparingReplace || replacing || syncing || resyncingAll || repairing}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 rounded-2xl font-black text-sm hover:bg-red-50 dark:hover:bg-red-950/40 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-lg ${preparingReplace || replacing ? 'animate-spin' : ''}`}>{preparingReplace || replacing ? 'sync' : 'cloud_download'}</span>
+                {preparingReplace ? t('account.folderSync.replace.checking') : replacing ? t('account.folderSync.replace.replacing') : t('account.folderSync.replace.button')}
+              </button>
             </div>
           </div>
-        )}
-        {syncMode === 'git-remote' && (
-          <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            {t('account.folderSync.knownDevicesUnavailable')}
-          </p>
-        )}
-
-        {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
-        {resyncingAll && resyncProgress && (
-          <div className="space-y-1">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-              {t('account.folderSync.resyncProgress', { phase: resyncProgress.phase, done: resyncProgress.done, total: resyncProgress.total })}
-            </p>
-            <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all bg-amber-500"
-                style={{ width: `${resyncProgress.total ? Math.round((resyncProgress.done / resyncProgress.total) * 100) : 100}%` }}
-              />
-            </div>
-          </div>
-        )}
-        {resyncingAll && !resyncProgress && !syncing && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{t('account.folderSync.preparingResync')}</p>
-        )}
-        {syncing && progress && (
-          <div className="space-y-1">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-              {progress.phase === 'push' ? t('account.folderSync.uploading') : t('account.folderSync.downloading')}{' — '}
-              {t('account.folderSync.objectProgress', { done: progress.done, count: progress.total })}
-            </p>
-            <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${progress.phase === 'push' ? 'bg-primary' : 'bg-sky-500'}`}
-                style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 100}%` }}
-              />
-            </div>
-          </div>
-        )}
-        {!syncing && result && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-            {result.pushedObjects > 0 && `${t('account.folderSync.uploadedObjects', { count: result.pushedObjects })} `}
-            {result.pulledObjects > 0 && `${t('account.folderSync.downloadedObjects', { count: result.pulledObjects })} `}
-            {result.pushedObjects === 0 && result.pulledObjects === 0 && `${t('account.folderSync.nothingTransferred')} `}
-            {result.applied > 0
-              ? t('account.folderSync.appliedFromOthers', {
-                  what: formatAppliedByType(t, result.appliedByType) || t('account.folderSync.changeCount', { count: result.applied }),
-                })
-              : t('account.folderSync.nothingNew')}
-            {result.committed ? ` ${t('account.folderSync.ownChangesCommitted')}` : ''}
-            {result.autoResolved > 0 ? ` ${t('account.folderSync.autoResolvedFields', { count: result.autoResolved })}` : ''}
-            {result.conflicts > 0 ? ` ${t('account.folderSync.fieldsNeedReview', { count: result.conflicts })}` : ''}
-          </p>
-        )}
-        {!syncing && result && result.failedEntities.length > 0 && (
-          <p className="text-xs text-amber-600 font-medium">
-            {t('account.folderSync.failedEntities', {
-              count: result.failedEntities.length,
-              types: result.failedEntities.map((f) => f.entityType).join(', '),
-            })}
-          </p>
-        )}
-        {stuckEntities.length > 0 && (
-          <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/60 dark:bg-red-950/20 p-3 space-y-2">
-            <p className="text-xs font-bold text-red-700 dark:text-red-400">
-              {t('account.folderSync.stuck.title', { count: stuckEntities.length })}
-            </p>
-            <ul className="space-y-1">
-              {stuckEntities.slice(0, 8).map((e) => (
-                <li key={`${e.entityType}:${e.entityId}`} className="text-xs text-red-700/90 dark:text-red-300/90">
-                  <span className="font-medium">{t(`account.entityLabel.${e.entityType}`, { defaultValue: e.entityType })}</span>
-                  {e.displayName ? ` "${e.displayName}"` : ''} — {stuckReason(t, e.error)}
-                </li>
-              ))}
-              {stuckEntities.length > 8 && (
-                <li className="text-xs text-red-700/70 dark:text-red-300/70">
-                  {t('account.folderSync.stuck.andMore', { count: stuckEntities.length - 8 })}
-                </li>
-              )}
-            </ul>
-            <button
-              onClick={handleRetryStuck}
-              disabled={retryingStuck}
-              className="text-xs font-bold text-red-700 dark:text-red-400 underline disabled:opacity-50"
-            >
-              {retryingStuck ? t('account.folderSync.stuck.retrying') : t('account.folderSync.stuck.tryAgain')}
-            </button>
-          </div>
-        )}
-        {!syncing && result && Object.keys(result.entityScanCounts).length > 0 && (
-          <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">
-            {t('account.folderSync.scanCounts')} {formatScanCounts(result.entityScanCounts)}
-          </p>
-        )}
-        {!repairing && repairMessage && <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">{repairMessage}</p>}
-        {replacing && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-            {replaceProgress
-              ? t('account.folderSync.replace.progress', { done: replaceProgress.done, total: replaceProgress.total })
-              : t('account.folderSync.replace.preparing')}
-          </p>
-        )}
-        {!replacing && replaceMessage && <p className="text-xs text-primary font-medium">{replaceMessage}</p>}
-
-        <div className="flex gap-3 flex-wrap">
-          <button
-            type="button"
-            onClick={handleSyncNow}
-            disabled={syncing}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
-          >
-            <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
-            {syncing ? t('account.folderSync.syncing') : t('account.folderSync.syncNow')}
-          </button>
-          <button
-            type="button"
-            onClick={handleResyncAll}
-            disabled={resyncingAll || syncing}
-            title={t('account.folderSync.resyncAllHint')}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
-          >
-            <span className={`material-symbols-outlined text-lg ${resyncingAll ? 'animate-spin' : ''}`}>refresh</span>
-            {resyncingAll ? t('account.folderSync.resyncing') : t('account.folderSync.resyncAll')}
-          </button>
-          <button
-            type="button"
-            onClick={handleRepairLocalStorage}
-            disabled={repairing || syncing || resyncingAll}
-            title={t('account.folderSync.repairHint')}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
-          >
-            <span className={`material-symbols-outlined text-lg ${repairing ? 'animate-spin' : ''}`}>build</span>
-            {repairing ? t('account.folderSync.repairing') : t('account.folderSync.repairLocalData')}
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/sync-history')}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black text-sm hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
-          >
-            <span className="material-symbols-outlined text-lg">history</span>
-            {t('account.folderSync.history')}
-          </button>
-        </div>
-
-        {/* Deliberately apart from the everyday buttons above and styled as a
-            danger action: it discards this device's own library. */}
-        <div className="rounded-2xl border border-red-100 dark:border-red-900/40 bg-red-50/50 dark:bg-red-950/20 p-4 space-y-3">
-          <div>
-            <p className="text-sm font-black text-red-700 dark:text-red-300">{t('account.folderSync.replace.title')}</p>
-            <p className="text-xs text-red-700/80 dark:text-red-300/80 mt-1">{t('account.folderSync.replace.hint')}</p>
-          </div>
-          <button
-            type="button"
-            onClick={handlePrepareReplace}
-            disabled={preparingReplace || replacing || syncing || resyncingAll || repairing}
-            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 rounded-2xl font-black text-sm hover:bg-red-50 dark:hover:bg-red-950/40 transition-all active:scale-[0.98] disabled:opacity-50"
-          >
-            <span className={`material-symbols-outlined text-lg ${preparingReplace || replacing ? 'animate-spin' : ''}`}>{preparingReplace || replacing ? 'sync' : 'cloud_download'}</span>
-            {preparingReplace ? t('account.folderSync.replace.checking') : replacing ? t('account.folderSync.replace.replacing') : t('account.folderSync.replace.button')}
-          </button>
-        </div>
+        </details>
       </div>
 
       <Modal
@@ -1376,7 +1653,7 @@ function SyncCard() {
             type="button"
             onClick={handleSyncNow}
             disabled={syncing}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-2xl font-black text-sm hover:bg-zinc-800 dark:hover:bg-white transition-all active:scale-[0.98] disabled:opacity-50"
           >
             <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
             {syncing ? t('account.folderSync.syncing') : t('account.folderSync.syncNow')}
@@ -1623,7 +1900,7 @@ function LlmProviderCard() {
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-2xl font-black text-sm hover:bg-zinc-800 dark:hover:bg-white transition-all active:scale-[0.98] disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
           {saving ? t('common.saving') : saved ? t('common.saved') : t('common.save')}
@@ -1721,7 +1998,7 @@ function BackupCard() {
           type="button"
           onClick={handleExport}
           disabled={exporting}
-          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white rounded-2xl font-black text-sm hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
+          className="flex items-center justify-center gap-2 px-6 py-3 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 rounded-2xl font-black text-sm hover:bg-zinc-800 dark:hover:bg-white transition-all active:scale-[0.98] disabled:opacity-50"
         >
           <span className={`material-symbols-outlined text-lg ${exporting ? 'animate-spin' : ''}`}>
             {exporting ? 'sync' : 'download'}
@@ -2391,7 +2668,6 @@ function LanguagesCard() {
     void i18n.changeLanguage(code);
   };
 
-  const custom = languages.filter((l) => !l.hasUiBundle);
   const preview = isValidLanguageCode(draft) ? languageLabel(draft) : null;
 
   const handleAdd = (e: React.FormEvent) => {
@@ -2542,9 +2818,41 @@ function LanguagesCard() {
   );
 }
 
+/** The Account page's sections. Each card lives in exactly one; the tab is
+ *  in the URL (?tab=ai) so other pages can link straight to a section. */
+const ACCOUNT_SECTIONS = [
+  { id: 'sync', icon: 'sync' },
+  { id: 'profile', icon: 'person' },
+  { id: 'appearance', icon: 'palette' },
+  { id: 'ai', icon: 'auto_awesome' },
+  { id: 'data', icon: 'database' },
+] as const;
+type AccountTab = typeof ACCOUNT_SECTIONS[number]['id'];
+
+/** Which build this is — the desktop app asks Electron for the installed
+ *  version, every other platform shows the one baked in at build time. */
+function AboutCard() {
+  const { t } = useTranslation();
+  const [version, setVersion] = useState<string>(__APP_VERSION__);
+  useEffect(() => {
+    window.smartchefElectron?.getAppVersion?.().then((v) => { if (v) setVersion(v); }).catch(() => {});
+  }, []);
+  return (
+    <section className="border-t border-zinc-100 dark:border-zinc-800 pt-6">
+      <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.about.heading')}</h2>
+      <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+        {t('account.about.version')}: <span className="font-black text-zinc-900 dark:text-zinc-100">{version}</span>
+      </p>
+    </section>
+  );
+}
+
 export default function Account() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: AccountTab = ACCOUNT_SECTIONS.some((x) => x.id === searchParams.get('tab')) ? searchParams.get('tab') as AccountTab : 'sync';
+  const selectTab = (id: AccountTab) => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set('tab', id); return next; }, { replace: true });
   const account = useStore((s) => s.account);
   const setAccount = useStore((s) => s.setAccount);
   const [standalone, setStandalone] = useState<boolean | null>(null);
@@ -2608,106 +2916,135 @@ export default function Account() {
           <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">{t('common.account')}</h1>
         </div>
 
-      {/* Identity spans the full width: the avatar picker is fourteen
-          swatches across and only reads as a row when it has the room. */}
-      {standalone === null ? null : standalone ? (
-        <StandaloneProfileCard />
-      ) : (
-      <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.name')}</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.username')}</label>
-          <input
-            type="text"
-            autoCapitalize="none"
-            value={username}
-            onChange={(e) => setUsername(e.target.value.toLowerCase())}
-            className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
-          />
-        </div>
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.avatar')}</label>
-          <div className="flex flex-wrap gap-3 mb-4">
-            {AVATAR_PRESETS.map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => setAvatarUrl(preset)}
-                className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200 dark:hover:ring-zinc-700'}`}
-              >
-                <img src={preset} alt="" className="w-full h-full object-cover" />
-              </button>
-            ))}
-          </div>
-          <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.ownImage')}</span>
-          <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
-        </div>
-        <div>
-          <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.serverAccount.newPassword')}</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
-          />
-        </div>
-        {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
-        <div className="flex gap-4 pt-2">
-          <button
-            type="submit"
-            disabled={saving || !name}
-            className="px-8 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
-            {saving ? t('common.saving') : saved ? t('common.saved') : t('account.profile.saveChanges')}
-          </button>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
-          >
-            {t('account.profile.logOut')}
-          </button>
-        </div>
-      </form>
-      )}
 
-      {/* Two packed stacks, not a two-column grid. CSS grid locks cards into
-          rows, so the short Appearance card sitting beside the tall AI
-          Provider left ~250px of dead space beneath it, and pushed Backup &
-          Restore into a row of its own with the entire right half empty.
-          Stacks just pack: each column is as tall as its own contents.
+      {/* Sections. The page used to show every card at once in two
+          columns; grouped, each section is short enough to read through. */}
+      <nav aria-label={t('account.sections.label')} className="mb-3">
+        <div role="tablist" className="flex flex-wrap gap-2">
+          {ACCOUNT_SECTIONS.map(({ id, icon }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => selectTab(id)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-black whitespace-nowrap transition-colors ${
+                tab === id ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[18px]">{icon}</span>
+              {t(`account.sections.${id}.label`)}
+            </button>
+          ))}
+        </div>
+      </nav>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8 max-w-3xl">{t(`account.sections.${tab}.hint`)}</p>
 
-          The split is by content width, not importance — sync, conflicts and
-          user management carry wide rows (repo URLs, device lists, diffs);
-          appearance, provider, backup and the profile list are all short
-          controls that read fine in a 490px column. */}
-      <div className="mt-8 grid grid-cols-1 xl:grid-cols-12 gap-6 sm:gap-8 items-start">
-        <div className="xl:col-span-7 space-y-6 sm:space-y-8 min-w-0">
-          <FolderSyncCard />
-          <SyncCard />
-          {standalone && <ConflictsCard />}
-          {isNative() && !standalone && <OfflineDownloadsCard />}
-          {!standalone && account?.role === 'admin' && <ManageUsersCard />}
-        </div>
-        <div className="xl:col-span-5 space-y-6 sm:space-y-8 min-w-0">
-          <AppearanceCard />
-          <LanguagesCard />
-          <DiscoverSourcesCard />
-          <LlmProviderCard />
-          <BackupCard />
-          {standalone && <AllProfilesCard />}
-          <StorageModeCard />
-        </div>
+      <div role="tabpanel" className="max-w-4xl space-y-6 sm:space-y-8">
+        {tab === 'sync' && (
+          <>
+            {standalone && <ConflictsCard />}
+            <FolderSyncCard />
+            <SyncCard />
+            {standalone && <SharedCookbooksCard />}
+            {isNative() && !standalone && <OfflineDownloadsCard />}
+          </>
+        )}
+        {tab === 'profile' && (
+          <>
+            {standalone === null ? null : standalone ? (
+              <StandaloneProfileCard />
+            ) : (
+            <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
+              <div>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.name')}</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.folderSync.username')}</label>
+                <input
+                  type="text"
+                  autoCapitalize="none"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.avatar')}</label>
+                <div className="flex flex-wrap gap-3 mb-4">
+                  {AVATAR_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAvatarUrl(preset)}
+                      className={`w-12 h-12 rounded-full overflow-hidden shrink-0 transition-all ${avatarUrl === preset ? 'ring-4 ring-primary' : 'ring-2 ring-transparent hover:ring-zinc-200 dark:hover:ring-zinc-700'}`}
+                    >
+                      <img src={preset} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+                <span className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.ownImage')}</span>
+                <ImageUrlInput value={avatarUrl} onChange={setAvatarUrl} />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.serverAccount.newPassword')}</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-zinc-50 dark:bg-zinc-900 rounded-2xl border-none focus:ring-2 focus:ring-primary/20 text-zinc-900 dark:text-zinc-100 font-medium p-4"
+                />
+              </div>
+              {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+              <div className="flex gap-4 pt-2">
+                <button
+                  type="submit"
+                  disabled={saving || !name}
+                  className="px-8 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-lg">{saving ? 'sync' : saved ? 'check' : 'save'}</span>
+                  {saving ? t('common.saving') : saved ? t('common.saved') : t('account.profile.saveChanges')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="px-6 py-4 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-2xl font-black hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-[0.98]"
+                >
+                  {t('account.profile.logOut')}
+                </button>
+              </div>
+            </form>
+            )}
+            {standalone && <AllProfilesCard />}
+            {!standalone && account?.role === 'admin' && <ManageUsersCard />}
+          </>
+        )}
+        {tab === 'appearance' && (
+          <>
+            <AppearanceCard />
+            <LanguagesCard />
+          </>
+        )}
+        {tab === 'ai' && (
+          <>
+            <LlmProviderCard />
+            <DiscoverSourcesCard />
+          </>
+        )}
+        {tab === 'data' && (
+          <>
+            <BackupCard />
+            <StorageModeCard />
+            <AboutCard />
+          </>
+        )}
       </div>
       </div>
     </AppLayout>

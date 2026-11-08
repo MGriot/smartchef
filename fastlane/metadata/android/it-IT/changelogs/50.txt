@@ -1,0 +1,1 @@
+Invia una copia di una ricetta a qualcun altro: Esporta salva un file con la ricetta e le sue foto, e Importa > File la aggiunge alla sua libreria, collegando ingredienti e strumenti che ha già.

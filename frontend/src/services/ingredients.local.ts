@@ -251,6 +251,10 @@ export interface IngredientInput {
   synonyms?: string[];
   /** "This is a variety of" — see db/migrations/036_ingredient_parent.sql. */
   parentIngredientId?: string | null;
+  /** Grams per millilitre. Undefined on update means "leave as is", so a
+   *  caller that never heard of density (backup import, AI tidy) can't
+   *  wipe it; null clears it. */
+  densityGPerMl?: number | null;
 }
 
 async function upsertIngredientTags(ingredientId: string, tagIds?: string[]) {
@@ -276,12 +280,12 @@ export async function createIngredient(d: IngredientInput): Promise<{ id: string
   await query(
     `INSERT INTO ingredients (id, name, category_id, description, icon, image_urls,
        calories_kcal, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, seasonal_months,
-       synonyms, parent_ingredient_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+       synonyms, parent_ingredient_id, density_g_per_ml)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [id, d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
      d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
-     d.synonyms ?? [], d.parentIngredientId ?? null]
+     d.synonyms ?? [], d.parentIngredientId ?? null, d.densityGPerMl ?? null]
   );
 
   if (d.translations && d.translations.length > 0) {
@@ -377,8 +381,13 @@ export async function suggestIngredientTidy(
   const [catalog, categories, tags] = await Promise.all([
     query<{ id: string; name: string }>("SELECT id, name FROM ingredients WHERE sync_status != 'deleted' ORDER BY name"),
     query<{ id: string; name: string }>('SELECT id, name FROM ingredient_categories ORDER BY sort_order, name'),
-    query<{ id: string; name: string }>('SELECT id, name FROM tags WHERE deleted_at IS NULL ORDER BY name'),
+    query<{ id: string; name: string; group_name: string | null; exclude_tag_ids: string }>('SELECT id, name, group_name, exclude_tag_ids FROM tags WHERE deleted_at IS NULL ORDER BY name'),
   ]);
+  // Only what a food contains and the diets it fits are ever offered —
+  // see lib/tagScope.ts. "wrongTags" still sees every tag the item has, so
+  // a dish tag left on an ingredient can be flagged for removal.
+  const { ingredientTagFilter } = await import('../lib/tagScope');
+  const ingredientTags = tags.filter(ingredientTagFilter(tags));
   const idByLower = (rows: Array<{ id: string; name: string }>) => {
     const map = new Map<string, string>();
     for (const r of rows) if (!map.has(r.name.trim().toLowerCase())) map.set(r.name.trim().toLowerCase(), r.id);
@@ -397,7 +406,7 @@ export async function suggestIngredientTidy(
       langs,
       catalogNames: catalog.map((c) => c.name),
       categoryNames: categories.map((c) => c.name),
-      tagNames: tags.map((t) => t.name),
+      tagNames: ingredientTags.map((t) => t.name),
     },
   );
 
@@ -429,14 +438,14 @@ export interface NamingChange {
   addTagIds?: string[];
   removeTagIds?: string[];
   /** Per 100 g; only the fields present are written. */
-  nutrition?: Partial<Record<'caloriesKcal' | 'proteinG' | 'carbsG' | 'fatG' | 'fiberG' | 'sugarG' | 'sodiumMg', number>>;
+  nutrition?: Partial<Record<'caloriesKcal' | 'proteinG' | 'carbsG' | 'fatG' | 'fiberG' | 'sugarG' | 'sodiumMg' | 'densityGPerMl', number>>;
   /** Appended to the synonyms on file, duplicates skipped. */
   addSynonyms?: string[];
 }
 
 const NUTRITION_COLUMNS: Record<keyof NonNullable<NamingChange['nutrition']>, string> = {
   caloriesKcal: 'calories_kcal', proteinG: 'protein_g', carbsG: 'carbs_g', fatG: 'fat_g',
-  fiberG: 'fiber_g', sugarG: 'sugar_g', sodiumMg: 'sodium_mg',
+  fiberG: 'fiber_g', sugarG: 'sugar_g', sodiumMg: 'sodium_mg', densityGPerMl: 'density_g_per_ml',
 };
 
 /** Applies a naming change without touching anything else on the row —
@@ -502,12 +511,14 @@ export async function updateIngredient(id: string, d: IngredientInput): Promise<
   await query(
     `UPDATE ingredients SET name=$1, category_id=$2, description=$3, icon=$4, image_urls=$5,
        calories_kcal=$6, protein_g=$7, carbs_g=$8, fat_g=$9, fiber_g=$10, sugar_g=$11, sodium_mg=$12,
-       seasonal_months=$13, synonyms=$14, parent_ingredient_id=$15, updated_at=now()
+       seasonal_months=$13, synonyms=$14, parent_ingredient_id=$15,
+       density_g_per_ml=CASE WHEN $17 = 1 THEN $18 ELSE density_g_per_ml END, updated_at=now()
      WHERE id=$16`,
     [d.name, d.categoryId, d.description || null, d.icon || null, d.imageUrls || [],
      d.caloriesKcal ?? null, d.proteinG ?? null, d.carbsG ?? null, d.fatG ?? null,
      d.fiberG ?? null, d.sugarG ?? null, d.sodiumMg ?? null, d.seasonalMonths ?? [],
-     d.synonyms ?? [], parentIngredientId, id]
+     d.synonyms ?? [], parentIngredientId, id,
+     d.densityGPerMl !== undefined ? 1 : 0, d.densityGPerMl ?? null]
   );
 
   if (d.translations) {

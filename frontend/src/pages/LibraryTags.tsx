@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
-import Autocomplete from '../components/Autocomplete';
 import RenderFaIcon from '../components/RenderFaIcon';
-import SynonymsEditor from '../components/SynonymsEditor';
+import { CatalogMergeModal, CatalogNamingSection } from '../components/LibraryCatalog';
 import { useStore } from '../store/app.store';
 import { apiFetch } from '../lib/api';
 import { useTagGroupLabels } from '../hooks/useTagGroupLabels';
@@ -240,7 +239,6 @@ export default function LibraryTags() {
     [tags, mergeSource],
   );
 
-  const addTranslation = () => setTranslations([...translations, { lang: '', name: '' }]);
 
   const toggleExclude = (id: string) => {
     setForm(f => ({
@@ -255,32 +253,57 @@ export default function LibraryTags() {
     e.preventDefault();
     const url = editingTag ? `/api/tags/${editingTag.id}` : '/api/tags';
     const method = editingTag ? 'PUT' : 'POST';
+    const cleanTranslations = translations.filter(t => t.lang.trim() && t.name.trim());
+
+    // The edit lands on the page first and the request follows: the modal
+    // closing is the answer, and the refetch afterwards settles the row.
+    if (editingTag) {
+      const patched = {
+        ...editingTag,
+        name: form.name,
+        group_name: form.groupName,
+        color: form.color,
+        icon: form.icon,
+        exclude_tag_ids: form.excludeTagIds,
+        synonyms: form.synonyms,
+        translations: cleanTranslations,
+        translated_name: cleanTranslations.find(tr => tr.lang.toLowerCase() === contentLang?.toLowerCase())?.name ?? null,
+      };
+      setTags(prev => prev.map(tag => tag.id === editingTag.id ? patched : tag));
+    }
+    setShowModal(false);
 
     try {
       const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, translations: translations.filter(t => t.lang.trim() && t.name.trim()) })
+        body: JSON.stringify({ ...form, translations: cleanTranslations })
       });
       const result = await res.json();
-      if (res.ok) {
-        setShowModal(false);
-        fetchTags();
-      } else {
-        alert(t('library.shared.saveFailed', { error: JSON.stringify(result.error || result) }));
-      }
+      if (!res.ok) alert(t('library.shared.saveFailed', { error: JSON.stringify(result.error || result) }));
     } catch (err) {
       console.error('Save failed:', err);
     }
+    fetchTags();
   };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm(t('library.tags.confirmDelete'))) return;
+    // Gone from the page at once — the open modal used to keep showing the
+    // deleted tag, which read as "the delete didn't work".
+    const previous = tags;
+    setTags(prev => prev.filter(tag => tag.id !== id));
+    setShowModal(false);
+    setEditingTag(null);
     try {
       const res = await apiFetch(`/api/tags/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchTags();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      fetchTags();
+      fetchCustomTags();
     } catch (err) {
       console.error('Delete failed:', err);
+      setTags(previous);
+      alert(t('library.shared.saveFailed', { error: String(err) }));
     }
   };
 
@@ -482,41 +505,19 @@ export default function LibraryTags() {
       </AppLayout>
 
       {/* ─── Merge Tag ───────────────────────────────────── */}
-      <Modal
+      <CatalogMergeModal
         open={!!mergeSource}
         onClose={() => setMergeSource(null)}
-        size="sm"
-        zIndex={120}
         title={t('library.tags.mergeTitle')}
         subtitle={mergeSource ? t('library.tags.mergeSubtitle', { name: mergeSource.name }) : undefined}
-        footer={
-          <>
-            <ModalCancelButton onClick={() => setMergeSource(null)}>{t('common.cancel')}</ModalCancelButton>
-            <ModalSubmitButton type="button" onClick={handleMerge} disabled={!mergeTargetId || merging}>
-              {merging ? t('library.shared.merging') : t('library.shared.merge')}
-            </ModalSubmitButton>
-          </>
-        }
-      >
-        {/* Was a hand-rolled input + filtered list. It kept its typed text in
-            the *page's* state, so every keystroke re-rendered the whole tag
-            catalog behind the dialog — and the list only appeared while no
-            target was picked, so correcting a choice meant clearing the box
-            first. Autocomplete is the same control the rest of the app
-            searches its catalogs with: the text stays inside it (the page
-            no longer re-renders as you type), arrow keys and Enter work,
-            and a suggestion's onMouseDown keeps focus in the field. */}
-        <Field label={t('library.shared.mergeIntoLabel')} hint={t('library.tags.mergeIntoHint')}>
-          <Autocomplete
-            options={mergeOptions}
-            value={mergeTargetId || null}
-            onSelect={(id) => setMergeTargetId(id)}
-            onClear={() => setMergeTargetId('')}
-            placeholder={t('library.tags.searchTag')}
-            className="sc-field"
-          />
-        </Field>
-      </Modal>
+        hint={t('library.tags.mergeIntoHint')}
+        placeholder={t('library.tags.searchTag')}
+        options={mergeOptions}
+        targetId={mergeTargetId}
+        onTargetChange={setMergeTargetId}
+        merging={merging}
+        onMerge={handleMerge}
+      />
 
       {/* ─── Rename / Merge Group ──────────────────────────────────────── */}
       {mergingGroup && (
@@ -616,23 +617,13 @@ export default function LibraryTags() {
             </div>
           </FormSection>
 
-          <FormSection
-            title={t('library.shared.sectionNaming')}
+          <CatalogNamingSection
             description={t('library.tags.namingHint')}
-            action={<AddLangButton onClick={addTranslation} label={t('library.shared.addLang')} />}
-          >
-            <Field label={t('library.shared.synonyms')}>
-              <SynonymsEditor value={form.synonyms} onChange={synonyms => setForm({ ...form, synonyms })} />
-            </Field>
-            <Field label={t('library.shared.translations')}>
-              <TranslationRows
-                value={translations}
-                onChange={setTranslations}
-                emptyLabel={t('library.shared.noTranslations')}
-                textPlaceholder={t('library.shared.translatedNamePlaceholder')}
-              />
-            </Field>
-          </FormSection>
+            synonyms={form.synonyms}
+            onSynonymsChange={synonyms => setForm({ ...form, synonyms })}
+            translations={translations}
+            onTranslationsChange={setTranslations}
+          />
         </div>
       </Modal>
     </>

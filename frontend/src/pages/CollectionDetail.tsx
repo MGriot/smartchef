@@ -1,3 +1,4 @@
+import MarkdownText from '../components/MarkdownText';
 import { formatDurationWith } from '../lib/duration';
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -181,7 +182,7 @@ export default function CollectionDetail() {
               <span className="material-symbols-outlined text-[18px]">arrow_back</span> {t('collections.gallery')}
             </Link>
             <h1 className="text-5xl font-extrabold tracking-tight font-headline text-on-surface mb-2">{collection.name}</h1>
-            {collection.description && <p className="text-secondary text-lg max-w-xl">{collection.description}</p>}
+            {collection.description && <MarkdownText text={collection.description} className="text-secondary text-lg max-w-xl" />}
           </div>
           <div className="flex gap-2">
             <button onClick={handleExportCollection} title={t('collections.export')} className="w-11 h-11 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-400 transition-all">

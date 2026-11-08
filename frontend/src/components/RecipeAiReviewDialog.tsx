@@ -4,8 +4,10 @@ import Modal, { ModalCancelButton, ModalSubmitButton } from './Modal';
 import type { CheckChange, CheckGroup, CheckResult } from '../lib/recipeCheck';
 import type { MismatchSide } from '../lib/recipeMismatchFix';
 import { diffWords } from '../lib/wordDiff';
+import { SOURCE_TYPE_META } from './RecipeSourcesEditor';
+import { difficultyKey } from '../lib/recipeReport';
 
-const GROUPS: CheckGroup[] = ['text', 'ingredients', 'steps', 'links', 'fields', 'tags', 'regions'];
+const GROUPS: CheckGroup[] = ['text', 'ingredients', 'steps', 'links', 'fields', 'tags', 'regions', 'sources'];
 
 /** One side of a git-style diff: a `-`/`+` gutter, the line tinted red or
  *  green, and the exact words that changed painted stronger. */
@@ -26,10 +28,13 @@ function DiffLine({ side, before, after }: { side: 'del' | 'add'; before: string
 
 /** What a change does, as the lines of a diff. A fill has no old value, so it
  *  shows only the green line. */
-function diffOf(c: CheckChange): { before: string | null; after: string } | null {
+function diffOf(c: CheckChange, t: (key: string) => string): { before: string | null; after: string } | null {
   switch (c.type) {
-    case 'textFix': case 'ingredientQty': case 'stepDuration': case 'field': case 'yield': case 'stepRewrite':
+    case 'difficulty': return { before: c.before ? t(difficultyKey[c.before]) : null, after: t(difficultyKey[c.value]) };
+    case 'textFix': case 'ingredientQty': case 'stepDuration': case 'field': case 'yield': case 'stepRewrite': case 'textAppend':
       return { before: c.before === '—' ? null : c.before, after: c.after };
+    case 'stepAdd': return { before: null, after: c.after };
+    case 'sourceAdd': return { before: null, after: [c.source.label, c.source.url].filter(Boolean).join(' — ') };
     case 'ingredientAdd': return c.after ? { before: null, after: `${c.name} — ${c.after}` } : { before: null, after: c.name };
     default: return null;
   }
@@ -38,7 +43,7 @@ function diffOf(c: CheckChange): { before: string | null; after: string } | null
 /** Review step of "Check with AI": every verified change with the recipe's
  *  own words that justify it, ticked by default, applied only on confirm. */
 export default function RecipeAiReviewDialog({
-  open, onClose, loading, error, result, onApply, onResolveMismatch, onDismissMismatch,
+  open, onClose, loading, error, result, onApply, onResolveMismatch, onDismissMismatch, title, subtitle, loadingText,
 }: {
   open: boolean;
   onClose: () => void;
@@ -50,6 +55,10 @@ export default function RecipeAiReviewDialog({
    *  Resolves with how many verified changes came back (0 = nothing to do). */
   onResolveMismatch?: (side: MismatchSide) => Promise<number>;
   onDismissMismatch?: () => void;
+  /** Defaults are Check with AI's; "Merge text with AI" reuses the dialog. */
+  title?: string;
+  subtitle?: string;
+  loadingText?: string;
 }) {
   const { t } = useTranslation();
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -59,6 +68,16 @@ export default function RecipeAiReviewDialog({
   // result that only gained changes (the mismatch fix) ticks just the new
   // ones, so what the user unticked stays unticked.
   const seen = useRef<Set<string>>(new Set());
+  // Seconds since loading started: a merge of a long text can take minutes,
+  // and a spinner alone looked frozen.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!loading) return;
+    setElapsed(0);
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [loading]);
 
   useEffect(() => {
     const ids = result?.changes.map((c) => c.id) ?? [];
@@ -110,6 +129,7 @@ export default function RecipeAiReviewDialog({
       case 'stepDuration': return t('recipeDetail.aiCheck.stepDuration', { n: c.index + 1 });
       case 'field': return t(`recipeDetail.aiCheck.field.${c.field}`);
       case 'yield': return t('recipeDetail.aiCheck.field.yield');
+      case 'difficulty': return t('recipeDetail.aiCheck.field.difficulty');
       case 'tag': return c.name;
       case 'region': return c.label;
       case 'link': return t('recipeDetail.aiCheck.link', { n: c.index + 1, from: c.from, label: c.label });
@@ -117,6 +137,9 @@ export default function RecipeAiReviewDialog({
       case 'ingredientRemove': return t('recipeDetail.aiCheck.ingredientRemove', { label: c.label });
       case 'stepRewrite': return t('recipeDetail.aiCheck.stepRewrite', { n: c.index + 1 });
       case 'stepRemove': return t('recipeDetail.aiCheck.stepRemove', { n: c.index + 1 });
+      case 'stepAdd': return t('recipeDetail.aiMerge.stepAdd');
+      case 'textAppend': return t(`recipeDetail.aiCheck.target.${c.target}`);
+      case 'sourceAdd': return t('recipeDetail.aiMerge.sourceAdd', { type: t(SOURCE_TYPE_META[c.source.type].labelKey) });
     }
   };
 
@@ -128,8 +151,8 @@ export default function RecipeAiReviewDialog({
       open={open}
       onClose={onClose}
       size="lg"
-      title={t('recipeDetail.aiCheck.title')}
-      subtitle={t('recipeDetail.aiCheck.subtitle')}
+      title={title ?? t('recipeDetail.aiCheck.title')}
+      subtitle={subtitle ?? t('recipeDetail.aiCheck.subtitle')}
       footer={
         <>
           <ModalCancelButton onClick={onClose}>{t('common.cancel')}</ModalCancelButton>
@@ -146,7 +169,8 @@ export default function RecipeAiReviewDialog({
       {loading && (
         <div className="flex items-center gap-3 py-10 justify-center text-zinc-500 dark:text-zinc-400">
           <span className="material-symbols-outlined animate-spin">progress_activity</span>
-          <span className="font-medium">{t('recipeDetail.aiCheck.checking')}</span>
+          <span className="font-medium">{loadingText ?? t('recipeDetail.aiCheck.checking')}</span>
+          {elapsed >= 5 && <span className="text-xs tabular-nums text-zinc-400">{t('recipeDetail.aiCheck.elapsed', { seconds: elapsed })}</span>}
         </div>
       )}
       {error && <p className="text-sm text-red-600 font-medium bg-red-50 rounded-xl px-4 py-3">{error}</p>}
@@ -232,9 +256,16 @@ export default function RecipeAiReviewDialog({
                             {t('recipeDetail.aiCheck.estimated')}
                           </span>
                         )}
+                        {(c.type === 'difficulty' || (c.type === 'field' && c.fromSteps)) && (
+                          <span className="ml-1 align-middle text-[10px] font-black uppercase tracking-wider rounded-full px-2 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                            {c.type === 'field' && c.fromSteps
+                              ? t('recipeDetail.aiCheck.fromSteps', { steps: c.fromSteps.map((i) => i + 1).join(', ') })
+                              : t('recipeDetail.aiCheck.estimatedByAi')}
+                          </span>
+                        )}
                       </span>
                       {(() => {
-                        const d = diffOf(c);
+                        const d = diffOf(c, t);
                         return d ? (
                           <span className="block mt-2 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
                             {d.before != null && <DiffLine side="del" before={d.before} after={d.after} />}

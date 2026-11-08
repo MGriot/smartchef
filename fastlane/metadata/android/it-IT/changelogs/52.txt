@@ -1,0 +1,1 @@
+Impostazioni riorganizzate: Account ora è diviso in Sincronizzazione e condivisione, Profilo, Aspetto e lingue, IA e fonti, Dati e archiviazione, e le impostazioni di sincronizzazione sono raggruppate e spiegate meglio.

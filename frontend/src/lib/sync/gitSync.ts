@@ -30,13 +30,14 @@ import { Preferences } from '@capacitor/preferences';
 import { gitfs } from '../gitfs';
 import { gitCache, resetGitCache } from './gitCache';
 import { isElectron } from '../electronBridge';
-import { ensureHiddenCloneInitialized, resetHiddenCloneInitFlag } from './hiddenClone';
+import { ensureHiddenCloneInitialized, isBrokenIndexError, removeBrokenIndex, resetHiddenCloneInitFlag } from './hiddenClone';
 import { pushObjectsAndRefs, pullObjectsAndRefs, DEFAULT_REMOTE_TRACKING_REF_NAME, type RemoteTransport, type TransferProgress } from './gitObjectTransport';
 import { writeBundleIfStale, tryCatchUpFromBundle } from './gitBundleTransport';
 import { packLooseObjectsAfterPush } from './gitPacking';
 import { fetchGitRemote, pushGitRemote } from './gitRemoteTransport';
 import {
   getSyncMode,
+  getSyncEngine,
   getGitRemoteConfig,
   getSyncIntervalMinutes,
   getConflictPolicy,
@@ -182,7 +183,15 @@ function author() {
  *  recipes.local.ts/ingredients.local.ts. One file per row (not per entity
  *  type) so a git diff on a single recipe is meaningful and two recipes
  *  edited at once don't collide in the same file. */
-export function writeEntityFile(type: EntityType, id: string, data: Record<string, unknown>): Promise<void> {
+export async function writeEntityFile(type: EntityType, id: string, data: Record<string, unknown>): Promise<void> {
+  // Sync v2: the change log is the only record; no Hidden Clone, no commit.
+  if ((await getSyncEngine()) === 'v2') {
+    const entityType = DIR_TO_ENTITY_TYPE[type];
+    if (!entityType) return;
+    await recordChangeIfEnabled(entityType, id, data);
+    await recordSynced(entityType, id, data.updated_at);
+    return;
+  }
   return serialize(async () => {
     const { dir } = await ensureHiddenCloneInitialized();
     // A field still waiting on the user is committed with the other
@@ -200,9 +209,24 @@ export function writeEntityFile(type: EntityType, id: string, data: Record<strin
     // The file now reflects the row as of this updated_at — see
     // syncReconcile.local.ts.
     if (entityType) await recordSynced(entityType, id, data.updated_at);
+    // Sync v2, phase 1: the change log rides along on the same hook, off
+    // unless switched on (services/changeLog.local.ts). Never fails a save.
+    if (entityType) await recordChangeIfEnabled(entityType, id, data);
     logIfSlow(`writeEntityFile(${type}) fs write`, startedAt, `${Math.round(json.length / 1024)}KB`);
     scheduleCommit();
-  });
+  }, `writeEntityFile(${type})`);
+}
+
+async function recordChangeIfEnabled(entityType: string, id: string, data: Record<string, unknown>): Promise<void> {
+  try {
+    const log = await import('../../services/changeLog.local');
+    if (!(await log.isChangeLogEnabled())) return;
+    // The library's own log, and a shared cookbook's for a recipe in one.
+    const { recordEntityEverywhere } = await import('../../services/sharedCookbooks.local');
+    await recordEntityEverywhere(entityType, id, data, await getDeviceId());
+  } catch (err) {
+    console.error(`SmartChef: change log could not record ${entityType} ${id}:`, err);
+  }
 }
 
 // ── Debounced commit — a burst of edits (typing a form, saving several
@@ -354,7 +378,7 @@ export async function hasConfiguredRemote(): Promise<boolean> {
   }
 }
 
-async function getConfiguredRemoteTransport(): Promise<RemoteTransport | null> {
+export async function getConfiguredRemoteTransport(): Promise<RemoteTransport | null> {
   if (isElectron()) {
     try {
       return await createElectronRemoteTransport();
@@ -832,7 +856,7 @@ async function syncNowInternal(onProgress?: (progress: TransferProgress) => void
   if (syncMode === 'git-remote') {
     const gitRemoteConfig = await getGitRemoteConfig();
     if (gitRemoteConfig) await syncGitRemoteMode(gitRemoteConfig);
-  } else {
+  } else if (syncMode === 'folder') {
     const transport = await getConfiguredRemoteTransport();
     if (transport) await syncFolderMode(transport);
   }
@@ -1017,6 +1041,10 @@ async function repairUnitRefs(): Promise<void> {
 }
 
 export async function syncNow(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
+  if ((await getSyncEngine()) === 'v2') {
+    const { syncNowV2 } = await import('./syncV2Runner');
+    return syncNowV2();
+  }
   await reserializeOnceForPortableIds();
   await repairUnitRefs();
   await publishDatabaseAheadOfRepo();
@@ -1038,6 +1066,20 @@ export async function syncNow(onProgress?: (progress: TransferProgress) => void)
   return result;
 }
 
+/** One cycle, run again once if a damaged .git/index in the clone failed it.
+ *  The index is only a cache, so dropping it is safe; left alone it failed
+ *  every cycle for good. */
+async function syncNowHealingIndex(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
+  try {
+    return await syncNowInternal(onProgress);
+  } catch (err) {
+    const { gitdir } = await ensureHiddenCloneInitialized();
+    if (!isBrokenIndexError(err) || !(await removeBrokenIndex(gitdir))) throw err;
+    resetGitCache();
+    return syncNowInternal(onProgress);
+  }
+}
+
 function syncNowSerialized(onProgress?: (progress: TransferProgress) => void): Promise<SyncResult> {
   return serialize(async () => {
     reportSyncStarted();
@@ -1049,7 +1091,7 @@ function syncNowSerialized(onProgress?: (progress: TransferProgress) => void): P
     resetGitCache();
     let applied = 0;
     try {
-      const result = await syncNowInternal(onProgress);
+      const result = await syncNowHealingIndex(onProgress);
       applied = result.applied;
       return result;
     } finally {

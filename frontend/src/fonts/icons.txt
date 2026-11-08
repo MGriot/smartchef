@@ -61,6 +61,7 @@ cloud
 cloud_done
 cloud_download
 cloud_off
+cloud_sync
 code
 collections
 collections_bookmark
@@ -269,6 +270,7 @@ poll
 pool
 portrait
 post
+post_add
 power
 preview
 print
@@ -337,7 +339,6 @@ speed
 sql
 square
 stack
-stacks
 star
 stars
 start

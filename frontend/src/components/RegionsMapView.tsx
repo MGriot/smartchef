@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, GeoJSON, Tooltip } from '../lib/leafletReact';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import { Suspense, lazy } from 'react';
 import type { ComponentProps } from 'react';
 import type RegionsMapView from './RegionsMapView';
 

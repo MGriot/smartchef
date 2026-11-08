@@ -1,0 +1,1 @@
+Basi per un motore di sincronizzazione più veloce e affidabile. Non è ancora attivo: la sincronizzazione funziona come prima.

@@ -189,10 +189,10 @@ async function loadBundleIngredient(id: string) {
     categoryName: row.category_name ?? "Uncategorized",
     name: row.name,
     description: row.description,
-    // Standalone's ingredients table has no density/default-unit columns.
-    // Emitted as null so the bundle keeps the shape the import side's Zod
-    // schema expects rather than omitting the keys.
-    densityGPerMl: null,
+    densityGPerMl: numberOrNull(row.density_g_per_ml),
+    // Standalone's ingredients table has no default-unit column. Emitted
+    // as null so the bundle keeps the shape the import side's Zod schema
+    // expects rather than omitting the key.
     defaultUnit: null,
     imageUrls: parseJsonArray(row.image_urls) as string[],
     icon: row.icon,

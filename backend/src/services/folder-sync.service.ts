@@ -5,15 +5,16 @@
 // in sync across devices). Each device writes only its own
 // `smartchef-<deviceId>.json`; on every tick it reads every *other*
 // device's file and merges each entity row in by id, last-write-wins on
-// `updatedAt`. See the Tenth-slice plan for why this replaces the
-// vector-clock CRDT engine (mdns.service.ts) rather than reusing it — that
-// engine never actually logged local writes, so there was nothing to sync.
+// `updatedAt`. See the Tenth-slice plan for why this replaced the
+// vector-clock CRDT engine rather than reusing it — that engine never
+// actually logged local writes, so there was nothing to sync. It has since
+// been removed (docs/cleanup-audit-2026-10.md, OBS-01).
 // ════════════════════════════════════════════════════════════════════════
 
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { PoolClient } from "pg";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 import { query, withTransaction } from "../db/pool";
 import { DEVICE_ID, DEVICE_NAME } from "./device-identity.service";
 import { computeAutoTagNames, unionTagNames } from "./tags.service";

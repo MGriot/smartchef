@@ -225,7 +225,13 @@
         "removeTags": "Tags removed",
         "nutrition": "Nutrition",
         "synonyms": "Synonyms"
-      }
+      },
+      "density": "Volume to weight",
+      "densityHint": "Specific weight in grams per millilitre (water = 1, flour ≈ 0.53, sugar ≈ 0.85, oil ≈ 0.92). When set, cups and spoons in recipes also show the weight.",
+      "densityUnit": "g/ml",
+      "densityExample": "1 cup ≈ {{grams}} g",
+      "densityKey": "Density (g/ml)",
+      "noDetails": "Nothing recorded for this ingredient yet. Tap Edit to add a description, nutrition, seasonality, tags or translations."
     },
     "common": {
       "gridView": "Grid view",
@@ -513,14 +519,16 @@
         "fields": "Portions, times and yield",
         "tags": "Tags",
         "regions": "Regions",
-        "links": "Links in the steps"
+        "links": "Links in the steps",
+        "sources": "Sources"
       },
       "field": {
         "servings": "Servings",
         "prep_time_min": "Prep time (min)",
         "cook_time_min": "Cook time (min)",
         "rest_time_min": "Rest time (min)",
-        "yield": "Yield"
+        "yield": "Yield",
+        "difficulty": "Difficulty"
       },
       "kind": {
         "fix": "fix",
@@ -544,6 +552,8 @@
       "stepRewrite": "Rewrite step {{n}}",
       "stepRemove": "Remove step {{n}}",
       "estimated": "amount estimated by AI",
+      "fromSteps": "added up from steps {{steps}}",
+      "estimatedByAi": "estimated by AI",
       "mismatch": {
         "title": "Ingredients and steps do not match",
         "stepsSay": "Named in the steps, missing from the list",
@@ -557,7 +567,8 @@
         "resolving": "Preparing the fixes…",
         "nothing": "No verifiable fix for this choice. You can edit the recipe by hand.",
         "error": "Could not prepare the fixes."
-      }
+      },
+      "elapsed": "{{seconds}} s"
     },
     "saving": "Saving…",
     "saveRecipe": "Save Recipe",
@@ -775,6 +786,36 @@
       "allIdentical": "The two recipes have the same content — merging only moves collections, plans and cook history.",
       "identicalFields_one": "{{count}} field is identical",
       "identicalFields_other": "{{count}} fields are identical"
+    },
+    "weightFromDensity": "Weight worked out from the ingredient's density",
+    "aiMerge": {
+      "button": "Merge text with AI",
+      "title": "Merge a text into this recipe",
+      "subtitle": "Paste anything about this dish: another version, a comment, notes. The AI proposes only what the text adds, and you choose what to keep.",
+      "placeholder": "Paste the text here…",
+      "hint": "Links, books and authors named in the text are added as sources. Nothing is removed from the recipe.",
+      "submit": "Merge with AI",
+      "reviewTitle": "What the text adds",
+      "reviewSubtitle": "Each change quotes the pasted text. Untick what you don't want, then apply: you can still edit before saving.",
+      "merging": "Reading the text…",
+      "failed": "The AI merge failed",
+      "stepAdd": "New step",
+      "sourceAdd": "Source: {{type}}"
+    },
+    "editLang": {
+      "editing": "Editing",
+      "add": "Language",
+      "pick": "Add a translation…",
+      "aiFill": "Fill the gaps with AI",
+      "remove": "Remove translation",
+      "removeConfirm": "Remove the whole {{lang}} translation of this recipe? It is gone once you save.",
+      "missing": "missing",
+      "panelHint": "You are writing the {{lang}} version. Each field shows the original above it. Quantities, units, tools and times are the same in every language: switch back to the original to change them.",
+      "ingredientNotes": "Notes",
+      "stepText": "Text",
+      "copyOriginal": "Start from the original (keeps the ingredient links)",
+      "ingredients": "Ingredients",
+      "ingredientNamesHint": "Names come from the ingredient library, so they are the same in every recipe: translate them in Library → Ingredients."
     }
   },
   "recipeCreate": {
@@ -840,6 +881,7 @@
     "ingredientsAndSteps": "Ingredients ({{ingCount}}) · {{stepCount}} steps",
     "createAndReview": "Create & Review Recipe",
     "notValidJson": "That file is not valid JSON.",
+    "notShareFile": "This file is not a recipe shared from SmartChef.",
     "importFailed": "Import failed",
     "failedToCreateRecipe": "Failed to create recipe",
     "originalRecipe": "Original recipe",
@@ -988,7 +1030,13 @@
     "nameOnly": "Name only",
     "remainingAtThisStep": "{{amount}} left at this step — use that",
     "ofTotal": "of {{total}} in the recipe",
-    "showUsedUp": "{{count}} already used up — show them anyway"
+    "showUsedUp": "{{count}} already used up — show them anyway",
+    "quantityHint": "Whole numbers, decimals or fractions: 2, 1.5, 3/4, 1 1/2, ½",
+    "quantityInvalid": "Not a quantity. Try 2, 1.5, 3/4 or 1 1/2",
+    "markdownHint": "Formatting:",
+    "markdownBold": "bold",
+    "markdownItalic": "italic",
+    "markdownList": "list"
   },
   "errors": {
     "couldNotCreateIngredient": "Could not create ingredient",
@@ -1045,7 +1093,8 @@
     "mergeIntoSelf": "Cannot merge an item into itself.",
     "toolNotFound": "Tool not found",
     "providerBusy": "{{provider}} is overloaded right now (HTTP {{status}}) and still was after several retries. This is on the provider's side — try again in a few minutes.",
-    "llmReplyTruncated": "The model's reply was cut off: the last steps may be incomplete or missing their links."
+    "llmReplyTruncated": "The model's reply was cut off: the last steps may be incomplete or missing their links.",
+    "aiTimedOut": "{{provider}} didn't answer within {{seconds}} seconds. Long texts and slow models take longer: try pasting only the part you need, or pick a faster model under AI Provider in your account."
   },
   "shopping": {
     "otherAisle": "Other",
@@ -1343,6 +1392,7 @@
     "hiddenHint": "Hidden languages are only out of the pickers. Nothing written in them was deleted, and showing one again brings it straight back."
   },
   "account": {
+    "about": { "heading": "About", "version": "Version" },
     "sync": {
       "nothingChanged": "Nothing changed — already up to date."
     },
@@ -1502,10 +1552,10 @@
       "languageLabel": "Language"
     },
     "folderSync": {
-      "heading": "Folder Sync",
+      "heading": "Sync between your devices",
       "syncHeading": "Sync",
-      "subtitle": "Choose how this device exchanges changes with your others — a plain synced folder, or a real git server.",
-      "subtitleCrossRef": "This is how offline devices reach each other; to move the library onto a server instead (or back off one), see \"{{card}}\".",
+      "subtitle": "Your devices exchange changes through a place you choose: a synced folder, a WebDAV server or a git server. No SmartChef account is needed.",
+      "subtitleCrossRef": "To move the library onto a SmartChef server instead, see \"{{card}}\" in Data & storage.",
       "adminOnlyNote": "Only an admin profile can change where this library syncs to, its credentials, or its devices.",
       "lastSyncedAt": "Last synced {{when}}",
       "neverSynced": "Never synced yet",
@@ -1575,10 +1625,10 @@
       "syncFailed": "Sync failed",
       "resyncAll": "Resync All",
       "resyncing": "Resyncing…",
-      "resyncAllHint": "Re-serializes every recipe, ingredient, tool, tag, technique, and profile this device has and pushes them all — use after updating if something looks missing on the other end, not needed for routine syncing",
+      "resyncAllHint": "Sends everything on this device to the others again. Use it if something is missing on another device after an update; everyday syncing never needs it.",
       "repairLocalData": "Repair Local Data",
       "repairing": "Repairing…",
-      "repairHint": "Re-applies this device's own sync history onto its local data — fixes an item whose ingredients/steps/tools went missing after syncing, without needing anything from another device",
+      "repairHint": "Rebuilds this device’s recipes from its own sync history. Use it if a recipe lost its ingredients, steps or tools after a sync; it needs nothing from other devices.",
       "history": "History",
       "couldNotResync": "Could not resync all data",
       "couldNotRepair": "Could not repair local data",
@@ -1587,6 +1637,39 @@
       "couldNotSaveGitRemote": "Could not save git remote settings",
       "autoResolvedFields_one": "{{count}} difference settled automatically.",
       "autoResolvedFields_other": "{{count}} differences settled automatically.",
+      "webdav": {
+        "mode": "WebDAV",
+        "modeHint": "Nextcloud, ownCloud, Koofr, pCloud or a NAS. Uses the new sync engine.",
+        "url": "WebDAV folder URL",
+        "urlHint": "The folder to keep the library in. On Nextcloud: Files → Settings → WebDAV, plus a folder name.",
+        "password": "App password",
+        "passwordHint": "Create an app password in your server's security settings rather than using your account password. It stays on this device.",
+        "passwordKept": "Saved — leave blank to keep",
+        "save": "Save and sync",
+        "saving": "Connecting…"
+      },
+      "encryption": {
+        "label": "Encryption",
+        "hint": "Your cloud stores this library encrypted. Every device needs this recovery key, which the Setup File carries. Keep a copy somewhere safe: without it, the synced copy cannot be read.",
+        "show": "Show recovery key",
+        "hide": "Hide",
+        "copy": "Copy",
+        "encryptNew": "Encrypt the library",
+        "encryptNewHint": "Decided when this device creates the library in the cloud. Leave on unless you want the files readable by anyone with access to the folder.",
+        "enterKey": "Recovery key from another device",
+        "useKey": "Use key",
+        "invalidKey": "That is not a SmartChef recovery key.",
+        "keySaved": "Key saved. Syncing…"
+      },
+      "engine": {
+        "label": "Sync engine",
+        "git": "Classic (git)",
+        "gitHint": "Every change becomes a git commit. Proven, but it slows down as the library grows, and works only with a folder or a git server.",
+        "v2": "New engine",
+        "v2Hint": "Each device keeps a small log of its own changes: much faster, works with WebDAV too, and adds encryption and shared cookbooks. Still new: switch every device, one at a time, and keep a backup until they have all synced.",
+        "switching": "Switching: publishing the whole library once…",
+        "confirmSwitch": "Switch this device to the new sync engine? It syncs once with the classic engine, then publishes the whole library in the new format. Switch every device of this library, one at a time."
+      },
       "conflictPolicy": {
         "label": "When both devices change the same thing",
         "newest": "Keep the newest edit",
@@ -1596,7 +1679,7 @@
       },
       "replace": {
         "title": "Replace this device with the synced data",
-        "hint": "Discards this device’s library and takes the Sync Folder’s (or git remote’s) exactly — like \"git reset --hard\". Use it when this device has drifted and you don’t want to merge.",
+        "hint": "Throws away this device’s library and takes the synced copy exactly as it is. Use it when this device has drifted and you don’t want to merge.",
         "button": "Replace with synced data",
         "checking": "Checking the synced data…",
         "replacing": "Replacing…",
@@ -1638,7 +1721,7 @@
       "label": "Setup File",
       "exportButton": "Export Setup File",
       "importButton": "Use a Setup File",
-      "hint": "Everything on this card except the sync folder itself — the mode, the interval, and the repository URL, username and access token — in one passphrase-encrypted file, so setting up your next device doesn't mean typing a token on a phone keyboard.",
+      "hint": "Everything another device needs to join this library — where it syncs, the login or token, the encryption key and your shared cookbooks — in one passphrase-protected file. Only the sync folder itself has to be chosen again on each device.",
       "applied": "Applied: {{what}}",
       "appliedFolderMode": "Folder mode",
       "appliedNeedsFolder": "— now choose this device’s sync folder above."
@@ -1784,6 +1867,100 @@
       "noFeed": "That site doesn't publish a feed the app can read.",
       "failed": "Could not reach that address.",
       "duplicate": "Already in the list."
+    },
+    "cookbooks": {
+      "heading": "Shared cookbooks",
+      "subtitle": "Recipes kept in sync, both ways, with other people’s libraries. Each library keeps its own ingredients, ratings and notes.",
+      "none": "This device hasn’t joined a shared cookbook yet.",
+      "recipeCount_one": "{{count}} recipe",
+      "recipeCount_other": "{{count}} recipes",
+      "notEncrypted": "not encrypted",
+      "invite": "Invite",
+      "leave": "Leave",
+      "confirmLeave": "Leave “{{name}}”? Its recipes stay here as your own private copies, and the other members keep theirs.",
+      "notJoinedHere_one": "Some recipes here are in a shared cookbook this device hasn’t joined. Import the Setup File from the device that joined it.",
+      "notJoinedHere_other": "Some recipes here are in {{count}} shared cookbooks this device hasn’t joined. Import the Setup File from the device that joined them.",
+      "new": "New cookbook",
+      "joinWithInvite": "Join with an invite",
+      "howTo": "A cookbook lives in a place every member can open: a WebDAV folder (for example a Nextcloud public link with edit rights) or a git repository with the members as collaborators. Put a recipe in it from the recipe’s Share menu.",
+      "createTitle": "New shared cookbook",
+      "createSubtitle": "Where the cookbook lives, for you and everyone you invite.",
+      "create": "Create",
+      "name": "Name",
+      "encrypt": "Encrypt the cookbook",
+      "encryptHint": "The storage provider sees only scrambled files. The key travels inside the invites.",
+      "store": {
+        "webdav": "WebDAV folder",
+        "git": "Git repository",
+        "url": "Address",
+        "webdavHint": "An empty folder every member can write to, e.g. a Nextcloud public link (https://…/public.php/webdav).",
+        "gitHint": "A repository on GitHub, GitLab, Gitea… The cookbook gets its own branch.",
+        "username": "Username",
+        "password": "Password",
+        "token": "Access token"
+      },
+      "inviteTitle": "Invite to the cookbook",
+      "inviteHint": "The invite file carries the cookbook’s key and the storage password. Send the file, and tell the passphrase some other way (in person, by phone).",
+      "saveInvite": "Save the invite",
+      "inviteSaved": "Invite saved to {{location}}.",
+      "joinTitle": "Join a shared cookbook",
+      "joinSubtitle": "Open the invite file you were sent.",
+      "chooseInvite": "Choose the invite file",
+      "join": "Join",
+      "invitedBy": "Invited by {{name}}.",
+      "joinStoreHint": "This is where the cookbook lives. If you have your own access to it (your own account or token), you can enter it here.",
+      "recipeMenuItem": "Shared cookbook…",
+      "recipeTitle": "Shared cookbook",
+      "recipeSubtitle": "Everyone in the cookbook sees this recipe and its changes. Your rating stays yours.",
+      "noneForRecipe": "Create or join a shared cookbook first, in Account.",
+      "added_one": "Added. It will reach the other members on the next sync.",
+      "added_other": "Added, with {{count}} recipes in all (its sub-recipes too). They will reach the other members on the next sync.",
+      "removed": "Taken out. It stays here as your own recipe; the other members keep theirs.",
+      "takeOut": "Take it out of the cookbook"
+    },
+    "syncGroups": {
+      "status": {
+        "title": "Status"
+      },
+      "where": {
+        "title": "Where your library syncs",
+        "hint": "The place your devices meet. Pick one; every device of the library must use the same place."
+      },
+      "how": {
+        "title": "How it syncs",
+        "hint": "The sync engine, how often it runs, and what happens when two devices change the same thing."
+      },
+      "devices": {
+        "title": "Your devices",
+        "hint": "This device’s name, the others syncing with it, and the Setup File that adds a new device in one step."
+      },
+      "troubleshooting": {
+        "title": "Troubleshooting",
+        "hint": "Only when something looks wrong: re-publish, repair, or replace this device’s library."
+      }
+    },
+    "sections": {
+      "label": "Settings sections",
+      "sync": {
+        "label": "Sync & sharing",
+        "hint": "Keep this library the same on all your devices, and share recipes with other people."
+      },
+      "profile": {
+        "label": "Profile",
+        "hint": "Who is cooking: your name and picture, and the other people using this app."
+      },
+      "appearance": {
+        "label": "Appearance & languages",
+        "hint": "Theme, colours, and the languages for the app and for your recipes."
+      },
+      "ai": {
+        "label": "AI & sources",
+        "hint": "The AI that reads, checks and translates recipes, and the websites Discover suggests recipes from."
+      },
+      "data": {
+        "label": "Data & storage",
+        "hint": "Backups of your library, and where it is kept: on this device or on a server."
+      }
     }
   },
   "connect": {
@@ -1808,7 +1985,7 @@
     "setupAppliedGitNoToken": "Syncing through {{url}} — no access token was included, so you may need to add one later.",
     "setupAppliedFolder": "Folder mode. A folder can’t travel in a setup file, so pick this device’s own below.",
     "syncTitle": "Sync across your devices",
-    "syncHint": "Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder), or connect directly to a git server (GitHub, GitLab, self-hosted). Skip this for now — you can always set it up later from Account → Folder Sync.",
+    "syncHint": "Optional. Point this at a folder your other devices can also reach (e.g. a Syncthing-managed folder), or connect directly to a git server (GitHub, GitLab, self-hosted). Skip this for now — you can always set it up later from Account → Sync & sharing.",
     "remove": "Remove",
     "repoUrl": "Repository URL",
     "repoUrlHint": "An empty private repo works fine.",
@@ -1827,7 +2004,7 @@
     "skipped": "Skipped ✓",
     "skip": "Skip for now",
     "probeOnlyProfiles": "Only the profiles are fetched now — your recipes download in the background once you're in.",
-    "tokenChangeLater": "You can change it later in Account → Folder Sync.",
+    "tokenChangeLater": "You can change it later in Account → Sync & sharing.",
     "probeFailedTitle": "Couldn't read this library",
     "probeFailedHint": "If other devices already share it, go back and check the address and token rather than creating a profile here — a new profile made now would be a second copy of someone the library may already have.",
     "pickProfile": "This library already has profiles — pick who you are, or create a new one.",
@@ -1881,7 +2058,7 @@
     "created": "Setup file created",
     "savedTo": "Saved to {{location}}",
     "savedAs": "Saved as {{fileName}} wherever your browser puts downloads.",
-    "createdHint": "Move it to your other device however you like, then choose it there — on first run, or from Account → Folder Sync. You will need the same passphrase to open it, and there is no way to recover it, so keep it somewhere you trust.",
+    "createdHint": "Move it to your other device however you like, then choose it there — on first run, or from Account → Sync & sharing. You will need the same passphrase to open it, and there is no way to recover it, so keep it somewhere you trust.",
     "exportIntro": "The file holds this device's sync mode, how often it syncs, and — in Git Remote mode — the repository URL, username and access token. It is encrypted with the passphrase you choose here: only SmartChef can read the format, and only this passphrase can unlock it.",
     "passphrase": "Passphrase",
     "passphraseHint": "At least {{count}} characters.",

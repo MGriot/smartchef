@@ -1,5 +1,17 @@
 # TODO
 
+## SmartChef 1.14.0 — editor and text (2026-10-25)
+
+- [x] **Merge text with AI** — paste a text in the recipe editor; the AI proposes only what it adds (ingredients/amounts, new or richer steps, times, servings, description/tips/storage, dish tags, regions, sources). Every proposal quotes the pasted text and is verified in `lib/recipeMerge.ts`; nothing is removed. Reuses the Check-with-AI review dialog and `applyCheckChanges()` (new `stepAdd`, `textAppend`, `sourceAdd` changes). Standalone only, like the check. 7 tests.
+- [x] **Tags describe the dish** — auto-tagging passes from an ingredient only contains/diet tags (`lib/tagScope.ts`; group names matched in all four languages, plus anything a diet excludes). Ingredient tag picker and Tidy with AI limited to those; import and check prompts (both twins) say tags are for the dish, capped at 5. Existing tags are left as they are.
+- [x] **Fractions in quantities** — `QuantityInput` + `parseQuantityStrict` / `formatQuantity`; display re-chosen after scaling. Storage unchanged.
+- [x] **Density, volume → weight** — `density_g_per_ml` in standalone schema, sync allowlist, backup, share bundle and both ingredient routes; “≈ g” line on the recipe and print view; Tidy with AI proposes it; planner nutrition uses it. Real-SQLite sync round-trip test.
+- [x] **Markdown in text fields** — in-house subset parser + React renderer (no HTML), step references preserved; 15 tests including server-rendered output.
+- [x] **Editing translations** — language bar + per-language panel in the editor, AI fill of empty fields only (`translate-preview`); `TranslationsEditor` now picks languages from a list.
+- Not done: *Merge text with AI* and *Fill the gaps with AI* have no server-mode route (the check never had one either); the new-recipe page (`/recipe/new`) still uses the older per-row translation lists.
+
+---
+
 ## Catalog-aware import matching (2026-09-18)
 
 - [x] **AI import now recognizes the library it's importing into** — the recipe-parse prompt (server and standalone) is handed the library's own ingredient/tool/technique names, labelled in the app's content language, and asked which one each parsed item corresponds to (`catalogName`), instead of coining fresh wording every time.

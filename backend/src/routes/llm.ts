@@ -8,7 +8,7 @@ import { z } from "zod";
 import { parseRecipeWithLLM, checkOllamaHealth } from "../services/llm.parser";
 import { matchLLMResultToDB } from "../services/ingredient.matcher";
 import { withTransaction } from "../db/pool";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 
 export const llmRouter = Router();
 

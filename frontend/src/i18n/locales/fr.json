@@ -225,7 +225,13 @@
         "removeTags": "Étiquettes retirées",
         "nutrition": "Valeurs nutritionnelles",
         "synonyms": "Synonymes"
-      }
+      },
+      "density": "Du volume au poids",
+      "densityHint": "Masse volumique en grammes par millilitre (eau = 1, farine ≈ 0,53, sucre ≈ 0,85, huile ≈ 0,92). Si elle est renseignée, tasses et cuillères affichent aussi le poids.",
+      "densityUnit": "g/ml",
+      "densityExample": "1 tasse ≈ {{grams}} g",
+      "densityKey": "Masse volumique (g/ml)",
+      "noDetails": "Rien n'est encore enregistré pour cet ingrédient. Touchez Modifier pour ajouter une description, des valeurs nutritionnelles, la saison, des tags ou des traductions."
     },
     "common": {
       "gridView": "Vue en grille",
@@ -513,14 +519,16 @@
         "fields": "Portions, durées et rendement",
         "tags": "Étiquettes",
         "regions": "Régions",
-        "links": "Liens dans les étapes"
+        "links": "Liens dans les étapes",
+        "sources": "Sources"
       },
       "field": {
         "servings": "Portions",
         "prep_time_min": "Préparation (min)",
         "cook_time_min": "Cuisson (min)",
         "rest_time_min": "Repos (min)",
-        "yield": "Rendement"
+        "yield": "Rendement",
+        "difficulty": "Difficulté"
       },
       "kind": {
         "fix": "correction",
@@ -544,6 +552,8 @@
       "stepRewrite": "Réécrire l'étape {{n}}",
       "stepRemove": "Supprimer l'étape {{n}}",
       "estimated": "quantité estimée par l'IA",
+      "fromSteps": "somme des étapes {{steps}}",
+      "estimatedByAi": "estimée par l'IA",
       "mismatch": {
         "title": "Les ingrédients et les étapes ne correspondent pas",
         "stepsSay": "Cités dans les étapes, absents de la liste",
@@ -557,7 +567,8 @@
         "resolving": "Préparation des corrections…",
         "nothing": "Aucune correction vérifiable pour ce choix. Vous pouvez modifier la recette à la main.",
         "error": "Impossible de préparer les corrections."
-      }
+      },
+      "elapsed": "{{seconds}} s"
     },
     "saving": "En cours d'enregistrement…",
     "saveRecipe": "Enregistrer la recette",
@@ -775,6 +786,36 @@
       "allIdentical": "Les deux recettes ont le même contenu : la fusion ne déplace que les collections, les plans et l'historique de cuisson.",
       "identicalFields_one": "{{count}} champ est identique",
       "identicalFields_other": "{{count}} champs sont identiques"
+    },
+    "weightFromDensity": "Poids calculé à partir de la masse volumique de l'ingrédient",
+    "aiMerge": {
+      "button": "Fusionner un texte avec l'IA",
+      "title": "Fusionner un texte avec cette recette",
+      "subtitle": "Collez n'importe quel texte sur ce plat : une autre version, un commentaire, des notes. L'IA ne propose que ce que le texte ajoute, et vous choisissez quoi garder.",
+      "placeholder": "Collez le texte ici…",
+      "hint": "Les liens, livres et auteurs cités dans le texte sont ajoutés comme sources. Rien n'est retiré de la recette.",
+      "submit": "Fusionner avec l'IA",
+      "reviewTitle": "Ce que le texte ajoute",
+      "reviewSubtitle": "Chaque modification cite le texte collé. Décochez ce que vous ne voulez pas, puis appliquez : vous pourrez encore modifier avant d'enregistrer.",
+      "merging": "Lecture du texte…",
+      "failed": "La fusion avec l'IA a échoué",
+      "stepAdd": "Nouvelle étape",
+      "sourceAdd": "Source : {{type}}"
+    },
+    "editLang": {
+      "editing": "Modification",
+      "add": "Langue",
+      "pick": "Ajouter une traduction…",
+      "aiFill": "Compléter avec l'IA",
+      "remove": "Supprimer la traduction",
+      "removeConfirm": "Supprimer toute la traduction en {{lang}} de cette recette ? Elle disparaît à l'enregistrement.",
+      "missing": "manquant",
+      "panelHint": "Vous rédigez la version en {{lang}}. Chaque champ affiche l'original au-dessus. Quantités, unités, ustensiles et temps sont les mêmes dans toutes les langues : revenez à l'original pour les modifier.",
+      "ingredientNotes": "Notes",
+      "stepText": "Texte",
+      "copyOriginal": "Partir de l'original (garde les liens vers les ingrédients)",
+      "ingredients": "Ingrédients",
+      "ingredientNamesHint": "Les noms viennent de la bibliothèque d'ingrédients et sont donc les mêmes dans toutes les recettes : traduisez-les dans Bibliothèque → Ingrédients."
     }
   },
   "recipeCreate": {
@@ -840,6 +881,7 @@
     "ingredientsAndSteps": "Ingrédients ({{ingCount}}) · {{stepCount}} étapes",
     "createAndReview": "Créer et examiner la recette",
     "notValidJson": "Ce fichier n'est pas un JSON valide.",
+    "notShareFile": "Ce fichier n'est pas une recette partagée depuis SmartChef.",
     "importFailed": "Importation échouée",
     "failedToCreateRecipe": "Échec de la création de la recette",
     "originalRecipe": "Recette originale",
@@ -988,7 +1030,13 @@
     "nameOnly": "Nom seul",
     "remainingAtThisStep": "Il reste {{amount}} à cette étape — utiliser cela",
     "ofTotal": "sur {{total}} dans la recette",
-    "showUsedUp": "{{count}} déjà épuisés — les afficher quand même"
+    "showUsedUp": "{{count}} déjà épuisés — les afficher quand même",
+    "quantityHint": "Entiers, décimaux ou fractions : 2, 1,5, 3/4, 1 1/2, ½",
+    "quantityInvalid": "Quantité invalide. Essayez 2, 1,5, 3/4 ou 1 1/2",
+    "markdownHint": "Mise en forme :",
+    "markdownBold": "gras",
+    "markdownItalic": "italique",
+    "markdownList": "liste"
   },
   "errors": {
     "couldNotCreateIngredient": "Impossible de créer l'ingrédient",
@@ -1045,7 +1093,8 @@
     "mergeIntoSelf": "Impossible de fusionner un élément avec lui-même.",
     "toolNotFound": "Ustensile introuvable",
     "providerBusy": "{{provider}} est surchargé en ce moment (HTTP {{status}}), même après plusieurs tentatives. Le problème vient du fournisseur — réessayez dans quelques minutes.",
-    "llmReplyTruncated": "La réponse du modèle a été coupée : les dernières étapes peuvent être incomplètes ou sans liens."
+    "llmReplyTruncated": "La réponse du modèle a été coupée : les dernières étapes peuvent être incomplètes ou sans liens.",
+    "aiTimedOut": "{{provider}} n'a pas répondu en {{seconds}} secondes. Les textes longs et les modèles lents prennent plus de temps : collez seulement la partie utile, ou choisissez un modèle plus rapide dans Fournisseur IA, dans votre compte."
   },
   "shopping": {
     "otherAisle": "Autres",
@@ -1343,6 +1392,7 @@
     "hiddenHint": "Les langues masquées disparaissent seulement des sélecteurs. Rien de ce qui est écrit dans ces langues n'a été supprimé, et en réafficher une remet tout en place."
   },
   "account": {
+    "about": { "heading": "À propos", "version": "Version" },
     "sync": {
       "nothingChanged": "Aucun changement — déjà à jour."
     },
@@ -1502,10 +1552,10 @@
       "languageLabel": "Langue"
     },
     "folderSync": {
-      "heading": "Synchronisation par dossier",
+      "heading": "Synchronisation entre appareils",
       "syncHeading": "Synchronisation",
-      "subtitle": "Choisissez comment cet appareil échange ses modifications avec les autres — un simple dossier synchronisé, ou un vrai serveur git.",
-      "subtitleCrossRef": "C’est ainsi que les appareils hors ligne se rejoignent ; pour déplacer la bibliothèque vers un serveur (ou la ramener), voyez « {{card}} ».",
+      "subtitle": "Vos appareils échangent leurs modifications via un endroit que vous choisissez : un dossier synchronisé, un serveur WebDAV ou un serveur git. Aucun compte SmartChef n’est nécessaire.",
+      "subtitleCrossRef": "Pour déplacer plutôt la bibliothèque sur un serveur SmartChef, voir « {{card}} » dans Données et stockage.",
       "adminOnlyNote": "Seul un profil administrateur peut changer la destination de synchronisation de cette bibliothèque, ses identifiants ou ses appareils.",
       "lastSyncedAt": "Dernière synchronisation {{when}}",
       "neverSynced": "Jamais synchronisé",
@@ -1575,10 +1625,10 @@
       "syncFailed": "Échec de la synchronisation",
       "resyncAll": "Tout resynchroniser",
       "resyncing": "Resynchronisation…",
-      "resyncAllHint": "Resérialise chaque recette, ingrédient, ustensile, étiquette, technique et profil de cet appareil et les envoie tous — utile après une mise à jour si quelque chose semble manquer de l’autre côté, inutile pour la synchronisation courante",
+      "resyncAllHint": "Renvoie aux autres appareils tout ce qui se trouve sur celui-ci. À utiliser si, après une mise à jour, il manque quelque chose sur un autre appareil ; la synchronisation habituelle n’en a pas besoin.",
       "repairLocalData": "Réparer les données locales",
       "repairing": "Réparation…",
-      "repairHint": "Réapplique l’historique de synchronisation de cet appareil à ses données locales — répare un élément dont les ingrédients/étapes/ustensiles ont disparu après une synchronisation, sans rien exiger d’un autre appareil",
+      "repairHint": "Reconstruit les recettes de cet appareil à partir de son propre historique de synchronisation. À utiliser si une recette a perdu ses ingrédients, étapes ou ustensiles après une synchronisation ; rien n’est demandé aux autres appareils.",
       "history": "Historique",
       "couldNotResync": "Impossible de resynchroniser toutes les données",
       "couldNotRepair": "Impossible de réparer les données locales",
@@ -1587,6 +1637,39 @@
       "couldNotSaveGitRemote": "Impossible d’enregistrer les paramètres du dépôt git distant",
       "autoResolvedFields_one": "{{count}} différence résolue automatiquement.",
       "autoResolvedFields_other": "{{count}} différences résolues automatiquement.",
+      "webdav": {
+        "mode": "WebDAV",
+        "modeHint": "Nextcloud, ownCloud, Koofr, pCloud ou un NAS. Utilise le nouveau moteur de synchronisation.",
+        "url": "URL du dossier WebDAV",
+        "urlHint": "Le dossier où garder la bibliothèque. Sur Nextcloud : Fichiers → Paramètres → WebDAV, plus un nom de dossier.",
+        "password": "Mot de passe d'application",
+        "passwordHint": "Créez un mot de passe d'application dans les paramètres de sécurité du serveur plutôt que d'utiliser celui du compte. Il reste sur cet appareil.",
+        "passwordKept": "Enregistré — laissez vide pour le garder",
+        "save": "Enregistrer et synchroniser",
+        "saving": "Connexion…"
+      },
+      "encryption": {
+        "label": "Chiffrement",
+        "hint": "Votre cloud stocke cette bibliothèque chiffrée. Chaque appareil a besoin de cette clé de récupération, incluse dans le fichier de configuration. Gardez-en une copie en lieu sûr : sans elle, la copie synchronisée est illisible.",
+        "show": "Afficher la clé de récupération",
+        "hide": "Masquer",
+        "copy": "Copier",
+        "encryptNew": "Chiffrer la bibliothèque",
+        "encryptNewHint": "Décidé quand cet appareil crée la bibliothèque dans le cloud. Laissez activé, sauf si vous voulez des fichiers lisibles par quiconque accède au dossier.",
+        "enterKey": "Clé de récupération d'un autre appareil",
+        "useKey": "Utiliser la clé",
+        "invalidKey": "Ce n'est pas une clé de récupération SmartChef.",
+        "keySaved": "Clé enregistrée. Synchronisation…"
+      },
+      "engine": {
+        "label": "Moteur de synchronisation",
+        "git": "Classique (git)",
+        "gitHint": "Chaque modification devient un commit git. Éprouvé, mais il ralentit quand la bibliothèque grandit, et ne fonctionne qu’avec un dossier ou un serveur git.",
+        "v2": "Nouveau moteur",
+        "v2Hint": "Chaque appareil tient un petit journal de ses propres modifications : bien plus rapide, fonctionne aussi avec WebDAV, et ajoute le chiffrement et les livres de recettes partagés. Encore récent : passez chaque appareil, un par un, et gardez une sauvegarde jusqu’à ce qu’ils se soient tous synchronisés.",
+        "switching": "Bascule en cours : publication de toute la bibliothèque une fois…",
+        "confirmSwitch": "Basculer cet appareil vers le nouveau moteur de synchronisation ? Il synchronise d'abord une fois avec le moteur classique, puis publie toute la bibliothèque au nouveau format. Basculez tous les appareils de la bibliothèque, un par un."
+      },
       "conflictPolicy": {
         "label": "Quand les deux appareils modifient la même chose",
         "newest": "La modification la plus récente gagne",
@@ -1596,7 +1679,7 @@
       },
       "replace": {
         "title": "Remplacer cet appareil par les données synchronisées",
-        "hint": "Abandonne la bibliothèque de cet appareil et reprend exactement celle du dossier de synchronisation (ou du dépôt git) — comme « git reset --hard ». À utiliser quand cet appareil a divergé et que vous ne voulez pas fusionner.",
+        "hint": "Abandonne la bibliothèque de cet appareil et prend la copie synchronisée telle quelle. À utiliser quand cet appareil a divergé et que vous ne voulez pas fusionner.",
         "button": "Remplacer par les données synchronisées",
         "checking": "Vérification des données synchronisées…",
         "replacing": "Remplacement…",
@@ -1638,7 +1721,7 @@
       "label": "Fichier de configuration",
       "exportButton": "Exporter un fichier de configuration",
       "importButton": "Utiliser un fichier de configuration",
-      "hint": "Tout ce qui figure sur cette carte sauf le dossier de synchronisation lui-même — le mode, l’intervalle, ainsi que l’URL du dépôt, le nom d’utilisateur et le jeton d’accès — dans un seul fichier chiffré par phrase secrète, pour que configurer votre prochain appareil ne veuille pas dire taper un jeton au clavier du téléphone.",
+      "hint": "Tout ce dont un autre appareil a besoin pour rejoindre cette bibliothèque — où elle se synchronise, l’identifiant ou le jeton, la clé de chiffrement et vos livres de recettes partagés — dans un seul fichier protégé par une phrase secrète. Seul le dossier de synchronisation doit être choisi à nouveau sur chaque appareil.",
       "applied": "Appliqué : {{what}}",
       "appliedFolderMode": "Mode dossier",
       "appliedNeedsFolder": "— choisissez maintenant le dossier de synchronisation de cet appareil ci-dessus."
@@ -1784,6 +1867,100 @@
       "noFeed": "Ce site ne publie pas de flux lisible par l'application.",
       "failed": "Impossible d'atteindre cette adresse.",
       "duplicate": "Déjà dans la liste."
+    },
+    "cookbooks": {
+      "heading": "Livres de recettes partagés",
+      "subtitle": "Des recettes synchronisées, dans les deux sens, avec les bibliothèques d’autres personnes. Chaque bibliothèque garde ses ingrédients, ses notes et ses avis.",
+      "none": "Cet appareil n’a encore rejoint aucun livre de recettes partagé.",
+      "recipeCount_one": "{{count}} recette",
+      "recipeCount_other": "{{count}} recettes",
+      "notEncrypted": "non chiffré",
+      "invite": "Inviter",
+      "leave": "Quitter",
+      "confirmLeave": "Quitter « {{name}} » ? Ses recettes restent ici comme copies privées, et les autres membres gardent les leurs.",
+      "notJoinedHere_one": "Certaines recettes sont dans un livre partagé que cet appareil n’a pas rejoint. Importez le fichier de configuration de l’appareil qui l’a rejoint.",
+      "notJoinedHere_other": "Certaines recettes sont dans {{count}} livres partagés que cet appareil n’a pas rejoints. Importez le fichier de configuration de l’appareil qui les a rejoints.",
+      "new": "Nouveau livre",
+      "joinWithInvite": "Rejoindre avec une invitation",
+      "howTo": "Un livre de recettes se trouve dans un endroit que tous les membres peuvent ouvrir : un dossier WebDAV (par exemple un lien public Nextcloud avec droit de modification) ou un dépôt git avec les membres comme collaborateurs. Ajoutez une recette depuis le menu Partager de la recette.",
+      "createTitle": "Nouveau livre de recettes partagé",
+      "createSubtitle": "Où se trouve le livre, pour vous et pour les personnes invitées.",
+      "create": "Créer",
+      "name": "Nom",
+      "encrypt": "Chiffrer le livre",
+      "encryptHint": "Le service de stockage ne voit que des fichiers illisibles. La clé voyage dans les invitations.",
+      "store": {
+        "webdav": "Dossier WebDAV",
+        "git": "Dépôt git",
+        "url": "Adresse",
+        "webdavHint": "Un dossier vide où tous les membres peuvent écrire, par ex. un lien public Nextcloud (https://…/public.php/webdav).",
+        "gitHint": "Un dépôt sur GitHub, GitLab, Gitea… Le livre a sa propre branche.",
+        "username": "Nom d’utilisateur",
+        "password": "Mot de passe",
+        "token": "Jeton d’accès"
+      },
+      "inviteTitle": "Inviter dans le livre",
+      "inviteHint": "Le fichier d’invitation contient la clé du livre et le mot de passe du stockage. Envoyez le fichier et communiquez la phrase secrète autrement (en personne, par téléphone).",
+      "saveInvite": "Enregistrer l’invitation",
+      "inviteSaved": "Invitation enregistrée dans {{location}}.",
+      "joinTitle": "Rejoindre un livre partagé",
+      "joinSubtitle": "Ouvrez le fichier d’invitation reçu.",
+      "chooseInvite": "Choisir le fichier d’invitation",
+      "join": "Rejoindre",
+      "invitedBy": "Invitation de {{name}}.",
+      "joinStoreHint": "C’est là que se trouve le livre. Si vous avez votre propre accès (votre compte ou jeton), vous pouvez le saisir ici.",
+      "recipeMenuItem": "Livre de recettes partagé…",
+      "recipeTitle": "Livre de recettes partagé",
+      "recipeSubtitle": "Tous les membres du livre voient cette recette et ses modifications. Votre note reste la vôtre.",
+      "noneForRecipe": "Créez ou rejoignez d’abord un livre partagé, dans Compte.",
+      "added_one": "Ajoutée. Elle parviendra aux autres membres à la prochaine synchronisation.",
+      "added_other": "{{count}} recettes ajoutées au total (avec ses sous-recettes). Elles parviendront aux autres membres à la prochaine synchronisation.",
+      "removed": "Retirée. Elle reste ici comme votre recette ; les autres membres gardent la leur.",
+      "takeOut": "Retirer du livre"
+    },
+    "syncGroups": {
+      "status": {
+        "title": "État"
+      },
+      "where": {
+        "title": "Où se synchronise votre bibliothèque",
+        "hint": "L’endroit où vos appareils se retrouvent. Choisissez-en un ; tous les appareils de la bibliothèque doivent utiliser le même."
+      },
+      "how": {
+        "title": "Comment elle se synchronise",
+        "hint": "Le moteur de synchronisation, sa fréquence, et ce qui se passe quand deux appareils modifient la même chose."
+      },
+      "devices": {
+        "title": "Vos appareils",
+        "hint": "Le nom de cet appareil, les autres qui se synchronisent avec lui, et le fichier de configuration pour en ajouter un nouveau en une étape."
+      },
+      "troubleshooting": {
+        "title": "Dépannage",
+        "hint": "Seulement si quelque chose ne va pas : republier, réparer ou remplacer la bibliothèque de cet appareil."
+      }
+    },
+    "sections": {
+      "label": "Sections des réglages",
+      "sync": {
+        "label": "Synchronisation et partage",
+        "hint": "Gardez cette bibliothèque identique sur tous vos appareils, et partagez des recettes avec d’autres personnes."
+      },
+      "profile": {
+        "label": "Profil",
+        "hint": "Qui cuisine : votre nom et votre image, et les autres personnes qui utilisent l’app."
+      },
+      "appearance": {
+        "label": "Apparence et langues",
+        "hint": "Thème, couleurs, et langues de l’app et de vos recettes."
+      },
+      "ai": {
+        "label": "IA et sources",
+        "hint": "L’IA qui lit, vérifie et traduit les recettes, et les sites d’où Découvrir propose des recettes."
+      },
+      "data": {
+        "label": "Données et stockage",
+        "hint": "Les sauvegardes de votre bibliothèque, et où elle est conservée : sur cet appareil ou sur un serveur."
+      }
     }
   },
   "connect": {

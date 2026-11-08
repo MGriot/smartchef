@@ -1,0 +1,1 @@
+Saving or deleting a tag is instant, a deleted tag stays deleted, and the tag icon picker has fruit, vegetables, breads and drinks.

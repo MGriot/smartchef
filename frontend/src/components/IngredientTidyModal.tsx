@@ -17,17 +17,19 @@ const ASPECTS_KEY = 'smartchef.ingredients.tidyAspects';
  *  (services/aiTasks.local.ts), sent so it sees what is on file today. */
 const NUTRIENT_ALIAS: Record<NutrientKey, string> = {
   caloriesKcal: 'kcal', proteinG: 'protein', carbsG: 'carbs', fatG: 'fat', fiberG: 'fiber', sugarG: 'sugar', sodiumMg: 'sodium',
+  densityGPerMl: 'density',
 };
 const NUTRIENT_COLUMN: Record<NutrientKey, keyof TidyIngredient> = {
   caloriesKcal: 'calories_kcal', proteinG: 'protein_g', carbsG: 'carbs_g', fatG: 'fat_g',
-  fiberG: 'fiber_g', sugarG: 'sugar_g', sodiumMg: 'sodium_mg',
+  fiberG: 'fiber_g', sugarG: 'sugar_g', sodiumMg: 'sodium_mg', densityGPerMl: 'density_g_per_ml',
 };
 const NUTRIENT_LABEL: Record<NutrientKey, string> = {
   caloriesKcal: 'recipeDetail.calories', proteinG: 'recipeDetail.protein', carbsG: 'recipeDetail.carbs',
   fatG: 'recipeDetail.fat', fiberG: 'recipeDetail.fiber', sugarG: 'recipeDetail.sugar', sodiumMg: 'recipeDetail.sodium',
+  densityGPerMl: 'library.ingredients.densityKey',
 };
 const NUTRIENT_UNIT: Record<NutrientKey, string> = {
-  caloriesKcal: 'kcal', proteinG: 'g', carbsG: 'g', fatG: 'g', fiberG: 'g', sugarG: 'g', sodiumMg: 'mg',
+  caloriesKcal: 'kcal', proteinG: 'g', carbsG: 'g', fatG: 'g', fiberG: 'g', sugarG: 'g', sodiumMg: 'mg', densityGPerMl: 'g/ml',
 };
 
 function loadAspects(): Record<Aspect, boolean> {

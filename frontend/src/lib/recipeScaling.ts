@@ -14,7 +14,8 @@
 // ════════════════════════════════════════════════════════════════════════
 
 import { remainingBeforeStep, stepIngredientConsumption } from './stepRefs';
-import { toSystem, type MeasurementSystem } from './unitConvert';
+import { toGrams, toSystem, roundForDisplay, type MeasurementSystem } from './unitConvert';
+import { formatQuantity, isToTasteUnit } from './ingredientAmount';
 
 export interface ScalerIngredient {
   sortOrder: number;
@@ -23,6 +24,8 @@ export interface ScalerIngredient {
   quantity: number | null;
   quantityText?: string | null;
   unitSymbol?: string | null;
+  /** The ingredient's g/ml, when known — see weightHint(). */
+  densityGPerMl?: number | null;
 }
 
 export interface ScalerStepIngredientRef {
@@ -84,10 +87,12 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
     return qty * servingsScale;
   };
 
-  const scale = (qty: number | null): string => {
+  /** The form ("1 ½", "250", "2.4") is chosen per unit after scaling, so
+   *  a cup that becomes 1.5 cups reads "1 ½" rather than "1.5". */
+  const scale = (qty: number | null, unitSymbol?: string | null): string => {
     const v = scaleNum(qty);
     if (v === null) return '';
-    return v % 1 === 0 ? String(v) : v.toFixed(1);
+    return formatQuantity(v, unitSymbol);
   };
 
   /** Scales to the current portion count AND restates in the chosen system.
@@ -98,12 +103,31 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
    *  of those cases. A quantityText with no number ("a pinch") never even
    *  reaches it. */
   const formatAmount = (qty: number | null, unitSymbol?: string | null, quantityText?: string | null): string => {
-    const v = scaleNum(qty);
-    if (v === null) return quantityText || '';
-    const fallback = `${v % 1 === 0 ? v : v.toFixed(1)}${unitSymbol ? ` ${unitSymbol}` : quantityText ? ` ${quantityText}` : ''}`;
+    if (isToTasteUnit(unitSymbol)) return unitSymbol!.trim();
+    const scaled = scaleNum(qty);
+    if (scaled === null) return quantityText || '';
+    // No amount is negative. One that reads so came from an import that
+    // took a range ("½–1 tbsp") for a minus sign; its size is the best
+    // reading of what was meant.
+    const v = Math.abs(scaled);
+    const fallback = `${formatQuantity(v, unitSymbol)}${unitSymbol ? ` ${unitSymbol}` : quantityText ? ` ${quantityText}` : ''}`;
     if (!unitSymbol) return fallback;
     const converted = toSystem(v, unitSymbol, displaySystem);
     return converted ? `${converted.value} ${converted.symbol}` : fallback;
+  };
+
+  /** "≈ 120 g" under a volume amount ("1 cup flour") whose ingredient has
+   *  a density; null for anything already a weight, countable or of
+   *  unknown density. Scaled like the amount it sits under, and given in
+   *  ounces when the reader asked for imperial. */
+  const weightHint = (qty: number | null, unitSymbol?: string | null, densityGPerMl?: number | null): string | null => {
+    const v = scaleNum(qty);
+    if (v === null) return null;
+    const grams = toGrams(v, unitSymbol, densityGPerMl);
+    if (grams === null || grams <= 0) return null;
+    const restated = toSystem(grams, 'g', displaySystem);
+    if (restated) return `≈ ${restated.value} ${restated.symbol}`;
+    return grams >= 1000 ? `≈ ${roundForDisplay(grams / 1000)} kg` : `≈ ${Math.round(grams) || roundForDisplay(grams)} g`;
   };
 
   /** Context for resolving {{ing:N}} inline refs in step text. */
@@ -165,10 +189,10 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
         return {
           sortOrder: ing.sortOrder,
           name: ing.ingredientName || ing.subRecipeTitle || fallbackName,
-          quantity: ref.quantity != null ? scale(ref.quantity) : '',
+          quantity: ref.quantity != null ? scale(ref.quantity, ref.unitSymbol || ing.unitSymbol) : '',
           unitSymbol: ref.unitSymbol || ing.unitSymbol || '',
           portionPct: 100,
-          remainingAfter: after != null ? scale(after) : '',
+          remainingAfter: after != null ? scale(after, ing.unitSymbol) : '',
           totalUnitSymbol: ing.unitSymbol || '',
         };
       }
@@ -176,10 +200,10 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
       return {
         sortOrder: ing.sortOrder,
         name: ing.ingredientName || ing.subRecipeTitle || fallbackName,
-        quantity: scale(portionQty),
+        quantity: scale(portionQty, ing.unitSymbol),
         unitSymbol: ing.unitSymbol || '',
         portionPct: Math.round(ref.portion * 100),
-        remainingAfter: after != null ? scale(after) : '',
+        remainingAfter: after != null ? scale(after, ing.unitSymbol) : '',
         totalUnitSymbol: ing.unitSymbol || '',
       };
     }).filter((x): x is StepIngredientUse => x !== null);
@@ -190,6 +214,7 @@ export function createRecipeScaler(opts: RecipeScalerOptions) {
     scaleNum,
     scale,
     formatAmount,
+    weightHint,
     stepTextIngredients,
     stepTextIngredientsFor,
     sortedSteps,

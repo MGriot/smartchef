@@ -47,10 +47,16 @@ export interface SetupFileDestination {
  *  The sync folder itself is not portable and is left out on purpose — see
  *  the header of setupConfigFile.ts. */
 export async function buildSetupPayload(deviceName?: string | null): Promise<SetupFilePayload> {
-  const [mode, interval, gitRemote] = await Promise.all([
+  const [{ getSyncEngine, getWebDavConfig, getLibraryKey }, { formatRecoveryKey }] = await Promise.all([
+    import('./sync/syncSettings'), import('./changeLog/libraryStore'),
+  ]);
+  const [mode, interval, gitRemote, engine, webdav, libraryKey] = await Promise.all([
     getSyncMode(),
     getSyncInterval(),
     getGitRemoteConfig(),
+    getSyncEngine(),
+    getWebDavConfig(),
+    getLibraryKey(),
   ]);
   return {
     exportedAt: new Date().toISOString(),
@@ -66,7 +72,11 @@ export async function buildSetupPayload(deviceName?: string | null): Promise<Set
             corsProxy: gitRemote.corsProxy,
           }
         : null,
+      engine,
+      webdav: mode === 'webdav' && webdav ? webdav : null,
+      libraryKey: libraryKey ? formatRecoveryKey(libraryKey) : null,
     },
+    cookbooks: await (await import('../services/sharedCookbooks.local')).listCookbooks(),
   };
 }
 
@@ -122,6 +132,30 @@ export async function applySetupPayload(payload: SetupFilePayload): Promise<Appl
     // remote. Leaving a half-configured one behind would keep showing its
     // URL in the settings card under a mode that never reads it.
     await clearGitRemoteConfig();
+  }
+
+  if (payload.sync.webdav) {
+    const { setWebDavConfig } = await import('./sync/syncSettings');
+    await setWebDavConfig(payload.sync.webdav);
+  }
+  if (Array.isArray(payload.cookbooks) && payload.cookbooks.length > 0) {
+    const { joinCookbooks } = await import('../services/sharedCookbooks.local');
+    await joinCookbooks(payload.cookbooks);
+  }
+  if (payload.sync.libraryKey) {
+    const [{ setLibraryKey }, { parseRecoveryKey }] = await Promise.all([import('./sync/syncSettings'), import('./changeLog/libraryStore')]);
+    const key = parseRecoveryKey(payload.sync.libraryKey);
+    if (key) await setLibraryKey(key);
+  }
+  // The library's other devices sync with v2: this one joins them. A device
+  // being set up has nothing of its own to publish yet, so no whole-library
+  // seed is needed — every later save is recorded in full the first time.
+  if (payload.sync.engine === 'v2' || mode === 'webdav') {
+    const [{ setSyncEngine }, { setChangeLogEnabled }] = await Promise.all([
+      import('./sync/syncSettings'), import('../services/changeLog.local'),
+    ]);
+    await setChangeLogEnabled(true);
+    await setSyncEngine('v2');
   }
 
   await setSyncInterval(interval);

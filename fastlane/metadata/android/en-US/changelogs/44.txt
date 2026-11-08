@@ -1,0 +1,1 @@
+Ingredient names in a recipe open that ingredient's card in the Library (with Edit), and a recipe used as an ingredient opens that recipe; amounts are never shown negative, "q.b." shows on its own, and an ingredient that lost its name says so.

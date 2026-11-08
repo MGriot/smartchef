@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { formatQuantityWithUnit } from '../lib/ingredientAmount';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppLayout from '../components/AppLayout';
 import RenderFaIcon from '../components/RenderFaIcon';
@@ -58,7 +59,6 @@ export default function ShoppingList() {
   const [activeList, setActiveList] = useState<ShoppingListDetail | null>(null);
   const [viewMode, setViewMode] = useState<'ingredient' | 'recipe'>('ingredient');
   const [generating, setGenerating] = useState(false);
-  const [listName, setListName] = useState('');
   // Generation used to fail entirely into console.error, which is how a
   // missing offline route read as "the button does nothing" instead of as
   // an error. Anything that stops a list being generated says so here.
@@ -126,7 +126,7 @@ export default function ShoppingList() {
       const res = await apiFetch('/api/shopping/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menuId: selectedMenuId, listName: listName.trim() || t('shopping.listFromMenu', { menu: menuName }) }),
+        body: JSON.stringify({ menuId: selectedMenuId, listName: t('shopping.listFromMenu', { menu: menuName }) }),
       });
       const json = await res.json();
       if (res.ok) {
@@ -154,7 +154,7 @@ export default function ShoppingList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recipes: cart.map(c => ({ recipeId: c.recipeId, servings: c.servings })),
-          listName: listName.trim() || t('shopping.heading'),
+          listName: t('shopping.heading'),
         }),
       });
       const json = await res.json();
@@ -245,7 +245,7 @@ export default function ShoppingList() {
     for (const item of activeList.items) {
       for (const src of item.sourceDetails) {
         if (!map.has(src.recipeId)) map.set(src.recipeId, { recipeTitle: src.recipeTitle, items: [] });
-        map.get(src.recipeId)!.items.push({ ...item, forQuantity: `${src.quantity % 1 === 0 ? src.quantity : src.quantity.toFixed(1)} ${src.unitSymbol}` });
+        map.get(src.recipeId)!.items.push({ ...item, forQuantity: formatQuantityWithUnit(src.quantity, src.unitSymbol) });
       }
     }
     return Array.from(map.entries()).map(([recipeId, v]) => ({ recipeId, ...v }));
