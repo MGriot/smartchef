@@ -1392,6 +1392,7 @@
     "hiddenHint": "Los idiomas ocultos solo desaparecen de los selectores. No se ha borrado nada de lo escrito en ellos, y al volver a mostrar uno todo regresa tal cual."
   },
   "account": {
+    "about": { "heading": "Acerca de", "version": "Versión" },
     "sync": {
       "nothingChanged": "Sin cambios — ya está todo al día."
     },

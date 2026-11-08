@@ -1392,6 +1392,7 @@
     "hiddenHint": "Les langues masquées disparaissent seulement des sélecteurs. Rien de ce qui est écrit dans ces langues n'a été supprimé, et en réafficher une remet tout en place."
   },
   "account": {
+    "about": { "heading": "À propos", "version": "Version" },
     "sync": {
       "nothingChanged": "Aucun changement — déjà à jour."
     },
