@@ -1,0 +1,1 @@
+Nell'importazione di una ricetta, un nuovo ingrediente mostra ora anche il nome nella tua lingua accanto a quello inglese.

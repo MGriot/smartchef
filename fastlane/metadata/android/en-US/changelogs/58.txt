@@ -1,0 +1,1 @@
+In the recipe import review, a new ingredient now shows its name in your language next to the English one.
