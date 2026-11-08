@@ -174,6 +174,9 @@ export default function RecipeImport() {
   // editable, and an edited name is translated again on create.
   const [naming, setNaming] = useState<Record<number, IngredientNaming>>({});
   const [namingPending, setNamingPending] = useState<Set<number>>(new Set());
+  // Why naming failed, per row — it used to fail silently, which looked
+  // exactly like "the AI has no translation for this".
+  const [namingError, setNamingError] = useState<Record<number, string>>({});
   const namingGeneration = useRef(0);
 
   // Which language the review step matches and searches the catalogs in.
@@ -493,6 +496,11 @@ export default function RecipeImport() {
     if (!todo.length) return;
     const generation = namingGeneration.current;
     setNamingPending((prev) => new Set([...prev, ...todo]));
+    setNamingError((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !todo.includes(Number(k)))));
+    const fail = (reason: string) => {
+      if (generation !== namingGeneration.current) return;
+      setNamingError((prev) => ({ ...prev, ...Object.fromEntries(todo.map((i) => [i, reason])) }));
+    };
     try {
       const res = await apiFetch('/api/ingredients/ai-name', {
         method: 'POST',
@@ -500,12 +508,18 @@ export default function RecipeImport() {
         body: JSON.stringify({ items: todo.map((i) => ({ key: String(i), text: d.ingredients[i].name })) }),
         timeoutMs: 650_000,
       });
-      if (!res.ok || generation !== namingGeneration.current) return;
+      if (generation !== namingGeneration.current) return;
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        fail(String(body?.error ?? res.status));
+        return;
+      }
       const json = await res.json();
       const rows: IngredientNaming[] = Array.isArray(json.data) ? json.data : [];
       setNaming((prev) => ({ ...prev, ...Object.fromEntries(rows.map((r) => [Number(r.key), r])) }));
     } catch (err) {
       console.warn('AI ingredient naming unavailable:', err);
+      fail(err instanceof Error ? err.message : String(err));
     } finally {
       if (generation === namingGeneration.current) {
         setNamingPending((prev) => {
@@ -1206,6 +1220,14 @@ export default function RecipeImport() {
                   className="mt-1 block w-full text-xs font-normal normal-case tracking-normal text-zinc-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1.5"
                 />
               </label>
+              {kind === 'ingredient' && !namingBusy && !suggestion && namingError[index] && (
+                <p className="text-[11px] text-red-600 dark:text-red-400">
+                  {t('import.namingFailed', { reason: namingError[index] })}{' '}
+                  <button type="button" className="font-bold underline" onClick={() => draft && void requestNaming(draft, [index], true)}>
+                    {t('import.namingRetry')}
+                  </button>
+                </p>
+              )}
               {namingBusy && (
                 <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{t('import.namingBusy')}</p>
               )}

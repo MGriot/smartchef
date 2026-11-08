@@ -935,6 +935,8 @@
     "newNameEnglish": "Nombre en inglés",
     "newName": "Nombre",
     "namingBusy": "Pidiendo a la IA el nombre de catálogo y las traducciones…",
+    "namingFailed": "Nombre con IA fallido: {{reason}}",
+    "namingRetry": "Reintentar",
     "varietyOf": "Variedad de {{name}}",
     "translatedOnCreate": "La IA generará las traducciones al crearlo.",
     "readFileFailed": "No se pudo leer ese archivo.",
