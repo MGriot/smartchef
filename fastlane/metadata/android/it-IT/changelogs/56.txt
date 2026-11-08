@@ -1,0 +1,1 @@
+L'importazione con AI ora conserva i tempi di preparazione, cottura, riposo e dei passaggi anche quando il modello li scrive come testo, ad esempio "1h 30", o come durata ISO.

@@ -1,0 +1,1 @@
+AI recipe import now keeps prep, cook, rest and step times when the model writes them as text such as "1h 30" or an ISO duration.
