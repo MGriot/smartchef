@@ -31,6 +31,7 @@
 // what RecipeImport.tsx already casts the /api/recipes/parse response to,
 // so returning it here type-checks the wire contract instead of asserting
 // it.
+import { parseMinutes } from '../lib/parseMinutes';
 import i18n from '../i18n';
 import type { TemplateParseResult } from './recipeTemplateParser';
 import { loadImportCatalog, type ImportCatalog } from './importCatalog.local';
@@ -732,9 +733,9 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
       : undefined,
     description: parsed.description ?? undefined,
     servings: typeof parsed.servings === 'number' ? parsed.servings : undefined,
-    prepTimeMin: typeof parsed.prepTimeMin === 'number' ? parsed.prepTimeMin : undefined,
-    cookTimeMin: typeof parsed.cookTimeMin === 'number' ? parsed.cookTimeMin : undefined,
-    restTimeMin: typeof parsed.restTimeMin === 'number' ? parsed.restTimeMin : undefined,
+    prepTimeMin: parseMinutes(parsed.prepTimeMin),
+    cookTimeMin: parseMinutes(parsed.cookTimeMin),
+    restTimeMin: parseMinutes(parsed.restTimeMin),
     yield: parseYield(parsed.yield),
     difficulty: ['easy', 'medium', 'hard', 'expert'].includes(parsed.difficulty)
       ? parsed.difficulty
@@ -778,7 +779,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
           stepNumber: step.stepNumber ?? i + 1,
           title: step.title ?? undefined,
           description: step.description ?? '',
-          durationMin: typeof step.durationMin === 'number' ? step.durationMin : undefined,
+          durationMin: parseMinutes(step.durationMin),
           techniques: Array.isArray(step.techniques) ? step.techniques.filter((t: unknown) => typeof t === 'string') : [],
           tools: Array.isArray(step.tools) ? step.tools.filter((t: unknown) => typeof t === 'string') : [],
           // Which of the recipe's ingredients this step uses. Kept as the
