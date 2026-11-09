@@ -1,0 +1,1 @@
+You can now merge several recipes at once, and merge with AI: the AI flags repeated rows but you tick every one.
