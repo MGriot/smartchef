@@ -1034,11 +1034,14 @@ export async function getRecipeMergePreview(sourceId: string, targetId: string):
       const sourceValue = source[fieldName] ?? null;
       const targetValue = target[fieldName] ?? null;
       const equal = fieldValuesEqual(fieldName, sourceValue, targetValue);
-      const canKeepBoth = SET_FIELDS.has(fieldName);
+      // Ingredients and steps can keep both sides too, by appending the
+      // duplicate's rows to the kept recipe's (see combineRows) — the way
+      // to not lose half a recipe. They still default to one side.
+      const canKeepBoth = SET_FIELDS.has(fieldName) || fieldName === 'ingredients' || fieldName === 'steps';
       // What the merge did before there was a choice: the kept recipe's
       // value, unless it has none; sets were already unioned.
       const defaultSide: MergeSide = equal ? 'target'
-        : canKeepBoth ? 'both'
+        : SET_FIELDS.has(fieldName) ? 'both'
         : isEmptyValue(targetValue) && !isEmptyValue(sourceValue) ? 'source' : 'target';
       return { fieldName, sourceValue, targetValue, equal, canKeepBoth, defaultSide };
     });
@@ -1057,10 +1060,16 @@ export async function getRecipeMergePreview(sourceId: string, targetId: string):
 // sub-recipe. Then the duplicate is deleted the way any recipe is, so the
 // deletion syncs.
 
+/** Individual rows of the duplicate to add to the kept recipe — the AI
+ *  merge, where the user ticks each ingredient and step. Rows not listed
+ *  are left behind with the deleted duplicate. */
+export interface MergePicks { ingredientIds: string[]; stepIds: string[] }
+
 export async function mergeRecipes(
   sourceId: string,
   targetId: string,
   choices?: Record<string, MergeSide>,
+  picks?: MergePicks,
 ): Promise<{ recipesUpdated: number } | null> {
   if (sourceId === targetId) throw new Error(i18n.t('errors.mergeIntoSelf'));
   const [source, target] = await Promise.all([
@@ -1069,7 +1078,8 @@ export async function mergeRecipes(
   ]);
   if (!source || !target) return null;
 
-  if (choices) await applyMergeChoices(sourceId, targetId, choices);
+  if (choices || picks) choices = choices ?? {};
+  if (choices) await applyMergeChoices(sourceId, targetId, choices, picks);
 
   await query(
     `INSERT INTO collection_recipes (collection_id, recipe_id)
@@ -1120,15 +1130,32 @@ const JSON_TEXT_SET_FIELDS = new Set(['tags', 'regions', 'image_urls']);
  *  Steps and ingredients move as rows (writeArrayField upserts by id, so
  *  the source's rows, with their translations, change owner), which is
  *  safe only because the source is deleted straight after. */
-async function applyMergeChoices(sourceId: string, targetId: string, choices: Record<string, MergeSide>): Promise<void> {
+async function applyMergeChoices(sourceId: string, targetId: string, choices: Record<string, MergeSide>, picks?: MergePicks): Promise<void> {
   const [source, target] = await Promise.all([buildRecipeEntity(sourceId), buildRecipeEntity(targetId)]);
   if (!source || !target) return;
   const [{ applyResolvedConflict, getMergeableFieldNames }, { setMembers, SET_FIELDS }] = await Promise.all([
     import('./conflicts.local'), import('../lib/mergeNormalize'),
   ]);
   const allowed = new Set((getMergeableFieldNames('recipe') ?? []).filter((f) => !MERGE_SKIPPED_FIELDS.has(f)));
+  // Appending rows (instead of replacing the list) happens for a "keep
+  // both" on ingredients or steps, and for the AI merge's ticked rows.
+  const combine = !!picks || choices.ingredients === 'both' || choices.steps === 'both';
+  // Where the duplicate's rows sit now, before any of them moves.
+  const sourceIngredients = combine
+    ? await query<{ id: string; sort_order: number; substitute_for: number | null }>(
+        "SELECT id, sort_order, substitute_for FROM recipe_ingredients WHERE recipe_id=$1 ORDER BY sort_order", [sourceId])
+    : [];
+  const sourceSteps = combine
+    ? await query<{ id: string; step_number: number }>("SELECT id, step_number FROM recipe_steps WHERE recipe_id=$1 ORDER BY step_number", [sourceId])
+    : [];
+  const targetEnds = combine
+    ? await queryOne<{ ing: number | null; step: number | null }>(
+        `SELECT (SELECT MAX(sort_order) FROM recipe_ingredients WHERE recipe_id=$1) AS ing,
+                (SELECT MAX(step_number) FROM recipe_steps WHERE recipe_id=$1) AS step`, [targetId])
+    : null;
   for (const [fieldName, side] of Object.entries(choices)) {
     if (!allowed.has(fieldName) || side === 'target') continue;
+    if (combine && (fieldName === 'ingredients' || fieldName === 'steps') && (picks || side === 'both')) continue;
     let chosenValue: unknown = source[fieldName] ?? null;
     if (side === 'both' && SET_FIELDS.has(fieldName)) {
       const members = [...setMembers(target[fieldName]), ...setMembers(source[fieldName])];
@@ -1136,6 +1163,18 @@ async function applyMergeChoices(sourceId: string, targetId: string, choices: Re
       chosenValue = JSON_TEXT_SET_FIELDS.has(fieldName) ? JSON.stringify(union) : union;
     }
     await applyResolvedConflict({ entityType: 'recipe', entityId: targetId, fieldName, chosenValue });
+  }
+
+  if (combine) {
+    await combineRows({
+      source, target, targetId, picks,
+      ingSide: picks ? 'target' : (choices.ingredients ?? 'target'),
+      stepSide: picks ? 'target' : (choices.steps ?? 'target'),
+      sourceIngredients, sourceSteps,
+      targetMaxIngredient: targetEnds?.ing ?? null,
+      targetMaxStep: targetEnds?.step ?? null,
+    });
+    return;
   }
 
   // Steps point at ingredients by position ({{ing:N}}, step_ingredients).
@@ -1156,16 +1195,7 @@ async function applyMergeChoices(sourceId: string, targetId: string, choices: Re
     // recipe said, and the AI check can link them again and raise the
     // mismatch for the user to settle.
     const { STEP_REF_RE, parseRefParams, normalizeName } = await import('../lib/stepRefs');
-    const namesOf = async (entity: Record<string, unknown>): Promise<string[]> => {
-      const out: string[] = [];
-      for (const r of (entity.ingredients as Array<Record<string, unknown>>) ?? []) {
-        const row = r.ingredient_id
-          ? await queryOne<{ name: string }>("SELECT name FROM ingredients WHERE id=$1", [r.ingredient_id as string])
-          : r.sub_recipe_id ? await queryOne<{ name: string }>("SELECT title AS name FROM recipes WHERE id=$1", [r.sub_recipe_id as string]) : null;
-        out[Number(r.sort_order)] = row?.name ?? '';
-      }
-      return out;
-    };
+    const namesOf = ingredientNamesOf;
     const writtenAgainst = await namesOf(stepsSide === 'source' ? source : target);
     const kept = await namesOf(ingredientsSide === 'source' ? source : target);
     const sameList = writtenAgainst.every((n, i) => normalizeName(n) === normalizeName(kept[i] ?? ''));
@@ -1197,6 +1227,159 @@ async function applyMergeChoices(sourceId: string, targetId: string, choices: Re
       }
     }
   }
+}
+
+/** Ingredient names by sort_order, for turning {{ing:N}} back into words. */
+async function ingredientNamesOf(entity: Record<string, unknown>): Promise<string[]> {
+  const out: string[] = [];
+  for (const r of (entity.ingredients as Array<Record<string, unknown>>) ?? []) {
+    const row = r.ingredient_id
+      ? await queryOne<{ name: string }>("SELECT name FROM ingredients WHERE id=$1", [r.ingredient_id as string])
+      : r.sub_recipe_id ? await queryOne<{ name: string }>("SELECT title AS name FROM recipes WHERE id=$1", [r.sub_recipe_id as string]) : null;
+    out[Number(r.sort_order)] = row?.name ?? '';
+  }
+  return out;
+}
+
+/** Appends the duplicate's ingredient and step rows to the kept recipe
+ *  instead of replacing its lists ("keep both", or the AI merge's ticked
+ *  rows). Rows are moved, not copied (the duplicate is deleted right
+ *  after), so their translations come along.
+ *
+ *  Steps name ingredients by position, and positions change here: a moved
+ *  ingredient lands after the kept ones. So every step that came from the
+ *  duplicate has its {{ing:N}} and step_ingredients renumbered; a reference
+ *  to an ingredient that did not make it over turns back into the plain
+ *  word it read as, rather than pointing at the wrong ingredient. The same
+ *  goes for the kept recipe's own steps when its ingredient list was
+ *  replaced wholesale. */
+async function combineRows(a: {
+  source: Record<string, any>;
+  target: Record<string, any>;
+  targetId: string;
+  picks?: MergePicks;
+  ingSide: MergeSide;
+  stepSide: MergeSide;
+  sourceIngredients: Array<{ id: string; sort_order: number; substitute_for: number | null }>;
+  sourceSteps: Array<{ id: string; step_number: number }>;
+  targetMaxIngredient: number | null;
+  targetMaxStep: number | null;
+}): Promise<void> {
+  const { STEP_REF_RE, parseRefParams, buildRef } = await import('../lib/stepRefs');
+
+  // 1 ── Ingredients: old position -> new position (null = not in the result)
+  const ingMap = new Map<number, number | null>();
+  const movedIngredients: typeof a.sourceIngredients = [];
+  if (a.picks) {
+    const picked = new Set(a.picks.ingredientIds);
+    for (const row of a.sourceIngredients) if (picked.has(row.id)) movedIngredients.push(row);
+  } else if (a.ingSide === 'both') {
+    movedIngredients.push(...a.sourceIngredients);
+  }
+  const ingOffset = a.targetMaxIngredient == null ? 0 : a.targetMaxIngredient + 1;
+  for (const row of a.sourceIngredients) {
+    const moved = movedIngredients.indexOf(row);
+    if (moved >= 0) ingMap.set(Number(row.sort_order), a.picks ? ingOffset + moved : Number(row.sort_order) + ingOffset);
+    else ingMap.set(Number(row.sort_order), a.ingSide === 'source' && !a.picks ? Number(row.sort_order) : null);
+  }
+  for (const row of movedIngredients) {
+    const substitute = row.substitute_for == null ? null : ingMap.get(Number(row.substitute_for)) ?? null;
+    await query(
+      "UPDATE recipe_ingredients SET recipe_id=$1, sort_order=$2, substitute_for=$3 WHERE id=$4",
+      [a.targetId, ingMap.get(Number(row.sort_order)), substitute, row.id]
+    );
+  }
+
+  // 2 ── Steps: moved to the end of the kept recipe's
+  const sourceStepIds = new Set(a.sourceSteps.map((s) => s.id));
+  const movedSteps = a.picks
+    ? a.sourceSteps.filter((s) => a.picks!.stepIds.includes(s.id))
+    : a.stepSide === 'both' ? a.sourceSteps : [];
+  if (movedSteps.length) {
+    const firstMoved = Math.min(...movedSteps.map((s) => Number(s.step_number)));
+    const shift = a.targetMaxStep == null ? 0 : a.targetMaxStep - firstMoved + 1;
+    for (const s of movedSteps) {
+      await query("UPDATE recipe_steps SET recipe_id=$1, step_number=$2 WHERE id=$3", [a.targetId, Number(s.step_number) + shift, s.id]);
+    }
+  }
+
+  // 3 ── Renumber the references in every step that now sits in the kept recipe
+  const fromSourceNames = await ingredientNamesOf(a.source);
+  const fromTargetNames = await ingredientNamesOf(a.target);
+  const rewrite = (text: string, map: (n: number) => number | null, names: string[]) =>
+    text.replace(STEP_REF_RE, (whole, type: string, refId: string, raw?: string) => {
+      if (type !== 'ing') return whole;
+      const n = parseInt(refId.trim(), 10);
+      if (!Number.isFinite(n)) return whole;
+      const to = map(n);
+      return to != null ? buildRef('ing', to, parseRefParams(raw)) : (parseRefParams(raw).alias || names[n] || whole);
+    });
+  const steps = await query<{ id: string; description: string | null; step_ingredients: string | null }>(
+    "SELECT id, description, step_ingredients FROM recipe_steps WHERE recipe_id=$1", [a.targetId]
+  );
+  for (const step of steps) {
+    const fromSource = sourceStepIds.has(step.id);
+    const map = fromSource ? (n: number) => ingMap.get(n) ?? null : (n: number) => (a.ingSide === 'source' ? null : n);
+    const names = fromSource ? fromSourceNames : fromTargetNames;
+    const identity = fromSource ? [...ingMap].every(([from, to]) => from === to) : a.ingSide !== 'source';
+    if (identity) continue;
+
+    let refs: Array<{ ingredientSortOrder?: number }> = [];
+    try { refs = JSON.parse(step.step_ingredients || '[]'); } catch { refs = []; }
+    if (!Array.isArray(refs)) refs = [];
+    const remapped = refs.flatMap((r) => {
+      const to = map(Number(r?.ingredientSortOrder));
+      return to == null ? [] : [{ ...r, ingredientSortOrder: to }];
+    });
+    await query(
+      "UPDATE recipe_steps SET description=$1, step_ingredients=$2 WHERE id=$3",
+      [rewrite(step.description ?? '', map, names), JSON.stringify(remapped), step.id]
+    );
+    const translated = await query<{ id: string; description: string | null }>(
+      "SELECT id, description FROM recipe_step_translations WHERE step_id=$1", [step.id]
+    );
+    for (const tr of translated) {
+      if (tr.description && tr.description.includes('{{ing:')) {
+        await query("UPDATE recipe_step_translations SET description=$1 WHERE id=$2", [rewrite(tr.description, map, names), tr.id]);
+      }
+    }
+  }
+}
+
+// ── POST /recipes/:id/merge-many ───────────────────────────────────────
+// Several duplicates folded into one kept recipe, in order. Each duplicate
+// brings its own choices (the compare view's), or its ticked rows (the AI
+// merge). Nothing is touched unless every duplicate exists.
+
+export interface MergeManyItem {
+  sourceId: string;
+  choices?: Record<string, MergeSide>;
+  picks?: MergePicks;
+}
+
+export async function mergeRecipesMany(targetId: string, items: MergeManyItem[]): Promise<{ recipesUpdated: number } | null> {
+  const sourceIds = [...new Set(items.map((i) => i.sourceId))];
+  if (sourceIds.includes(targetId)) throw new Error(i18n.t('errors.mergeIntoSelf'));
+  const live = async (id: string) => !!(await queryOne("SELECT id FROM recipes WHERE id=$1 AND COALESCE(sync_status,'')!='deleted'", [id]));
+  if (!(await live(targetId))) return null;
+  for (const id of sourceIds) if (!(await live(id))) throw new Error(i18n.t('errors.recipeNotFound'));
+
+  let recipesUpdated = 0;
+  for (const item of items) {
+    if (!sourceIds.includes(item.sourceId)) continue;
+    sourceIds.splice(sourceIds.indexOf(item.sourceId), 1);   // a repeated duplicate is merged once
+    let choices = item.choices;
+    if (!choices && item.picks) {
+      // Everything but the lists keeps the compare view's default.
+      const preview = await getRecipeMergePreview(item.sourceId, targetId);
+      choices = Object.fromEntries(
+        (preview?.fields ?? []).filter((f) => !f.equal && f.fieldName !== 'ingredients' && f.fieldName !== 'steps').map((f) => [f.fieldName, f.defaultSide])
+      );
+    }
+    const result = await mergeRecipes(item.sourceId, targetId, choices, item.picks);
+    recipesUpdated += result?.recipesUpdated ?? 0;
+  }
+  return { recipesUpdated };
 }
 
 // ── Portions / cook-sequence ────────────────────────────────────────────

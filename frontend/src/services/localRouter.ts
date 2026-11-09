@@ -113,6 +113,21 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
       return { status: 502, error: err instanceof Error ? err.message : 'AI merge failed' };
     }
   }
+  // "Merge with AI" over several saved recipes: the model only advises which
+  // rows repeat the kept recipe; the dialog lets the user tick each one —
+  // see lib/recipeMergeAi.ts.
+  if (id === 'ai-merge-many') {
+    if (method !== 'POST' || sub) return NOT_HANDLED;
+    const body = parseBody(init) ?? {};
+    const others = Array.isArray(body.otherIds) ? body.otherIds.filter((x: unknown) => typeof x === 'string') : [];
+    if (typeof body.keptId !== 'string' || !body.keptId || others.length === 0) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    try {
+      const { proposeRecipesMerge } = await import('./recipeMergeAi.local');
+      return { status: 200, data: await proposeRecipesMerge(body.keptId, others, typeof body.lang === 'string' ? body.lang : undefined) };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI merge failed' };
+    }
+  }
   if (id === 'parse') {
     if (method !== 'POST') return NOT_HANDLED;
     const body = parseBody(init) ?? {};
@@ -185,6 +200,26 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
     const result = await recipes.mergeRecipes(id, body.targetId, choices);
     if (!result) return { status: 404, error: i18n.t('errors.recipeNotFound') };
     return { status: 200, data: result };
+  }
+  // Several duplicates into the recipe in the path — the compare view's
+  // choices per duplicate, or the AI dialog's ticked rows.
+  if (sub === 'merge-many' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    const sources = Array.isArray(body.sources) ? body.sources : [];
+    if (sources.length === 0 || sources.some((s: any) => typeof s?.id !== 'string')) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    try {
+      const result = await recipes.mergeRecipesMany(id, sources.map((s: any) => ({
+        sourceId: s.id,
+        choices: s.choices && typeof s.choices === 'object' ? s.choices : undefined,
+        picks: s.picks && typeof s.picks === 'object'
+          ? { ingredientIds: Array.isArray(s.picks.ingredientIds) ? s.picks.ingredientIds : [], stepIds: Array.isArray(s.picks.stepIds) ? s.picks.stepIds : [] }
+          : undefined,
+      })));
+      if (!result) return { status: 404, error: i18n.t('errors.recipeNotFound') };
+      return { status: 200, data: result };
+    } catch (err) {
+      return { status: 400, error: err instanceof Error ? err.message : i18n.t('recipeDetail.mergeFailed') };
+    }
   }
   if (sub === 'merge-preview' && method === 'GET') {
     const targetId = sp.get('targetId');
