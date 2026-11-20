@@ -6,6 +6,7 @@ import type { MismatchSide } from '../lib/recipeMismatchFix';
 import { diffWords } from '../lib/wordDiff';
 import { SOURCE_TYPE_META } from './RecipeSourcesEditor';
 import { difficultyKey } from '../lib/recipeReport';
+import SourcesReadNote from './SourcesReadNote';
 
 const GROUPS: CheckGroup[] = ['text', 'ingredients', 'steps', 'links', 'fields', 'tags', 'regions', 'sources'];
 
@@ -293,6 +294,8 @@ export default function RecipeAiReviewDialog({
             </ul>
           </section>
         )}
+
+        <SourcesReadNote sources={result?.sourcesRead} />
       </div>
     </Modal>
   );

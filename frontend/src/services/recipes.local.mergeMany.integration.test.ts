@@ -150,3 +150,46 @@ describe('merge several recipes with ticked rows', () => {
     await expect(mergeRecipesMany('keep', [{ sourceId: 'dup' }, { sourceId: 'dup' }])).resolves.not.toBeNull();
   });
 });
+
+describe('references survive every kind of merge', () => {
+  const sourcesOf = async (query: Awaited<ReturnType<typeof seed>>) => {
+    const row = await query<{ sources: string; source_url: string | null }>(`SELECT sources, source_url FROM recipes WHERE id = 'keep'`);
+    return { list: JSON.parse(row[0].sources) as Array<{ type: string; label?: string; url?: string }>, sourceUrl: row[0].source_url };
+  };
+  const giveSources = async (query: Awaited<ReturnType<typeof seed>>) => {
+    await query(`UPDATE recipes SET source_url = 'https://a.it/tartellette', sources = $1 WHERE id = 'keep'`,
+      [JSON.stringify([{ type: 'url', label: 'Ricetta originale', url: 'https://a.it/tartellette' }])]);
+    await query(`UPDATE recipes SET source_url = 'https://b.fr/tartelettes', sources = $1 WHERE id = 'dup'`,
+      [JSON.stringify([{ type: 'url', url: 'http://www.a.it/tartellette/' }, { type: 'book', label: 'Artusi' }])]);
+    await query(`UPDATE recipes SET sources = $1 WHERE id = 'dup2'`,
+      [JSON.stringify([{ type: 'book', label: 'artusi' }, { type: 'video', url: 'https://v.it/1' }])]);
+  };
+  const expected = ['https://a.it/tartellette', 'Artusi', 'https://b.fr/tartelettes', 'https://v.it/1'];
+
+  it('keeps all of them in a compare-view merge, whatever the choices', async () => {
+    const query = await seed();
+    await giveSources(query);
+    const { mergeRecipesMany } = await import('./recipes.local');
+    await mergeRecipesMany('keep', [{ sourceId: 'dup', choices: { title: 'source' } }, { sourceId: 'dup2', choices: {} }]);
+    const { list, sourceUrl } = await sourcesOf(query);
+    expect(list.map((s) => s.url ?? s.label)).toEqual(expected);
+    expect(sourceUrl).toBe('https://a.it/tartellette');
+  });
+
+  it('keeps all of them in the plain merge with no choices', async () => {
+    const query = await seed();
+    await giveSources(query);
+    const { mergeRecipes } = await import('./recipes.local');
+    await mergeRecipes('dup', 'keep');
+    await mergeRecipes('dup2', 'keep');
+    expect((await sourcesOf(query)).list.map((s) => s.url ?? s.label)).toEqual(expected);
+  });
+
+  it('does not offer the references as a field to pick a side for', async () => {
+    const query = await seed();
+    await giveSources(query);
+    const { getRecipeMergePreview } = await import('./recipes.local');
+    const preview = await getRecipeMergePreview('dup', 'keep');
+    expect(preview?.fields.map((f) => f.fieldName)).not.toContain('sources');
+  });
+});

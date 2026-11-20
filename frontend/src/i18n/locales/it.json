@@ -775,26 +775,8 @@
       "withAi": "Unisci con l'IA",
       "next": "Ricetta successiva",
       "progress": "Ricetta {{current}} di {{total}} — scegli la versione da tenere per ogni campo",
-      "removeFromMerge": "Togli dall'unione"
-    },
-    "aiMergeMany": {
-      "title": "Unisci con l'IA",
-      "subtitle": "L'IA ha confrontato le copie con \"{{kept}}\", la ricetta che tieni.",
-      "loading": "Confronto le ricette…",
-      "explain": "L'IA si limita a suggerire. Sono elencati tutti gli ingredienti e i passaggi delle copie: spunta quelli da aggiungere alla ricetta tenuta. Le righe che l'IA ritiene ripetute o fuori posto partono senza spunta, con il motivo. Nulla viene tolto dalla ricetta tenuta.",
-      "selectAll": "Spunta tutto",
-      "selectNone": "Togli tutte le spunte",
-      "counter": "{{kept}} di {{total}} spuntate · {{flagged}} da controllare",
-      "duplicateOf": "Sembra: {{text}}",
-      "looksOut": "Potrebbe non c'entrare",
-      "ingredients": "Ingredienti",
-      "steps": "Passaggi",
-      "retry": "Riprova",
-      "apply_one": "Unisci, aggiungendo {{count}} riga",
-      "apply_other": "Unisci, aggiungendo {{count}} righe",
-      "leftOutNote_one": "{{count}} riga senza spunta verrà scartata insieme alla sua ricetta.",
-      "leftOutNote_other": "{{count}} righe senza spunta verranno scartate insieme alle loro ricette.",
-      "failed": "L'unione con l'IA non è riuscita"
+      "removeFromMerge": "Togli dall'unione",
+      "sourcesKept": "Le fonti e i riferimenti di tutte le ricette vengono sempre conservati."
     },
     "mergeCompare": {
       "compare": "Confronta",
@@ -846,6 +828,47 @@
       "copyOriginal": "Parti dall'originale (mantiene i collegamenti agli ingredienti)",
       "ingredients": "Ingredienti",
       "ingredientNamesHint": "I nomi vengono dalla libreria degli ingredienti, quindi sono uguali in ogni ricetta: traducili in Libreria → Ingredienti."
+    },
+    "aiSources": {
+      "title": "Fonti lette dall'IA: {{read}} di {{total}}",
+      "unreadable": "non leggibile"
+    },
+    "aiMergeUnified": {
+      "title": "Unisci con l'IA",
+      "subtitle": "Una sola ricetta da {{count}} versioni e dalle loro fonti",
+      "loading": "Leggo le ricette e le loro fonti…",
+      "loadingHint": "L'IA confronta le versioni e scrive una ricetta unica. Può richiedere un minuto.",
+      "draft": "Ricetta unificata",
+      "ingredients": "Ingredienti ({{count}})",
+      "steps": "Passaggi ({{count}})",
+      "tips": "Consigli",
+      "storage": "Conservazione",
+      "servings": "{{count}} porzioni",
+      "optional": "facoltativo",
+      "fromPage": "Fonte",
+      "notInLibraryChip": "Non in libreria",
+      "notInLibrary": "Non presenti nella libreria ingredienti, quindi non salvati come righe: {{names}}. Aggiungili dalla scheda della ricetta dopo l'unione.",
+      "versions": "Versioni",
+      "keptVersion": "ricetta tenuta",
+      "foldedVersion": "unita ed eliminata",
+      "keepsNote": "Collezioni, menù, cronologia e tutte le fonti passano alla ricetta tenuta.",
+      "translationsNote": "Le traduzioni della ricetta tenuta verranno rimosse: andranno rigenerate sul nuovo testo.",
+      "reasoning": "Ragionamento dell'IA",
+      "doubts": "Dubbi da chiarire ({{count}})",
+      "doubtsHint": "Tocca una risposta o scrivi in chat.",
+      "chat": "Chat",
+      "chatHint": "Chiedi modifiche o chiarimenti: la ricetta viene riscritta a ogni risposta.",
+      "chatPlaceholder": "Scrivi all'IA per affinare la ricetta…",
+      "send": "Invia",
+      "thinking": "Sto pensando…",
+      "tabRecipe": "Ricetta",
+      "tabChat": "Chat",
+      "save": "Salva la ricetta unita",
+      "saving": "Salvataggio…",
+      "retry": "Riprova",
+      "failed": "L'unione con l'IA non è riuscita",
+      "noRecipe": "L'IA non ha restituito una ricetta utilizzabile. Riprova.",
+      "sessionLost": "Questa unione non è più attiva. Riaprila per ricominciare."
     }
   },
   "login": {
@@ -1011,7 +1034,9 @@
     "scanPagesChosen_other": "{{count}} pagine scelte",
     "scanPagesHint": "Verranno lette come un’unica ricetta, nell’ordine in cui le hai scelte: la lista degli ingredienti su una pagina e i passaggi su un’altra diventano un solo import.",
     "scanMultiImageOnly": "Solo foto e scansioni possono essere unite in un’unica ricetta. Importa un PDF, una nota vocale o un video singolarmente.",
-    "scanOcrLeadHint": "Lettura su questo dispositivo: gratuita, offline e precisa sul testo stampato bene. Il risultato finisce nella casella di testo, così puoi controllarlo prima di importare."
+    "scanOcrLeadHint": "Lettura su questo dispositivo: gratuita, offline e precisa sul testo stampato bene. Il risultato finisce nella casella di testo, così puoi controllarlo prima di importare.",
+    "times": "Tempi",
+    "timesHint": "In minuti. Se la ricetta non li dichiara sono la somma delle durate dei passaggi: correggili se serve. Totale: {{total}}"
   },
   "seasonality": {
     "hint": "Cosa è di stagione, mese per mese — modifica la stagionalità di un ingrediente dalla pagina Ingredienti.",
@@ -1425,7 +1450,10 @@
     "hiddenHint": "Le lingue nascoste spariscono solo dai selettori. Nulla di scritto in quelle lingue è stato eliminato, e mostrandone una torna subito tutto al suo posto."
   },
   "account": {
-    "about": { "heading": "Informazioni", "version": "Versione" },
+    "about": {
+      "heading": "Informazioni",
+      "version": "Versione"
+    },
     "sync": {
       "nothingChanged": "Nessuna modifica — è già tutto aggiornato."
     },

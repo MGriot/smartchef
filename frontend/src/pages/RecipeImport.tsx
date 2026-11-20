@@ -29,6 +29,7 @@ interface IngredientNaming {
   translations: Array<{ lang: string; text: string }>;
 }
 import { repairIngredientAmount } from '../lib/ingredientAmount';
+import { formatDurationWith } from '../lib/duration';
 import { checkMediaForProvider } from '../lib/llmMedia';
 import { matchStepIngredients, linkIngredientsInText, normalizeName } from '../lib/stepRefs';
 import { linkEntitiesInText, resolveRegions, verifiedMentions, ingredientMentionNames, ingredientsNamedInText } from '../lib/importLinking';
@@ -1828,6 +1829,43 @@ export default function RecipeImport() {
                            {detectedUnsupportedLang
                              ? t('import.langUnsupported', { lang: detectedUnsupportedLang.toUpperCase() })
                              : t('import.matchLanguageHint')}
+                         </p>
+                       </div>
+
+                       {/* The recipe's overall times, shown before saving:
+                           when the source states none they are the sum of
+                           the step durations (lib/recipeTimes.ts), which is
+                           worth a glance and one correction here rather
+                           than four empty tiles on the saved recipe. */}
+                       <div className="mb-6">
+                         <p className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">{t('import.times')}</p>
+                         <div className="grid grid-cols-3 gap-3">
+                           {([
+                             ['prepTimeMin', 'recipeDetail.prepTime'],
+                             ['restTimeMin', 'recipeDetail.waitingTime'],
+                             ['cookTimeMin', 'recipeDetail.cookTime'],
+                           ] as const).map(([field, labelKey]) => (
+                             <label key={field} className="block min-w-0">
+                               <span className="block text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 mb-1 truncate">{t(labelKey)}</span>
+                               <input
+                                 type="number"
+                                 min={0}
+                                 inputMode="numeric"
+                                 value={draft[field] || ''}
+                                 onChange={(e) => {
+                                   const minutes = parseInt(e.target.value, 10);
+                                   setDraft({ ...draft, [field]: Number.isFinite(minutes) && minutes > 0 ? minutes : undefined });
+                                 }}
+                                 placeholder="—"
+                                 className="sc-field-inset w-full"
+                               />
+                             </label>
+                           ))}
+                         </div>
+                         <p className="sc-hint mt-2">
+                           {t('import.timesHint', {
+                             total: formatDurationWith(t, (draft.prepTimeMin || 0) + (draft.restTimeMin || 0) + (draft.cookTimeMin || 0)),
+                           })}
                          </p>
                        </div>
 

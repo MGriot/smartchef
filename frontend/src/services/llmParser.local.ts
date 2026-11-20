@@ -32,6 +32,7 @@
 // so returning it here type-checks the wire contract instead of asserting
 // it.
 import { parseMinutes } from '../lib/parseMinutes';
+import { deriveRecipeTimes } from '../lib/recipeTimes';
 import i18n from '../i18n';
 import type { TemplateParseResult } from './recipeTemplateParser';
 import { loadImportCatalog, type ImportCatalog } from './importCatalog.local';
@@ -107,7 +108,16 @@ export interface ProviderCallOptions {
   /** Ceiling for one cloud request; defaults to CLOUD_TIMEOUT_MS. Ollama
    *  keeps its own, longer one either way. */
   timeoutMs?: number;
+  /** Earlier turns of a conversation, oldest first; the `content` passed to
+   *  the call is then the newest user turn. Used by the AI merge's chat. */
+  history?: ChatTurn[];
+  /** Room for the answer. The default fits a parsed recipe; a rewritten
+   *  recipe that also explains itself needs more. */
+  maxTokens?: number;
 }
+
+/** One turn of a conversation with the model. */
+export interface ChatTurn { role: 'user' | 'assistant'; content: string }
 
 const PROVIDER_NAMES: Record<string, string> = { anthropic: 'Claude', gemini: 'Gemini', openai: 'OpenAI', ollama: 'Ollama' };
 
@@ -164,6 +174,7 @@ Il JSON deve avere questa struttura:
       "title": "string | null",
       "description": "string",
       "durationMin": "number | null",
+      "timeKind": "prep | cook | rest | null",
       "techniques": ["string"],
       "tools": ["string"],
       "ingredients": [
@@ -189,6 +200,8 @@ Il JSON deve avere questa struttura:
 
 Regole:
 - restTimeMin è il tempo di attesa/riposo (lievitazione, marinatura, raffreddamento) separato dal tempo di preparazione attiva
+- timeKind (negli step) dice che tipo di tempo è il durationMin di QUEL passaggio: "prep" = lavoro attivo (tagliare, impastare, montare), "cook" = cottura (forno, fornello, frittura, bollitura), "rest" = attesa senza lavoro (riposo, lievitazione, marinatura, raffreddamento). null se il passaggio non ha durationMin. È una classificazione del passaggio, non una stima
+- prepTimeMin, cookTimeMin e restTimeMin vanno compilati quando la ricetta li dichiara. Se non li dichiara lasciali null e NON sommarli tu: vengono calcolati dalle durate degli step. Per questo compila durationMin e timeKind in OGNI passaggio il cui testo indica una durata
 - tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari, con nomi brevi, generici e IN INGLESE (es. "Oven", "Stand Mixer", "Blender"), qualunque sia la lingua della ricetta
 - yield è la quantità finita prodotta (es. "12 biscotti" -> amount 12, unit "pezzi"; "1 litro" -> amount 1, unit "litri"). Compila SOLO se la ricetta la dichiara esplicitamente; altrimenti null. Non confonderla con servings (le porzioni)
 - storageInstructions è come conservare gli avanzi ("Come conservare"), tips sono consigli generali distinti dalla description — entrambi null se non menzionati
@@ -455,7 +468,7 @@ async function postWithRetry(
   }
 }
 
-async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
+async function callAnthropic(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number, opts: ProviderCallOptions = {}): Promise<string> {
   // A media turn is content BLOCKS rather than a bare string; the image or
   // document goes first so the text that follows reads as an instruction
   // about it, which is what Anthropic's own guidance asks for.
@@ -480,9 +493,9 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
       // A recipe with a dozen steps, each listing its ingredients, tools,
       // techniques and quoted mentions, runs well past 1500 tokens; the cut-off
       // tail steps then lost their links without a word.
-      max_tokens: 4096,
+      max_tokens: opts.maxTokens ?? 4096,
       system: systemPrompt,
-      messages: [{ role: 'user', content: userContent }],
+      messages: [...(opts.history ?? []), { role: 'user', content: userContent }],
       // No temperature/top_p/top_k — current Claude models return HTTP 400
       // on any non-default sampling param.
     },
@@ -494,7 +507,7 @@ async function callAnthropic(content: string, apiKey: string, systemPrompt: stri
   return data?.content?.find((b) => b.type === 'text')?.text ?? '';
 }
 
-async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
+async function callGemini(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number, opts: ProviderCallOptions = {}): Promise<string> {
   // inlineData covers images, PDFs, audio AND video with one shape — the
   // reason Gemini is the fallback this file steers people to for a voice
   // note or a clip.
@@ -509,16 +522,21 @@ async function callGemini(content: string, apiKey: string, systemPrompt: string,
     { 'x-goog-api-key': apiKey },
     {
       systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: 'user', parts }],
+      contents: [
+        // Gemini calls the assistant's side of a conversation "model".
+        ...(opts.history ?? []).map((turn) => ({ role: turn.role === 'assistant' ? 'model' : 'user', parts: [{ text: turn.content }] })),
+        { role: 'user', parts },
+      ],
     },
     timeoutMs,
   );
   if (statusCode < 200 || statusCode >= 300) throw providerError('Gemini', statusCode, text);
   const data = json as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  // A long answer can arrive as several text parts.
+  return (data?.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? '').join('');
 }
 
-async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
+async function callOpenAI(content: string, apiKey: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number, opts: ProviderCallOptions = {}): Promise<string> {
   // OpenAI takes an image as a data URI in an image_url part rather than as
   // raw base64 — the one provider here that does.
   const userContent = media?.length
@@ -534,6 +552,7 @@ async function callOpenAI(content: string, apiKey: string, systemPrompt: string,
       model,
       messages: [
         { role: 'system', content: systemPrompt },
+        ...(opts.history ?? []),
         { role: 'user', content: userContent },
       ],
     },
@@ -544,7 +563,7 @@ async function callOpenAI(content: string, apiKey: string, systemPrompt: string,
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
-async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number): Promise<string> {
+async function callOllama(content: string, ollamaUrl: string, systemPrompt: string, model: string, media: ParseMedia[] | undefined, timeoutMs: number, opts: ProviderCallOptions = {}): Promise<string> {
   const base = ollamaUrl.replace(/\/+$/, '');
   // Ollama attaches images as a base64 array on the message itself. Note
   // that it accepts this against ANY model: a text-only one silently drops
@@ -561,11 +580,12 @@ async function callOllama(content: string, ollamaUrl: string, systemPrompt: stri
       stream: false,
       messages: [
         { role: 'system', content: systemPrompt },
+        ...(opts.history ?? []),
         userMessage,
       ],
       options: {
         temperature: 0.1,
-        num_predict: 1500,
+        num_predict: opts.maxTokens ?? 1500,
       },
     },
     Math.max(timeoutMs, OLLAMA_TIMEOUT_MS),
@@ -590,17 +610,17 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
   const call = (model: string): Promise<string> => {
     if (settings.provider === 'anthropic') {
       if (!settings.keys.anthropic) throw new Error(i18n.t('errors.noApiKey', { provider: 'Anthropic' }));
-      return callAnthropic(content, settings.keys.anthropic, systemPrompt, model, media, timeoutMs);
+      return callAnthropic(content, settings.keys.anthropic, systemPrompt, model, media, timeoutMs, opts);
     }
     if (settings.provider === 'gemini') {
       if (!settings.keys.gemini) throw new Error(i18n.t('errors.noApiKey', { provider: 'Google Gemini' }));
-      return callGemini(content, settings.keys.gemini, systemPrompt, model, media, timeoutMs);
+      return callGemini(content, settings.keys.gemini, systemPrompt, model, media, timeoutMs, opts);
     }
     if (settings.provider === 'openai') {
       if (!settings.keys.openai) throw new Error(i18n.t('errors.noApiKey', { provider: 'OpenAI' }));
-      return callOpenAI(content, settings.keys.openai, systemPrompt, model, media, timeoutMs);
+      return callOpenAI(content, settings.keys.openai, systemPrompt, model, media, timeoutMs, opts);
     }
-    return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, model, media, timeoutMs);
+    return callOllama(content, settings.ollamaUrl || DEFAULT_OLLAMA_URL, systemPrompt, model, media, timeoutMs, opts);
   };
 
   const models = modelsFor(settings.provider, settings.models?.[settings.provider] ?? null, !!media?.length);
@@ -622,6 +642,16 @@ export async function callConfiguredProvider(content: string, systemPrompt: stri
       console.warn(`SmartChef: ${models[i]} is unavailable (HTTP ${err.statusCode}) — trying ${models[i + 1]}`);
     }
   }
+}
+
+/** A conversation with the configured provider: `turns` oldest first, the
+ *  last one being the user's. The same dispatch, fallbacks and error words
+ *  as a single call; the earlier turns travel as the provider's own message
+ *  history. */
+export async function callConfiguredProviderChat(turns: ChatTurn[], systemPrompt: string, opts: ProviderCallOptions = {}): Promise<string> {
+  const last = turns[turns.length - 1];
+  if (!last || last.role !== 'user') throw new Error('A conversation must end with a user turn.');
+  return callConfiguredProvider(last.content, systemPrompt, undefined, { ...opts, history: turns.slice(0, -1) });
 }
 
 // ── Response handling ───────────────────────────────────────────────────
@@ -713,7 +743,7 @@ function parseStepMentions(raw: unknown): Array<{ kind: 'ingredient' | 'tool' | 
   return out;
 }
 
-function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
+export function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
   const jsonMatch = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
   if (!jsonMatch) throw new Error(i18n.t('errors.noJsonFromModel'));
 
@@ -733,9 +763,14 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
       : undefined,
     description: parsed.description ?? undefined,
     servings: typeof parsed.servings === 'number' ? parsed.servings : undefined,
-    prepTimeMin: parseMinutes(parsed.prepTimeMin),
-    cookTimeMin: parseMinutes(parsed.cookTimeMin),
-    restTimeMin: parseMinutes(parsed.restTimeMin),
+    // What the recipe states, and for a time it does not state, the sum of
+    // its steps' durations of that kind (lib/recipeTimes.ts).
+    ...deriveRecipeTimes(
+      { prepTimeMin: parseMinutes(parsed.prepTimeMin), cookTimeMin: parseMinutes(parsed.cookTimeMin), restTimeMin: parseMinutes(parsed.restTimeMin) },
+      (Array.isArray(parsed.steps) ? parsed.steps : []).map((step: any) => ({
+        durationMin: parseMinutes(step?.durationMin), timeKind: step?.timeKind, description: step?.description,
+      })),
+    ),
     yield: parseYield(parsed.yield),
     difficulty: ['easy', 'medium', 'hard', 'expert'].includes(parsed.difficulty)
       ? parsed.difficulty
@@ -819,7 +854,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): TemplateParseResult {
  *  fetchUrlContent(). The cap is not only about token spend: it is what
  *  keeps a local CPU-only model's prefill inside the timeout, and the
  *  recipe itself is almost always within it. */
-function htmlToPlainText(html: string): string {
+export function htmlToPlainText(html: string): string {
   return html
     .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gim, '')
     .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gim, '')

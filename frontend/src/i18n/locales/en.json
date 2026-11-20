@@ -775,26 +775,8 @@
       "withAi": "Merge with AI",
       "next": "Next recipe",
       "progress": "Recipe {{current}} of {{total}} — pick the version to keep of each field",
-      "removeFromMerge": "Remove from the merge"
-    },
-    "aiMergeMany": {
-      "title": "Merge with AI",
-      "subtitle": "The AI compared the copies with \"{{kept}}\", the recipe you keep.",
-      "loading": "Comparing the recipes…",
-      "explain": "The AI only suggests. Every ingredient and step of the copies is listed: tick what should be added to the kept recipe. Rows the AI thinks repeat something or do not belong start unticked, with its reason. Nothing is removed from the kept recipe.",
-      "selectAll": "Tick all",
-      "selectNone": "Untick all",
-      "counter": "{{kept}} of {{total}} ticked · {{flagged}} for you to check",
-      "duplicateOf": "Looks like: {{text}}",
-      "looksOut": "May not belong",
-      "ingredients": "Ingredients",
-      "steps": "Steps",
-      "retry": "Try again",
-      "apply_one": "Merge, adding {{count}} row",
-      "apply_other": "Merge, adding {{count}} rows",
-      "leftOutNote_one": "{{count}} unticked row will be discarded with its recipe.",
-      "leftOutNote_other": "{{count}} unticked rows will be discarded with their recipes.",
-      "failed": "The AI merge failed"
+      "removeFromMerge": "Remove from the merge",
+      "sourcesKept": "The references of every recipe are always kept."
     },
     "mergeCompare": {
       "compare": "Compare",
@@ -846,6 +828,47 @@
       "copyOriginal": "Start from the original (keeps the ingredient links)",
       "ingredients": "Ingredients",
       "ingredientNamesHint": "Names come from the ingredient library, so they are the same in every recipe: translate them in Library → Ingredients."
+    },
+    "aiSources": {
+      "title": "References read by the AI: {{read}} of {{total}}",
+      "unreadable": "could not be read"
+    },
+    "aiMergeUnified": {
+      "title": "Merge with AI",
+      "subtitle": "One recipe from {{count}} versions and their references",
+      "loading": "Reading the recipes and their references…",
+      "loadingHint": "The AI compares the versions and writes a single recipe. This can take a minute.",
+      "draft": "Unified recipe",
+      "ingredients": "Ingredients ({{count}})",
+      "steps": "Steps ({{count}})",
+      "tips": "Tips",
+      "storage": "Storage",
+      "servings": "{{count}} servings",
+      "optional": "optional",
+      "fromPage": "Source",
+      "notInLibraryChip": "Not in library",
+      "notInLibrary": "Not in the ingredient library, so not saved as rows: {{names}}. Add them from the recipe page after the merge.",
+      "versions": "Versions",
+      "keptVersion": "kept recipe",
+      "foldedVersion": "merged and deleted",
+      "keepsNote": "Collections, menus, cook history and every reference move to the kept recipe.",
+      "translationsNote": "The kept recipe's translations will be removed: they need to be made again from the new text.",
+      "reasoning": "The AI's reasoning",
+      "doubts": "Doubts to settle ({{count}})",
+      "doubtsHint": "Tap an answer or write in the chat.",
+      "chat": "Chat",
+      "chatHint": "Ask for changes or explanations: the recipe is rewritten with every answer.",
+      "chatPlaceholder": "Write to the AI to refine the recipe…",
+      "send": "Send",
+      "thinking": "Thinking…",
+      "tabRecipe": "Recipe",
+      "tabChat": "Chat",
+      "save": "Save the merged recipe",
+      "saving": "Saving…",
+      "retry": "Retry",
+      "failed": "The AI merge failed",
+      "noRecipe": "The AI returned no usable recipe. Try again.",
+      "sessionLost": "This merge is no longer active. Open it again to start over."
     }
   },
   "recipeCreate": {
@@ -975,7 +998,9 @@
     "scanPagesChosen_other": "{{count}} pages chosen",
     "scanPagesHint": "These will be read as one recipe, in the order you chose them — an ingredient list on one page and the steps on another come out as a single import.",
     "scanMultiImageOnly": "Only photos and scans can be combined into one recipe. Import a PDF, a voice note or a video on its own.",
-    "scanOcrLeadHint": "Read on this device: free, offline, and exact on clearly printed text. The result lands in the text box for you to check before importing."
+    "scanOcrLeadHint": "Read on this device: free, offline, and exact on clearly printed text. The result lands in the text box for you to check before importing.",
+    "times": "Times",
+    "timesHint": "In minutes. When the recipe states none they are the sum of the step durations: correct them if needed. Total: {{total}}"
   },
   "login": {
     "enterPasswordToContinue": "Enter your password to continue",
@@ -1425,7 +1450,10 @@
     "hiddenHint": "Hidden languages are only out of the pickers. Nothing written in them was deleted, and showing one again brings it straight back."
   },
   "account": {
-    "about": { "heading": "About", "version": "Version" },
+    "about": {
+      "heading": "About",
+      "version": "Version"
+    },
     "sync": {
       "nothingChanged": "Nothing changed — already up to date."
     },

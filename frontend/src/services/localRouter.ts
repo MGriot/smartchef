@@ -113,17 +113,39 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
       return { status: 502, error: err instanceof Error ? err.message : 'AI merge failed' };
     }
   }
-  // "Merge with AI" over several saved recipes: the model only advises which
-  // rows repeat the kept recipe; the dialog lets the user tick each one —
-  // see lib/recipeMergeAi.ts.
-  if (id === 'ai-merge-many') {
-    if (method !== 'POST' || sub) return NOT_HANDLED;
+  // "Merge with AI" over several saved recipes: the model reads them and the
+  // pages they cite, writes one unified recipe, and refines it in a chat
+  // with the user until they save it — see lib/recipeMergeUnified.ts.
+  //   POST ai-merge-unified         {keptId, otherIds, lang} opens a merge
+  //   POST ai-merge-unified/chat    {sessionId, message}     one chat turn
+  //   POST ai-merge-unified/apply   {sessionId}              saves it
+  //   POST ai-merge-unified/close   {sessionId}              drops it
+  if (id === 'ai-merge-unified') {
+    if (method !== 'POST') return NOT_HANDLED;
     const body = parseBody(init) ?? {};
-    const others = Array.isArray(body.otherIds) ? body.otherIds.filter((x: unknown) => typeof x === 'string') : [];
-    if (typeof body.keptId !== 'string' || !body.keptId || others.length === 0) return { status: 400, error: i18n.t('errors.recipeRequired') };
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
     try {
-      const { proposeRecipesMerge } = await import('./recipeMergeAi.local');
-      return { status: 200, data: await proposeRecipesMerge(body.keptId, others, typeof body.lang === 'string' ? body.lang : undefined) };
+      const local = await import('./recipeMergeUnified.local');
+      if (!sub) {
+        const others = Array.isArray(body.otherIds) ? body.otherIds.filter((x: unknown) => typeof x === 'string') : [];
+        if (typeof body.keptId !== 'string' || !body.keptId || others.length === 0) return { status: 400, error: i18n.t('errors.recipeRequired') };
+        return { status: 200, data: await local.startUnifiedMerge(body.keptId, others, typeof body.lang === 'string' ? body.lang : undefined) };
+      }
+      if (!sessionId) return { status: 400, error: i18n.t('errors.recipeRequired') };
+      if (sub === 'chat') {
+        if (typeof body.message !== 'string' || !body.message.trim()) return { status: 400, error: i18n.t('errors.recipeRequired') };
+        return { status: 200, data: await local.continueUnifiedMerge(sessionId, body.message) };
+      }
+      if (sub === 'apply') {
+        const result = await local.applyUnifiedMerge(sessionId);
+        if (!result) return { status: 404, error: i18n.t('errors.recipeNotFound') };
+        return { status: 200, data: result };
+      }
+      if (sub === 'close') {
+        local.closeUnifiedMerge(sessionId);
+        return { status: 200, data: { success: true } };
+      }
+      return NOT_HANDLED;
     } catch (err) {
       return { status: 502, error: err instanceof Error ? err.message : 'AI merge failed' };
     }

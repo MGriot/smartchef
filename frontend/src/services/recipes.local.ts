@@ -1013,8 +1013,10 @@ export interface RecipeMergePreview {
   fields: RecipeMergeField[];
 }
 
-// Bookkeeping, not content: nobody picks a side for these.
-const MERGE_SKIPPED_FIELDS = new Set(['sync_status', 'language_code', 'is_component', 'source_url', 'region_coords']);
+// Bookkeeping, not content: nobody picks a side for these. `sources` is
+// content, but there is no side to pick either: a merge keeps every
+// reference of both recipes (see mergedSources).
+const MERGE_SKIPPED_FIELDS = new Set(['sync_status', 'language_code', 'is_component', 'source_url', 'region_coords', 'sources']);
 
 async function liveRecipeEntity(id: string): Promise<Record<string, unknown> | null> {
   const entity = await buildRecipeEntity(id);
@@ -1081,20 +1083,7 @@ export async function mergeRecipes(
   if (choices || picks) choices = choices ?? {};
   if (choices) await applyMergeChoices(sourceId, targetId, choices, picks);
 
-  await query(
-    `INSERT INTO collection_recipes (collection_id, recipe_id)
-     SELECT collection_id, $1 FROM collection_recipes WHERE recipe_id=$2 ON CONFLICT DO NOTHING`,
-    [targetId, sourceId]
-  );
-  await query("DELETE FROM collection_recipes WHERE recipe_id=$1", [sourceId]);
-  await query("UPDATE menu_items SET recipe_id=$1 WHERE recipe_id=$2", [targetId, sourceId]);
-  await query("UPDATE cook_log SET recipe_id=$1 WHERE recipe_id=$2", [targetId, sourceId]);
-
-  const parents = await query<{ recipe_id: string }>(
-    "SELECT DISTINCT recipe_id FROM recipe_ingredients WHERE sub_recipe_id=$1 AND recipe_id != $2",
-    [sourceId, targetId]
-  );
-  await query("UPDATE recipe_ingredients SET sub_recipe_id=$1 WHERE sub_recipe_id=$2 AND recipe_id != $1", [targetId, sourceId]);
+  const parents = await moveRecipeLinks(sourceId, targetId);
 
   if (choices) {
     await query(
@@ -1116,10 +1105,88 @@ export async function mergeRecipes(
     );
   }
 
+  // References are never a choice: the kept recipe ends up with its own,
+  // the duplicate's, and the page each of them was imported from.
+  const { mergedSources } = await import('../lib/recipeSources');
+  await query("UPDATE recipes SET sources=$1 WHERE id=$2", [JSON.stringify(mergedSources(target, source)), targetId]);
+
   await deleteRecipe(sourceId);
   await syncRecipe(targetId);
   for (const p of parents) await syncRecipe(p.recipe_id);
   return { recipesUpdated: parents.length + 1 };
+}
+
+/** Everything that refers to the duplicate now refers to the kept recipe:
+ *  collections, planned meals, the cook log, other recipes using it as a
+ *  sub-recipe. Returns those other recipes, which need syncing again. */
+async function moveRecipeLinks(sourceId: string, targetId: string): Promise<Array<{ recipe_id: string }>> {
+  await query(
+    `INSERT INTO collection_recipes (collection_id, recipe_id)
+     SELECT collection_id, $1 FROM collection_recipes WHERE recipe_id=$2 ON CONFLICT DO NOTHING`,
+    [targetId, sourceId]
+  );
+  await query("DELETE FROM collection_recipes WHERE recipe_id=$1", [sourceId]);
+  await query("UPDATE menu_items SET recipe_id=$1 WHERE recipe_id=$2", [targetId, sourceId]);
+  await query("UPDATE cook_log SET recipe_id=$1 WHERE recipe_id=$2", [targetId, sourceId]);
+
+  const parents = await query<{ recipe_id: string }>(
+    "SELECT DISTINCT recipe_id FROM recipe_ingredients WHERE sub_recipe_id=$1 AND recipe_id != $2",
+    [sourceId, targetId]
+  );
+  await query("UPDATE recipe_ingredients SET sub_recipe_id=$1 WHERE sub_recipe_id=$2 AND recipe_id != $1", [targetId, sourceId]);
+  return parents;
+}
+
+// ── POST /recipes/:id/merge-unified ────────────────────────────────────
+// The AI merge: the kept recipe is rewritten as the one recipe the model
+// and the user arrived at (services/recipeMergeUnified.local.ts builds
+// `content` from the reviewed draft), then every copy gives up what refers
+// to it and is deleted, exactly as in the other merges. Nothing is touched
+// unless every recipe exists.
+
+export async function mergeRecipesUnified(
+  targetId: string,
+  otherIds: string[],
+  content: RecipeInput,
+): Promise<{ recipesUpdated: number } | null> {
+  const sourceIds = [...new Set(otherIds)];
+  if (sourceIds.includes(targetId)) throw new Error(i18n.t('errors.mergeIntoSelf'));
+  const live = (id: string) => queryOne<Record<string, any>>("SELECT * FROM recipes WHERE id=$1 AND COALESCE(sync_status,'')!='deleted'", [id]);
+  const target = await live(targetId);
+  if (!target) return null;
+  const sources: Array<Record<string, any>> = [];
+  for (const id of sourceIds) {
+    const row = await live(id);
+    if (!row) throw new Error(i18n.t('errors.recipeNotFound'));
+    sources.push(row);
+  }
+
+  // References are kept whole, as in every merge: the kept recipe's, then
+  // each copy's, with the page each was imported from.
+  const { mergedSources, parseSources } = await import('../lib/recipeSources');
+  let allSources = parseSources(target.sources);
+  let kept: { sources: unknown; source_url: unknown } = { sources: allSources, source_url: target.source_url };
+  for (const source of sources) {
+    allSources = mergedSources(kept, source);
+    kept = { sources: allSources, source_url: null };
+  }
+
+  await updateRecipe(targetId, { ...content, sources: allSources });
+
+  const parents = new Set<string>();
+  let timesCooked = 0;
+  for (const source of sources) {
+    for (const p of await moveRecipeLinks(source.id, targetId)) parents.add(p.recipe_id);
+    timesCooked += Number(source.times_cooked) || 0;
+    await deleteRecipe(source.id);
+  }
+  await query(
+    "UPDATE recipes SET times_cooked = COALESCE(times_cooked, 0) + $1, updated_at = now() WHERE id = $2",
+    [timesCooked, targetId]
+  );
+  await syncRecipe(targetId);
+  for (const id of parents) await syncRecipe(id);
+  return { recipesUpdated: parents.size + 1 };
 }
 
 // Stored as JSON text on the recipes row, unlike toolIds (an array the

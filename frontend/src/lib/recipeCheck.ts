@@ -32,6 +32,7 @@ import { matchUnitId } from './fuzzyMatch';
 import { isCountryCode } from './countries';
 import { editDistance } from './wordDiff';
 import { durationsIn, sumStepDurations } from './aiTiming';
+import { hasSource } from './recipeSources';
 
 // ── Shapes ──────────────────────────────────────────────────────────────
 
@@ -93,6 +94,10 @@ export interface CheckDraft {
   tools?: CheckNamedEntity[];
   techniques?: CheckNamedEntity[];
   sources?: CheckSource[];
+  /** The text of the recipe's reference pages, read by the service before
+   *  the model is asked (services/sourceReader.local.ts). A fact a source
+   *  page states counts as stated by the recipe: quotes may come from here. */
+  sourcePages?: Array<{ url: string; title: string | null; text: string }>;
 }
 
 export interface CheckSource { type: 'url' | 'book' | 'video' | 'other'; label?: string; url?: string }
@@ -167,6 +172,8 @@ export interface CheckResult {
   /** The steps name ingredients the list lacks. When set, the user is asked
    *  which side to believe (see lib/recipeMismatchFix.ts). */
   mismatch?: IngredientMismatch | null;
+  /** The reference pages the model was shown, and the ones that could not be read. */
+  sourcesRead?: Array<{ url: string; ok: boolean; title?: string; error?: string }>;
 }
 
 // ── Reading the recipe ──────────────────────────────────────────────────
@@ -200,6 +207,8 @@ function corpusOf(draft: CheckDraft, cat: CheckCatalog): string {
     draft.title, draft.description, draft.tips, draft.storage_instructions, draft.source_url,
     ...ingredients.map(ingredientLine),
     ...(draft.steps ?? []).flatMap((s) => [s.title, plainStepText(s.description, ingredients, cat), s.notes]),
+    // The pages the recipe cites are part of what it says.
+    ...(draft.sourcePages ?? []).flatMap((p) => [p.title, p.text]),
   ];
   return normText(parts.filter(Boolean).join(' \n '));
 }
@@ -276,6 +285,7 @@ export function buildCheckRequest(draft: CheckDraft, cat: CheckCatalog) {
     })),
     // What a step's words can be linked to besides the ingredient list.
     catalog: { tools: cat.tools.map(labelOf), techniques: cat.techniques.map(labelOf) },
+    ...(draft.sourcePages?.length ? { sourcePages: draft.sourcePages } : {}),
   };
 }
 
@@ -298,9 +308,11 @@ export function buildCheckSystemPrompt(cat: CheckCatalog): string {
   const list = (names: string[]) => (names.length ? names.map((n) => `"${n}"`).join(', ') : '(none)');
   return `You audit ONE recipe from a recipe-management app. You receive its fields, its ingredient list (each with an index "i"), and its steps (each with an index "i" and plain text).
 
-ABSOLUTE RULE — NEVER INVENT DATA. Use only what the recipe itself literally says. Do not use cooking knowledge to supply typical quantities, times, servings, yields, tags or places. If the recipe does not state it, return null / leave it out. A smaller correct answer is always better than a larger guessed one. If you are unsure, return nothing. The only two exceptions are "difficulty" and times added up from the steps' own durations (rule 4).
+ABSOLUTE RULE — NEVER INVENT DATA. Use only what the recipe itself, or one of its source pages (see below), literally says. Do not use cooking knowledge to supply typical quantities, times, servings, yields, tags or places. If the recipe does not state it, return null / leave it out. A smaller correct answer is always better than a larger guessed one. If you are unsure, return nothing. The only two exceptions are "difficulty" and times added up from the steps' own durations (rule 4).
 
-Every proposal (except "typos", "links", "mismatch" and "difficulty", and times added up from steps) MUST carry "evidence": a quote copied CHARACTER FOR CHARACTER from the recipe (title, description, tips, storage, an ingredient line, a step text or title), at most 25 words, that states the fact. Proposals without an exact quote are discarded automatically. Every number you propose must appear in its quote.
+SOURCE PAGES. The request may carry "sourcePages": the text of the web pages this recipe cites as its references (where it was taken from). Read them all before answering. A fact a source page states counts as stated by the recipe, so they are where to look for what the recipe lost on the way: servings, overall times, yield, a step's duration, a quantity the ingredient list lacks. Compare the recipe with them: where an amount, a time or a step of the recipe disagrees with its source and the text alone cannot settle which is right, say so in "warnings", naming the page's site. Never copy a source page's wording into the recipe, never add ingredients or steps from it here, and never treat a page that is about a different dish as a source.
+
+Every proposal (except "typos", "links", "mismatch" and "difficulty", and times added up from steps) MUST carry "evidence": a quote copied CHARACTER FOR CHARACTER from the recipe (title, description, tips, storage, an ingredient line, a step text or title) or from one of its source pages, at most 25 words, that states the fact. Proposals without an exact quote are discarded automatically. Every number you propose must appear in its quote.
 
 Do this, in order:
 1. "typos": spelling and typing mistakes only (misspelt words, doubled letters, missing accents or apostrophes, a missing or extra space, wrong capital letter). {"target": "title"|"description"|"tips"|"storage"|"ingredientName"|"stepTitle"|"stepText", "i": ingredient/step index or null, "before": the mistaken words copied exactly (1 to 4 words), "after": the same words corrected}. NEVER reword, rephrase, translate, change a number or unit, change style, or fix grammar that is merely informal. Keep the author's language and voice. The text stays exactly as it is apart from the mistaken word itself.
@@ -818,8 +830,7 @@ export function applyCheckChanges<T extends CheckDraft>(draft: T, changes: Check
   const sources = [...(draft.sources ?? [])];
   for (const c of changes) {
     if (c.type !== 'sourceAdd') continue;
-    const dup = sources.some((s) => (c.source.url && s.url === c.source.url) || (!c.source.url && !!s.label && s.label.toLowerCase() === (c.source.label ?? '').toLowerCase()));
-    if (!dup) sources.push(c.source);
+    if (!hasSource(sources, c.source)) sources.push(c.source);
   }
   if (changes.some((c) => c.type === 'sourceAdd')) next.sources = sources;
 

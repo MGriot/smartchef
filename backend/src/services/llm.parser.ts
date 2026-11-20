@@ -74,6 +74,7 @@ Il JSON deve avere questa struttura:
       "title": "string | null",
       "description": "string",
       "durationMin": "number | null",
+      "timeKind": "prep | cook | rest | null",
       "techniques": ["string"],
       "tools": ["string"],
       "ingredients": [
@@ -99,6 +100,8 @@ Il JSON deve avere questa struttura:
 
 Regole:
 - restTimeMin è il tempo di attesa/riposo (lievitazione, marinatura, raffreddamento) separato dal tempo di preparazione attiva
+- timeKind (negli step) dice che tipo di tempo è il durationMin di QUEL passaggio: "prep" = lavoro attivo (tagliare, impastare, montare), "cook" = cottura (forno, fornello, frittura, bollitura), "rest" = attesa senza lavoro (riposo, lievitazione, marinatura, raffreddamento). null se il passaggio non ha durationMin. È una classificazione del passaggio, non una stima
+- prepTimeMin, cookTimeMin e restTimeMin vanno compilati quando la ricetta li dichiara. Se non li dichiara lasciali null e NON sommarli tu: vengono calcolati dalle durate degli step. Per questo compila durationMin e timeKind in OGNI passaggio il cui testo indica una durata
 - tools è l'elenco degli strumenti/attrezzi da cucina menzionati o chiaramente necessari, con nomi brevi, generici e IN INGLESE (es. "Oven", "Stand Mixer", "Blender"), qualunque sia la lingua della ricetta
 - yield è la quantità finita prodotta (es. "12 biscotti" -> amount 12, unit "pezzi"; "1 litro" -> amount 1, unit "litri"). Compila SOLO se la ricetta la dichiara esplicitamente; altrimenti null. Non confonderla con servings (le porzioni)
 - storageInstructions è come conservare gli avanzi ("Come conservare"), tips sono consigli generali distinti dalla description — entrambi null se non menzionati
@@ -810,6 +813,48 @@ function parseStepMentions(raw: unknown): Array<{ kind: "ingredient" | "tool" | 
   return out;
 }
 
+// ── Durations ───────────────────────────────────────────────────────────
+// Ports of frontend/src/lib/parseMinutes.ts and lib/recipeTimes.ts, kept
+// short: a model answers "30 min" or "PT1H" as readily as 30, and a recipe
+// whose text gives durations only inside its steps still has overall times,
+// the sum of those steps per kind. A time the recipe states is never
+// replaced by a sum.
+
+function parseMinutes(value: unknown): number | undefined {
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined;
+  if (typeof value !== "string") return undefined;
+  const text = value.trim().toLowerCase();
+  if (/^\d+(\.\d+)?$/.test(text)) return Math.round(Number(text));
+  const iso = /^p(?:(\d+)d)?(?:t(?:(\d+)h)?(?:(\d+)m)?)?$/.exec(text);
+  if (iso && (iso[1] || iso[2] || iso[3])) return Number(iso[1] ?? 0) * 1440 + Number(iso[2] ?? 0) * 60 + Number(iso[3] ?? 0);
+  const m = /^(?:(\d+(?:[.,]\d+)?)\s*(?:h|hr|hrs|hours?|or[ae])\s*(?:e|and)?\s*)?(?:(\d+)\s*(?:m|min|mins|minutes?|minut[oi])?)?$/.exec(text);
+  if (!m || (m[1] === undefined && m[2] === undefined)) return undefined;
+  return Math.round(Number((m[1] ?? "0").replace(",", ".")) * 60 + Number(m[2] ?? 0));
+}
+
+const REST_STEP_RE = /\b(ripos|lievit|marin|raffredd|rassod|ammoll|in frigo|frigorifero|rest(?:ing)?\b|chill|cool(?:s|ing)?\b|rise\b|rising|proof|soak|refriger)/i;
+const COOK_STEP_RE = /\b(cuoc|cott|cuci|forno|inforn|boll|lessa|frigg|fritt|rosol|soffrigg|tosta|griglia|arrost|bake|baking|boil|simmer|fry|roast|grill|saut|sear|steam|cook|oven)/i;
+
+function deriveRecipeTimes(parsed: any): { prepTimeMin?: number; cookTimeMin?: number; restTimeMin?: number } {
+  const sums = { prep: 0, cook: 0, rest: 0 };
+  for (const step of Array.isArray(parsed?.steps) ? parsed.steps : []) {
+    const minutes = parseMinutes(step?.durationMin);
+    if (!minutes) continue;
+    const said = typeof step?.timeKind === "string" ? step.timeKind.trim().toLowerCase() : "";
+    const text = typeof step?.description === "string" ? step.description : "";
+    const kind: "prep" | "cook" | "rest" =
+      said === "prep" || said === "cook" || said === "rest" ? said
+        : REST_STEP_RE.test(text) ? "rest" : COOK_STEP_RE.test(text) ? "cook" : "prep";
+    sums[kind] += minutes;
+  }
+  const pick = (stated: unknown, sum: number) => parseMinutes(stated) || (sum > 0 ? sum : undefined);
+  return {
+    prepTimeMin: pick(parsed?.prepTimeMin, sums.prep),
+    cookTimeMin: pick(parsed?.cookTimeMin, sums.cook),
+    restTimeMin: pick(parsed?.restTimeMin, sums.rest),
+  };
+}
+
 function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
   // Cerca il JSON nella risposta (l'LLM potrebbe aggiungere testo)
   const jsonMatch = raw.match(/\{[\s\S]*\}/) ?? raw.match(/\{[\s\S]*/);
@@ -830,9 +875,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
       : undefined,
     description: parsed.description ?? undefined,
     servings: typeof parsed.servings === "number" ? parsed.servings : undefined,
-    prepTimeMin: typeof parsed.prepTimeMin === "number" ? parsed.prepTimeMin : undefined,
-    cookTimeMin: typeof parsed.cookTimeMin === "number" ? parsed.cookTimeMin : undefined,
-    restTimeMin: typeof parsed.restTimeMin === "number" ? parsed.restTimeMin : undefined,
+    ...deriveRecipeTimes(parsed),
     yield: parseYield(parsed.yield),
     difficulty: ["easy", "medium", "hard", "expert"].includes(parsed.difficulty)
       ? parsed.difficulty
@@ -876,7 +919,7 @@ function parseJsonResponse(raw: string, baseUrl?: string): LLMParseResult {
           stepNumber: step.stepNumber ?? i + 1,
           title: step.title ?? undefined,
           description: step.description ?? "",
-          durationMin: typeof step.durationMin === "number" ? step.durationMin : undefined,
+          durationMin: parseMinutes(step.durationMin),
           techniques: Array.isArray(step.techniques) ? step.techniques.filter((t: unknown) => typeof t === "string") : [],
           tools: Array.isArray(step.tools) ? step.tools.filter((t: unknown) => typeof t === "string") : [],
           // Which of the recipe's ingredients this step uses. Kept as the

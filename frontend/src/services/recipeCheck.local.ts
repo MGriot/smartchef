@@ -13,16 +13,23 @@ import {
   type CheckCatalog, type CheckDraft, type CheckResult,
 } from '../lib/recipeCheck';
 import type { IngredientMismatch } from '../lib/recipeConsistency';
+import { readRecipeSources } from './sourceReader.local';
+import { sourcePagesForModel, sourcesReadSummary } from '../lib/sourcePages';
 import { buildMergeRequest, buildMergeSystemPrompt, interpretMergeResponse } from '../lib/recipeMerge';
 import {
   buildFixRequest, buildFixSystemPrompt, interpretFixResponse,
   type MismatchFixResult, type MismatchSide,
 } from '../lib/recipeMismatchFix';
 
-export async function checkRecipeWithAi(draft: CheckDraft, catalog: CheckCatalog): Promise<CheckResult> {
+export async function checkRecipeWithAi(input: CheckDraft, catalog: CheckCatalog): Promise<CheckResult> {
+  // The pages the recipe cites are read first and handed to the model with
+  // it: the audit is of the recipe against where it came from, not of the
+  // recipe against itself.
+  const pages = await readRecipeSources([input]);
+  const draft: CheckDraft = { ...input, sourcePages: sourcePagesForModel(pages) };
   const request = buildCheckRequest(draft, catalog);
   const raw = await callConfiguredProvider(JSON.stringify(request), buildCheckSystemPrompt(catalog), undefined, { timeoutMs: LONG_AI_TIMEOUT_MS });
-  return interpretCheckResponse(parseJsonObject(raw), draft, catalog);
+  return { ...interpretCheckResponse(parseJsonObject(raw), draft, catalog), sourcesRead: sourcesReadSummary(pages) };
 }
 
 /** "Merge text with AI": the draft plus a text the user pasted; back come

@@ -3,6 +3,7 @@ import MarkdownText from '../components/MarkdownText';
 import QuantityInput from '../components/QuantityInput';
 import { formatQuantity, formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { formatDurationWith } from '../lib/duration';
+import { totalStepMinutes } from '../lib/recipeTimes';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -975,7 +976,10 @@ const RecipeDetail: React.FC = () => {
     );
   }
 
-  const totalTime = (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0) + (recipe.rest_time_min || 0);
+  // A recipe saved with no overall times still has one when its steps carry
+  // durations: their sum, rather than a "—" next to steps that add up.
+  const totalTime = (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0) + (recipe.rest_time_min || 0)
+    || totalStepMinutes(recipe.steps || []);
 
   /* ═════════════════════════════════════════════════════════════════
      COOKING MODE
@@ -1569,10 +1573,13 @@ const RecipeDetail: React.FC = () => {
               servings: draft.servings, prep_time_min: draft.prep_time_min, cook_time_min: draft.cook_time_min,
               rest_time_min: draft.rest_time_min, difficulty: draft.difficulty, yield_amount: draft.yield_amount, yield_unit_id: draft.yield_unit_id,
               tags: draft.tags, regions: draft.regions, ingredients: draft.ingredients, steps: draft.steps,
+              // The references: the service reads their pages for the model.
+              sources: draft.sources,
             },
             catalog: { tools: allTools, techniques: allTechniques, units: allUnits, tagNames },
           }),
-          timeoutMs: 300_000,
+          // Reading the reference pages comes before the model's own time.
+          timeoutMs: 360_000,
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || t('recipeDetail.aiCheck.failed'));

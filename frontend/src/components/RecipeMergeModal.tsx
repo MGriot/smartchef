@@ -3,9 +3,8 @@ import { useTranslation } from 'react-i18next';
 import Modal, { ModalCancelButton, ModalSubmitButton } from './Modal';
 import Autocomplete from './Autocomplete';
 import { Field } from './Form';
-import RecipeAiMergeReviewDialog, { type AiMergePicks } from './RecipeAiMergeReviewDialog';
+import RecipeAiMergeStudio from './RecipeAiMergeStudio';
 import { apiFetch } from '../lib/api';
-import type { MergeAiProposal, MergeAiRecipe } from '../lib/recipeMergeAi';
 import { FieldConflict, SECTION_ORDER, sectionOf, type DisplayConflict, type SectionKey, type Side, type SideLabels } from './sync/ConflictResolver';
 import type { MergeSide, RecipeMergePreview } from '../services/recipes.local';
 
@@ -17,10 +16,10 @@ type Choices = Record<string, MergeSide>;
  *  every copy is compared with the kept recipe field by field, one after the
  *  other, and for every field that differs the user picks which version
  *  survives (recipes.local.ts's getRecipeMergePreview/mergeRecipesMany) — or
- *  "Merge with AI" has the model flag which ingredients and steps repeat the
- *  kept recipe, and the user ticks each one (RecipeAiMergeReviewDialog). The
- *  AI only advises: nothing is dropped without being shown first.
- *  Collections, planned meals, the cook log and sub-recipe uses always move over.
+ *  "Merge with AI" has the model read the recipes and the pages they cite
+ *  and write one unified recipe, refined in a chat (RecipeAiMergeStudio).
+ *  Collections, planned meals, the cook log and sub-recipe uses always move
+ *  over, and so does every reference of every recipe.
  *
  *  In the comparison the kept recipe is the resolver's "local" side and the
  *  duplicate its "remote" side, so the sync conflict card's renderers —
@@ -56,9 +55,6 @@ export default function RecipeMergeModal({
   const [error, setError] = useState<string | null>(null);
 
   const [aiOpen, setAiOpen] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiData, setAiData] = useState<{ recipes: MergeAiRecipe[]; proposal: MergeAiProposal } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -70,8 +66,6 @@ export default function RecipeMergeModal({
     setCurrent(0);
     setError(null);
     setAiOpen(false);
-    setAiData(null);
-    setAiError(null);
     apiFetch(`/api/recipes${lang ? `?lang=${lang}` : ''}`)
       .then((res) => res.json())
       .then((json) => setRecipes(json.data || []))
@@ -139,40 +133,13 @@ export default function RecipeMergeModal({
       if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('recipeDetail.mergeFailed'));
       onMerged(keptId);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('recipeDetail.mergeFailed');
-      setError(message);
-      setAiError(message);
+      setError(err instanceof Error ? err.message : t('recipeDetail.mergeFailed'));
     } finally {
       setBusy(false);
     }
   };
 
   const merge = () => postMerge(previews.map((p) => ({ id: p.source.id, choices: choices[p.source.id] ?? {} })));
-
-  const runAi = async () => {
-    setAiOpen(true);
-    setAiLoading(true);
-    setAiError(null);
-    setAiData(null);
-    try {
-      const res = await apiFetch('/api/recipes/ai-merge-many', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keptId, otherIds: duplicates, lang }),
-        timeoutMs: 300_000,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('recipeDetail.aiMergeMany.failed'));
-      setAiData(json.data);
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : t('recipeDetail.aiMergeMany.failed'));
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  const applyAi = (picks: AiMergePicks[]) =>
-    postMerge(picks.map((p) => ({ id: p.sourceId, picks: { ingredientIds: p.ingredientIds, stepIds: p.stepIds } })));
 
   const labels: SideLabels = {
     local: t('recipeDetail.mergeCompare.kept'),
@@ -224,7 +191,7 @@ export default function RecipeMergeModal({
               <ModalCancelButton onClick={onClose}>{t('common.cancel')}</ModalCancelButton>
               <button
                 type="button"
-                onClick={runAi}
+                onClick={() => setAiOpen(true)}
                 disabled={duplicates.length === 0 || busy}
                 className="inline-flex items-center gap-1 px-4 py-2 rounded-full bg-zinc-100 dark:bg-zinc-800 text-sm font-black text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50"
               >
@@ -279,18 +246,20 @@ export default function RecipeMergeModal({
                 </li>
               ))}
             </ul>
+            <p className="flex items-start gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="material-symbols-outlined text-[16px] shrink-0">link</span>
+              {t('recipeDetail.mergeMulti.sourcesKept')}
+            </p>
             {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
           </div>
         </Modal>
-        <RecipeAiMergeReviewDialog
+        <RecipeAiMergeStudio
           open={open && aiOpen}
           onClose={() => setAiOpen(false)}
-          loading={aiLoading}
-          error={aiError}
-          data={aiData}
-          applying={busy}
-          onRetry={runAi}
-          onApply={applyAi}
+          keptId={keptId}
+          otherIds={duplicates}
+          lang={lang}
+          onMerged={onMerged}
         />
       </>
     );
@@ -346,7 +315,7 @@ export default function RecipeMergeModal({
               <p className="text-sm font-black text-zinc-900 dark:text-zinc-100 break-words">{preview.source.title}</p>
             </div>
           </div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('recipeDetail.mergeCompare.explain')}</p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('recipeDetail.mergeCompare.explain')} {t('recipeDetail.mergeMulti.sourcesKept')}</p>
 
           {differing.length === 0 ? (
             <p className="rounded-2xl bg-zinc-50 dark:bg-zinc-900 p-4 text-sm font-bold text-zinc-600 dark:text-zinc-300">{t('recipeDetail.mergeCompare.allIdentical')}</p>
