@@ -13,7 +13,9 @@ archive
 arrow_back
 arrow_downward
 arrow_upward
+article
 assignment
+assistant
 attribution
 auto_awesome
 auto_fix_high
@@ -58,7 +60,6 @@ cleaning
 clear
 close
 cloud
-cloud_done
 cloud_download
 cloud_off
 cloud_sync
@@ -75,6 +76,7 @@ construction
 content_copy
 contract
 contrast
+conversation
 cookie
 cooking
 create
@@ -138,6 +140,7 @@ filter
 flag
 flaky
 flight
+flip
 floor
 folder
 folder_open
@@ -148,6 +151,7 @@ functions
 gate
 gesture
 gif
+girl
 grade
 gradient
 grain
@@ -224,6 +228,7 @@ move
 move_down
 moving
 navigation
+news
 north
 note
 notes
@@ -265,6 +270,7 @@ pinch
 place
 play_circle
 plumbing
+podcasts
 policy
 poll
 pool
@@ -275,6 +281,7 @@ power
 preview
 print
 priority
+privacy
 problem
 progress_activity
 public
@@ -332,6 +339,7 @@ shortcut
 signature
 skillet
 sleep
+slideshow
 smartphone
 sort
 source
@@ -350,6 +358,7 @@ storage
 store
 straight
 straighten
+strategy
 stream
 style
 subject
@@ -374,6 +383,7 @@ today
 token
 toolbar
 tooltip
+topic
 transform
 translate
 travel

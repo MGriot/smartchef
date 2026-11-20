@@ -1,0 +1,1 @@
+Unendo le ricette restano tutte le fonti. L'unione con l'IA legge le pagine delle fonti, scrive una sola ricetta e la affini in chat. Gli import con l'IA riempiono i tempi. Nuovo menù delle card e una pagina per cercare ricette sui tuoi siti.

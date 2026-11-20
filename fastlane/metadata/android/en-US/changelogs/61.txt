@@ -1,0 +1,1 @@
+Merging recipes keeps every reference. Merge with AI reads the source pages, writes one recipe and lets you refine it in a chat. AI imports now fill the recipe's times. New card menu and a page to search recipes across your sites.
