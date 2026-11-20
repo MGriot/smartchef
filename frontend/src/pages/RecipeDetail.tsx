@@ -5,7 +5,6 @@ import { formatQuantity, formatQuantityWithUnit } from '../lib/ingredientAmount'
 import { formatDurationWith } from '../lib/duration';
 import { totalStepMinutes } from '../lib/recipeTimes';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AddToCollectionPicker from '../components/AddToCollectionPicker';
 import { useTranslation } from 'react-i18next';
@@ -13,8 +12,8 @@ import i18n from '../i18n';
 import { useStore } from '../store/app.store';
 import { languageLabel } from '../lib/languages';
 import { useLanguages } from '../hooks/useLanguages';
-import { useFileExport } from '../hooks/useFileExport';
-import { slugForFilename } from '../lib/fileExport';
+import { useRecipeExportActions } from '../hooks/useRecipeExportActions';
+import ActionMenu from '../components/ActionMenu';
 import RenderFaIcon from '../components/RenderFaIcon';
 import Autocomplete from '../components/Autocomplete';
 import StepEditor, { StepIngredientAmount } from '../components/StepEditor';
@@ -44,8 +43,6 @@ import { type MeasurementSystem } from '../lib/unitConvert';
 import { createRecipeScaler } from '../lib/recipeScaling';
 import { difficultyKey, tidyNote } from '../lib/recipeReport';
 import ConverterPanel from '../components/ConverterPanel';
-import ShareLinkModal from '../components/ShareLinkModal';
-import { RecipeCookbookDialog } from '../components/sync/SharedCookbooks';
 import RecipeMergeModal from '../components/RecipeMergeModal';
 import AppLayout from '../components/AppLayout';
 import StarRating from '../components/StarRating';
@@ -54,7 +51,6 @@ import { apiFetch, isNative } from '../lib/api';
 import { tagTextColor } from '../lib/tagColor';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { countryDisplayName, flagEmoji, isCountryCode } from '../lib/countries';
-import { buildCookidooExport, type CookidooExport } from '../lib/cookidooExport';
 import RecipeAiReviewDialog from '../components/RecipeAiReviewDialog';
 import RecipeMergeTextDialog from '../components/RecipeMergeTextDialog';
 import { applyCheckChanges, type CheckChange, type CheckResult, type ResolvedApplyInput } from '../lib/recipeCheck';
@@ -277,19 +273,6 @@ function IngredientNameLink({ ing, className, children }: {
 // Recipe actions inside FloatingActionBar: 44px touch targets instead of the
 // header's bare 20px icons.
 const BAR_BUTTON = 'w-11 h-11 justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800';
-// A header popover hangs down from its icon; one opened from the floating bar
-// has to open upward and span the screen instead, or a 256px menu anchored to
-// an icon near the middle of a 390px screen runs off the left edge.
-const popoverPlacement = (inBar: boolean) =>
-  inBar ? 'fixed left-4 right-4 mx-auto max-w-sm z-50' : 'absolute right-0 top-8 z-50 w-64';
-const POPOVER_ABOVE_BAR: React.CSSProperties = { bottom: 'calc(5.5rem + env(safe-area-inset-bottom))' };
-// FloatingActionBar closes (opacity 0, pointer-events none) on every tap
-// inside it, which includes the tap that opens a popover — so a popover
-// rendered inside the bar was hidden the instant it appeared and only came
-// back when the bar was reopened. From the bar, hang it off <body> instead.
-const popoverLayer = (inBar: boolean, node: React.ReactNode) =>
-  inBar ? createPortal(node, document.body) : node;
-
 // Was a private helper here that stopped at hours, which is how a 15-day
 // maceration came out as "360h". Now lib/duration.ts, shared with every
 // other place a duration is shown.
@@ -458,16 +441,14 @@ const RecipeDetail: React.FC = () => {
   const [addedToCart, setAddedToCart] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const { exportFile, sheet: exportSheet } = useFileExport();
-  const [showShareLink, setShowShareLink] = useState(false);
+  // The button a menu was opened from: the header's from `lg` up, the
+  // floating bar's below. Both exist in the tree, one of them hidden.
+  const menuAnchor = useRef<HTMLElement | null>(null);
   const [showMerge, setShowMerge] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
-  const [showCookbook, setShowCookbook] = useState(false);
   useEffect(() => {
     import('../lib/standalone').then(({ isStandaloneMode }) => isStandaloneMode()).then(setIsStandalone);
   }, []);
-  const [cookidooExport, setCookidooExport] = useState<CookidooExport | null>(null);
-  const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [inAnyCollection, setInAnyCollection] = useState(false);
   const [cookSequence, setCookSequence] = useState<CookSequenceSection[] | null>(null);
   const [nutrition, setNutrition] = useState<RecipeNutritionResult | null>(null);
@@ -531,6 +512,18 @@ const RecipeDetail: React.FC = () => {
   const [viewLang, setViewLang] = useState<string | null>(null);
   useEffect(() => { setViewLang(null); }, [id]);
   const shownLang = viewLang ?? contentLang;
+
+  // Export and share: the same actions, and dialogs, as a gallery card's menu.
+  const exportActions = useRecipeExportActions({
+    recipeId: id ?? '',
+    title: recipe?.translated_title || recipe?.title || '',
+    servings,
+    lang: shownLang,
+    loadRecipe: () => {
+      if (!recipe) throw new Error(t('recipeDetail.recipeNotFound'));
+      return recipe;
+    },
+  });
 
   // In view mode, library suggestion names (ingredients/tools/techniques)
   // should track the app's UI language (contentLang) — that's the language
@@ -3192,216 +3185,52 @@ const RecipeDetail: React.FC = () => {
     </button>
   );
 
-  const recipeSlug = slugForFilename(recipe.translated_title || recipe.title);
-
-  /* Through lib/fileExport.ts: the Blob + <a download> this used to be is a
-     silent no-op on Android, where there is no download manager to catch
-     it. Errors land in the same console.error the handlers always had. */
-  const downloadTextFile = (contents: string, filename: string, mime: string) => {
-    exportFile({ fileName: filename, mimeType: mime, data: contents })
-      .catch(err => console.error('Recipe export failed:', err));
-  };
-
-  const handleExportRecipe = async () => {
-    setShowExportMenu(false);
-    try {
-      // Standalone writes the share file another library can import
-      // (services/recipeShare.local.ts); a server keeps its own bundle.
-      const res = await apiFetch(`/api/share/recipes/${id}/${isStandalone ? 'copy' : 'export'}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ? JSON.stringify(json.error) : t('errors.exportFailed'));
-      downloadTextFile(JSON.stringify(json.data, null, 2), `${recipeSlug}.smartchef.json`, 'application/json');
-    } catch (err) {
-      console.error('Recipe export failed:', err);
-    }
-  };
-
-  /* ── Cookidoo (Bimby/Thermomix) export ─────────────────────────────────
-     Built entirely from the already-loaded `recipe` rather than through
-     /api/share: that route has no standalone-mode counterpart in
-     localRouter.ts, and this export is text the user pastes by hand, so
-     there's nothing a server round-trip would add. Works offline and in
-     standalone mode as a result. */
-  const handleExportForCookidoo = () => {
-    setShowExportMenu(false);
-    setCookidooExport(buildCookidooExport(recipe, {
-      title: t('recipeDetail.cookidoo.fieldTitle'),
-      prepTime: t('recipeDetail.cookidoo.fieldPrepTime'),
-      totalTime: t('recipeDetail.cookidoo.fieldTotalTime'),
-      servings: t('recipeDetail.cookidoo.fieldServings'),
-      servingsValue: (n: number) => t('recipeDetail.cookidoo.portions', { count: n }),
-      ingredients: t('recipeDetail.cookidoo.fieldIngredients'),
-      steps: t('recipeDetail.cookidoo.fieldSteps'),
-      devices: t('recipeDetail.cookidoo.fieldDevices'),
-      tips: t('recipeDetail.cookidoo.fieldTips'),
-      optional: t('recipeDetail.cookidoo.optional'),
-      hourShort: t('recipeDetail.cookidoo.hourShort'),
-      minuteShort: t('recipeDetail.cookidoo.minuteShort'),
-      storagePrefix: t('recipeDetail.cookidoo.storagePrefix'),
-      techniquesPrefix: t('recipeDetail.cookidoo.techniquesPrefix'),
-    }, { servings }));
-  };
-
-  const copyToClipboard = async (text: string, key: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // Electron/older webviews can reject the async clipboard API when the
-      // document isn't focused; the legacy path still works there.
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    }
-    setCopiedSection(key);
-    window.setTimeout(() => setCopiedSection(c => (c === key ? null : c)), 1500);
-  };
-
   const exportHeaderButton = (inBar: boolean) => (
-    <div className="relative">
-      <button
-        onClick={() => setShowExportMenu(v => !v)}
-        className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors`}
-        aria-label={t('recipeDetail.exportRecipe')}
-        title={t('recipeDetail.exportRecipe')}
-      >
-        <span className="material-symbols-outlined text-[20px]">ios_share</span>
-      </button>
-      {showExportMenu && popoverLayer(inBar, (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
-          <div className={`${popoverPlacement(inBar)} bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-2`} style={inBar ? POPOVER_ABOVE_BAR : undefined}>
-            <button
-              onClick={() => { setShowExportMenu(false); setShowShareLink(true); }}
-              className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
-            >
-              <span className="material-symbols-outlined text-[18px]">link</span>
-              {t('share.menuItem')}
-            </button>
-            {/* A page of its own rather than this one printed: the report
-                (pages/RecipeReport.tsx) lays the whole recipe out for paper
-                and prints on every platform, Android included. */}
-            <button
-              onClick={() => {
-                setShowExportMenu(false);
-                const query = new URLSearchParams({ servings: String(servings) });
-                if (shownLang) query.set('lang', shownLang);
-                navigate(`/recipe/${id}/report?${query.toString()}`);
-              }}
-              className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
-            >
-              <span className="material-symbols-outlined text-[18px]">print</span>
-              {t('print.report.menuItem')}
-            </button>
-            <button
-              onClick={handleExportRecipe}
-              className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-            >
-              {t('recipeDetail.exportAsJson')}
-            </button>
-            {isStandalone && (
-              <button
-                onClick={() => { setShowExportMenu(false); setShowCookbook(true); }}
-                className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center gap-2"
-              >
-                <span className="material-symbols-outlined text-[18px]">menu_book</span>
-                {t('account.cookbooks.recipeMenuItem')}
-              </button>
-            )}
-            <button
-              onClick={handleExportForCookidoo}
-              className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-            >
-              {t('recipeDetail.exportForCookidoo')}
-            </button>
-          </div>
-        </>
-      ))}
-    </div>
-  );
-
-  const cookidooModal = cookidooExport && (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => setCookidooExport(null)}>
-      <div
-        className="w-full max-w-2xl max-h-[85vh] flex flex-col bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-100 dark:border-zinc-800"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-4 p-6 pb-4 border-b border-zinc-100 dark:border-zinc-800">
-          <div>
-            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('recipeDetail.cookidoo.title')}</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">{t('recipeDetail.cookidoo.hint')}</p>
-          </div>
-          <button
-            onClick={() => setCookidooExport(null)}
-            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
-            aria-label={t('common.cancel')}
-          >
-            <span className="material-symbols-outlined text-[22px]">close</span>
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {cookidooExport.sections.map(section => (
-            <div key={section.key}>
-              <div className="flex items-center justify-between gap-3 mb-1.5">
-                <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
-                  {section.label}
-                </span>
-                <button
-                  onClick={() => copyToClipboard(section.text, section.key)}
-                  className="text-xs font-bold text-primary hover:opacity-70 transition-opacity"
-                >
-                  {copiedSection === section.key ? t('recipeDetail.cookidoo.copied') : t('recipeDetail.cookidoo.copy')}
-                </button>
-              </div>
-              <pre className="whitespace-pre-wrap break-words text-sm text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl p-3 font-sans">
-                {section.text}
-              </pre>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 p-4 border-t border-zinc-100 dark:border-zinc-800">
-          <button
-            onClick={() => downloadTextFile(cookidooExport.fullText, `${recipeSlug}.cookidoo.txt`, 'text/plain;charset=utf-8')}
-            className="px-4 py-2.5 rounded-xl text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-          >
-            {t('recipeDetail.cookidoo.download')}
-          </button>
-          <button
-            onClick={() => copyToClipboard(cookidooExport.fullText, '__all__')}
-            className="px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-primary hover:opacity-90 transition-opacity"
-          >
-            {copiedSection === '__all__' ? t('recipeDetail.cookidoo.copied') : t('recipeDetail.cookidoo.copyAll')}
-          </button>
-        </div>
-      </div>
-    </div>
+    <button
+      onClick={(e) => { menuAnchor.current = e.currentTarget; setShowExportMenu(v => !v); }}
+      className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-primary transition-colors`}
+      aria-label={t('recipeDetail.exportRecipe')}
+      title={t('recipeDetail.exportRecipe')}
+      aria-haspopup="menu"
+      aria-expanded={showExportMenu}
+    >
+      <span className="material-symbols-outlined text-[20px]">ios_share</span>
+    </button>
   );
 
   const collectionHeaderButton = (inBar: boolean) => (
-    <div className="relative">
-      <button
-        onClick={() => setShowCollectionPicker(v => !v)}
-        className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 transition-colors ${inAnyCollection ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
-        aria-label={t('recipeDetail.addToCollection')}
-        title={t('recipeDetail.addToCollection')}
-      >
-        <span className="material-symbols-outlined text-[20px]">collections_bookmark</span>
-      </button>
-      {showCollectionPicker && popoverLayer(inBar, (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setShowCollectionPicker(false)} />
-          <div className={`${popoverPlacement(inBar)} bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-100 dark:border-zinc-800 p-3 max-h-[70vh] overflow-y-auto`} style={inBar ? POPOVER_ABOVE_BAR : undefined}>
-            <AddToCollectionPicker recipeId={id!} servings={servings} onMembershipChange={setInAnyCollection} />
-          </div>
-        </>
-      ))}
-    </div>
+    <button
+      onClick={(e) => { menuAnchor.current = e.currentTarget; setShowCollectionPicker(v => !v); }}
+      className={`${inBar ? BAR_BUTTON : ''} flex items-center gap-1.5 transition-colors ${inAnyCollection ? 'text-primary' : 'text-zinc-500 dark:text-zinc-400 hover:text-primary'}`}
+      aria-label={t('recipeDetail.addToCollection')}
+      title={t('recipeDetail.addToCollection')}
+      aria-haspopup="menu"
+      aria-expanded={showCollectionPicker}
+    >
+      <span className="material-symbols-outlined text-[20px]">collections_bookmark</span>
+    </button>
+  );
+
+  // Rendered once for both homes of their buttons: portalled and fixed, so
+  // the floating bar fading out on the tap that opens them cannot hide them.
+  const actionMenus = (
+    <>
+      <ActionMenu
+        open={showExportMenu}
+        onClose={() => setShowExportMenu(false)}
+        anchorRef={menuAnchor}
+        label={t('recipeDetail.menu.exportAndShare')}
+        title={t('recipeDetail.menu.exportAndShare')}
+        views={{ main: { sections: [{ items: exportActions.items }] } }}
+      />
+      <ActionMenu
+        open={showCollectionPicker}
+        onClose={() => setShowCollectionPicker(false)}
+        anchorRef={menuAnchor}
+        label={t('recipeDetail.addToCollection')}
+        views={{ main: { content: <AddToCollectionPicker recipeId={id!} servings={servings} onMembershipChange={setInAnyCollection} /> } }}
+      />
+    </>
   );
 
   // One set of actions, two homes: the top bar from `lg` up, a floating
@@ -3421,8 +3250,8 @@ const RecipeDetail: React.FC = () => {
 
   return (
     <AppLayout headerActions={headerActions} hideCreateButton>
-      {cookidooModal}
-      {exportSheet}
+      {actionMenus}
+      {exportActions.dialogs}
 
       {/* ── Printed header ──────────────────────────────────────
           The hero below is white text laid over a photo, which prints as
@@ -3644,19 +3473,6 @@ const RecipeDetail: React.FC = () => {
           onMerged={(targetId) => { setShowMerge(false); navigate(`/recipe/${targetId}`); }}
         />
       )}
-      {id && isStandalone && (
-        <RecipeCookbookDialog open={showCookbook} onClose={() => setShowCookbook(false)} recipeId={id} />
-      )}
-      {id && (
-        <ShareLinkModal
-          open={showShareLink}
-          onClose={() => setShowShareLink(false)}
-          recipeId={id}
-          standalone={isStandalone}
-          onExportFile={handleExportRecipe}
-        />
-      )}
-
       {/* ── Two-column layout ──────────────────────────────────── */}
       <div className="max-w-7xl mx-auto px-6 mt-10 pb-24">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 print:block">

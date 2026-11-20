@@ -138,3 +138,15 @@ describe('interpretMergeResponse — times and difficulty', () => {
     expect(r.changes.map((c: any) => [c.field, c.value])).toEqual([['cook_time_min', 45]]);
   });
 });
+
+describe('interpretMergeResponse — times added up from new steps', () => {
+  it('lets a new step\'s duration count in a sum of the steps', () => {
+    const result = interpretMergeResponse({
+      steps: [{ i: null, title: 'Cottura', text: 'Cuoci in forno a 180 gradi per 40 minuti.', durationMin: 40, evidence: 'Cuoci in forno a 180 gradi per 40 minuti' }],
+      // Index 1: the step after the recipe's only one, i.e. the new step.
+      cookTimeMin: { value: 40, fromSteps: [1] },
+    }, draft(), pasted, catalog);
+    const field = result.changes.find((c) => c.type === 'field');
+    expect(field).toMatchObject({ field: 'cook_time_min', value: 40, fromSteps: [1] });
+  });
+});

@@ -17,7 +17,8 @@
     "createRecipe": "Créer une Recette",
     "atlas": "Atlas",
     "pantry": "Garde-manger",
-    "discover": "Découvrir"
+    "discover": "Découvrir",
+    "siteSearch": "Search the sites"
   },
   "atlas": {
     "title": "Atlas",
@@ -858,7 +859,7 @@
       "doubtsHint": "Tap an answer or write in the chat.",
       "chat": "Chat",
       "chatHint": "Ask for changes or explanations: the recipe is rewritten with every answer.",
-      "chatPlaceholder": "Write to the AI to refine the recipe…",
+      "chatPlaceholder": "Ask for a change…",
       "send": "Send",
       "thinking": "Thinking…",
       "tabRecipe": "Recipe",
@@ -869,6 +870,12 @@
       "failed": "The AI merge failed",
       "noRecipe": "The AI returned no usable recipe. Try again.",
       "sessionLost": "This merge is no longer active. Open it again to start over."
+    },
+    "menu": {
+      "exportAndShare": "Export and share",
+      "sectionRecipe": "Recipe",
+      "sectionShare": "Share",
+      "sectionManage": "Manage"
     }
   },
   "recipeCreate": {
@@ -1927,7 +1934,11 @@
       "none": "Aucune source. Ajoutez-en une ci-dessous.",
       "noFeed": "Ce site ne publie pas de flux lisible par l'application.",
       "failed": "Impossible d'atteindre cette adresse.",
-      "duplicate": "Déjà dans la liste."
+      "duplicate": "Déjà dans la liste.",
+      "searchUrl": "Search address",
+      "searchUrlSet": "Search: {{url}}",
+      "searchUrlHint": "For “Search the sites”: the address of the site's results page, with {q} where the words go. Leave empty to have it found automatically.",
+      "searchUrlInvalid": "An http(s) address containing {q} is needed."
     },
     "cookbooks": {
       "heading": "Livres de recettes partagés",
@@ -2273,5 +2284,23 @@
     "pageOf": "Page {{page}} sur {{total}}",
     "searchingSites": "Recherche dans les sites…",
     "notSearchable": "Ces sites ne peuvent pas être interrogés, seulement leurs derniers articles : {{names}}."
+  },
+  "siteSearch": {
+    "title": "Search the sites",
+    "subtitle": "One search across the sites you follow in Discover, beyond their feeds: only pages that really hold a recipe are shown.",
+    "toDiscover": "Discover",
+    "fromDiscover": "Search the sites",
+    "placeholder": "Search for a recipe, e.g. pasta, onion soup…",
+    "search": "Search",
+    "intro_one": "Type what you are looking for: the search runs on your {{count}} site.",
+    "intro_other": "Type what you are looking for: the search runs on all your {{count}} sites.",
+    "searching": "Searching the sites… {{done}} of {{total}}",
+    "failed": "Did not answer or block the app's requests: {{names}}.",
+    "unsearchable": "No search found for: {{names}}.",
+    "setSearchUrl": "Give their search address",
+    "empty": "No recipes found for “{{query}}”.",
+    "servings_one": "{{count}} serving",
+    "servings_other": "{{count}} servings",
+    "partial": "Partial matches"
   }
 }

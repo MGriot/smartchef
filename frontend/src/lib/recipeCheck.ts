@@ -433,6 +433,9 @@ export function interpretFieldsAndTimes(
 
   const durations = (draft.steps ?? []).map((s) => s.durationMin);
   for (const c of earlier) if (c.type === 'stepDuration' && c.index < durations.length) durations[c.index] = c.durationMin;
+  // New steps (Merge text) go after the existing ones, in the order proposed,
+  // so the first is index steps.length: their durations can be added up too.
+  for (const c of earlier) if (c.type === 'stepAdd') durations.push(c.durationMin);
   const usedSteps = new Set<number>();
   const proposed: Partial<Record<TimeField, number>> = {};
   for (const [field, key] of TIME_KEYS) {

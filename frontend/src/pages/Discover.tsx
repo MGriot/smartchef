@@ -103,6 +103,14 @@ export default function Discover() {
             <h1 className="text-3xl font-black text-zinc-900 dark:text-zinc-100">{t('discover.title')}</h1>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 font-medium mt-1">{t('discover.subtitle')}</p>
           </div>
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <Link
+            to={query.trim().length >= MIN_SITE_SEARCH ? `/search-sites?q=${encodeURIComponent(query.trim())}` : '/search-sites'}
+            className="flex items-center gap-1.5 rounded-xl bg-primary/5 px-3 py-2 text-sm font-bold text-primary hover:bg-primary/10"
+          >
+            <span className="material-symbols-outlined text-[18px]">travel_explore</span>
+            {t('siteSearch.fromDiscover')}
+          </Link>
           <button
             type="button"
             onClick={() => void load(true)}
@@ -112,6 +120,7 @@ export default function Discover() {
             <span className={`material-symbols-outlined text-[18px] ${loading ? 'animate-spin' : ''}`}>refresh</span>
             {t('discover.refresh')}
           </button>
+          </div>
         </div>
 
         {sources.length === 0 ? (

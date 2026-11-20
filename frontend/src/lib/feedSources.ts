@@ -16,6 +16,9 @@ export interface FeedSource {
   id: string;
   name: string;
   feedUrl: string;
+  /** The site's search address with {q} for the words, typed by the user
+   *  for a site whose search "Search the sites" cannot find on its own. */
+  searchUrl?: string;
 }
 
 export const DISCOVER_SOURCES = 'discover.sources';
@@ -60,7 +63,8 @@ export function parseFeedSources(raw: unknown): FeedSource[] {
     if (!r || typeof r.id !== 'string' || !r.id.trim() || typeof r.name !== 'string' || !r.name.trim() || !isHttpUrl(r.feedUrl)) continue;
     if (seen.has(r.id)) continue;
     seen.add(r.id);
-    out.push({ id: r.id, name: r.name.trim().slice(0, 80), feedUrl: r.feedUrl });
+    const searchUrl = typeof r.searchUrl === 'string' && r.searchUrl.includes('{q}') && isHttpUrl(r.searchUrl.split('{q}').join('x')) ? r.searchUrl.trim() : undefined;
+    out.push({ id: r.id, name: r.name.trim().slice(0, 80), feedUrl: r.feedUrl, ...(searchUrl ? { searchUrl } : {}) });
     if (out.length >= MAX_FEED_SOURCES) break;
   }
   return out;

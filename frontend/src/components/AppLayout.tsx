@@ -50,6 +50,7 @@ const NAV_LINKS: { to: string; labelKey: string; secondary?: boolean }[] = [
   { to: '/pantry', labelKey: 'nav.pantry' },
   { to: '/shopping', labelKey: 'nav.shoppingList' },
   { to: '/discover', labelKey: 'nav.discover', secondary: true },
+  { to: '/search-sites', labelKey: 'nav.siteSearch', secondary: true },
   { to: '/history', labelKey: 'nav.history', secondary: true },
   { to: '/library/ingredients', labelKey: 'nav.library', secondary: true },
 ];

@@ -104,8 +104,14 @@ export default function RecipeAiMergeStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, keptId, otherIds.join(',')]);
 
+  // Follow the conversation as it grows, but not on opening: the first
+  // thing to read is the recipe at the top, not the end of the chat.
+  const seenMessages = useRef(0);
   useEffect(() => {
-    chatEnd.current?.scrollIntoView({ block: 'nearest' });
+    const count = view?.messages.length ?? 0;
+    const grew = seenMessages.current > 0 && count > seenMessages.current;
+    seenMessages.current = count;
+    if (grew || sending) chatEnd.current?.scrollIntoView({ block: 'nearest' });
   }, [view?.messages.length, sending]);
 
   const send = async (text: string) => {

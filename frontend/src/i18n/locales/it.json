@@ -17,7 +17,8 @@
     "createRecipe": "Crea Ricetta",
     "atlas": "Atlante",
     "pantry": "Dispensa",
-    "discover": "Scopri"
+    "discover": "Scopri",
+    "siteSearch": "Cerca sui siti"
   },
   "atlas": {
     "title": "Atlante",
@@ -858,7 +859,7 @@
       "doubtsHint": "Tocca una risposta o scrivi in chat.",
       "chat": "Chat",
       "chatHint": "Chiedi modifiche o chiarimenti: la ricetta viene riscritta a ogni risposta.",
-      "chatPlaceholder": "Scrivi all'IA per affinare la ricetta…",
+      "chatPlaceholder": "Chiedi una modifica…",
       "send": "Invia",
       "thinking": "Sto pensando…",
       "tabRecipe": "Ricetta",
@@ -869,6 +870,12 @@
       "failed": "L'unione con l'IA non è riuscita",
       "noRecipe": "L'IA non ha restituito una ricetta utilizzabile. Riprova.",
       "sessionLost": "Questa unione non è più attiva. Riaprila per ricominciare."
+    },
+    "menu": {
+      "exportAndShare": "Esporta e condividi",
+      "sectionRecipe": "Ricetta",
+      "sectionShare": "Condividi",
+      "sectionManage": "Gestione"
     }
   },
   "login": {
@@ -1927,7 +1934,11 @@
       "none": "Nessuna fonte. Aggiungine una qui sotto.",
       "noFeed": "Quel sito non pubblica un feed leggibile dall'app.",
       "failed": "Impossibile raggiungere quell'indirizzo.",
-      "duplicate": "Già presente nell'elenco."
+      "duplicate": "Già presente nell'elenco.",
+      "searchUrl": "Indirizzo di ricerca",
+      "searchUrlSet": "Ricerca: {{url}}",
+      "searchUrlHint": "Per «Cerca sui siti»: l'indirizzo della pagina dei risultati del sito, con {q} al posto delle parole. Lascia vuoto per farlo trovare in automatico.",
+      "searchUrlInvalid": "Serve un indirizzo http(s) che contenga {q}."
     },
     "cookbooks": {
       "heading": "Ricettari condivisi",
@@ -2273,5 +2284,23 @@
     "pageOf": "Pagina {{page}} di {{total}}",
     "searchingSites": "Cerco nei siti…",
     "notSearchable": "In questi siti non si può cercare, solo tra gli ultimi articoli: {{names}}."
+  },
+  "siteSearch": {
+    "title": "Cerca sui siti",
+    "subtitle": "Una ricerca sui siti che segui in Scopri, oltre i loro feed: vengono mostrate solo le pagine che contengono davvero una ricetta.",
+    "toDiscover": "Scopri",
+    "fromDiscover": "Cerca sui siti",
+    "placeholder": "Cerca una ricetta, es. pasta, zuppa di cipolle…",
+    "search": "Cerca",
+    "intro_one": "Scrivi cosa cerchi: la ricerca parte sul tuo {{count}} sito.",
+    "intro_other": "Scrivi cosa cerchi: la ricerca parte su tutti i tuoi {{count}} siti.",
+    "searching": "Cerco sui siti… {{done}} di {{total}}",
+    "failed": "Non hanno risposto o bloccano le richieste dell'app: {{names}}.",
+    "unsearchable": "Ricerca non trovata per: {{names}}.",
+    "setSearchUrl": "Indica il loro indirizzo di ricerca",
+    "empty": "Nessuna ricetta trovata per «{{query}}».",
+    "servings_one": "{{count}} porzione",
+    "servings_other": "{{count}} porzioni",
+    "partial": "Corrispondenze parziali"
   }
 }
