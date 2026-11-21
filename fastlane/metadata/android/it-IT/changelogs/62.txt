@@ -1,0 +1,1 @@
+Pagina Account sul telefono: la card della sincronizzazione non esce più dallo schermo e le sezioni scorrono su una riga. I profili non amministratori vedono chiaramente quando la sincronizzazione va ancora configurata.

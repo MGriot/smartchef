@@ -370,6 +370,8 @@ sweep
 switch
 switches
 sync
+sync_disabled
+sync_problem
 tab
 table
 tablet

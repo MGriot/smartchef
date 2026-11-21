@@ -1,0 +1,1 @@
+Account page on phones: the sync card no longer runs off the screen, and the settings sections scroll in one row. Profiles that are not admins see clearly when sync still has to be set up.
