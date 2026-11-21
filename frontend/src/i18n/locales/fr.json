@@ -1625,6 +1625,7 @@
       "subtitle": "Vos appareils échangent leurs modifications via un endroit que vous choisissez : un dossier synchronisé, un serveur WebDAV ou un serveur git. Aucun compte SmartChef n’est nécessaire.",
       "subtitleCrossRef": "Pour déplacer plutôt la bibliothèque sur un serveur SmartChef, voir « {{card}} » dans Données et stockage.",
       "adminOnlyNote": "Seul un profil administrateur peut changer la destination de synchronisation de cette bibliothèque, ses identifiants ou ses appareils.",
+      "notConfiguredNonAdmin": "La synchronisation n'est pas encore configurée sur cet appareil. Demandez à un profil administrateur de l'activer dans cette section.",
       "lastSyncedAt": "Dernière synchronisation {{when}}",
       "neverSynced": "Jamais synchronisé",
       "never": "Jamais",

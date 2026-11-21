@@ -1625,6 +1625,7 @@
       "subtitle": "Tus dispositivos intercambian cambios a través de un lugar que eliges: una carpeta sincronizada, un servidor WebDAV o un servidor git. No hace falta una cuenta de SmartChef.",
       "subtitleCrossRef": "Para llevar la biblioteca a un servidor SmartChef, consulta \"{{card}}\" en Datos y almacenamiento.",
       "adminOnlyNote": "Solo un perfil administrador puede cambiar dónde se sincroniza esta biblioteca, sus credenciales o sus dispositivos.",
+      "notConfiguredNonAdmin": "La sincronización aún no está configurada en este dispositivo. Pide a un perfil administrador que la active en esta sección.",
       "lastSyncedAt": "Última sincronización {{when}}",
       "neverSynced": "Nunca sincronizado",
       "never": "Nunca",

@@ -1625,6 +1625,7 @@
       "subtitle": "Your devices exchange changes through a place you choose: a synced folder, a WebDAV server or a git server. No SmartChef account is needed.",
       "subtitleCrossRef": "To move the library onto a SmartChef server instead, see \"{{card}}\" in Data & storage.",
       "adminOnlyNote": "Only an admin profile can change where this library syncs to, its credentials, or its devices.",
+      "notConfiguredNonAdmin": "Sync isn't set up on this device yet. Ask an admin profile to turn it on in this section.",
       "lastSyncedAt": "Last synced {{when}}",
       "neverSynced": "Never synced yet",
       "never": "Never",

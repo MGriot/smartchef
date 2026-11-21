@@ -265,6 +265,9 @@ function FolderSyncCard() {
   // exactly the state that hid a week of failed pushes.
   const [lastPushAt, setLastPushAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  // Set once the effect below has read the sync settings, so the
+  // non-admin card never flashes "not set up" on a configured device.
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [resyncingAll, setResyncingAll] = useState(false);
   const [resyncProgress, setResyncProgress] = useState<{ phase: string; done: number; total: number } | null>(null);
   const [repairing, setRepairing] = useState(false);
@@ -435,6 +438,7 @@ function FolderSyncCard() {
           setPauseReason(await getSyncPauseReason());
         }
       }
+      setConfigLoaded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -790,37 +794,88 @@ function FolderSyncCard() {
   // library syncs to, its credentials, its interval, or device management
   // affects every device sharing this library — reserved for an admin.
   if (!isAdmin) {
+    // A non-admin cannot set sync up, so on a device where nobody has, a
+    // "Sync now" button would only ever fail: say who can set it up instead.
+    const configured = syncMode === 'folder' ? !!folderPath : syncMode === 'git-remote' ? !!gitRemoteUrl : !!webdavUrl;
+    const tone = !configured ? 'idle' : pauseReason || error ? 'warn' : lastSyncAt ? 'ok' : 'idle';
     return (
-      <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.syncHeading')}</h2>
-            <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
-              {lastSyncAt
-                ? t('account.folderSync.lastSyncedAt', { when: new Date(lastSyncAt).toLocaleString(i18n.language) })
-                : t('account.folderSync.neverSynced')}
-            </p>
+      <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <span
+              className={`shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center ${
+                tone === 'ok'
+                  ? 'bg-primary/10 text-primary'
+                  : tone === 'warn'
+                    ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
+                    : 'bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500'
+              }`}
+            >
+              <span className={`material-symbols-outlined text-[22px] ${syncing ? 'animate-spin' : ''}`}>
+                {tone === 'warn' ? 'sync_problem' : configured ? 'sync' : 'sync_disabled'}
+              </span>
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100 leading-tight">{t('account.folderSync.syncHeading')}</h2>
+              <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-0.5">
+                {lastSyncAt
+                  ? t('account.folderSync.lastSyncedAt', { when: formatRelativeTime(t, lastSyncAt) })
+                  : t('account.folderSync.neverSynced')}
+              </p>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={handleSyncNow}
-            disabled={syncing}
-            className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-2xl font-black text-sm hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-50"
-          >
-            <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
-            {syncing ? t('account.folderSync.syncing') : t('account.folderSync.syncNow')}
-          </button>
+          {configLoaded && configured && (
+            <button
+              type="button"
+              onClick={handleSyncNow}
+              disabled={syncing}
+              className="shrink-0 w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3 bg-primary text-white rounded-2xl font-black text-sm hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-60"
+            >
+              <span className={`material-symbols-outlined text-lg ${syncing ? 'animate-spin' : ''}`}>sync</span>
+              {syncing ? t('account.folderSync.syncing') : t('account.folderSync.syncNow')}
+            </button>
+          )}
         </div>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          {t('account.folderSync.adminOnlyNote')}
+
+        {configLoaded && !configured && (
+          <p className="text-sm text-zinc-600 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800/60 rounded-2xl px-4 py-3">
+            {t('account.folderSync.notConfiguredNonAdmin')}
+          </p>
+        )}
+
+        {pauseReason && (
+          <p className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 rounded-xl px-4 py-3 flex items-start gap-2">
+            <span className="material-symbols-outlined text-[16px] shrink-0">warning</span>
+            {t('account.folderSync.syncPaused', { reason: pauseReason })}
+          </p>
+        )}
+
+        {syncing && progress && (
+          <div className="space-y-1">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+              {progress.phase === 'push' ? t('account.folderSync.uploading') : t('account.folderSync.downloading')}{' — '}
+              {t('account.folderSync.objectProgress', { done: progress.done, count: progress.total })}
+            </p>
+            <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${progress.phase === 'push' ? 'bg-primary' : 'bg-sky-500'}`}
+                style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {error && <p className="text-sm text-red-600 dark:text-red-400 font-medium">{error}</p>}
+
+        <p className="flex items-start gap-2 text-xs text-zinc-400 dark:text-zinc-500 border-t border-zinc-100 dark:border-zinc-800 pt-4">
+          <span className="material-symbols-outlined text-[16px] shrink-0">lock</span>
+          <span>{t('account.folderSync.adminOnlyNote')}</span>
         </p>
-        {error && <p className="mt-4 text-sm text-red-600 font-medium">{error}</p>}
       </div>
     );
   }
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.folderSync.heading')}</h2>
@@ -1549,7 +1604,7 @@ function OfflineDownloadsCard() {
     <button
       type="button"
       onClick={() => navigate('/downloads')}
-      className="w-full flex items-center justify-between gap-4 bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 text-left hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
+      className="w-full flex items-center justify-between gap-4 bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 text-left hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
     >
       <div>
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.offlineDownloads.heading')}</h2>
@@ -1604,7 +1659,7 @@ function SyncCard() {
   if (!status) return null;
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.multiDeviceSync.heading')}</h2>
@@ -1817,7 +1872,7 @@ function LlmProviderCard() {
   const cloudProvider = provider !== 'ollama' ? (provider as CloudProvider) : null;
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.llm.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
@@ -1915,7 +1970,7 @@ function ManageUsersCard() {
   return (
     <Link
       to="/manage-users"
-      className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
+      className="flex items-center justify-between bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors"
     >
       <div>
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.manageUsers.heading')}</h2>
@@ -1984,7 +2039,7 @@ function BackupCard() {
   };
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       {exportSheet}
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.backup.heading')}</h2>
@@ -2095,7 +2150,7 @@ function StandaloneProfileCard() {
   };
 
   return (
-    <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
+    <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
       <div>
         <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.name')}</label>
         <input
@@ -2230,7 +2285,7 @@ function AllProfilesCard() {
   const otherAdmins = (profiles ?? []).filter((p) => p.role === 'admin').length;
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.profiles.heading')}</h2>
@@ -2437,7 +2492,7 @@ function StorageModeCard() {
   };
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.storageMode.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">
@@ -2588,7 +2643,7 @@ function AppearanceCard() {
   };
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('account.appearance.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('account.appearance.subtitle')}</p>
@@ -2697,7 +2752,7 @@ function LanguagesCard() {
   };
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
+    <div className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800">
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('languages.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('languages.subtitle')}</p>
@@ -2904,31 +2959,34 @@ export default function Account() {
 
   return (
     <AppLayout>
-      <div className="px-6 sm:px-10 py-10 max-w-7xl mx-auto">
-        <div className="mb-10">
+      <div className="px-4 sm:px-10 py-6 sm:py-10 max-w-7xl mx-auto">
+        <div className="mb-6 sm:mb-10">
           <button
             onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-sm font-bold mb-6 transition-colors"
+            className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-400 text-sm font-bold mb-4 sm:mb-6 transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             {t('common.back')}
           </button>
-          <h1 className="text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">{t('common.account')}</h1>
+          <h1 className="text-3xl sm:text-4xl font-black text-zinc-900 dark:text-zinc-100 tracking-tighter">{t('common.account')}</h1>
         </div>
 
 
       {/* Sections. The page used to show every card at once in two
-          columns; grouped, each section is short enough to read through. */}
-      <nav aria-label={t('account.sections.label')} className="mb-3">
-        <div role="tablist" className="flex flex-wrap gap-2">
+          columns; grouped, each section is short enough to read through.
+          On a phone the five chips wrapped into three rows that pushed the
+          content below the fold, so there they scroll as one row instead,
+          bleeding to the screen edge so the cut-off chip reads as "more". */}
+      <nav aria-label={t('account.sections.label')} className="mb-3 -mx-4 sm:mx-0">
+        <div role="tablist" className="flex gap-2 overflow-x-auto scrollbar-hide px-4 sm:px-0 sm:flex-wrap sm:overflow-visible snap-x">
           {ACCOUNT_SECTIONS.map(({ id, icon }) => (
             <button
               key={id}
               type="button"
               role="tab"
               aria-selected={tab === id}
-              onClick={() => selectTab(id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-black whitespace-nowrap transition-colors ${
+              onClick={(e) => { selectTab(id); e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }); }}
+              className={`shrink-0 snap-start flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-black whitespace-nowrap transition-colors ${
                 tab === id ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 border border-zinc-100 dark:border-zinc-800 hover:text-zinc-800 dark:hover:text-zinc-200'
               }`}
             >
@@ -2938,7 +2996,7 @@ export default function Account() {
           ))}
         </div>
       </nav>
-      <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-8 max-w-3xl">{t(`account.sections.${tab}.hint`)}</p>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 sm:mb-8 max-w-3xl">{t(`account.sections.${tab}.hint`)}</p>
 
       <div role="tabpanel" className="max-w-4xl space-y-6 sm:space-y-8">
         {tab === 'sync' && (
@@ -2955,7 +3013,7 @@ export default function Account() {
             {standalone === null ? null : standalone ? (
               <StandaloneProfileCard />
             ) : (
-            <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-[40px] p-6 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
+            <form onSubmit={handleSave} className="bg-white dark:bg-zinc-900 rounded-3xl sm:rounded-[40px] p-5 sm:p-10 shadow-sm border border-zinc-100 dark:border-zinc-800 space-y-6">
               <div>
                 <label className="block text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-2">{t('account.profile.name')}</label>
                 <input
