@@ -33,6 +33,8 @@ export interface LocalDispatchResult {
    *  that answer with both "the one you asked for" and "all the matches" —
    *  see dispatchGeocode(). */
   results?: unknown;
+  /** More top-level keys alongside `data` — a paged list's total/hasMore. */
+  meta?: Record<string, unknown>;
   error?: string;
 }
 
@@ -176,6 +178,9 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
   if (!id) {
     if (method === 'GET') {
       const result = await recipes.listRecipes(Object.fromEntries(sp) as any);
+      // A paged request (the gallery) also needs to know how many there are;
+      // every other caller keeps getting the bare list it always got.
+      if (sp.has('limit')) return { status: 200, data: result.data, meta: { total: result.total, hasMore: result.hasMore } };
       return { status: 200, data: result.data };
     }
     if (method === 'POST') {
@@ -188,7 +193,9 @@ async function dispatchRecipes(segments: string[], method: string, sp: URLSearch
 
   if (!sub) {
     if (method === 'GET') {
-      const recipe = await recipes.getRecipe(id, sp.get('lang') ?? undefined);
+      const recipe = await recipes.getRecipe(id, sp.get('lang') ?? undefined, {
+        withSubRecipeIngredients: sp.get('include') === 'sub_ingredients',
+      });
       if (!recipe) return { status: 404, error: i18n.t('errors.recipeNotFound') };
       return { status: 200, data: recipe };
     }

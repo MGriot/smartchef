@@ -264,7 +264,30 @@ recipeRouter.get("/", async (req: Request, res: Response) => {
   const orderBy = sort === "alphabetical" && langParamIndex
     ? "COALESCE(rt.title, r.title) ASC"
     : SORT_OPTIONS[String(sort)] ?? SORT_OPTIONS["recently-edited"];
-  sql += ` GROUP BY r.id, acc.name, acc.avatar_url${lang ? ", rt.title, rt.description" : ""} ORDER BY ${orderBy}`;
+  sql += ` GROUP BY r.id, acc.name, acc.avatar_url${lang ? ", rt.title, rt.description" : ""} ORDER BY ${orderBy}, r.id`;
+
+  // A page (the gallery asks for one): `limit` rows from `offset`, with the
+  // full count from a window over the grouped rows, so it costs no second
+  // query. Without `limit`, the whole list as before.
+  const limit = req.query.limit !== undefined ? Math.max(1, Math.floor(Number(req.query.limit)) || 1) : undefined;
+  const offset = Math.max(0, Math.floor(Number(req.query.offset)) || 0);
+  if (limit !== undefined) {
+    const pageParams = [...params, limit, offset];
+    const paged = `SELECT page.*, COUNT(*) OVER () AS total_count FROM (${sql}) page LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length}`;
+    const rows = await query<Record<string, unknown>>(paged, pageParams);
+    let total = rows.length > 0 ? Number(rows[0].total_count) : 0;
+    if (rows.length === 0 && offset > 0) {
+      // Past the end: the window had no row to ride on.
+      const counted = await query<{ n: string }>(`SELECT COUNT(*) AS n FROM (${sql}) page`, params);
+      total = Number(counted[0]?.n ?? 0);
+    }
+    const data = rows.map((row) => {
+      const { total_count: _count, ...rest } = row;
+      return rest;
+    });
+    res.json({ data, total, hasMore: offset + data.length < total });
+    return;
+  }
 
   const recipes = await query(sql, params);
   res.json({ data: recipes, total: recipes.length });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -22,6 +22,7 @@ export default function RecipeCardMenu({
   lang,
   dense = false,
   onDeleted,
+  cardRef,
 }: {
   recipeId: string;
   title: string;
@@ -29,11 +30,16 @@ export default function RecipeCardMenu({
   lang: string;
   dense?: boolean;
   onDeleted: (id: string) => void;
+  /** The card itself: it stays bright while the rest of the gallery dims. */
+  cardRef?: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const addToShoppingCart = useStore((s) => s.addToShoppingCart);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  // The card the button sits in, unless the caller names it: the menu keeps
+  // it lit while the rest of the gallery dims.
+  const parentCardRef = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [showMerge, setShowMerge] = useState(false);
@@ -87,14 +93,14 @@ export default function RecipeCardMenu({
       <button
         ref={buttonRef}
         type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); parentCardRef.current = e.currentTarget.parentElement; setOpen((v) => !v); }}
         aria-label={t('gallery.recipeActions')}
         title={t('gallery.recipeActions')}
         aria-haspopup="menu"
         aria-expanded={open}
         className={`${btn} absolute z-20 ${dense ? 'top-2 right-2' : 'top-3 right-3'} rounded-full bg-white/90 dark:bg-zinc-900/90 text-zinc-700 dark:text-zinc-200 shadow-md flex items-center justify-center hover:bg-white active:scale-95 transition-all`}
       >
-        <span className={`material-symbols-outlined ${dense ? 'text-[18px]' : 'text-[22px]'}`}>more_vert</span>
+        <span className={`material-symbols-outlined ${dense ? 'text-[18px]' : 'text-[22px]'}`}>{open ? 'close' : 'more_vert'}</span>
       </button>
 
       {notice && createPortal(
@@ -108,6 +114,8 @@ export default function RecipeCardMenu({
         anchorRef={buttonRef}
         title={title}
         label={t('gallery.recipeActions')}
+        spotlightRef={cardRef ?? parentCardRef}
+        phoneLayout="fan"
         views={{
           main: {
             sections: [

@@ -177,7 +177,7 @@ export default function Modal({
   );
 
   return createPortal(
-    <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6" style={{ zIndex }}>
+    <div className="app-no-drag fixed inset-0 flex items-center justify-center p-4 sm:p-6" style={{ zIndex }}>
       <div
         className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm animate-backdrop-in"
         onClick={closeOnBackdrop ? onClose : undefined}

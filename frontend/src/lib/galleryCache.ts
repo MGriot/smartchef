@@ -17,12 +17,10 @@ export interface GalleryQuery {
   sort: string;
 }
 
-/** Cards mounted on the first frame. */
-export const REVEAL_INITIAL = 12;
-/** Cards added per step after that. */
-export const REVEAL_STEP = 8;
-/** Pause between steps, so the grid fills in rather than landing in one render. */
-export const REVEAL_DELAY_MS = 50;
+/** Recipes per gallery page: the first one paints, the next ones load as
+ *  the grid scrolls toward its end. Two dozen is a full screen and a half on
+ *  a wide window, and a few phone screens. */
+export const GALLERY_PAGE = 24;
 
 const DISK_KEY = 'smartchef.gallery.cache';
 const DISK_LIMIT = 300;

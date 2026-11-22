@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('smartchefElectron', {
   readPrefsBackup: () => ipcRenderer.invoke('smartchef-prefs-read'),
   setPrefsBackup: (key: string, value: string | null) => ipcRenderer.invoke('smartchef-prefs-set', key, value),
   getAppVersion: () => ipcRenderer.invoke('smartchef-app-version'),
+  // Repaints the window-controls strip in the header's colour (see the
+  // `smartchef-set-titlebar-overlay` handler in electron/src/index.ts).
+  setTitleBarOverlay: (dark: boolean, surface?: 'header' | 'page') => ipcRenderer.invoke('smartchef-set-titlebar-overlay', dark, surface),
   // Native save dialog for the encrypted Setup File and every other export
   // (frontend/src/lib/fileExport.ts) — see the `smartchef-save-file`
   // handler in electron/src/index.ts for why the renderer's own

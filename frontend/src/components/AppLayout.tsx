@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/app.store';
-import { useLanguages, useUiAndContentLanguage } from '../hooks/useLanguages';
+import { useLanguages } from '../hooks/useLanguages';
 import OfflineBanner from './OfflineBanner';
 import CoverImage from './CoverImage';
 import CreateImportMenu from './CreateImportMenu';
@@ -15,7 +15,7 @@ interface AppLayoutProps {
   librarySection?: LibrarySection;
   /** Extra content appended below the static library nav (e.g. the dynamic categories list). */
   sidebarExtra?: React.ReactNode;
-  /** Extra content rendered in the header's right-hand action area, before the language switcher. */
+  /** Extra content rendered in the header's right-hand action area, before the avatar. */
   headerActions?: React.ReactNode;
   /** Hides the header's "Create recipe" button (it makes no sense inside a recipe). */
   hideCreateButton?: boolean;
@@ -97,10 +97,10 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
     };
   }, [mobileMenuOpen]);
 
+  // The language is chosen in Settings → Appearance now; the menu only
+  // shows the current one as a shortcut there.
   const { languages } = useLanguages();
-
-  // Shared with the recipe page's own picker — see useUiAndContentLanguage().
-  const handleLanguageChange = useUiAndContentLanguage();
+  const currentLanguageLabel = languages.find((l) => l.code === contentLang)?.label ?? contentLang;
 
   // Both the Library top-level link and the individual library sub-pages
   // (Ingredients/Tools/Units) should light up "Library" as the active tab.
@@ -124,7 +124,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           scrolled content can't show through there. The spacer after it
           reserves the same height in the flow — see --app-header-h. */}
       <header
-        className="min-h-[var(--app-header-h)] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 fixed inset-x-0 top-0 lg:sticky z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))]"
+        className="app-drag min-h-[var(--app-header-h)] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 fixed inset-x-0 top-0 lg:sticky z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[calc(max(1rem,env(safe-area-inset-right))_+_var(--wco-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[calc(max(1.5rem,env(safe-area-inset-right))_+_var(--wco-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[calc(max(2rem,env(safe-area-inset-right))_+_var(--wco-right))]"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="flex items-center gap-3 lg:gap-6 xl:gap-10 min-w-0">
@@ -166,16 +166,6 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           {!hideCreateButton && (
             <CreateImportMenu variant="header" />
           )}
-          <select
-            value={contentLang}
-            onChange={(e) => handleLanguageChange(e.target.value)}
-            aria-label={t('common.language')}
-            className="block max-w-[5.5rem] sm:max-w-[6.5rem] xl:max-w-none truncate text-xs font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900 rounded-full pl-2.5 pr-6 xl:pl-3 xl:pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700 focus:ring-2 focus:ring-primary/20 cursor-pointer"
-          >
-            {languages.map((l) => (
-              <option key={l.code} value={l.code}>{l.label}</option>
-            ))}
-          </select>
           <Link
             to="/account"
             title={account?.name ?? t('common.account')}
@@ -201,23 +191,13 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
       )}
       {mobileMenuOpen && (
         <nav className="xl:hidden bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-1 shadow-sm max-lg:fixed max-lg:inset-x-0 max-lg:z-40 max-lg:top-[var(--app-header-h)] max-lg:max-h-[calc(100dvh-var(--app-header-h))] max-lg:overflow-y-auto max-lg:rounded-b-2xl">
-          {/* The header shows the picker at every width now — on a phone it
-              was only here, and went unfound. Kept as the labelled version. */}
-          <label className="sm:hidden flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+          <Link to="/account?tab=appearance" className={`${IDLE_LINK} justify-between`}>
             <span className="flex items-center gap-3">
               <span className="material-symbols-outlined text-[20px]">translate</span>
               {t('common.language')}
             </span>
-            <select
-              value={contentLang}
-              onChange={(e) => handleLanguageChange(e.target.value)}
-              className="text-xs font-bold text-zinc-600 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800 rounded-full pl-3 pr-7 py-1.5 border border-zinc-200 dark:border-zinc-700"
-            >
-              {languages.map((l) => (
-                <option key={l.code} value={l.code}>{l.label}</option>
-              ))}
-            </select>
-          </label>
+            <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 truncate">{currentLanguageLabel}</span>
+          </Link>
           <CreateImportMenu variant="menu" />
           {NAV_LINKS.map((link) => (
             <Link key={link.to} to={link.to} className={isActive(link.to) ? ACTIVE_LINK : IDLE_LINK}>

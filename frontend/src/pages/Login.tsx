@@ -5,6 +5,7 @@ import { ResolvedImage } from '../components/CoverImage';
 import { useStore, Account } from '../store/app.store';
 import { apiFetch, isNative, cacheAccountOffline } from '../lib/api';
 import { AVATAR_PRESETS, DEFAULT_AVATAR } from '../lib/avatarPresets';
+import WindowDragStrip from '../components/WindowDragStrip';
 
 // A raw `TypeError: Failed to fetch` (CORS rejection, DNS failure, refused
 // connection) reads as gibberish shown verbatim — the most common real
@@ -213,6 +214,7 @@ export default function Login({ hasAccount, onAuthenticated, onChangeStorage }: 
 
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center p-6 font-outfit">
+      <WindowDragStrip />
       <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-[40px] shadow-sm border border-zinc-100 dark:border-zinc-800 p-10">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-black text-primary tracking-tight mb-2">SmartChef</h1>

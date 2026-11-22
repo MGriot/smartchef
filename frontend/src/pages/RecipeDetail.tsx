@@ -4,7 +4,8 @@ import QuantityInput from '../components/QuantityInput';
 import { formatQuantity, formatQuantityWithUnit } from '../lib/ingredientAmount';
 import { formatDurationWith } from '../lib/duration';
 import { totalStepMinutes } from '../lib/recipeTimes';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { pendingRecipe, readRecipe, recipeDetailPath, writeRecipe } from '../lib/recipeCache';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AddToCollectionPicker from '../components/AddToCollectionPicker';
 import { useTranslation } from 'react-i18next';
@@ -321,13 +322,17 @@ const formatDate = (iso: string | null | undefined): string => {
 /* ── Sub-recipe ingredient fetcher ─────────────────────────────────── */
 const SubIngredientList: React.FC<{
   subRecipeId: string; servings: number; baseServings: number; lang?: string;
-}> = ({ subRecipeId, servings, baseServings, lang }) => {
+  /** The nested recipe's ingredients, when the page's own fetch brought them
+   *  (standalone mode does, in one batch for every nested recipe). */
+  preloaded?: Ingredient[];
+}> = ({ subRecipeId, servings, baseServings, lang, preloaded }) => {
   const { t } = useTranslation();
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [ingredients, setIngredients] = useState<Ingredient[]>(preloaded ?? []);
   const [open, setOpen] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!preloaded);
 
   useEffect(() => {
+    if (preloaded) { setIngredients(preloaded); setLoading(false); return; }
     (async () => {
       try {
         const res = await apiFetch(`/api/recipes/${subRecipeId}${lang ? `?lang=${lang}` : ''}`);
@@ -336,7 +341,7 @@ const SubIngredientList: React.FC<{
       } catch { /* ignore */ }
       finally { setLoading(false); }
     })();
-  }, [subRecipeId, lang]);
+  }, [subRecipeId, lang, preloaded]);
 
   if (loading) return <div className="pl-6 py-2 text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">{t('common.loading')}</div>;
   if (!ingredients.length) return null;
@@ -536,8 +541,16 @@ const RecipeDetail: React.FC = () => {
   // off contentLang unconditionally regardless of mode.
   const libraryLang = mode === 'edit' ? (draft.language_code || recipe?.language_code || contentLang) : contentLang;
 
-  /* ── Fetch techniques (needed in every mode to resolve {{tech:id}} refs in step text) ── */
+  // The full tool and technique catalogs are only needed to edit, to cook
+  // (sub-recipe sections name library tools), or to name a {{tool:id}} /
+  // {{tech:id}} the steps mention. Reading them for every recipe opened put
+  // two whole-table reads in the SQLite queue AHEAD of the recipe itself.
+  const stepRefsText = useMemo(() => JSON.stringify(recipe?.steps ?? []), [recipe?.steps]);
+  const needsCatalogs = mode !== 'view' || /\{\{(tech|tool):/.test(stepRefsText);
+
+  /* ── Fetch techniques (to resolve {{tech:id}} refs in step text, and to edit) ── */
   useEffect(() => {
+    if (!needsCatalogs) return;
     (async () => {
       try {
         const res = await apiFetch(`/api/techniques${libraryLang ? `?lang=${libraryLang}` : ''}`);
@@ -545,11 +558,12 @@ const RecipeDetail: React.FC = () => {
         setAllTechniques(json.data || []);
       } catch (err) { console.error('Techniques fetch failed:', err); }
     })();
-  }, [libraryLang]);
+  }, [libraryLang, needsCatalogs]);
 
   /* ── Tool names for {{tool:id}} refs: a step can name a library tool the recipe doesn't list ── */
   const [libraryTools, setLibraryTools] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
+    if (!needsCatalogs) return;
     (async () => {
       try {
         const res = await apiFetch(`/api/tools${libraryLang ? `?lang=${libraryLang}` : ''}`);
@@ -557,7 +571,7 @@ const RecipeDetail: React.FC = () => {
         setLibraryTools((json.data || []).map((t: Tool) => ({ id: t.id, name: t.translated_name || t.name })));
       } catch (err) { console.error('Tools fetch failed:', err); }
     })();
-  }, [libraryLang]);
+  }, [libraryLang, needsCatalogs]);
 
   /* ── Fetch library data (for edit mode) ────────────────────────── */
   useEffect(() => {
@@ -584,16 +598,34 @@ const RecipeDetail: React.FC = () => {
 
 
   /* ── Fetch recipe ───────────────────────────────────────────────── */
+  // Kept out of `recipe` (and so out of the draft the editor saves).
+  const [subRecipeIngredients, setSubRecipeIngredients] = useState<Record<string, Ingredient[]> | null>(null);
+  const shownJson = useRef<string | null>(null);
   const fetchRecipe = useCallback(async () => {
     if (!id) return;
-    setLoading(true);
+    const show = (data: Recipe & { sub_recipe_ingredients?: Record<string, Ingredient[]> }) => {
+      const text = JSON.stringify(data);
+      // A refetch that changed nothing must not reset the draft or re-render.
+      if (text === shownJson.current) return;
+      shownJson.current = text;
+      const { sub_recipe_ingredients, ...rest } = data;
+      setSubRecipeIngredients(sub_recipe_ingredients ?? null);
+      setRecipe(rest as Recipe);
+      setServings(rest.servings);
+      setDraft(rest as Recipe);
+    };
+    // The copy from last time (or from the gallery's prefetch) paints now;
+    // the fresh one replaces it when it lands.
+    const cached = readRecipe<Recipe>(id, shownLang);
+    if (cached) show(cached);
+    else setLoading(true);
     try {
-      const res = await apiFetch(`/api/recipes/${id}${shownLang ? `?lang=${shownLang}` : ''}`);
+      await pendingRecipe(id, shownLang);
+      const res = await apiFetch(recipeDetailPath(id, shownLang));
       const json = await res.json();
       if (json.data) {
-        setRecipe(json.data);
-        setServings(json.data.servings);
-        setDraft(json.data);
+        writeRecipe(id, shownLang, json.data);
+        show(json.data);
       }
     } catch (err) {
       console.error('Error fetching recipe:', err);
@@ -693,6 +725,8 @@ const RecipeDetail: React.FC = () => {
      moving the slider doesn't trigger a refetch. ── */
   useEffect(() => {
     if (!id || !recipe) { setNutrition(null); return; }
+    // Standalone answers 501 here (localRouter): one wasted bridge call.
+    if (isStandalone) return;
     (async () => {
       try {
         const res = await apiFetch(`/api/recipes/${id}/nutrition?servings=${recipe.servings}`);
@@ -703,7 +737,7 @@ const RecipeDetail: React.FC = () => {
         setNutrition(null);
       }
     })();
-  }, [id, recipe?.id, recipe?.servings]);
+  }, [id, recipe?.id, recipe?.servings, isStandalone]);
 
   /* ── Scale quantity ─────────────────────────────────────────────── */
   // The scaling itself lives in lib/recipeScaling.ts, shared with the
@@ -3654,6 +3688,7 @@ const RecipeDetail: React.FC = () => {
                         servings={servings}
                         baseServings={recipe.servings}
                         lang={shownLang}
+                        preloaded={subRecipeIngredients?.[ing.subRecipeId]}
                       />
                     )}
                   </div>

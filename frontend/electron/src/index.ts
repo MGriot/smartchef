@@ -7,7 +7,7 @@ import * as path from 'path';
 import electronIsDev from 'electron-is-dev';
 import unhandled from 'electron-unhandled';
 
-import { ElectronCapacitorApp, setupContentSecurityPolicy, setupReloadWatcher } from './setup';
+import { ElectronCapacitorApp, setupContentSecurityPolicy, setupReloadWatcher, titleBarColors } from './setup';
 
 // Graceful handling of unhandled errors.
 unhandled();
@@ -145,6 +145,18 @@ ipcMain.handle('smartchef-prefs-set', (_event, key: string, value: string | null
 });
 
 ipcMain.handle('smartchef-app-version', () => app.getVersion());
+
+// The renderer's theme (light/dark, or 'system') decides the header colour,
+// so it tells the window to repaint the min/max/close strip to match.
+ipcMain.handle('smartchef-set-titlebar-overlay', (event, dark: boolean, surface?: 'header' | 'page') => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || process.platform === 'darwin') return;
+  try {
+    win.setTitleBarOverlay(titleBarColors(!!dark, surface === 'page' ? 'page' : 'header'));
+  } catch {
+    // A window created without titleBarOverlay throws here: nothing to repaint.
+  }
+});
 
 // SmartChef: native folder picker for the git-based sync feature — see
 // frontend/src/lib/gitfs.ts. Desktop has no Storage Access Framework

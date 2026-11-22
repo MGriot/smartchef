@@ -207,7 +207,7 @@ export async function apiFetch(path: string, init?: RequestInit & { timeoutMs?: 
             ? { error: result.error }
             : result.results !== undefined
               ? { data: result.data, results: result.results }
-              : { data: result.data },
+              : { ...result.meta, data: result.data },
           result.status,
         );
       }

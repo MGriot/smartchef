@@ -282,6 +282,10 @@ export interface ListRecipesParams {
    *  db/migrations/034_ingredient_seasonality.sql. */
   seasonalOnly?: string;
   seasonalMonth?: string;
+  /** A page of the result: `limit` rows from `offset`. Without `limit` the
+   *  whole list, as every caller but the gallery wants it. */
+  limit?: string;
+  offset?: string;
 }
 
 /** Looks up every distinct tag name at once (2 queries total, however many
@@ -335,27 +339,26 @@ function tagsDisplayFromBatch(tagNames: string[], batch: Map<string, { translate
 
 export async function listRecipes(params: ListRecipesParams) {
   const { q, tag, tags, ingredientCategories, regions, difficulty, component, lang, sort, seasonalOnly, seasonalMonth } = params;
+  const limit = params.limit !== undefined ? Math.max(1, Math.floor(Number(params.limit)) || 0) : undefined;
+  const offset = Math.max(0, Math.floor(Number(params.offset)) || 0);
+  const alphabeticalTranslated = sort === "alphabetical" && !!lang;
+
+  // ── Which recipes, in which order ──────────────────────────────────────
+  // Only the columns the filters and the order need. The tag, region and
+  // season filters run in JS (array membership in JSON text), so a page can
+  // only be cut once they have run: this pass is cheap enough to do over
+  // the whole library, and the heavy one below only reads the page.
   const sqlParams: unknown[] = [];
-  let langJoin = "";
-  let translatedCols = "NULL AS translated_title, NULL AS translated_description";
-  if (lang) {
+  let orderJoin = "";
+  if (alphabeticalTranslated) {
     sqlParams.push(lang);
-    langJoin = `LEFT JOIN recipe_translations rt ON rt.recipe_id = r.id AND rt.language_code = $${sqlParams.length}`;
-    translatedCols = "rt.title AS translated_title, rt.description AS translated_description";
+    orderJoin = `LEFT JOIN recipe_translations rt ON rt.recipe_id = r.id AND rt.language_code = $${sqlParams.length}`;
   }
 
   let sql = `
-    SELECT ${LIST_COLUMNS}, ${translatedCols},
-           (SELECT COUNT(*) FROM recipe_ingredients cri2 WHERE cri2.recipe_id = r.id) AS ingredient_count,
-           r.creator_name AS creator_name,
-           -- Best-effort: creator_name is a plain denormalized string, not a
-           -- profile FK (see the comment at the top of this file), so this
-           -- can only match by name — a scalar subquery (not a JOIN) so two
-           -- profiles sharing a name never duplicate this row. Picks the
-           -- earliest-created match as a deterministic tie-break.
-           (SELECT avatar_url FROM profiles cp WHERE cp.name = r.creator_name AND cp.deleted_at IS NULL ORDER BY cp.created_at LIMIT 1) AS creator_avatar_url
+    SELECT r.id, r.tags, r.regions
     FROM recipes r
-    ${langJoin}
+    ${orderJoin}
     WHERE r.sync_status != 'deleted'
   `;
 
@@ -390,23 +393,24 @@ export async function listRecipes(params: ListRecipesParams) {
     sql += ` AND r.is_component = $${sqlParams.length}`;
   }
 
-  const orderBy = sort === "alphabetical" && lang
+  const orderBy = alphabeticalTranslated
     ? "COALESCE(rt.title, r.title) ASC"
     : SORT_OPTIONS[String(sort)] ?? SORT_OPTIONS["recently-edited"];
-  sql += ` ORDER BY ${orderBy}`;
+  // id breaks ties, so a page boundary between two equal keys is stable.
+  sql += ` ORDER BY ${orderBy}, r.id`;
 
-  let recipes = await query<Record<string, unknown>>(sql, sqlParams);
+  let matches = await query<{ id: string; tags: string | null; regions: string | null }>(sql, sqlParams);
 
   // Array-membership filters have no SQL equivalent here — applied in JS
   // against the already-narrowed row set.
   if (tag) {
-    recipes = recipes.filter(r => (JSON.parse((r.tags as string) ?? '[]') as string[]).includes(tag));
+    matches = matches.filter(r => (JSON.parse(r.tags ?? '[]') as string[]).includes(tag));
   }
   if (tags) {
     const tagList = tags.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
     if (tagList.length > 0) {
-      recipes = recipes.filter(r => {
-        const rTags = (JSON.parse((r.tags as string) ?? '[]') as string[]).map(t => t.toLowerCase());
+      matches = matches.filter(r => {
+        const rTags = (JSON.parse(r.tags ?? '[]') as string[]).map(t => t.toLowerCase());
         return tagList.some(t => rTags.includes(t));
       });
     }
@@ -414,35 +418,71 @@ export async function listRecipes(params: ListRecipesParams) {
   if (regions) {
     const regionList = regions.split(",").map(r => r.trim()).filter(Boolean);
     if (regionList.length > 0) {
-      recipes = recipes.filter(r => {
-        const rRegions = JSON.parse((r.regions as string) ?? '[]') as string[];
+      matches = matches.filter(r => {
+        const rRegions = JSON.parse(r.regions ?? '[]') as string[];
         return regionList.some(reg => rRegions.includes(reg));
       });
     }
   }
-  if (seasonalOnly === "true" && recipes.length > 0) {
+  if (seasonalOnly === "true" && matches.length > 0) {
     const month = seasonalMonth ? Number(seasonalMonth) : new Date().getMonth() + 1;
-    const ids = recipes.map(r => r.id as string);
-    const rows = await query<{ recipe_id: string; seasonal_months: string }>(
-      `SELECT ri.recipe_id, ing.seasonal_months
-       FROM recipe_ingredients ri
-       JOIN ingredients ing ON ing.id = ri.ingredient_id
-       WHERE ri.recipe_id IN (${inPlaceholders([], ids)})`,
-      ids
-    );
     const seasonalMonthsByRecipe = new Map<string, number[][]>();
-    for (const row of rows) {
-      const months = JSON.parse(row.seasonal_months ?? '[]') as number[];
-      if (months.length === 0) continue; // no seasonality data -- never excludes a recipe
-      const list = seasonalMonthsByRecipe.get(row.recipe_id) ?? [];
-      list.push(months);
-      seasonalMonthsByRecipe.set(row.recipe_id, list);
+    for (const batch of chunk(matches.map(r => r.id))) {
+      const rows = await query<{ recipe_id: string; seasonal_months: string }>(
+        `SELECT ri.recipe_id, ing.seasonal_months
+         FROM recipe_ingredients ri
+         JOIN ingredients ing ON ing.id = ri.ingredient_id
+         WHERE ri.recipe_id IN (${inPlaceholders([], batch)})`,
+        batch
+      );
+      for (const row of rows) {
+        const months = JSON.parse(row.seasonal_months ?? '[]') as number[];
+        if (months.length === 0) continue; // no seasonality data -- never excludes a recipe
+        const list = seasonalMonthsByRecipe.get(row.recipe_id) ?? [];
+        list.push(months);
+        seasonalMonthsByRecipe.set(row.recipe_id, list);
+      }
     }
-    recipes = recipes.filter(r => {
-      const ingredientMonthLists = seasonalMonthsByRecipe.get(r.id as string) ?? [];
+    matches = matches.filter(r => {
+      const ingredientMonthLists = seasonalMonthsByRecipe.get(r.id) ?? [];
       return ingredientMonthLists.every(months => months.includes(month));
     });
   }
+
+  const total = matches.length;
+  const pageIds = (limit !== undefined ? matches.slice(offset, offset + limit) : matches.slice(offset)).map(r => r.id);
+  if (pageIds.length === 0) return { data: [], total, hasMore: false };
+
+  // ── The page itself: the card columns, only for these rows ─────────────
+  const rows: Record<string, unknown>[] = [];
+  for (const batch of chunk(pageIds)) {
+    const p: unknown[] = [];
+    let langJoin = "";
+    let translatedCols = "NULL AS translated_title, NULL AS translated_description";
+    if (lang) {
+      p.push(lang);
+      langJoin = `LEFT JOIN recipe_translations rt ON rt.recipe_id = r.id AND rt.language_code = $${p.length}`;
+      translatedCols = "rt.title AS translated_title, rt.description AS translated_description";
+    }
+    rows.push(...await query<Record<string, unknown>>(
+      `SELECT ${LIST_COLUMNS}, ${translatedCols},
+              (SELECT COUNT(*) FROM recipe_ingredients cri2 WHERE cri2.recipe_id = r.id) AS ingredient_count,
+              r.creator_name AS creator_name,
+              -- Best-effort: creator_name is a plain denormalized string, not a
+              -- profile FK (see the comment at the top of this file), so this
+              -- can only match by name — a scalar subquery (not a JOIN) so two
+              -- profiles sharing a name never duplicate this row. Picks the
+              -- earliest-created match as a deterministic tie-break.
+              (SELECT avatar_url FROM profiles cp WHERE cp.name = r.creator_name AND cp.deleted_at IS NULL ORDER BY cp.created_at LIMIT 1) AS creator_avatar_url
+       FROM recipes r
+       ${langJoin}
+       WHERE r.id IN (${inPlaceholders(p, batch)})`,
+      p
+    ));
+  }
+  // `IN (...)` has no order of its own: put the rows back in the first pass's.
+  const rowById = new Map(rows.map(r => [r.id as string, r] as const));
+  const recipes = pageIds.map(rid => rowById.get(rid)).filter((r): r is Record<string, unknown> => !!r);
 
   const perRecipeTagNames = recipes.map(r => JSON.parse((r.tags as string) ?? '[]') as string[]);
   const tagsBatch = await buildTagsDisplayBatch(perRecipeTagNames.flat(), lang);
@@ -458,7 +498,7 @@ export async function listRecipes(params: ListRecipesParams) {
       sources: JSON.parse((r.sources as string) ?? '[]'),
     };
   });
-  return { data: result, total: result.length };
+  return { data: result, total, hasMore: offset + result.length < total };
 }
 
 // ── GET /recipes/:id ───────────────────────────────────────────────────
@@ -473,47 +513,26 @@ function matchesLang(stored: string, wanted: string): boolean {
   return stored.toLowerCase() === wanted.toLowerCase();
 }
 
-export async function getRecipe(id: string, lang?: string) {
-  if (!UUID_RE.test(id)) return null;
-
-  const params: unknown[] = [id];
-  let langJoin = "";
-  let translatedCols = "NULL AS translated_title, NULL AS translated_description";
-  if (lang) {
-    params.push(lang);
-    langJoin = `LEFT JOIN recipe_translations rct ON rct.recipe_id = r.id AND LOWER(rct.language_code) = LOWER($2)`;
-    translatedCols = "rct.title AS translated_title, rct.description AS translated_description";
+/** The ingredient rows of one or more recipes, with every translation they
+ *  need, in a fixed handful of queries however many recipes are asked for.
+ *  getRecipe() uses it for the recipe itself and, in one more pass, for the
+ *  recipes it uses as ingredients (the "matrioska" rows the page expands). */
+async function loadIngredients(recipeIds: string[], lang?: string): Promise<Map<string, Array<Record<string, unknown>>>> {
+  if (recipeIds.length === 0) return new Map();
+  const ingredientRows: Record<string, unknown>[] = [];
+  for (const batch of chunk(recipeIds)) {
+    const p: unknown[] = [];
+    ingredientRows.push(...await query<Record<string, unknown>>(
+      `SELECT ri.*, i.name AS ingredient_name, i.plural_name AS ingredient_plural_name, i.density_g_per_ml AS ingredient_density, sr.title AS sub_recipe_title, u.symbol AS unit_symbol
+       FROM recipe_ingredients ri
+       LEFT JOIN ingredients i ON i.id = ri.ingredient_id
+       LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
+       LEFT JOIN units u ON u.id = ri.unit_id
+       WHERE ri.recipe_id IN (${inPlaceholders(p, batch)})
+       ORDER BY ri.recipe_id, ri.sort_order`,
+      p
+    ));
   }
-
-  const recipe = await queryOne<Record<string, unknown>>(
-    `SELECT r.*, ${translatedCols}, r.creator_name AS creator_name,
-            (SELECT avatar_url FROM profiles cp WHERE cp.name = r.creator_name AND cp.deleted_at IS NULL ORDER BY cp.created_at LIMIT 1) AS creator_avatar_url
-     FROM recipes r
-     ${langJoin}
-     WHERE r.id = $1`,
-    params
-  );
-  if (!recipe) return null;
-
-  const tagNames = JSON.parse((recipe.tags as string) ?? '[]') as string[];
-  const tagsDisplay = tagsDisplayFromBatch(tagNames, await buildTagsDisplayBatch(tagNames, lang));
-
-  const translations = await query<{ language_code: string; title: string | null; description: string | null }>(
-    `SELECT language_code, title, description FROM recipe_translations WHERE recipe_id = $1`,
-    [id]
-  );
-
-  // ── Ingredients ──────────────────────────────────────────────────────
-  const ingredientRows = await query<Record<string, unknown>>(
-    `SELECT ri.*, i.name AS ingredient_name, i.plural_name AS ingredient_plural_name, i.density_g_per_ml AS ingredient_density, sr.title AS sub_recipe_title, u.symbol AS unit_symbol
-     FROM recipe_ingredients ri
-     LEFT JOIN ingredients i ON i.id = ri.ingredient_id
-     LEFT JOIN recipes sr ON sr.id = ri.sub_recipe_id
-     LEFT JOIN units u ON u.id = ri.unit_id
-     WHERE ri.recipe_id = $1
-     ORDER BY ri.sort_order`,
-    [id]
-  );
   // Every translation this recipe needs, read in a fixed handful of queries
   // rather than three per ingredient, two per step and one per tool. Opening
   // a 15-ingredient, 10-step recipe used to cost around seventy sequential
@@ -575,7 +594,7 @@ export async function getRecipe(id: string, lang?: string) {
     }
   }
 
-  const ingredients = [];
+  const byRecipe = new Map<string, Array<Record<string, unknown>>>();
   for (const row of ingredientRows) {
     let ingredientName = row.ingredient_name as string | null;
     let ingredientPluralName = row.ingredient_plural_name as string | null;
@@ -589,7 +608,9 @@ export async function getRecipe(id: string, lang?: string) {
       }
       translatedNotes = rowTranslations.find(t => matchesLang(t.language_code, lang))?.notes ?? null;
     }
-    ingredients.push({
+    const list = byRecipe.get(row.recipe_id as string) ?? [];
+    if (!byRecipe.has(row.recipe_id as string)) byRecipe.set(row.recipe_id as string, list);
+    list.push({
       id: row.id,
       sortOrder: row.sort_order,
       ingredientId: row.ingredient_id,
@@ -616,6 +637,52 @@ export async function getRecipe(id: string, lang?: string) {
       translatedNotes,
       translations: rowTranslations.map(t => ({ lang: t.language_code, notes: t.notes })),
     });
+  }
+  return byRecipe;
+}
+
+export async function getRecipe(id: string, lang?: string, options?: { withSubRecipeIngredients?: boolean }) {
+  if (!UUID_RE.test(id)) return null;
+
+  const params: unknown[] = [id];
+  let langJoin = "";
+  let translatedCols = "NULL AS translated_title, NULL AS translated_description";
+  if (lang) {
+    params.push(lang);
+    langJoin = `LEFT JOIN recipe_translations rct ON rct.recipe_id = r.id AND LOWER(rct.language_code) = LOWER($2)`;
+    translatedCols = "rct.title AS translated_title, rct.description AS translated_description";
+  }
+
+  const recipe = await queryOne<Record<string, unknown>>(
+    `SELECT r.*, ${translatedCols}, r.creator_name AS creator_name,
+            (SELECT avatar_url FROM profiles cp WHERE cp.name = r.creator_name AND cp.deleted_at IS NULL ORDER BY cp.created_at LIMIT 1) AS creator_avatar_url
+     FROM recipes r
+     ${langJoin}
+     WHERE r.id = $1`,
+    params
+  );
+  if (!recipe) return null;
+
+  const tagNames = JSON.parse((recipe.tags as string) ?? '[]') as string[];
+  const tagsDisplay = tagsDisplayFromBatch(tagNames, await buildTagsDisplayBatch(tagNames, lang));
+
+  const translations = await query<{ language_code: string; title: string | null; description: string | null }>(
+    `SELECT language_code, title, description FROM recipe_translations WHERE recipe_id = $1`,
+    [id]
+  );
+
+  // ── Ingredients ──────────────────────────────────────────────────────
+  const ingredients = (await loadIngredients([id], lang)).get(id) ?? [];
+
+  // The page lists a nested recipe's own ingredients under its row. Asked
+  // for explicitly (the detail page does), so exports and the editor's
+  // round-trip never carry it: it used to be one whole getRecipe() per
+  // nested recipe, about eleven reads each, fired by the page itself.
+  let subRecipeIngredients: Record<string, Array<Record<string, unknown>>> | undefined;
+  if (options?.withSubRecipeIngredients) {
+    const nestedIds = [...new Set(ingredients.map(i => i.subRecipeId).filter(Boolean))] as string[];
+    subRecipeIngredients = Object.fromEntries(await loadIngredients(nestedIds, lang));
+    for (const nestedId of nestedIds) subRecipeIngredients[nestedId] ??= [];
   }
 
   // ── Steps ────────────────────────────────────────────────────────────
@@ -739,6 +806,7 @@ export async function getRecipe(id: string, lang?: string) {
     steps,
     tools,
     techniques,
+    ...(subRecipeIngredients ? { sub_recipe_ingredients: subRecipeIngredients } : {}),
   };
 }
 

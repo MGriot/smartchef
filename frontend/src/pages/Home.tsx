@@ -1,6 +1,6 @@
 import { stripMarkdown } from '../lib/markdown';
 import { formatDurationWith } from '../lib/duration';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { getSyncStatus, subscribeSyncStatus, hasEverCompletedSync } from '../lib/sync/syncStatus';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -15,7 +15,8 @@ import { tagTextColor } from '../lib/tagColor';
 import { useFileExport } from '../hooks/useFileExport';
 import Modal, { ModalCancelButton, ModalSubmitButton } from '../components/Modal';
 import { Field } from '../components/Form';
-import { galleryKey, readGallery, writeGallery, REVEAL_INITIAL, REVEAL_STEP, REVEAL_DELAY_MS } from '../lib/galleryCache';
+import { galleryKey, readGallery, writeGallery, GALLERY_PAGE } from '../lib/galleryCache';
+import { prefetchRecipe } from '../lib/recipeCache';
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface TagDisplay {
@@ -126,8 +127,10 @@ const Home: React.FC = () => {
   // True while a fetch is in flight. The spinner is only for an empty grid;
   // otherwise the cards on screen stay (dimmed) until the new ones arrive.
   const [loading, setLoading] = useState(true);
-  // How many of `recipes` are mounted; grows in steps (see below).
-  const [revealed, setRevealed] = useState(REVEAL_INITIAL);
+  // Whether the library has more recipes past the pages already loaded,
+  // and whether the next page is on its way.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [activeCategoryFilters, setActiveCategoryFilters] = useState<string[]>([]);
   const [activeRegionFilters, setActiveRegionFilters] = useState<string[]>([]);
@@ -326,64 +329,107 @@ const Home: React.FC = () => {
 
   // A stale response (the query changed meanwhile) is dropped by the token.
   const fetchToken = useRef(0);
-  // The key the cards on screen belong to: a different one restarts the reveal.
+  // The key the cards on screen belong to: the same key again is a refresh
+  // (a sync landed) and reloads every page already shown, in place.
   const shownKey = useRef('');
+  const recipesRef = useRef(recipes);
+  recipesRef.current = recipes;
+  const galleryQuery = useMemo(() => ({
+    lang: contentLang,
+    q: debouncedQuery,
+    tags: activeTagFilters,
+    categories: activeCategoryFilters,
+    regions: activeRegionFilters,
+    seasonalOnly,
+    sort: sortBy,
+  }), [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, seasonalOnly, sortBy]);
+  const queryKey = galleryKey(galleryQuery);
+
+  const pagePath = useCallback((limit: number, offset: number) => {
+    const params = new URLSearchParams();
+    if (contentLang) params.set('lang', contentLang);
+    if (debouncedQuery) params.set('q', debouncedQuery);
+    if (activeTagFilters.length > 0) params.set('tags', activeTagFilters.join(','));
+    if (activeCategoryFilters.length > 0) params.set('ingredientCategories', activeCategoryFilters.join(','));
+    if (activeRegionFilters.length > 0) params.set('regions', activeRegionFilters.join(','));
+    if (seasonalOnly) params.set('seasonalOnly', 'true');
+    params.set('sort', sortBy);
+    params.set('limit', String(limit));
+    params.set('offset', String(offset));
+    return `/api/recipes?${params.toString()}`;
+  }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, seasonalOnly, sortBy]);
+
+  // A server that predates paging answers with the whole list: then there
+  // is simply nothing more to load.
+  const moreAfter = (json: { hasMore?: boolean; total?: number }, loaded: number) =>
+    typeof json.hasMore === 'boolean' ? json.hasMore : typeof json.total === 'number' ? json.total > loaded : false;
+
   useEffect(() => {
     const token = ++fetchToken.current;
-    const query = {
-      lang: contentLang,
-      q: debouncedQuery,
-      tags: activeTagFilters,
-      categories: activeCategoryFilters,
-      regions: activeRegionFilters,
-      seasonalOnly,
-      sort: sortBy,
-    };
+    const refresh = shownKey.current === queryKey;
+    shownKey.current = queryKey;
     // This query's last answer shows at once; without one the previous cards
     // stay (dimmed) rather than the grid collapsing to a spinner.
-    const cached = readGallery<Recipe>(query);
-    if (cached) setRecipes(cached);
+    if (!refresh) {
+      const cached = readGallery<Recipe>(galleryQuery);
+      if (cached) setRecipes(cached);
+    }
+    // A refresh reloads as many as are on screen, so nothing the user has
+    // scrolled past disappears; a new query starts from one page.
+    const limit = refresh ? Math.max(GALLERY_PAGE, recipesRef.current.length) : GALLERY_PAGE;
     setLoading(true);
+    setLoadingMore(false);
     (async () => {
       try {
-        const params = new URLSearchParams();
-        if (contentLang) params.set('lang', contentLang);
-        if (debouncedQuery) params.set('q', debouncedQuery);
-        if (activeTagFilters.length > 0) params.set('tags', activeTagFilters.join(','));
-        if (activeCategoryFilters.length > 0) params.set('ingredientCategories', activeCategoryFilters.join(','));
-        if (activeRegionFilters.length > 0) params.set('regions', activeRegionFilters.join(','));
-        if (seasonalOnly) params.set('seasonalOnly', 'true');
-        params.set('sort', sortBy);
-        const res = await apiFetch(`/api/recipes?${params.toString()}`);
+        const res = await apiFetch(pagePath(limit, 0));
         const json = await res.json();
         if (token !== fetchToken.current) return;
         const list: Recipe[] = json.data || [];
-        writeGallery(query, list);
+        writeGallery(galleryQuery, list);
         setRecipes(list);
+        setHasMore(moreAfter(json, list.length));
       } catch (err) {
         console.error('Error fetching recipes:', err);
       } finally {
         if (token === fetchToken.current) setLoading(false);
       }
     })();
-  }, [contentLang, debouncedQuery, activeTagFilters, activeCategoryFilters, activeRegionFilters, seasonalOnly, sortBy, syncStatus.appliedRevision]);
+  }, [queryKey, pagePath, syncStatus.appliedRevision]);
 
-  // Cards are mounted a few at a time instead of the whole library in one
-  // render, so the first ones are on screen while the rest keep arriving.
-  // Only a different query starts over: a refresh of the same list (a sync
-  // landed) never hides cards that are already showing.
-  const queryKey = galleryKey({ lang: contentLang, q: debouncedQuery, tags: activeTagFilters, categories: activeCategoryFilters, regions: activeRegionFilters, seasonalOnly, sort: sortBy });
-  useEffect(() => {
-    if (shownKey.current !== queryKey) {
-      shownKey.current = queryKey;
-      setRevealed(REVEAL_INITIAL);
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMore || loading) return;
+    const token = fetchToken.current;
+    const offset = recipesRef.current.length;
+    setLoadingMore(true);
+    try {
+      const res = await apiFetch(pagePath(GALLERY_PAGE, offset));
+      const json = await res.json();
+      if (token !== fetchToken.current) return;
+      const page: Recipe[] = json.data || [];
+      const seen = new Set(recipesRef.current.map((r) => r.id));
+      const merged = [...recipesRef.current, ...page.filter((r) => !seen.has(r.id))];
+      writeGallery(galleryQuery, merged);
+      setRecipes(merged);
+      setHasMore(page.length > 0 && moreAfter(json, offset + page.length));
+    } catch (err) {
+      console.error('Error fetching more recipes:', err);
+    } finally {
+      if (token === fetchToken.current) setLoadingMore(false);
     }
-  }, [queryKey]);
+  }, [hasMore, loadingMore, loading, pagePath, galleryQuery]);
+
+  // The next page starts loading well before the end of the grid is on
+  // screen, so scrolling rarely meets the placeholders.
+  const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (revealed >= recipes.length) return;
-    const timer = setTimeout(() => setRevealed((r) => r + REVEAL_STEP), REVEAL_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [revealed, recipes.length]);
+    const el = sentinelRef.current;
+    if (!el || !hasMore || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) void loadMore();
+    }, { rootMargin: '800px 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, loadMore, recipes.length]);
 
   return (
     <AppLayout>
@@ -718,7 +764,7 @@ const Home: React.FC = () => {
               style={isDesktopViewport ? { animationDelay: '0.1s', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` } : { animationDelay: '0.1s' }}
               aria-busy={loading}
             >
-              {recipes.slice(0, revealed).map((recipe, index) => {
+              {recipes.map((recipe, index) => {
                 const badges = getCardBadges(recipe, expandedTagCards.has(recipe.id));
                 // Waiting time counts: leaving rest_time_min out is what
                 // made a 15-day mirto advertise "25 min" on its card while
@@ -732,9 +778,9 @@ const Home: React.FC = () => {
                   // itself: a button (the "…" menu) may not nest in an <a>.
                   <div
                     key={recipe.id}
-                    // Plays once, when the card first mounts: cards that arrive
-                    // together fan in a few at a time (see `revealed`).
-                    style={{ '--sc-delay': `${(index % REVEAL_STEP) * 35}ms` } as React.CSSProperties}
+                    // Plays once, when the card first mounts: the cards of a
+                    // page fan in a few at a time.
+                    style={{ '--sc-delay': `${(index % 8) * 35}ms` } as React.CSSProperties}
                     className={`group relative animate-card-in bg-white dark:bg-zinc-900 rounded-3xl overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_40px_rgba(0,0,0,0.10)] transition-all duration-300 hover:translate-y-[-4px] ${selected ? 'ring-4 ring-primary' : ''}`}
                   >
                   {!selectMode && (
@@ -749,6 +795,11 @@ const Home: React.FC = () => {
                   )}
                   <Link
                     to={`/recipe/${recipe.id}`}
+                    // The recipe starts loading while the pointer is on its
+                    // way to a click (or the finger is still down), so the
+                    // page usually opens on data it already has.
+                    onPointerEnter={selectMode ? undefined : () => prefetchRecipe(recipe.id, contentLang)}
+                    onPointerDown={selectMode ? undefined : () => prefetchRecipe(recipe.id, contentLang)}
                     onClick={(e) => {
                       if (selectMode) {
                         e.preventDefault();
@@ -872,8 +923,22 @@ const Home: React.FC = () => {
                   </div>
                 );
               })}
+              {loadingMore && Array.from({ length: isDesktopViewport ? gridCols : 1 }, (_, i) => (
+                <div
+                  key={`more-${i}`}
+                  aria-hidden="true"
+                  className={`rounded-3xl bg-white dark:bg-zinc-900 overflow-hidden animate-pulse ${dense ? 'h-56' : 'h-80'}`}
+                >
+                  <div className={`${dense ? 'h-28' : 'h-48'} bg-zinc-100 dark:bg-zinc-800`} />
+                  <div className="p-5 space-y-3">
+                    <div className="h-4 w-2/3 rounded-full bg-zinc-100 dark:bg-zinc-800" />
+                    <div className="h-3 w-1/2 rounded-full bg-zinc-100 dark:bg-zinc-800" />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
+          {hasMore && <div ref={sentinelRef} aria-hidden="true" className="h-px" />}
           </>
           )}
       </div>

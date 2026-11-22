@@ -18,7 +18,7 @@ import type { SettingScope } from '../lib/sync/syncSettings';
 import { ACCENT_SCHEME, getSetting } from '../lib/settingsRegistry';
 import { applyAccentScheme } from '../lib/applySettings';
 import type { StuckEntity } from '../services/syncReconcile.local';
-import { useLanguages } from '../hooks/useLanguages';
+import { useLanguages, useUiAndContentLanguage } from '../hooks/useLanguages';
 import { hasUiBundle, isValidLanguageCode, languageLabel, normalizeLanguageCode } from '../lib/languages';
 import { persistUiLang } from '../lib/uiLanguage';
 import type { ThemeMode } from '../store/app.store';
@@ -2709,7 +2709,7 @@ function LanguagesCard() {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // The header picker moves the interface and the content language together,
+  // The main picker below moves the interface and the content language together,
   // which is the right default for the common case. This is the escape
   // hatch for the case it doesn't cover: reading recipes in one language
   // while keeping the app's own chrome in another. Stored per account
@@ -2717,6 +2717,10 @@ function LanguagesCard() {
   const uiLang = languages.some((l) => l.hasUiBundle && l.code === i18n.language)
     ? i18n.language
     : 'en';
+
+  // The one place to pick the language now that the header has no picker:
+  // the same app + content switch the header used to make.
+  const handleLanguageChange = useUiAndContentLanguage();
 
   const handleUiLangChange = (code: string) => {
     if (!persistUiLang(code, accountId)) return;
@@ -2756,6 +2760,23 @@ function LanguagesCard() {
       <div className="mb-6">
         <h2 className="text-lg font-black text-zinc-900 dark:text-zinc-100">{t('languages.heading')}</h2>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mt-1">{t('languages.subtitle')}</p>
+      </div>
+
+      <div className="mb-6">
+        <label htmlFor="app-language" className="sc-label mb-2 block">{t('languages.appLabel')}</label>
+        <select
+          id="app-language"
+          value={contentLang}
+          onChange={(e) => handleLanguageChange(e.target.value)}
+          className="w-full sm:max-w-xs border-none bg-zinc-50 dark:bg-zinc-950 rounded-xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-primary/20"
+        >
+          {languages.map((l) => (
+            <option key={l.code} value={l.code}>{l.label}</option>
+          ))}
+        </select>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-2 leading-relaxed">
+          {t('languages.appHint')}
+        </p>
       </div>
 
       <div className="mb-6">

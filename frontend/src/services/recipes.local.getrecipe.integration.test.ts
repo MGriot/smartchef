@@ -278,6 +278,38 @@ describe('standalone getRecipe — sub-recipe ingredients', () => {
   });
 });
 
+describe('standalone getRecipe — nested recipes\' own ingredients', () => {
+  it('leaves them out unless asked, so exports and saves never carry them', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedNested();
+    const { getRecipe } = await import('./recipes.local');
+
+    const recipe = (await getRecipe(PARENT_ID, 'it')) as Record<string, unknown>;
+    expect(recipe).not.toHaveProperty('sub_recipe_ingredients');
+  });
+
+  it('brings every nested recipe\'s ingredients in the same read, translated', async () => {
+    await (await import('../db/local')).initLocalSchema();
+    await seedNested();
+    const { getRecipe } = await import('./recipes.local');
+    await settle();
+
+    queryCount = 0;
+    await getRecipe(PARENT_ID, 'it');
+    const without = queryCount;
+
+    queryCount = 0;
+    const recipe = (await getRecipe(PARENT_ID, 'it', { withSubRecipeIngredients: true })) as never as {
+      sub_recipe_ingredients: Record<string, Array<{ ingredientName: string; quantity: number }>>;
+    };
+    expect(recipe.sub_recipe_ingredients[SUB_ID]).toEqual([
+      expect.objectContaining({ ingredientName: 'Tuorli', quantity: 2 }),
+    ]);
+    // One batched pass, not a whole getRecipe() per nested recipe.
+    expect(queryCount - without).toBeLessThanOrEqual(4);
+  });
+});
+
 describe('standalone cook sequence — language', () => {
   it('returns every section in the requested language', async () => {
     await (await import('../db/local')).initLocalSchema();

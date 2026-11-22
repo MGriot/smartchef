@@ -11,6 +11,7 @@ import type { RemoteAccessResult } from '../lib/sync/remoteAccessProbe';
 import { ImportSetupFileDialog } from '../components/SetupFileDialog';
 import type { AppliedSetup } from '../lib/setupFileTransfer';
 import type { TFunction } from 'i18next';
+import WindowDragStrip from '../components/WindowDragStrip';
 
 /** Turns a probe phase into something worth reading. Bytes are shown
  *  rather than a bare percentage because on a slow link the numbers moving
@@ -356,6 +357,7 @@ export default function ServerConnect({ onConnected }: ServerConnectProps) {
 
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 flex items-center justify-center p-6 font-outfit">
+      <WindowDragStrip />
       <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-[40px] shadow-sm border border-zinc-100 dark:border-zinc-800 p-10">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-black text-primary tracking-tight mb-2">SmartChef</h1>

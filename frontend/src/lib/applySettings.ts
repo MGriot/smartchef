@@ -25,9 +25,28 @@ export function applyAccentScheme(scheme: string): void {
   else root.setAttribute('data-accent', scheme);
 }
 
+/** What the desktop window's min/max/close strip sits on: the app header,
+ *  or the bare page on the screens that have none (see WindowDragStrip). */
+let titleBarSurface: 'header' | 'page' = 'header';
+
+function paintTitleBar(): void {
+  const dark = document.documentElement.classList.contains('dark');
+  window.smartchefElectron?.setTitleBarOverlay?.(dark, titleBarSurface)?.catch?.(() => {});
+}
+
+export function setTitleBarSurface(surface: 'header' | 'page'): void {
+  if (surface === titleBarSurface) return;
+  titleBarSurface = surface;
+  paintTitleBar();
+}
+
 export function applyThemeMode(mode: string): void {
   const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-  document.documentElement.classList.toggle('dark', mode === 'dark' || (mode === 'system' && prefersDark));
+  const dark = mode === 'dark' || (mode === 'system' && prefersDark);
+  document.documentElement.classList.toggle('dark', dark);
+  // Desktop: the window's min/max/close strip sits on the header and has
+  // to change colour with it.
+  paintTitleBar();
 }
 
 /** Re-applies whichever of the imperative settings actually changed.

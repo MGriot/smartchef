@@ -1202,6 +1202,23 @@ export async function initLocalSchema(): Promise<void> {
     await addColumnIfMissing(db, 'recipes', 'cookbook_id', 'TEXT');
     await migrateChangeLogScopes(db);
     await dropDanglingForeignKeys(db);
+    // Indexes for the reads the gallery and the recipe page make: the sort
+    // orders (no temporary sort tree per gallery page), the reverse lookups
+    // that only had a composite key starting on the other column, the
+    // creator-avatar lookup by name and the tag lookup by lower(name).
+    // One execute for all of them (one bridge call), after the table
+    // rebuilds above and the column additions they depend on (cookbook_id).
+    await db.execute(`
+      CREATE INDEX IF NOT EXISTS idx_recipes_updated_at ON recipes(updated_at);
+      CREATE INDEX IF NOT EXISTS idx_recipes_created_at ON recipes(created_at);
+      CREATE INDEX IF NOT EXISTS idx_recipes_cookbook ON recipes(cookbook_id);
+      CREATE INDEX IF NOT EXISTS idx_collection_recipes_recipe ON collection_recipes(recipe_id);
+      CREATE INDEX IF NOT EXISTS idx_menu_items_recipe ON menu_items(recipe_id);
+      CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_ingredient ON recipe_ingredients(ingredient_id);
+      CREATE INDEX IF NOT EXISTS idx_cook_log_cooked_at ON cook_log(cooked_at);
+      CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name);
+      CREATE INDEX IF NOT EXISTS idx_tags_lower_name ON tags(lower(name));
+    `);
     const seeded = await db.query('SELECT COUNT(*) as count FROM units');
     if ((seeded.values?.[0]?.count ?? 0) === 0) {
       await db.execute(SEED_SQL);

@@ -35,8 +35,8 @@ export default function PrintToolbar({
 
   return (
     <div
-      className="no-print sticky top-0 z-30 bg-white/95 dark:bg-zinc-900/95 backdrop-blur border-b border-zinc-200 dark:border-zinc-800"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      className="app-drag no-print sticky top-0 z-30 bg-white/95 dark:bg-zinc-900/95 backdrop-blur border-b border-zinc-200 dark:border-zinc-800 min-h-[env(titlebar-area-height,0px)] flex flex-col justify-center"
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingRight: 'var(--wco-right)' }}
     >
       <div className="mx-auto px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-3" style={{ maxWidth }}>
         <button
