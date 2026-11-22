@@ -43,8 +43,16 @@ declare global {
       readPrefsBackup?: () => Promise<Record<string, string>>;
       setPrefsBackup?: (key: string, value: string | null) => Promise<void>;
       getAppVersion?: () => Promise<string>;
-      /** Absent from a preload older than the integrated title bar. */
-      setTitleBarOverlay?: (dark: boolean, surface?: 'header' | 'page') => Promise<void>;
+      /** Absent from a preload older than the app-drawn window buttons. */
+      platform?: string;
+      windowControls?: {
+        minimise: () => Promise<void>;
+        toggleMaximise: () => Promise<void>;
+        close: () => Promise<void>;
+        isMaximized: () => Promise<boolean>;
+        /** Returns the unsubscribe. */
+        onMaximizedChange: (listener: (maximized: boolean) => void) => () => void;
+      };
       getLocalStorageDir: () => Promise<string>;
       getHiddenCloneDir: () => Promise<string>;
       geocode: (q: string, limit?: number, shape?: boolean) => Promise<GeocodeResult[]>;

@@ -1436,6 +1436,12 @@
     "savedAs": "Salvato come {{name}}",
     "failed": "Impossibile esportare il file."
   },
+  "window": {
+    "minimise": "Riduci a icona",
+    "maximise": "Ingrandisci",
+    "restore": "Ripristina",
+    "close": "Chiudi"
+  },
   "languages": {
     "heading": "Lingue",
     "subtitle": "Aggiungi una lingua in cui scrivere ricette e traduzioni. L’interfaccia resta in una delle quattro incluse.",

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import WindowControls from './WindowControls';
 import { Capacitor } from '@capacitor/core';
 import { canPrint, canSavePdfDirectly } from '../lib/print';
 import { PAPER_SIZES, type PaperSize } from '../lib/paperSize';
@@ -35,10 +36,10 @@ export default function PrintToolbar({
 
   return (
     <div
-      className="app-drag no-print sticky top-0 z-30 bg-white/95 dark:bg-zinc-900/95 backdrop-blur border-b border-zinc-200 dark:border-zinc-800 min-h-[env(titlebar-area-height,0px)] flex flex-col justify-center"
-      style={{ paddingTop: 'env(safe-area-inset-top)', paddingRight: 'var(--wco-right)' }}
+      className="app-drag no-print sticky top-0 z-30 bg-white/95 dark:bg-zinc-900/95 backdrop-blur border-b border-zinc-200 dark:border-zinc-800 min-h-[var(--window-bar-h)] flex items-center"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
-      <div className="mx-auto px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-3" style={{ maxWidth }}>
+      <div className="flex-1 min-w-0 mx-auto px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-3" style={{ maxWidth }}>
         <button
           onClick={onBack}
           className="flex items-center gap-1 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:text-primary transition-colors"
@@ -105,6 +106,7 @@ export default function PrintToolbar({
           </p>
         )}
       </div>
+      <WindowControls className="self-start mt-2 mr-2" />
     </div>
   );
 }

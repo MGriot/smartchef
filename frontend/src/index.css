@@ -62,10 +62,12 @@
      hard-coding 65px, which was wrong as soon as the inset was non-zero. */
   :root {
     --app-header-h: calc(65px + env(safe-area-inset-top));
-    /* Width the desktop window's min/max/close buttons take at the top
-       right (Electron's titleBarOverlay exposes the free title-bar area as
-       env(titlebar-area-*)). Everywhere else the env() fallbacks make it 0. */
-    --wco-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+    /* Desktop (no native title bar): how tall the strip a header-less
+       screen can be dragged by is. 0 in a browser and on Android. */
+    --window-bar-h: 0px;
+  }
+  html.has-window-controls {
+    --window-bar-h: 52px;
   }
 
   /* The class sits on <html> itself, so `.dark html` never matched and the

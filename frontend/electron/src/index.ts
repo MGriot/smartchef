@@ -7,7 +7,7 @@ import * as path from 'path';
 import electronIsDev from 'electron-is-dev';
 import unhandled from 'electron-unhandled';
 
-import { ElectronCapacitorApp, setupContentSecurityPolicy, setupReloadWatcher, titleBarColors } from './setup';
+import { ElectronCapacitorApp, setupContentSecurityPolicy, setupReloadWatcher } from './setup';
 
 // Graceful handling of unhandled errors.
 unhandled();
@@ -146,17 +146,18 @@ ipcMain.handle('smartchef-prefs-set', (_event, key: string, value: string | null
 
 ipcMain.handle('smartchef-app-version', () => app.getVersion());
 
-// The renderer's theme (light/dark, or 'system') decides the header colour,
-// so it tells the window to repaint the min/max/close strip to match.
-ipcMain.handle('smartchef-set-titlebar-overlay', (event, dark: boolean, surface?: 'header' | 'page') => {
+// The window has no native caption buttons (setup.ts): the header draws
+// its own and drives the window through these.
+ipcMain.handle('smartchef-window-control', (event, action: string) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win || process.platform === 'darwin') return;
-  try {
-    win.setTitleBarOverlay(titleBarColors(!!dark, surface === 'page' ? 'page' : 'header'));
-  } catch {
-    // A window created without titleBarOverlay throws here: nothing to repaint.
-  }
+  if (!win) return;
+  if (action === 'minimize') win.minimize();
+  else if (action === 'toggle-maximize') {
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  } else if (action === 'close') win.close();
 });
+ipcMain.handle('smartchef-window-is-maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false);
 
 // SmartChef: native folder picker for the git-based sync feature — see
 // frontend/src/lib/gitfs.ts. Desktop has no Storage Access Framework

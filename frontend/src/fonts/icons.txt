@@ -80,6 +80,7 @@ conversation
 cookie
 cooking
 create
+crop_square
 css
 cut
 cycle
@@ -137,6 +138,7 @@ fiber_new
 file_upload
 files
 filter
+filter_none
 flag
 flaky
 flight

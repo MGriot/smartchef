@@ -1436,6 +1436,12 @@
     "savedAs": "Enregistré sous {{name}}",
     "failed": "Impossible d'exporter le fichier."
   },
+  "window": {
+    "minimise": "Réduire",
+    "maximise": "Agrandir",
+    "restore": "Restaurer",
+    "close": "Fermer"
+  },
   "languages": {
     "heading": "Langues",
     "subtitle": "Ajoutez une langue pour écrire vos recettes et traductions. L’interface reste dans l’une des quatre fournies.",

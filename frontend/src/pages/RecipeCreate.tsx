@@ -24,7 +24,7 @@ import {
   STEP_REF_RE, syncIngredientRefAmount, reindexIngredientRefs,
   stepIngredientConsumption, remainingBeforeStep,
 } from '../lib/stepRefs';
-import { usePageTitleBar } from '../components/WindowDragStrip';
+import WindowControls from '../components/WindowControls';
 
 /* ── Types ─────────────────────────────────────────────────── */
 interface Ingredient {
@@ -160,7 +160,6 @@ const difficultyKey: Record<string, string> = {
 
 const RecipeCreate: React.FC = () => {
   const { t } = useTranslation();
-  usePageTitleBar();
   const { languages } = useLanguages();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
@@ -753,7 +752,7 @@ const RecipeCreate: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#fafaf5] dark:bg-zinc-950 font-body">
       {/* Header */}
-      <header className="app-drag bg-[#fafaf5]/90 dark:bg-zinc-950/90 backdrop-blur-md sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between min-h-[env(titlebar-area-height,0px)]" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))', paddingRight: 'calc(2rem + var(--wco-right))' }}>
+      <header className="app-drag bg-[#fafaf5]/90 dark:bg-zinc-950/90 backdrop-blur-md sticky top-0 z-50 border-b border-zinc-200/60 dark:border-zinc-700/60 px-8 py-4 flex items-center justify-between min-h-[var(--window-bar-h)]" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
         <Link to="/" className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
           <span className="material-symbols-outlined">close</span>
           <span className="text-sm font-bold">{t('common.cancel')}</span>
@@ -778,6 +777,7 @@ const RecipeCreate: React.FC = () => {
             {saving ? t('recipeCreate.creating') : t('recipeCreate.createRecipe')}
           </button>
         </div>
+        <WindowControls className="ml-3 -mr-4" />
       </header>
 
       {rawTextMode ? (

@@ -42,20 +42,6 @@ export function setupReloadWatcher(electronCapacitorApp: ElectronCapacitorApp): 
     });
 }
 
-/** The title-bar button strip's colours: the app header's (bg-white /
- *  dark:bg-zinc-900) or, on a screen with no header (sign-in, setup, the
- *  recipe creator), the page's own (#fafaf5 / zinc-950). */
-export function titleBarColors(dark: boolean, surface: 'header' | 'page' = 'header'): { color: string; symbolColor: string; height: number } {
-  if (surface === 'page') {
-    return dark
-      ? { color: '#09090b', symbolColor: '#f4f4f5', height: 64 }
-      : { color: '#fafaf5', symbolColor: '#18181b', height: 64 };
-  }
-  return dark
-    ? { color: '#18181b', symbolColor: '#f4f4f5', height: 64 }
-    : { color: '#ffffff', symbolColor: '#18181b', height: 64 };
-}
-
 // Define our class to manage our app.
 export class ElectronCapacitorApp {
   private MainWindow: BrowserWindow | null = null;
@@ -128,14 +114,13 @@ export class ElectronCapacitorApp {
       y: this.mainWindowState.y,
       width: this.mainWindowState.width,
       height: this.mainWindowState.height,
-      // No native frame or File/View bar: the app's own header IS the title
-      // bar. Windows draws its min/max/close buttons over the header's right
-      // end in the header's colour (the renderer keeps that colour in step
-      // with the theme through `smartchef-set-titlebar-overlay`), and the
-      // header reserves their width via env(titlebar-area-*) in index.css.
-      // The height matches the header's 64px row so the buttons fill it.
+      // No native frame, caption buttons or File/View bar: the app's own
+      // header is the title bar (it drags the window, a double-click
+      // maximises) and draws its own minimise / maximise / close
+      // (src/components/WindowControls.tsx, over the
+      // `smartchef-window-*` IPC in index.ts). 'hidden' rather than
+      // frame:false keeps Windows' resize edges, snapping and shadow.
       titleBarStyle: 'hidden',
-      titleBarOverlay: titleBarColors(nativeTheme.shouldUseDarkColors),
       backgroundColor: nativeTheme.shouldUseDarkColors ? '#09090b' : '#fafaf5',
       webPreferences: {
         nodeIntegration: true,
@@ -150,6 +135,12 @@ export class ElectronCapacitorApp {
     if (this.CapacitorFileConfig.electron?.backgroundColor) {
       this.MainWindow.setBackgroundColor(this.CapacitorFileConfig.electron.backgroundColor);
     }
+
+    // The renderer's maximise button shows "restore" while maximised,
+    // whichever way the window got there (button, double-click, snap, Win+Up).
+    const sendMaximized = () => this.MainWindow?.webContents.send('smartchef-window-maximized', this.MainWindow.isMaximized());
+    this.MainWindow.on('maximize', sendMaximized);
+    this.MainWindow.on('unmaximize', sendMaximized);
 
     // If we close the main window with the splashscreen enabled we need to destory the ref.
     this.MainWindow.on('closed', () => {

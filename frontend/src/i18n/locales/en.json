@@ -1436,6 +1436,12 @@
     "savedAs": "Saved as {{name}}",
     "failed": "Couldn't export the file."
   },
+  "window": {
+    "minimise": "Minimise",
+    "maximise": "Maximise",
+    "restore": "Restore",
+    "close": "Close"
+  },
   "languages": {
     "heading": "Languages",
     "subtitle": "Add a language to write recipes and translations in. The interface stays in one of the four it ships with.",

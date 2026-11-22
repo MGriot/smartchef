@@ -6,6 +6,7 @@ import { useLanguages } from '../hooks/useLanguages';
 import OfflineBanner from './OfflineBanner';
 import CoverImage from './CoverImage';
 import CreateImportMenu from './CreateImportMenu';
+import WindowControls from './WindowControls';
 
 type LibrarySection = 'ingredients' | 'tools' | 'units' | 'techniques' | 'tags' | 'seasonality';
 
@@ -124,7 +125,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           scrolled content can't show through there. The spacer after it
           reserves the same height in the flow — see --app-header-h. */}
       <header
-        className="app-drag min-h-[var(--app-header-h)] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 fixed inset-x-0 top-0 lg:sticky z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[calc(max(1rem,env(safe-area-inset-right))_+_var(--wco-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[calc(max(1.5rem,env(safe-area-inset-right))_+_var(--wco-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[calc(max(2rem,env(safe-area-inset-right))_+_var(--wco-right))]"
+        className="app-drag min-h-[var(--app-header-h)] bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 fixed inset-x-0 top-0 lg:sticky z-50 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))]"
         style={{ paddingTop: 'env(safe-area-inset-top)' }}
       >
         <div className="flex items-center gap-3 lg:gap-6 xl:gap-10 min-w-0">
@@ -173,6 +174,7 @@ export default function AppLayout({ children, librarySection, sidebarExtra, head
           >
             <CoverImage src={account?.avatarUrl} alt={account?.name ?? t('common.account')} className="w-full h-full object-cover" fallbackSrc={DEFAULT_AVATAR} />
           </Link>
+          <WindowControls className="-mr-2 pl-2 sm:pl-3 ml-1 border-l border-zinc-100 dark:border-zinc-800" />
         </div>
       </header>
       <div className="lg:hidden shrink-0" style={{ height: 'var(--app-header-h)' }} aria-hidden="true" />

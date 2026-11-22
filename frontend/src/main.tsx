@@ -8,6 +8,7 @@ import "./index.css";
 import "./i18n";
 import { isNative } from "./lib/api";
 import { restorePreferences } from "./lib/prefsBackup";
+import { hasWindowControls } from "./components/WindowControls";
 
 // isomorphic-git (standalone mode's Folder Sync, lib/sync/gitSync.ts)
 // references the Node.js `Buffer` global directly — never imports it,
@@ -19,6 +20,10 @@ import { restorePreferences } from "./lib/prefsBackup";
 // before gitSync.ts's dynamic `import('isomorphic-git')` ever resolves;
 // since that's always an async dynamic import, this synchronous top-level
 // assignment on app boot is guaranteed to land first.
+// Desktop: the window has no native title bar, so header-less screens
+// reserve a strip to drag it by and hold the app's own window buttons.
+if (hasWindowControls()) document.documentElement.classList.add("has-window-controls");
+
 if (typeof globalThis.Buffer === "undefined") {
   (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 }

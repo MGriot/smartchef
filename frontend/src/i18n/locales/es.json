@@ -1436,6 +1436,12 @@
     "savedAs": "Guardado como {{name}}",
     "failed": "No se pudo exportar el archivo."
   },
+  "window": {
+    "minimise": "Minimizar",
+    "maximise": "Maximizar",
+    "restore": "Restaurar",
+    "close": "Cerrar"
+  },
   "languages": {
     "heading": "Idiomas",
     "subtitle": "Añade un idioma para escribir recetas y traducciones. La interfaz permanece en uno de los cuatro incluidos.",
