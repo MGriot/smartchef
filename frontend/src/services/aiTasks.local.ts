@@ -13,6 +13,7 @@
 
 import { callConfiguredProvider, parseJsonObject } from './llmParser.local';
 import { languageLabel } from '../lib/languages';
+import { tidyBatchSize } from '../lib/ingredientTidyRun';
 
 // ── Recipe translation ──────────────────────────────────────────────────
 
@@ -445,8 +446,8 @@ export function normalizeIngredientTidy(parsed: any, items: IngredientTidyItem[]
  *  asked of each, so an answer stays well inside the model's output limit. */
 export async function tidyIngredients(items: IngredientTidyItem[], ctx: TidyPromptContext): Promise<IngredientTidyResult[]> {
   const systemPrompt = buildIngredientTidyPrompt(ctx);
-  const asked = Object.values(ctx.aspects).filter(Boolean).length;
-  const batchSize = asked <= 1 ? 30 : 15;
+  // The same size the Library sends, so one of its batches is one request.
+  const batchSize = tidyBatchSize(ctx.aspects);
   const results: IngredientTidyResult[] = [];
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
@@ -459,7 +460,9 @@ export async function tidyIngredients(items: IngredientTidyItem[], ctx: TidyProm
       ...(ctx.aspects.nutrition ? { nutrition: b.nutrition ?? {} } : {}),
       ...(ctx.aspects.synonyms ? { synonyms: b.synonyms ?? [] } : {}),
     }));
-    const raw = await callConfiguredProvider(JSON.stringify({ items: payload }), systemPrompt);
+    // 20 rows with every aspect asked run past Anthropic's default 4096
+    // output tokens, and a cut-off answer loses its tail rows.
+    const raw = await callConfiguredProvider(JSON.stringify({ items: payload }), systemPrompt, undefined, { maxTokens: 8192 });
     results.push(...normalizeIngredientTidy(parseJsonObject(raw), batch, ctx));
   }
   return results;

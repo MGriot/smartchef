@@ -426,6 +426,186 @@ export async function suggestIngredientTidy(
   }));
 }
 
+// ── "Tidy with AI" runs: what to send, and what came back ──────────────
+// A run is planned here, sent batch by batch from the Library, and each
+// answer is stored as soon as it arrives (table ingredient_ai_reviews), so
+// a provider that gives up halfway costs only the batches it refused.
+// See lib/ingredientTidyRun.ts for the rules.
+
+type TidyAspectFlags = import('../lib/ingredientTidyRun').TidyAspectFlags;
+type TidyAspect = import('../lib/ingredientTidyRun').TidyAspect;
+
+interface TidyReviewRow { ingredient_id: string; hashes: string; suggestion: string | null }
+
+function parseJsonOr<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T; } catch { return fallback; }
+}
+
+async function tidyLanguages(): Promise<string[]> {
+  const { listLanguages } = await import('../lib/languages');
+  return [...new Set(listLanguages().map((l) => l.code))].filter((code) => code !== 'en');
+}
+
+/** What the tidy rules look at, for every live ingredient (or the given
+ *  ones): three reads in all, whatever the catalog size. */
+async function loadTidyContent(ids?: string[]): Promise<import('../lib/ingredientTidy').TidyIngredient[]> {
+  const [rows, translations, tagRows] = await Promise.all([
+    query<{
+      id: string; name: string; parent_ingredient_id: string | null; category_id: string | null; synonyms: string | null;
+      calories_kcal: number | null; protein_g: number | null; carbs_g: number | null; fat_g: number | null;
+      fiber_g: number | null; sugar_g: number | null; sodium_mg: number | null; density_g_per_ml: number | null;
+    }>(
+      `SELECT id, name, parent_ingredient_id, category_id, synonyms, calories_kcal, protein_g, carbs_g, fat_g,
+              fiber_g, sugar_g, sodium_mg, density_g_per_ml
+         FROM ingredients WHERE sync_status != 'deleted'`,
+    ),
+    query<{ ingredient_id: string; language_code: string; translated_name: string }>(
+      'SELECT ingredient_id, language_code, translated_name FROM ingredient_translations',
+    ),
+    query<{ ingredient_id: string; tag_id: string }>('SELECT ingredient_id, tag_id FROM ingredient_tags'),
+  ]);
+  const wanted = ids ? new Set(ids) : null;
+  const trById = new Map<string, Array<{ lang: string; text: string }>>();
+  for (const t of translations) {
+    const list = trById.get(t.ingredient_id) ?? [];
+    list.push({ lang: t.language_code.toLowerCase(), text: t.translated_name });
+    trById.set(t.ingredient_id, list);
+  }
+  const tagsById = new Map<string, Array<{ id: string }>>();
+  for (const t of tagRows) {
+    const list = tagsById.get(t.ingredient_id) ?? [];
+    list.push({ id: t.tag_id });
+    tagsById.set(t.ingredient_id, list);
+  }
+  return rows
+    .filter((r) => !wanted || wanted.has(r.id))
+    .map((r) => ({
+      ...r,
+      synonyms: parseJsonOr<unknown[]>(r.synonyms, []).filter((x): x is string => typeof x === 'string'),
+      translations: trById.get(r.id) ?? [],
+      tags: tagsById.get(r.id) ?? [],
+    }));
+}
+
+async function loadTidyReviews(ids: string[]): Promise<Map<string, TidyReviewRow>> {
+  const out = new Map<string, TidyReviewRow>();
+  for (const part of chunk(ids)) {
+    const params: unknown[] = [];
+    const rows = await query<TidyReviewRow>(
+      `SELECT ingredient_id, hashes, suggestion FROM ingredient_ai_reviews WHERE ingredient_id IN (${inPlaceholders(params, part)})`,
+      params,
+    );
+    for (const r of rows) out.set(r.ingredient_id, r);
+  }
+  return out;
+}
+
+/** One statement per 100 rows rather than one per ingredient: every call
+ *  is a bridge crossing on Android. */
+async function upsertTidyReviews(rows: Array<{ id: string; hashes: Record<string, string>; suggestion: unknown }>): Promise<void> {
+  const now = new Date().toISOString();
+  for (const part of chunk(rows, 100)) {
+    const params: unknown[] = [];
+    const values = part.map((r) => `(${inPlaceholders(params, [r.id, JSON.stringify(r.hashes), r.suggestion == null ? null : JSON.stringify(r.suggestion), now])})`);
+    await query(
+      `INSERT INTO ingredient_ai_reviews (ingredient_id, hashes, suggestion, reviewed_at) VALUES ${values.join(', ')}
+         ON CONFLICT(ingredient_id) DO UPDATE SET hashes = excluded.hashes, suggestion = excluded.suggestion, reviewed_at = excluded.reviewed_at`,
+      params,
+    );
+  }
+}
+
+export interface TidyPlanOut {
+  pendingIds: string[];
+  complete: number;
+  unchanged: number;
+  /** Answers from an earlier run still waiting for review, for
+   *  ingredients that have not changed since. */
+  saved: TidySuggestionOut[];
+}
+
+/** Which of `ids` the next run still has to send for these aspects, and
+ *  the answers kept from a run that stopped. `force` sends them all and
+ *  drops the kept answers. */
+export async function planIngredientTidy(ids: string[], aspects: TidyAspectFlags, force = false): Promise<TidyPlanOut> {
+  const { planTidyRun, tidyContentHashes } = await import('../lib/ingredientTidyRun');
+  const [content, langs, categories] = await Promise.all([
+    loadTidyContent(ids),
+    tidyLanguages(),
+    query<{ id: string }>('SELECT id FROM ingredient_categories'),
+  ]);
+  const order = new Map(ids.map((id, i) => [id, i]));
+  content.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  const reviews = await loadTidyReviews(content.map((c) => c.id));
+
+  const hashesById = new Map<string, Partial<Record<TidyAspect, string>>>();
+  const saved: TidySuggestionOut[] = [];
+  const dropped: Array<{ id: string; hashes: Record<string, string>; suggestion: null }> = [];
+  for (const ing of content) {
+    const row = reviews.get(ing.id);
+    if (!row) continue;
+    const stored = parseJsonOr<Record<string, string>>(row.hashes, {});
+    hashesById.set(ing.id, stored);
+    if (!row.suggestion) continue;
+    // A kept answer is only good while the row is what the model saw.
+    const now = tidyContentHashes(ing, langs);
+    const fresh = Object.entries(stored).every(([aspect, h]) => now[aspect as TidyAspect] === h);
+    if (fresh && !force) {
+      saved.push(parseJsonOr<TidySuggestionOut>(row.suggestion, { key: ing.id }));
+    } else {
+      // Changed since, or a forced rerun: the answer goes, and so does the
+      // record that it was reviewed.
+      dropped.push({ id: ing.id, hashes: {}, suggestion: null });
+      hashesById.delete(ing.id);
+    }
+  }
+  if (dropped.length) await upsertTidyReviews(dropped);
+
+  const plan = planTidyRun(content, hashesById, aspects, langs, { force, knownCategoryIds: new Set(categories.map((c) => c.id)) });
+  return { ...plan, saved };
+}
+
+/** Stores one batch's answers as they arrive: the hash of what each asked
+ *  aspect looked at, and the answer itself until it is reviewed. An answer
+ *  already waiting for the same ingredient is merged, the newer aspects
+ *  winning. */
+export async function recordIngredientTidy(ids: string[], aspects: TidyAspectFlags, suggestions: TidySuggestionOut[]): Promise<void> {
+  const { askedAspects, tidyContentHashes } = await import('../lib/ingredientTidyRun');
+  const asked = askedAspects(aspects);
+  const [content, langs] = await Promise.all([loadTidyContent(ids), tidyLanguages()]);
+  if (content.length === 0 || asked.length === 0) return;
+  const reviews = await loadTidyReviews(content.map((c) => c.id));
+  const byKey = new Map(suggestions.map((s) => [s.key, s]));
+  await upsertTidyReviews(content.map((ing) => {
+    const row = reviews.get(ing.id);
+    const now = tidyContentHashes(ing, langs);
+    const hashes = parseJsonOr<Record<string, string>>(row?.hashes, {});
+    for (const a of asked) hashes[a] = now[a];
+    const previous = parseJsonOr<TidySuggestionOut | null>(row?.suggestion, null);
+    const next = byKey.get(ing.id);
+    const suggestion = previous || next ? { ...(previous ?? {}), ...(next ?? {}), key: ing.id } : null;
+    return { id: ing.id, hashes, suggestion };
+  }));
+}
+
+/** Ends the review of these ingredients: their kept answers are dropped,
+ *  and the aspects they were reviewed for are re-hashed from the row as it
+ *  is now, so what was just applied counts as reviewed. */
+export async function finishIngredientTidy(ids: string[]): Promise<void> {
+  const { tidyContentHashes } = await import('../lib/ingredientTidyRun');
+  const [content, langs] = await Promise.all([loadTidyContent(ids), tidyLanguages()]);
+  if (content.length === 0) return;
+  const reviews = await loadTidyReviews(content.map((c) => c.id));
+  await upsertTidyReviews(content.map((ing) => {
+    const stored = parseJsonOr<Record<string, string>>(reviews.get(ing.id)?.hashes, {});
+    const now = tidyContentHashes(ing, langs);
+    const hashes: Record<string, string> = {};
+    for (const aspect of Object.keys(stored)) hashes[aspect] = now[aspect as TidyAspect];
+    return { id: ing.id, hashes, suggestion: null };
+  }));
+}
+
 export interface NamingChange {
   name?: string;
   /** undefined = leave as is; null = clear. */

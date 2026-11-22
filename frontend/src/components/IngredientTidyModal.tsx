@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Modal, { ModalCancelButton } from './Modal';
 import { apiFetch } from '../lib/api';
@@ -6,6 +6,22 @@ import {
   buildTidyProposals, changeFor, defaultSelection, proposalKinds, selectionKey,
   type NutrientKey, type TidyChangeKind, type TidyIngredient, type TidyProposal, type TidySuggestion,
 } from '../lib/ingredientTidy';
+import { TIDY_BATCH_BACKOFF_MS, isRetryableTidyStatus, tidyBatches } from '../lib/ingredientTidyRun';
+
+/** POST /api/ingredients/ai-tidy/plan — what a run still has to send. */
+interface TidyPlan {
+  pendingIds: string[];
+  complete: number;
+  unchanged: number;
+  saved: TidySuggestion[];
+}
+
+const postJson = (path: string, body: unknown, timeoutMs?: number) => apiFetch(path, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+  ...(timeoutMs ? { timeoutMs } : {}),
+});
 
 interface Named { id: string; name: string; translated_name?: string | null }
 
@@ -68,6 +84,33 @@ export default function IngredientTidyModal({
   const [proposals, setProposals] = useState<TidyProposal[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [force, setForce] = useState(false);
+  const [plan, setPlan] = useState<TidyPlan | null>(null);
+  const [planTick, setPlanTick] = useState(0);
+  const [run, setRun] = useState({ batch: 0, batches: 0, proposals: 0 });
+  const [waiting, setWaiting] = useState<{ seconds: number; attempt: number } | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const stopRef = useRef(false);
+
+  // Which ingredients still need the model, re-counted whenever the
+  // choice of aspects changes — the button shows the real number.
+  useEffect(() => {
+    if (!open || phase !== 'intro') return;
+    let cancelled = false;
+    setPlan(null);
+    if (!ASPECTS.some((a) => aspects[a]) || ingredients.length === 0) return;
+    postJson('/api/ingredients/ai-tidy/plan', { ids: ingredients.map((i) => i.id), aspects, force })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        // No plan (an older router, an error): fall back to sending everything.
+        setPlan(res.ok && json.data ? json.data as TidyPlan : { pendingIds: ingredients.map((i) => i.id), complete: 0, unchanged: 0, saved: [] });
+      })
+      .catch(() => { if (!cancelled) setPlan({ pendingIds: ingredients.map((i) => i.id), complete: 0, unchanged: 0, saved: [] }); });
+    return () => { cancelled = true; };
+  }, [open, phase, aspects, force, ingredients, planTick]);
+
+  const savedProposals = useMemo(() => (plan?.saved.length ? buildTidyProposals(ingredients, plan.saved).length : 0), [plan, ingredients]);
 
   const label = (list: Named[], id: string | null | undefined) => {
     const hit = list.find((x) => x.id === id);
@@ -77,10 +120,29 @@ export default function IngredientTidyModal({
 
   const close = () => {
     if (phase === 'analysing' || phase === 'applying') return;
+    // Proposals not yet applied stay kept for the next time this opens.
     setPhase('intro');
     setProposals([]);
     setError(null);
+    setForce(false);
     onClose();
+  };
+
+  const finish = (ids: string[]) => {
+    if (ids.length === 0) return Promise.resolve();
+    return postJson('/api/ingredients/ai-tidy/done', { ids }).then(() => undefined, () => undefined);
+  };
+
+  /** Waits out a back-off, a second at a time so the countdown shows and
+   *  Stop is honoured. False when stopped. */
+  const backOff = async (ms: number, attempt: number): Promise<boolean> => {
+    for (let left = Math.ceil(ms / 1000); left > 0; left--) {
+      if (stopRef.current) return false;
+      setWaiting({ seconds: left, attempt });
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    setWaiting(null);
+    return !stopRef.current;
   };
 
   const setAspect = (aspect: Aspect, value: boolean) => {
@@ -90,60 +152,91 @@ export default function IngredientTidyModal({
   };
 
   const analyse = async () => {
+    if (!plan) return;
     setError(null);
+    stopRef.current = false;
+    setStopping(false);
+    setWaiting(null);
     setPhase('analysing');
-    setProgress({ done: 0, total: ingredients.length });
-    const asked = ASPECTS.filter((a) => aspects[a]).length;
-    // Rows per request — fewer the more is asked of each, so progress
-    // keeps moving and a truncated answer only loses one batch.
-    const batchSize = asked <= 1 ? 30 : 15;
+    const byId = new Map(ingredients.map((i) => [i.id, i]));
     const categoryName = (id: string | null | undefined) => categories.find((c) => c.id === id)?.name ?? null;
-    const suggestions: TidySuggestion[] = [];
-    // A batch the provider still refuses after its own retries is skipped,
-    // not fatal: the batches that did come back are reviewed, and a second
-    // run picks up what was left.
-    let skipped = 0;
-    let lastError: Error | null = null;
-    try {
-      for (let i = 0; i < ingredients.length; i += batchSize) {
-        const batch = ingredients.slice(i, i + batchSize);
+    // Answers a stopped run kept come first; the run only sends what is
+    // left, one batch per request.
+    const suggestions: TidySuggestion[] = [...plan.saved];
+    const batches = tidyBatches(plan.pendingIds.filter((id) => byId.has(id)), aspects);
+    const total = batches.reduce((n, b) => n + b.length, 0);
+    let analysed = 0;
+    let failure: string | null = null;
+    const count = () => buildTidyProposals(ingredients, suggestions).length;
+    setRun({ batch: 0, batches: batches.length, proposals: count() });
+
+    for (let k = 0; k < batches.length && !failure && !stopRef.current; k++) {
+      setRun((r) => ({ ...r, batch: k + 1 }));
+      const batch = batches[k].map((id) => byId.get(id)!);
+      const body = {
+        aspects,
+        // The router keeps this batch's answers as soon as they arrive.
+        record: true,
+        items: batch.map((ing) => ({
+          key: ing.id,
+          text: ing.name,
+          known: Object.fromEntries((ing.translations ?? []).map((tr) => [tr.lang, tr.text])),
+          category: categoryName(ing.category_id),
+          tags: (ing.tags ?? []).map((tg) => tg.name ?? tags.find((x) => x.id === tg.id)?.name).filter(Boolean),
+          nutrition: Object.fromEntries((Object.keys(NUTRIENT_ALIAS) as NutrientKey[]).map((k2) => [NUTRIENT_ALIAS[k2], ing[NUTRIENT_COLUMN[k2]] ?? null])),
+          synonyms: ing.synonyms ?? [],
+        })),
+      };
+      // Busy or rate-limited: wait and send the same batch again, the
+      // waits growing. Anything else, or still busy after the last wait,
+      // ends the run here — the batches already back are kept.
+      for (let attempt = 0; ; attempt++) {
+        let status = 0;
+        let message = t('library.ingredients.tidyFailed');
         try {
-          const res = await apiFetch('/api/ingredients/ai-tidy', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              aspects,
-              items: batch.map((ing) => ({
-                key: ing.id,
-                text: ing.name,
-                known: Object.fromEntries((ing.translations ?? []).map((tr) => [tr.lang, tr.text])),
-                category: categoryName(ing.category_id),
-                tags: (ing.tags ?? []).map((tg) => tg.name ?? tags.find((x) => x.id === tg.id)?.name).filter(Boolean),
-                nutrition: Object.fromEntries((Object.keys(NUTRIENT_ALIAS) as NutrientKey[]).map((k) => [NUTRIENT_ALIAS[k], ing[NUTRIENT_COLUMN[k]] ?? null])),
-                synonyms: ing.synonyms ?? [],
-              })),
-            }),
-            timeoutMs: 650_000,
-          });
+          const res = await postJson('/api/ingredients/ai-tidy', body, 650_000);
           const json = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : t('library.ingredients.tidyFailed'));
-          suggestions.push(...(json.data as TidySuggestion[]));
+          if (res.ok) {
+            suggestions.push(...(json.data as TidySuggestion[]));
+            analysed += batch.length;
+            setRun((r) => ({ ...r, proposals: count() }));
+            break;
+          }
+          status = res.status;
+          if (typeof json.error === 'string') message = json.error;
         } catch (err) {
-          skipped += batch.length;
-          lastError = err instanceof Error ? err : new Error(String(err));
+          // apiFetch itself threw: the network, not the provider.
+          status = 503;
+          if (err instanceof Error && err.message) message = err.message;
         }
-        setProgress({ done: Math.min(i + batchSize, ingredients.length), total: ingredients.length });
+        if (!isRetryableTidyStatus(status) || attempt >= TIDY_BATCH_BACKOFF_MS.length) { failure = message; break; }
+        if (!(await backOff(TIDY_BATCH_BACKOFF_MS[attempt], attempt + 1))) break;
       }
-      if (suggestions.length === 0 && lastError) throw lastError;
-      if (skipped > 0) setError(t('library.ingredients.tidySkipped', { count: skipped, error: lastError?.message ?? '' }));
-      const found = buildTidyProposals(ingredients, suggestions);
-      setProposals(found);
-      setSelected(defaultSelection(found));
-      setPhase('review');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('library.ingredients.tidyFailed'));
-      setPhase('intro');
     }
+    setWaiting(null);
+    setStopping(false);
+
+    if (failure) {
+      setError(t('library.ingredients.tidyStopped', { error: failure, done: analysed, total, left: total - analysed }));
+    }
+    const found = buildTidyProposals(ingredients, suggestions);
+    // Answers that turned out to change nothing need no review: drop them
+    // now so they are not counted again next time.
+    const withProposal = new Set(found.map((p) => p.id));
+    void finish([...new Set(suggestions.map((s) => s.key))].filter((id) => !withProposal.has(id)));
+    if (found.length === 0 && failure) {
+      setPhase('intro');
+      setPlanTick((n) => n + 1);
+      return;
+    }
+    setProposals(found);
+    setSelected(defaultSelection(found));
+    setPhase('review');
+  };
+
+  const stop = () => {
+    stopRef.current = true;
+    setStopping(true);
   };
 
   const toApply = useMemo(
@@ -155,25 +248,27 @@ export default function IngredientTidyModal({
     setPhase('applying');
     setProgress({ done: 0, total: toApply.length });
     setError(null);
+    const applied: string[] = [];
     try {
       for (let i = 0; i < toApply.length; i++) {
         const { p, body } = toApply[i];
-        const res = await apiFetch(`/api/ingredients/${p.id}/naming`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+        const res = await postJson(`/api/ingredients/${p.id}/naming`, body);
         if (!res.ok) {
           const json = await res.json().catch(() => ({}));
           throw new Error(typeof json.error === 'string' ? json.error : t('library.ingredients.tidyFailed'));
         }
+        applied.push(p.id);
         setProgress({ done: i + 1, total: toApply.length });
       }
+      // Every proposal shown has now been reviewed, applied or not.
+      await finish(proposals.map((p) => p.id));
       onApplied();
       setPhase('intro');
       setProposals([]);
+      setForce(false);
       onClose();
     } catch (err) {
+      await finish(applied);
       setError(err instanceof Error ? err.message : t('library.ingredients.tidyFailed'));
       setPhase('review');
     }
@@ -232,10 +327,24 @@ export default function IngredientTidyModal({
       subtitle={t('library.ingredients.tidySubtitle')}
       footer={
         <>
-          <ModalCancelButton onClick={close}>{t('common.cancel')}</ModalCancelButton>
+          {phase === 'analysing' ? (
+            // Ends the run after the batch in flight; what came back is kept.
+            <ModalCancelButton onClick={stop}>
+              {stopping ? t('library.ingredients.tidyStopping') : t('library.ingredients.tidyStop')}
+            </ModalCancelButton>
+          ) : (
+            <ModalCancelButton onClick={close}>{t('common.cancel')}</ModalCancelButton>
+          )}
           {phase === 'intro' && (
-            <button type="button" onClick={analyse} disabled={ingredients.length === 0 || !anyAspect} className="px-6 py-3 rounded-full bg-primary text-white font-bold disabled:opacity-50">
-              {t('library.ingredients.tidyAnalyse', { count: ingredients.length })}
+            <button
+              type="button"
+              onClick={analyse}
+              disabled={!plan || !anyAspect || (plan.pendingIds.length === 0 && savedProposals === 0)}
+              className="px-6 py-3 rounded-full bg-primary text-white font-bold disabled:opacity-50"
+            >
+              {plan && plan.pendingIds.length === 0 && savedProposals > 0
+                ? t('library.ingredients.tidyReview', { count: savedProposals })
+                : t('library.ingredients.tidyAnalyse', { count: plan ? plan.pendingIds.length : '…' as unknown as number })}
             </button>
           )}
           {(phase === 'review' || phase === 'applying') && (
@@ -266,12 +375,43 @@ export default function IngredientTidyModal({
                 </label>
               ))}
             </fieldset>
+            <label className="flex items-start gap-3 rounded-2xl border border-zinc-100 dark:border-zinc-800 p-3 cursor-pointer">
+              <input type="checkbox" className="mt-1 accent-primary" checked={force} onChange={(e) => setForce(e.target.checked)} />
+              <span className="min-w-0">
+                <span className="block text-sm font-bold text-zinc-800 dark:text-zinc-100">{t('library.ingredients.tidyForce')}</span>
+                <span className="block text-xs text-zinc-500 dark:text-zinc-400">{t('library.ingredients.tidyForceHint')}</span>
+              </span>
+            </label>
+            {anyAspect && !plan && (
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('library.ingredients.tidyPlanning')}</p>
+            )}
+            {plan && (plan.complete > 0 || plan.unchanged > 0) && (
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {t('library.ingredients.tidySkippedCounts', { complete: plan.complete, unchanged: plan.unchanged })}
+              </p>
+            )}
+            {savedProposals > 0 && (
+              <p className="text-xs text-primary font-medium">{t('library.ingredients.tidySavedWaiting', { count: savedProposals })}</p>
+            )}
+            {plan && anyAspect && plan.pendingIds.length === 0 && savedProposals === 0 && (
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('library.ingredients.tidyNothingToAnalyse')}</p>
+            )}
           </>
         )}
         {phase === 'analysing' && (
-          <p className="text-sm text-zinc-600 dark:text-zinc-300">
-            {t('library.ingredients.tidyAnalysing', { done: progress.done, total: progress.total })}
-          </p>
+          <div className="space-y-1.5">
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">
+              {t('library.ingredients.tidyProgress', { batch: run.batch, batches: run.batches, proposals: run.proposals })}
+            </p>
+            <div className="h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+              <div className="h-full bg-primary transition-all" style={{ width: `${run.batches ? Math.round(((run.batch - 1) / run.batches) * 100) : 0}%` }} />
+            </div>
+            {waiting && (
+              <p className="text-xs text-amber-700 dark:text-amber-500">
+                {t('library.ingredients.tidyWaiting', { seconds: waiting.seconds, attempt: waiting.attempt, max: TIDY_BATCH_BACKOFF_MS.length })}
+              </p>
+            )}
+          </div>
         )}
         {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
         {(phase === 'review' || phase === 'applying') && proposals.length === 0 && (

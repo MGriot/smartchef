@@ -346,16 +346,45 @@ async function dispatchIngredients(segments: string[], method: string, sp: URLSe
   // each aspect only when asked for — see aiTasks.local.ts.
   if (first === 'ai-tidy' && method === 'POST') {
     const body = parseBody(init) ?? {};
-    const items = Array.isArray(body.items) ? body.items : [];
-    if (items.length === 0) return { status: 400, error: i18n.t('errors.nothingToName') };
     const a = body.aspects ?? {};
     const aspects = { naming: !!a.naming, classification: !!a.classification, nutrition: !!a.nutrition, synonyms: !!a.synonyms };
-    if (!Object.values(aspects).some(Boolean)) return { status: 400, error: i18n.t('errors.nothingToName') };
-    try {
-      return { status: 200, data: await ingredients.suggestIngredientTidy(items, aspects) };
-    } catch (err) {
-      return { status: 502, error: err instanceof Error ? err.message : 'AI tidy failed' };
+    const ids = Array.isArray(body.ids) ? body.ids.filter((x: unknown): x is string => typeof x === 'string') : [];
+    // What a run still has to send, and the answers a stopped run kept —
+    // see lib/ingredientTidyRun.ts.
+    if (second === 'plan') {
+      return { status: 200, data: await ingredients.planIngredientTidy(ids, aspects, body.force === true) };
     }
+    // The user reviewed these: drop their kept answers.
+    if (second === 'done') {
+      await ingredients.finishIngredientTidy(ids);
+      return { status: 200, data: { success: true } };
+    }
+    if (second) return NOT_HANDLED;
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (items.length === 0) return { status: 400, error: i18n.t('errors.nothingToName') };
+    if (!Object.values(aspects).some(Boolean)) return { status: 400, error: i18n.t('errors.nothingToName') };
+    let data;
+    try {
+      data = await ingredients.suggestIngredientTidy(items, aspects);
+    } catch (err) {
+      // Busy or rate-limited (llmParser.local.ts's ProviderUnavailableError)
+      // answers 429/503 so the Library waits and re-sends this batch; any
+      // other failure (no key, a rejected one) is a 502 it stops on.
+      // A retired model (404) is not worth waiting for.
+      const code = (err as { statusCode?: number })?.statusCode;
+      const unavailable = (err as { name?: string })?.name === 'ProviderUnavailableError' && code !== 404;
+      return { status: unavailable ? (code === 429 ? 429 : 503) : 502, error: err instanceof Error ? err.message : 'AI tidy failed' };
+    }
+    // Kept as soon as it arrives, so a run that stops later loses nothing.
+    // A failed write only costs the resume: the answer still goes back.
+    if (body.record === true) {
+      try {
+        await ingredients.recordIngredientTidy(items.map((i: { key?: unknown }) => i?.key).filter((k: unknown): k is string => typeof k === 'string'), aspects, data);
+      } catch (err) {
+        console.error('SmartChef: could not keep the tidy answers', err);
+      }
+    }
+    return { status: 200, data };
   }
   if (second === 'naming' && method === 'POST') {
     await ingredients.applyIngredientNaming(first, parseBody(init) ?? {});

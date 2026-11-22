@@ -913,6 +913,19 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- "Tidy with AI" bookkeeping, per ingredient and never synced: the hash of
+-- what each aspect looked at when its answer arrived (JSON object, aspect
+-- to hash), so a later run skips what has not changed since, and the
+-- answer itself while it waits for the user to review it, so a run that
+-- stops halfway keeps what already came back. No FK on purpose, the same
+-- as ingredients.category_id above.
+CREATE TABLE IF NOT EXISTS ingredient_ai_reviews (
+  ingredient_id TEXT PRIMARY KEY,
+  hashes        TEXT NOT NULL DEFAULT '{}',
+  suggestion    TEXT,
+  reviewed_at   TEXT
+);
+
 CREATE TABLE IF NOT EXISTS sync_alias (
   entity_type TEXT NOT NULL,
   foreign_id  TEXT NOT NULL,
