@@ -1,0 +1,1 @@
+Le ricette si aprono più in fretta e la galleria si carica mentre scorri. Il menù ⋮ di una card oscura il resto, e sul telefono si apre a ventaglio come il pulsante della ricetta. La lingua ora si sceglie nelle Impostazioni. Windows: niente più barra del titolo di sistema, menù File/View e scrollbar con le frecce.

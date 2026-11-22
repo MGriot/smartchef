@@ -1,0 +1,1 @@
+Recipes open faster and the gallery loads as you scroll. The ⋮ menu on a card dims everything else, and on a phone it fans out like the recipe page's button. The language is now chosen in Settings. Windows: no more system title bar, File/View menu or arrowed scrollbar.
