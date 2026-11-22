@@ -17,6 +17,7 @@ import { INGREDIENT_ICONS } from '../lib/icons';
 import Modal, { ModalCancelButton, ModalDeleteButton, ModalSubmitButton } from '../components/Modal';
 import { AddLangButton, Field, FieldRow, FormSection, IconPicker, TranslationRows } from '../components/Form';
 import IngredientTidyModal from '../components/IngredientTidyModal';
+import CatalogAiActions from '../components/CatalogAiActions';
 import DuplicateMergeModal from '../components/DuplicateMergeModal';
 
 /** Short month names in the UI language. LibrarySeasonality.tsx already
@@ -651,7 +652,7 @@ export default function LibraryIngredients() {
   const toggleAllSections = () => setCollapsed(allCollapsed ? new Set() : new Set(sectionKeys));
 
   /** Every ingredient in one list, no headings — the same cards and rows
-   *  the grouped view draws, so only the grouping changes. */
+   *  the grouped view paints, so only the grouping changes. */
   const flatList = () => {
     const matched = sortWithVariants(
       sortLibraryItems(ingredients.filter(matchesFilters), sort, {
@@ -750,6 +751,7 @@ export default function LibraryIngredients() {
                 <span className="hidden sm:inline">{t('library.ingredients.tidyButton')}</span>
               </button>
             )}
+            <CatalogAiActions pictureKind="ingredients" items={ingredients} onChanged={fetchData} />
             <button
               onClick={() => handleOpenModal()}
               aria-label={t('library.ingredients.addNew')}

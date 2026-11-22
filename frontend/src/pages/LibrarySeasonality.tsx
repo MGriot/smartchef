@@ -7,6 +7,7 @@ import { apiFetch } from '../lib/api';
 import { LibraryToolbar } from '../components/LibraryViewControls';
 import { useLibraryView } from '../hooks/useLibraryView';
 import { sortLibraryItems } from '../lib/librarySort';
+import CatalogAiActions from '../components/CatalogAiActions';
 
 interface SeasonalIngredient {
   id: string;
@@ -36,6 +37,8 @@ export default function LibrarySeasonality() {
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const { view, setView, sort, setSort } = useLibraryView('seasonality', 'grid');
+  // Bumped after "Seasonality with AI" applies, to refetch.
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -45,7 +48,7 @@ export default function LibrarySeasonality() {
         setIngredients(json.data || []);
         setLoading(false);
       });
-  }, [contentLang]);
+  }, [contentLang, reload]);
 
   const monthLabels = useMemo(() => {
     const fmt = new Intl.DateTimeFormat(i18n.language, { month: 'long' });
@@ -77,6 +80,9 @@ export default function LibrarySeasonality() {
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-3xl font-black text-zinc-900 dark:text-zinc-100">{t('nav.seasonality')}</h1>
+          <div className="shrink-0 flex items-center gap-2">
+            <CatalogAiActions tidyKind="seasonality" items={ingredients} onChanged={() => setReload((n) => n + 1)} />
+          </div>
         </div>
         <p className="text-sm text-zinc-400 dark:text-zinc-500 font-medium mb-8">{t('seasonality.hint')}</p>
 

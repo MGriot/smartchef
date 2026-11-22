@@ -434,6 +434,80 @@
       "factor": "Conversion Factor (to base)",
       "factorHint": "How many base units of this type one of this unit is worth — 1 for the base unit itself.",
       "translationsHint": "A name per language; the symbol stays the same everywhere."
+    },
+    "ai": {
+      "button": "Tidy with AI",
+      "pictureButton": "Draw pictures",
+      "title": {
+        "tools": "Tidy tools with AI",
+        "techniques": "Tidy techniques with AI",
+        "units": "Tidy units with AI",
+        "seasonality": "Seasonality with AI"
+      },
+      "subtitle": {
+        "tools": "Names and translations, descriptions, groups, synonyms",
+        "techniques": "Names and translations, descriptions, synonyms",
+        "units": "Names and translations",
+        "seasonality": "The months each ingredient is in season"
+      },
+      "intro": {
+        "tools": "The AI reviews every tool and proposes fixes: an English name, a name per language — correcting wrong ones, not only filling the missing ones — a short description, the group it belongs in, and other names it goes by. Nothing changes until you review and apply.",
+        "techniques": "The AI reviews every technique and proposes fixes: an English name, a name per language — correcting wrong ones, not only filling the missing ones — a short description of what it does, and other names it goes by. Nothing changes until you review and apply.",
+        "units": "The AI reviews every unit's name and its name per language, correcting wrong ones and filling the missing ones. Symbols and conversion factors are never touched. Nothing changes until you review and apply.",
+        "seasonality": "The AI proposes the months each ingredient is in season where you cook — fresh produce, herbs, mushrooms, seasonal fish — and corrects months on file that are wrong. Pantry staples get no season. Nothing changes until you review and apply."
+      },
+      "aspects": "What should the AI review?",
+      "aspect": {
+        "naming": "Names and translations",
+        "description": "Description",
+        "category": "Group",
+        "synonyms": "Synonyms",
+        "season": "Season"
+      },
+      "aspectHint": {
+        "naming": "English base name and a name per language — and corrections of wrong ones.",
+        "description": "Fills a missing description; a wrong one is offered as a correction, not ticked.",
+        "category": "Reuses the groups you already have; a new one only when none fits.",
+        "synonyms": "Other names for the same thing, used by search and Smart Import.",
+        "season": "In-season months."
+      },
+      "region": "Where do you cook?",
+      "regionHint": "Seasons depend on the place — a country or a region, e.g. Italy, Northern Italy, California.",
+      "analyse": "Analyse {{count}}",
+      "analysing": "Analysing… {{done}} / {{total}}",
+      "apply": "Apply to {{count}}",
+      "applying": "Applying… {{done}} / {{total}}",
+      "nothing": "Everything already looks right — nothing to change.",
+      "duplicate": "Would become \"{{name}}\", which already exists — use Merge to combine them.",
+      "failed": "The AI request failed.",
+      "skipped": "{{count}} items were skipped because the AI did not answer ({{error}}). Run it again later to cover them.",
+      "none": "none",
+      "notSeasonal": "no season",
+      "rename": "Rename: {{from}} → {{to}}",
+      "fixTranslation": "Fix {{lang}}: {{from}} → {{to}}",
+      "addDescription": "Description: {{to}}",
+      "fixDescription": "Replace description: {{to}}",
+      "category": "Group: {{from}} → {{to}}",
+      "synonyms": "Add synonyms: {{list}}",
+      "months": "Season: {{from}} → {{to}}",
+      "kind": {
+        "name": "Renames",
+        "addTranslations": "New names",
+        "fixTranslations": "Fixed names",
+        "description": "Descriptions",
+        "category": "Groups",
+        "synonyms": "Synonyms",
+        "months": "Seasons"
+      },
+      "pictureTitle": "Draw missing pictures",
+      "pictureSubtitle": "{{count}} without a picture",
+      "pictureIntro": "The AI paints a picture for every item that has none yet, in the style of the reference picture you choose below, so the whole library looks like one set. Each picture is saved as soon as it arrives; you can stop at any time and continue later. Needs a Google Gemini or OpenAI key; each picture is billed by the provider.",
+      "pictureReference": "Style reference",
+      "pictureNoReference": "No picture in the library yet — the AI will paint in a soft watercolor style.",
+      "pictureStart": "Draw {{count}} pictures",
+      "pictureStop": "Stop",
+      "pictureProgress": "Drawing… {{done}} / {{total}}",
+      "pictureDone": "{{count}} pictures drawn, {{failed}} failed."
     }
   },
   "gallery": {

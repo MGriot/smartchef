@@ -434,6 +434,80 @@
       "factor": "Fattore di conversione (verso la base)",
       "factorHint": "Quante unità di base dello stesso tipo vale una di questa unità: 1 per l'unità di base stessa.",
       "translationsHint": "Un nome per lingua; il simbolo resta uguale ovunque."
+    },
+    "ai": {
+      "button": "Riordina con l'AI",
+      "pictureButton": "Disegna immagini",
+      "title": {
+        "tools": "Riordina gli strumenti con l'AI",
+        "techniques": "Riordina le tecniche con l'AI",
+        "units": "Riordina le unità con l'AI",
+        "seasonality": "Stagionalità con l'AI"
+      },
+      "subtitle": {
+        "tools": "Nomi e traduzioni, descrizioni, gruppi, sinonimi",
+        "techniques": "Nomi e traduzioni, descrizioni, sinonimi",
+        "units": "Nomi e traduzioni",
+        "seasonality": "I mesi in cui ogni ingrediente è di stagione"
+      },
+      "intro": {
+        "tools": "L'AI esamina ogni strumento e propone correzioni: un nome inglese, un nome per lingua — correggendo quelli sbagliati, non solo aggiungendo quelli mancanti — una breve descrizione, il gruppo a cui appartiene e gli altri nomi con cui è conosciuto. Nulla cambia finché non controlli e applichi.",
+        "techniques": "L'AI esamina ogni tecnica e propone correzioni: un nome inglese, un nome per lingua — correggendo quelli sbagliati, non solo aggiungendo quelli mancanti — una breve descrizione di cosa fa e gli altri nomi con cui è conosciuta. Nulla cambia finché non controlli e applichi.",
+        "units": "L'AI esamina il nome di ogni unità e il suo nome per lingua, correggendo quelli sbagliati e aggiungendo quelli mancanti. Simboli e fattori di conversione non vengono mai toccati. Nulla cambia finché non controlli e applichi.",
+        "seasonality": "L'AI propone i mesi in cui ogni ingrediente è di stagione dove cucini — frutta e verdura fresca, erbe, funghi, pesce di stagione — e corregge i mesi registrati che sono sbagliati. Gli ingredienti da dispensa non hanno stagione. Nulla cambia finché non controlli e applichi."
+      },
+      "aspects": "Cosa deve esaminare l'AI?",
+      "aspect": {
+        "naming": "Nomi e traduzioni",
+        "description": "Descrizione",
+        "category": "Gruppo",
+        "synonyms": "Sinonimi",
+        "season": "Stagione"
+      },
+      "aspectHint": {
+        "naming": "Nome base inglese e un nome per lingua — e correzione di quelli sbagliati.",
+        "description": "Aggiunge una descrizione mancante; una sbagliata viene proposta come correzione, non selezionata.",
+        "category": "Riusa i gruppi che hai già; uno nuovo solo se nessuno va bene.",
+        "synonyms": "Altri nomi per la stessa cosa, usati dalla ricerca e da Smart Import.",
+        "season": "Mesi di stagione."
+      },
+      "region": "Dove cucini?",
+      "regionHint": "Le stagioni dipendono dal luogo — un paese o una regione, es. Italia, Nord Italia, California.",
+      "analyse": "Analizza {{count}}",
+      "analysing": "Analisi… {{done}} / {{total}}",
+      "apply": "Applica a {{count}}",
+      "applying": "Applicazione… {{done}} / {{total}}",
+      "nothing": "Sembra già tutto corretto — niente da cambiare.",
+      "duplicate": "Diventerebbe \"{{name}}\", che esiste già — usa Unisci per combinarli.",
+      "failed": "La richiesta all'AI non è riuscita.",
+      "skipped": "{{count}} elementi sono stati saltati perché l'AI non ha risposto ({{error}}). Riprova più tardi per completarli.",
+      "none": "nessuno",
+      "notSeasonal": "nessuna stagione",
+      "rename": "Rinomina: {{from}} → {{to}}",
+      "fixTranslation": "Correggi {{lang}}: {{from}} → {{to}}",
+      "addDescription": "Descrizione: {{to}}",
+      "fixDescription": "Sostituisci descrizione: {{to}}",
+      "category": "Gruppo: {{from}} → {{to}}",
+      "synonyms": "Aggiungi sinonimi: {{list}}",
+      "months": "Stagione: {{from}} → {{to}}",
+      "kind": {
+        "name": "Rinomine",
+        "addTranslations": "Nuovi nomi",
+        "fixTranslations": "Nomi corretti",
+        "description": "Descrizioni",
+        "category": "Gruppi",
+        "synonyms": "Sinonimi",
+        "months": "Stagioni"
+      },
+      "pictureTitle": "Disegna le immagini mancanti",
+      "pictureSubtitle": "{{count}} senza immagine",
+      "pictureIntro": "L'AI dipinge un'immagine per ogni elemento che non ne ha ancora una, nello stile dell'immagine di riferimento che scegli qui sotto, così tutta la libreria sembra un'unica serie. Ogni immagine viene salvata appena arriva; puoi fermarti quando vuoi e continuare dopo. Serve una chiave Google Gemini o OpenAI; ogni immagine è addebitata dal provider.",
+      "pictureReference": "Riferimento di stile",
+      "pictureNoReference": "Ancora nessuna immagine in libreria — l'AI dipingerà in un morbido stile ad acquerello.",
+      "pictureStart": "Disegna {{count}} immagini",
+      "pictureStop": "Ferma",
+      "pictureProgress": "Disegno… {{done}} / {{total}}",
+      "pictureDone": "{{count}} immagini disegnate, {{failed}} non riuscite."
     }
   },
   "gallery": {

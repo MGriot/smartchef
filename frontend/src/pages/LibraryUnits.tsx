@@ -8,6 +8,7 @@ import { AddLangButton, Field, FieldRow, FormSection, TranslationRows } from '..
 import { LibraryToolbar } from '../components/LibraryViewControls';
 import { useLibraryView } from '../hooks/useLibraryView';
 import { sortLibraryItems } from '../lib/librarySort';
+import CatalogAiActions from '../components/CatalogAiActions';
 
 export default function LibraryUnits() {
   const [units, setUnits] = useState<any[]>([]);
@@ -122,10 +123,13 @@ export default function LibraryUnits() {
               <p className="text-[10px] font-bold text-primary tracking-[0.2em] uppercase mb-2">{t('library.units.eyebrow')}</p>
               <h1 className="text-6xl font-black text-zinc-900 dark:text-zinc-100 tracking-tight leading-none">{t('library.units.heading')}</h1>
             </div>
-            <button onClick={() => handleOpenModal()} className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95">
-              <span className="material-symbols-outlined text-xl">add_circle</span>
-              {t('library.units.addNew')}
-            </button>
+            <div className="shrink-0 flex items-center gap-2">
+              <CatalogAiActions tidyKind="units" items={units} onChanged={fetchUnits} />
+              <button onClick={() => handleOpenModal()} className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-full font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95">
+                <span className="material-symbols-outlined text-xl">add_circle</span>
+                {t('library.units.addNew')}
+              </button>
+            </div>
           </div>
 
           <LibraryToolbar

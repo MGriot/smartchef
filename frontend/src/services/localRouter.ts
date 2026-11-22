@@ -386,6 +386,26 @@ async function dispatchIngredients(segments: string[], method: string, sp: URLSe
     }
     return { status: 200, data };
   }
+  // Seasonality: the months each ingredient is in season in a region —
+  // see catalogTidy.local.ts.
+  if (first === 'ai-season' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (items.length === 0) return { status: 400, error: i18n.t('errors.nothingToName') };
+    try {
+      const { suggestSeasonality } = await import('./catalogTidy.local');
+      return { status: 200, data: await suggestSeasonality(items, typeof body.region === 'string' ? body.region : '') };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI seasonality failed' };
+    }
+  }
+  if (second === 'season' && method === 'POST') {
+    const body = parseBody(init) ?? {};
+    const { applySeasonality } = await import('./catalogTidy.local');
+    await applySeasonality(first, Array.isArray(body.seasonalMonths) ? body.seasonalMonths : []);
+    return { status: 200, data: { success: true } };
+  }
+  if (first === 'ai-paint' && method === 'POST') return paintPicture('ingredients', init);
   if (second === 'naming' && method === 'POST') {
     await ingredients.applyIngredientNaming(first, parseBody(init) ?? {});
     return { status: 200, data: { success: true } };
@@ -401,13 +421,57 @@ async function dispatchIngredients(segments: string[], method: string, sp: URLSe
   return NOT_HANDLED;
 }
 
+/** "Tidy with AI" and "missing pictures" for the catalogs that are not
+ *  ingredients — see catalogTidy.local.ts and catalogDrawings.local.ts.
+ *  Shared by the tools, techniques and units dispatchers below. */
+async function dispatchCatalogAi(kind: 'tools' | 'techniques' | 'units', id: string, sub: string | undefined, method: string, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
+  if (method !== 'POST') return NOT_HANDLED;
+  if (id === 'ai-tidy' && !sub) {
+    const body = parseBody(init) ?? {};
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (items.length === 0) return { status: 400, error: i18n.t('errors.nothingToName') };
+    const a = body.aspects ?? {};
+    const aspects = { naming: !!a.naming, description: !!a.description, category: !!a.category, synonyms: !!a.synonyms };
+    if (!Object.values(aspects).some(Boolean)) return { status: 400, error: i18n.t('errors.nothingToName') };
+    try {
+      const { suggestCatalogTidy } = await import('./catalogTidy.local');
+      return { status: 200, data: await suggestCatalogTidy(kind, items, aspects) };
+    } catch (err) {
+      return { status: 502, error: err instanceof Error ? err.message : 'AI tidy failed' };
+    }
+  }
+  if (id === 'ai-paint' && !sub && kind !== 'units') return paintPicture(kind, init);
+  if (sub === 'tidy') {
+    const { applyCatalogTidy } = await import('./catalogTidy.local');
+    await applyCatalogTidy(kind, id, parseBody(init) ?? {});
+    return { status: 200, data: { success: true } };
+  }
+  return NOT_HANDLED;
+}
+
+async function paintPicture(kind: 'ingredients' | 'tools' | 'techniques', init?: RequestInit): Promise<LocalDispatchResult> {
+  const body = parseBody(init) ?? {};
+  if (typeof body.id !== 'string' || typeof body.name !== 'string' || !body.name.trim()) return { status: 400, error: 'id and name are required' };
+  try {
+    const { paintCatalogPicture } = await import('./catalogDrawings.local');
+    return {
+      status: 200,
+      data: await paintCatalogPicture({ kind, id: body.id, name: body.name, description: body.description ?? null, referencePath: body.referencePath ?? null }),
+    };
+  } catch (err) {
+    return { status: 502, error: err instanceof Error ? err.message : 'AI picture failed' };
+  }
+}
+
 async function dispatchUnits(segments: string[], method: string, sp: URLSearchParams, init?: RequestInit): Promise<LocalDispatchResult | typeof NOT_HANDLED> {
-  const [, id] = segments;
+  const [, id, sub] = segments;
   if (!id) {
     if (method === 'GET') return { status: 200, data: await ingredients.listUnits({ lang: sp.get('lang') ?? undefined }) };
     if (method === 'POST') return { status: 200, data: await ingredients.createUnit(parseBody(init)) };
     return NOT_HANDLED;
   }
+  const ai = await dispatchCatalogAi('units', id, sub, method, init);
+  if (ai !== NOT_HANDLED) return ai;
   if (method === 'PUT') { await ingredients.updateUnit(id, parseBody(init)); return { status: 200, data: { success: true } }; }
   if (method === 'DELETE') { await ingredients.deleteUnit(id); return { status: 200, data: { success: true } }; }
   return NOT_HANDLED;
@@ -420,6 +484,8 @@ async function dispatchTools(segments: string[], method: string, sp: URLSearchPa
     if (method === 'POST') return { status: 200, data: await ingredients.createTool(parseBody(init)) };
     return NOT_HANDLED;
   }
+  const ai = await dispatchCatalogAi('tools', id, sub, method, init);
+  if (ai !== NOT_HANDLED) return ai;
   if (sub === 'merge' && method === 'POST') {
     const body = parseBody(init) ?? {};
     if (!body.targetId) return { status: 400, error: i18n.t('errors.toolMergeTargetRequired') };
@@ -487,6 +553,8 @@ async function dispatchTechniques(segments: string[], method: string, sp: URLSea
     if (method === 'POST') return { status: 200, data: await techniques.createTechnique(parseBody(init)) };
     return NOT_HANDLED;
   }
+  const ai = await dispatchCatalogAi('techniques', id, sub, method, init);
+  if (ai !== NOT_HANDLED) return ai;
   if (sub === 'merge' && method === 'POST') {
     const body = parseBody(init) ?? {};
     if (!body.targetId) return { status: 400, error: i18n.t('errors.techniqueMergeTargetRequired') };
