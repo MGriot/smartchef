@@ -1,0 +1,1 @@
+The AI ingredient tidy-up works in batches of 20–40, sends only ingredients that still need it, and keeps what came back: if the AI stops answering, run it again to pick up where it left off.

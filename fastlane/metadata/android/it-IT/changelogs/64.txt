@@ -1,0 +1,1 @@
+Il riordino degli ingredienti con l'IA lavora a lotti di 20–40, invia solo gli ingredienti che ne hanno bisogno e conserva le risposte ricevute: se l'IA smette di rispondere, rilancialo e riprende da dove si era fermato.
